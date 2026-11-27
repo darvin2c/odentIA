@@ -1,0 +1,229 @@
+import {
+  conversation,
+  conversationMessage,
+  type Db,
+  productVariant,
+  SETUP_STEPS,
+  type SetupStep,
+  store,
+  storeDeliveryMethod,
+  storeInvitation,
+  storeMember,
+  storePaymentMethod,
+  storeSetup,
+} from "@gestoria/db"
+import { and, asc, count, countDistinct, eq, gt, isNull, sql } from "drizzle-orm"
+import { z } from "zod"
+import type { Person } from "./cuenta.js"
+import { inStore, StoreError } from "./tiendas.js"
+
+/**
+ * Los primeros pasos de una tienda nueva (lienzo «gestorIA como odentIA», tablero 16; ADR 0227):
+ * «Tu tienda está casi lista», arriba de Inicio, para quien configura la tienda (`configuracion`:
+ * Dueño y Administrador). Siete pasos, cada uno marcado solo con lo que ya está guardado en su
+ * apartado: nadie marca «hecho» a mano. Nada obliga: se vende sin terminarlos.
+ *
+ * - Lo que no aplica a toda tienda se salta («No lo necesito»): trabajar sin equipo y vender sin
+ *   Sofi. Lo demás lo necesita toda tienda para vender: no se salta, solo se deja para después.
+ * - Los chats esperan la app de Meta: mientras tanto, el paso dice «Muy pronto» y no cuenta.
+ * - Con todos hechos o saltados, la lista queda lista (`store_setup.finished_at`) y no vuelve,
+ *   aunque después se apague un medio de pago.
+ */
+
+/** Los pasos que se pueden saltar porque no aplican a toda tienda. */
+export const SKIPPABLE_STEPS: readonly SetupStep[] = ["sofi", "equipo"]
+
+/**
+ * Si ya se pueden conectar los chats. Mientras la Bandeja espera la app de Meta, no: el paso dice
+ * «Muy pronto» y no cuenta para terminar. La entrega de la Bandeja lo enciende y dice cuándo un
+ * canal queda conectado (`chats` de `SetupFacts`).
+ */
+export const CHATS_READY = false
+
+/** Lo guardado que marca cada paso, y lo que la lista cuenta de él. */
+export interface SetupFacts {
+  /** El país de la tienda (Datos de la tienda): con él queda hecho. */
+  country: string | null
+  /** Los productos con alguna variante con stock. */
+  productsWithStock: number
+  /** Los medios de pago encendidos, por su nombre. */
+  payments: string[]
+  /** Las formas de entrega encendidas, por su nombre. */
+  deliveries: string[]
+  /** Un canal conectado; null mientras no se pueden conectar. */
+  chats: boolean | null
+  /** Le escribió a Sofi en «Probar a Sofi». */
+  triedSofi: boolean
+  /** Quienes son del equipo, y las invitaciones vigentes sin aceptar. */
+  members: number
+  invitations: number
+}
+
+export type SetupStepState = "hecho" | "falta" | "saltado" | "pronto"
+
+export interface SetupStepView {
+  step: SetupStep
+  state: SetupStepState
+  /** Se puede saltar con «No lo necesito». */
+  skippable: boolean
+}
+
+function isDone(step: SetupStep, facts: SetupFacts): boolean | null {
+  switch (step) {
+    case "datos":
+      return facts.country !== null
+    case "catalogo":
+      return facts.productsWithStock > 0
+    case "pagos":
+      return facts.payments.length > 0
+    case "entregas":
+      return facts.deliveries.length > 0
+    case "chats":
+      return facts.chats
+    case "sofi":
+      return facts.triedSofi
+    case "equipo":
+      return facts.members > 1 || facts.invitations > 0
+  }
+}
+
+/** Cómo va cada paso, en su orden: hecho por lo guardado, saltado, falta o muy pronto. */
+export function setupSteps(facts: SetupFacts, skipped: readonly SetupStep[]): SetupStepView[] {
+  return SETUP_STEPS.map((step) => {
+    const done = isDone(step, facts)
+    const skippable = SKIPPABLE_STEPS.includes(step)
+    const state: SetupStepState =
+      done === null
+        ? "pronto"
+        : done
+          ? "hecho"
+          : skippable && skipped.includes(step)
+            ? "saltado"
+            : "falta"
+    return { step, state, skippable }
+  })
+}
+
+/** Lista: no falta ninguno (lo que todavía no se puede hacer no cuenta). */
+export function setupFinished(steps: readonly SetupStepView[]): boolean {
+  return steps.every((s) => s.state !== "falta")
+}
+
+async function factsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> {
+  const [shop] = await tx
+    .select({ country: store.country })
+    .from(store)
+    .where(eq(store.id, storeId))
+  const [stocked] = await tx
+    .select({ n: countDistinct(productVariant.productId) })
+    .from(productVariant)
+    .where(
+      and(
+        eq(productVariant.storeId, storeId),
+        isNull(productVariant.removedAt),
+        gt(productVariant.stock, 0),
+      ),
+    )
+  const payments = await tx
+    .select({ name: storePaymentMethod.name })
+    .from(storePaymentMethod)
+    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
+    .orderBy(asc(storePaymentMethod.createdAt))
+  const deliveries = await tx
+    .select({ name: storeDeliveryMethod.name })
+    .from(storeDeliveryMethod)
+    .where(and(eq(storeDeliveryMethod.storeId, storeId), eq(storeDeliveryMethod.isActive, true)))
+    .orderBy(asc(storeDeliveryMethod.createdAt))
+  const [tried] = await tx
+    .select({ n: count() })
+    .from(conversationMessage)
+    .innerJoin(conversation, eq(conversation.id, conversationMessage.conversationId))
+    .where(
+      and(
+        eq(conversation.storeId, storeId),
+        eq(conversation.channel, "prueba"),
+        eq(conversationMessage.author, "cliente"),
+      ),
+    )
+  const [members] = await tx
+    .select({ n: count() })
+    .from(storeMember)
+    .where(eq(storeMember.storeId, storeId))
+  const [invited] = await tx
+    .select({ n: count() })
+    .from(storeInvitation)
+    .where(
+      and(
+        eq(storeInvitation.storeId, storeId),
+        isNull(storeInvitation.acceptedAt),
+        isNull(storeInvitation.revokedAt),
+        gt(storeInvitation.expiresAt, now),
+      ),
+    )
+  return {
+    country: shop?.country ?? null,
+    productsWithStock: Number(stocked?.n ?? 0),
+    payments: payments.map((p) => p.name),
+    deliveries: deliveries.map((d) => d.name),
+    chats: CHATS_READY ? false : null,
+    triedSofi: Number(tried?.n ?? 0) > 0,
+    members: Number(members?.n ?? 0),
+    invitations: Number(invited?.n ?? 0),
+  }
+}
+
+/**
+ * La lista de una tienda que empieza, o null si ya quedó lista. La primera vez que la ve completa,
+ * la anota como lista (sin nombre: lo anota el sistema) y desde entonces no vuelve.
+ */
+export async function setupIn(tx: Db, storeId: string, now = new Date()) {
+  const [saved] = await tx.select().from(storeSetup).where(eq(storeSetup.storeId, storeId))
+  if (saved?.finishedAt) return null
+  const facts = await factsIn(tx, storeId, now)
+  const steps = setupSteps(facts, saved?.skipped ?? [])
+  if (setupFinished(steps)) {
+    await tx
+      .insert(storeSetup)
+      .values({ storeId, finishedAt: now, updatedBy: null, updatedAt: now })
+      .onConflictDoUpdate({
+        target: storeSetup.storeId,
+        set: { finishedAt: now, updatedBy: null, updatedAt: now },
+      })
+    return null
+  }
+  return { steps, facts }
+}
+
+export const skipInput = z.object({
+  step: z.enum(SETUP_STEPS, { error: "Ese paso no existe" }),
+})
+
+/** «No lo necesito»: un paso que no aplica a la tienda deja de faltar. Lo salta quien configura. */
+export async function skipStep(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof skipInput>,
+) {
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    if (!SKIPPABLE_STEPS.includes(input.step))
+      throw new StoreError(
+        400,
+        "VALIDATION_ERROR",
+        "Este paso lo necesita toda tienda para vender: déjalo para después",
+      )
+    const now = new Date()
+    await tx
+      .insert(storeSetup)
+      .values({ storeId, skipped: [input.step], updatedBy: person.userId, updatedAt: now })
+      .onConflictDoUpdate({
+        target: storeSetup.storeId,
+        set: {
+          skipped: sql`array(select distinct unnest(${storeSetup.skipped} || array[${input.step}]::text[]) order by 1)`,
+          updatedBy: person.userId,
+          updatedAt: now,
+        },
+      })
+    return { ok: true }
+  })
+}

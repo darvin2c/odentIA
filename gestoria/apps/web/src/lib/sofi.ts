@@ -90,15 +90,8 @@ export interface StoreReport {
   }
 }
 
+/** Lo que hizo Argos y la semana (Reportes). Lo que le toca al equipo está en Inicio. */
 export interface ArgosBoard {
-  toDo: {
-    kind: "pago" | "stock_pedido" | "reponer" | "conversacion"
-    title: string
-    detail: string
-    orderId?: string
-    conversationId?: string
-    at?: string
-  }[]
   done: {
     kind: "pago" | "gracias" | "volvio" | "volver"
     title: string

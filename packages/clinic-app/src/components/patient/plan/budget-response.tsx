@@ -856,7 +856,12 @@ export function BudgetResponse({
   }
 
   const statusLine =
-    budget.status === "presentado" && budget.presentedAt
+    // Si le llegó, lo dice su mensaje: «enviado por WhatsApp el…» hasta que lo confirma (pedido del 27 nov).
+    budget.status === "presentado" && budget.delivery
+      ? budget.delivery.reached
+        ? `Espera respuesta · ${budget.delivery.text.charAt(0).toLowerCase()}${budget.delivery.text.slice(1)}`
+        : budget.delivery.text.replace(/^No llegó/, "No le llegó")
+      : budget.status === "presentado" && budget.presentedAt
       ? `${budgetChoiceWords(budget)} · entregado el ${formatDay(budget.presentedAt)}`
       : budget.decidedAt && ["aceptado", "parcial", "rechazado", "pospuesto"].includes(budget.status)
         ? `${budgetChoiceWords(budget)} · respondió el ${formatDay(budget.decidedAt)}`
@@ -1241,7 +1246,10 @@ export function BudgetResponse({
     >
       <div className="flex flex-col gap-1.5">
         <h4 className="text-base font-semibold">¿Qué respondió?</h4>
-        <Badge variant={budgetStatusTone(budget.status)} className="h-auto self-start py-0.5 text-left whitespace-normal">
+        <Badge
+          variant={budget.status === "presentado" && budget.delivery?.reached === false ? "destructive" : budgetStatusTone(budget.status)}
+          className="h-auto self-start py-0.5 text-left whitespace-normal"
+        >
           {statusLine}
         </Badge>
       </div>

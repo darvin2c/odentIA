@@ -10,6 +10,7 @@ import {
   orderPayment,
   type PaymentCollection,
   type PaymentTypeCode,
+  type PhotoType,
   product,
   productPhoto,
   productPromotion,
@@ -42,6 +43,15 @@ import {
   type QuoteLine,
   quote,
 } from "./precio.js"
+import {
+  checkSlotIn,
+  courierChoice,
+  courierFor,
+  courierNamesIn,
+  sameSlot,
+  slotInput,
+  slotLabel,
+} from "./repartidores.js"
 import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
 import { openSecret, sealSecret } from "./secretos.js"
 import { cancelSale, heldBy, recordSale } from "./stock.js"
@@ -93,8 +103,38 @@ export function stockShortSql(o: string) {
     ) d group by d.variant_id having sum(d.q) <> 0)`
 }
 
+/**
+ * Si un pedido (`o`, el alias de `sale_order`) volvió sin entregar y todavía no sale otra vez: está
+ * «Por salir» y lo último entre «Salió» y «No se entregó» de su historia es «No se entregó». Lo
+ * usan Inicio y su cifra «Sale hoy»; la pantalla del pedido lo lee igual de su historia.
+ */
+export function missedSql(o: string) {
+  const a = sql.raw(o)
+  // Sin «Salió» ni «No se entregó» la subconsulta da null: `coalesce` deja siempre sí o no, para
+  // que `not missedSql(…)` cuente los que nunca salieron.
+  return sql`(${a}.state = 'por_salir' and coalesce((
+    select e.action from order_event e
+    where e.order_id = ${a}.id and e.action in ('salio', 'no_entregado')
+    order by e.seq desc limit 1), '') = 'no_entregado')`
+}
+
+/**
+ * Los pedidos con su pago confirmado (todo o una parte) que no pueden salir: no alcanzaba el stock
+ * al pagar, o al cambiarlo (lo que tienen fuera no es lo de sus líneas). Los de prueba no cuentan.
+ */
+export async function paidWithoutStockIn(tx: Db, storeId: string) {
+  const rows = await tx.execute<{ id: string; number: number; customer_name: string }>(sql`
+    select o.id, o.number, o.customer_name from sale_order o
+    where o.store_id = ${storeId} and o.state = 'por_salir' and o.test = false
+      and o.payment_collection <> 'al_recibir'
+      and ${stockShortSql("o")}
+    order by o.number`)
+  return [...rows].map((o) => ({ orderId: o.id, number: pad(o.number), customer: o.customer_name }))
+}
+
 const OPEN: OrderState[] = ["por_pagar", "por_confirmar", "por_salir", "en_camino"]
-const TO_DELIVER: OrderState[] = ["por_salir", "en_camino"]
+/** Lo que sale: «Para entregar hoy» es lo de estos estados con su día hasta hoy. */
+export const TO_DELIVER: OrderState[] = ["por_salir", "en_camino"]
 /** Lo que se cambia o se pasa a otro día: lo que todavía no salió. */
 const NOT_SHIPPED: OrderState[] = ["por_pagar", "por_confirmar", "por_salir"]
 
@@ -118,6 +158,8 @@ export const LINK_ACTOR = "link-de-pago"
 
 /** Lo que dice el aviso que no se envió. */
 const NOT_SENT = "Sin enviar: WhatsApp todavía no está conectado"
+/** Lo que dice el aviso que la persona envió desde su celular («Avisar», decisión 4). */
+const SENT_BY_YOU = "Enviado por usted desde su WhatsApp: gestorIA no sabe si llegó"
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Elige una fecha")
 const cents = z.number().int("Escribe un monto válido").min(0).max(100_000_000)
@@ -190,20 +232,42 @@ export const reviewInput = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("no_coincide"), reason }),
 ])
 
-export const shipInput = z.object({
-  tracking: z
-    .string()
-    .trim()
-    .max(80, "Máximo 80 caracteres")
-    .default("")
-    .transform((value) => value || null),
-})
+const tracking = z
+  .string()
+  .trim()
+  .max(80, "Máximo 80 caracteres")
+  .default("")
+  .transform((value) => value || null)
+
+/** Con qué agencia va (tablero 17): una de las de siempre u otra escrita. Vacío: ninguna. */
+const agency = z
+  .string()
+  .trim()
+  .max(60, "Máximo 60 caracteres")
+  .default("")
+  .transform((value) => value.replace(/\s+/g, " ") || null)
+
+/** «Salió»: por agencia, con cuál y su número de envío, que también se puede anotar después. */
+export const shipInput = z.object({ tracking, agency })
+
+/** El envío por agencia de un pedido que sale o ya salió: la agencia y su número de envío. */
+export const shippingInput = z.object({ tracking, agency })
 
 export const deliverInput = z.object({
-  /** Si falta cobrar: lo que cobró en la puerta. */
+  /** Si falta cobrar: lo que cobró en la puerta, con un solo medio. */
   collectedCents: cents.nullable().default(null),
   /** Con qué le pagaron en la puerta (un medio de la tienda que se cobra al recibir). */
   methodId,
+  /** Si pagó una parte con cada medio («Agregar otro medio»): cada uno con su monto. */
+  payments: z
+    .array(
+      z.object({
+        methodId: z.uuid("Elige el medio de pago"),
+        amountCents: cents.min(1, "Escribe cuánto cobraste"),
+      }),
+    )
+    .max(3, "Hasta 3 medios")
+    .default([]),
 })
 
 export const cancelInput = z.object({ reason })
@@ -223,11 +287,31 @@ export const changeInput = orderInput.pick({
 })
 export type ChangeInput = z.infer<typeof changeInput>
 
-/** «No se entregó»: con su motivo (de la lista o escrito) y el día en que vuelve a salir. */
-export const missedInput = z.object({ reason, deliverOn: dateOnly })
+/**
+ * Lo que se elige al mover una entrega (Despachos, tablero 6): su franja (null, sin franja) y quién
+ * la lleva. Sin ellos, siguen los que tenía.
+ */
+const moveFields = {
+  slot: slotInput.nullable().optional(),
+  courier: courierChoice.optional(),
+}
 
-/** «Pasar a…»: otro día. */
-export const rescheduleInput = z.object({ deliverOn: dateOnly })
+/** «No se entregó»: con su motivo (de la lista o escrito) y el día en que vuelve a salir. */
+export const missedInput = z.object({ reason, deliverOn: dateOnly, ...moveFields })
+
+/** «Pasar a…»: otro día, y si se quiere otra franja u otro repartidor. */
+export const rescheduleInput = z.object({ deliverOn: dateOnly, ...moveFields })
+
+/** «Cambiar repartidor». */
+export const courierInput = z.object({ courier: courierChoice })
+
+/**
+ * «Avisar» (decisión 4): el texto que la persona envió desde el WhatsApp de su celular. Queda en la
+ * historia como «enviado por usted»: gestorIA no sabe si llegó.
+ */
+export const sentByYouInput = z.object({
+  text: z.string().trim().min(3, "Escribe el aviso").max(1000, "Máximo 1000 caracteres"),
+})
 
 /** «Deshacer» la confirmación de un pago, con motivo escrito. */
 export const undoInput = z.object({ reason })
@@ -525,6 +609,7 @@ async function notifyCustomer(
   extra: {
     url?: string
     tracking?: string | null
+    agency?: string | null
     /** Con un pago confirmado: cuánto pagó y cuánto falta (el pago en partes). */
     paidCents?: number
     dueCents?: number
@@ -542,7 +627,7 @@ async function notifyCustomer(
           ? `Recibimos tu pago del pedido ${n}. ¡Gracias!`
           : `Recibimos tu pago del pedido ${n}. ¡Gracias! Te avisamos cuando salga.`,
     pago_no_coincide: `No pudimos confirmar el pago de tu pedido ${n}. ¿Puedes revisarlo y enviarnos la captura otra vez?`,
-    en_camino: `Tu pedido ${n} va en camino.${extra.tracking ? ` Número de envío: ${extra.tracking}.` : ""}`,
+    en_camino: `Tu pedido ${n} va en camino${extra.agency ? ` por ${extra.agency}` : ""}.${extra.tracking ? ` Número de envío: ${extra.tracking}.` : ""}`,
     entregado: `Tu pedido ${n} fue entregado. ¡Gracias por tu compra!`,
     anulado: `Tu pedido ${n} fue anulado. Si es un error, escríbenos.`,
     cambiado: extra.dueCents
@@ -942,9 +1027,16 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     ).length > 0
   const balance = await balanceIn(tx, order)
   const now = Date.now()
+  const slot = slotOf(order)
   return {
     ...rest,
     number: pad(order.number),
+    /** Su franja, «9–13 h»; null: sin franja. */
+    slot: slot ? { ...slot, label: slotLabel(slot) } : null,
+    /** Quién lo lleva. */
+    courierName: order.courierId
+      ? ((await courierNamesIn(tx, storeId)).get(order.courierId) ?? null)
+      : null,
     /** Lo armó Sofi en la conversación. */
     bySofi: order.createdBy === SOFI_ACTOR,
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
@@ -1028,6 +1120,13 @@ async function lockOrder(tx: Db, storeId: string, orderId: string) {
 }
 
 type OrderRow = typeof saleOrder.$inferSelect
+
+/** La franja de un pedido; null: sin franja. */
+function slotOf(order: Pick<OrderRow, "slotStart" | "slotEnd">) {
+  return order.slotStart === null || order.slotEnd === null
+    ? null
+    : { start: order.slotStart, end: order.slotEnd }
+}
 
 function stateError(order: OrderRow): StoreError {
   const now: Record<OrderState, string> = {
@@ -1413,6 +1512,18 @@ export async function undoPayment(
   })
 }
 
+/**
+ * La agencia y el número de envío que quedan: la agencia solo en un envío por agencia (tablero 17);
+ * lo que no se escribe sigue como estaba.
+ */
+function shippingOf(order: OrderRow, input: z.infer<typeof shippingInput>) {
+  if (input.agency && order.deliveryType !== "ParcelService")
+    throw new StoreError(400, "VALIDATION_ERROR", "La agencia es de un envío por agencia", {
+      agency: "La agencia es de un envío por agencia",
+    })
+  return { agency: input.agency ?? order.agency, tracking: input.tracking ?? order.tracking }
+}
+
 /** «Salió»: el pedido va en camino. Si se paga al recibir, aquí baja el stock (decisión 3). */
 export async function markShipped(
   appDb: Db,
@@ -1424,22 +1535,40 @@ export async function markShipped(
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state !== "por_salir") throw stateError(order)
+    const shipping = shippingOf(order, input)
     await mustSale(tx, order, person.userId)
-    await setState(tx, order, "en_camino", { tracking: input.tracking })
+    await setState(tx, order, "en_camino", shipping)
     const { currency } = await storeRow(tx, storeId)
-    await logEvent(tx, storeId, orderId, person.userId, "salio", { envio: input.tracking })
-    await notifyCustomer(tx, order, person.userId, currency, "en_camino", {
-      tracking: input.tracking,
+    await logEvent(tx, storeId, orderId, person.userId, "salio", {
+      envio: shipping.tracking,
+      ...(shipping.agency ? { agencia: shipping.agency } : {}),
     })
+    await notifyCustomer(tx, order, person.userId, currency, "en_camino", shipping)
     return orderDetailIn(tx, storeId, orderId)
   })
 }
 
+/** Lo cobrado en la puerta, uno por medio: con qué y cuánto. */
+type DoorPayment = { methodId: string | null; amountCents: number }
+
+/** Lo que se cobró en la puerta: varios medios, o el monto y el medio de antes (uno solo). */
+function doorPaymentsOf(input: z.infer<typeof deliverInput>): DoorPayment[] {
+  if (input.payments.length > 0) return input.payments
+  return input.collectedCents
+    ? [{ methodId: input.methodId, amountCents: input.collectedCents }]
+    : []
+}
+
 /**
- * «Entregado» (o «Entregado y cobrado» si falta cobrar: queda quién cobró, cuánto y con qué). Si
- * pagó una parte antes, en la puerta se cobra lo que falta. Cualquier paso completa los anteriores
- * (tableros 6 y 7): si nadie marcó «Salió», queda también «Salió», con la misma hora. Un recojo en
- * tienda no sale: pasa de «por salir» a entregado.
+ * «Entregado» (o «Cobrar y entregar» si falta cobrar). Sin pago confirmado no se entrega (tablero
+ * 24): si falta cobrar, lo cobrado en la puerta se anota en este mismo paso, con su medio (efectivo
+ * o el POS de la tienda, con la foto del voucher si la hay), y tiene que ser todo lo que falta; un
+ * pago que espera a una persona (una captura de Yape a la tienda, un link que no coincide) se
+ * confirma antes. Lo cobrado queda a nombre de quien llevaba el pedido (su efectivo lo entrega en
+ * Caja), y quién lo anotó, con su nombre.
+ *
+ * Cualquier paso completa los anteriores (tableros 6 y 7): si nadie marcó «Salió», queda también
+ * «Salió», con la misma hora. Un recojo en tienda no sale: pasa de «por salir» a entregado.
  */
 export async function markDelivered(
   appDb: Db,
@@ -1447,48 +1576,81 @@ export async function markDelivered(
   storeId: string,
   orderId: string,
   input: z.infer<typeof deliverInput>,
+  voucher: { photo: Uint8Array; type: PhotoType } | null = null,
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
-    const { dueCents } = await balanceIn(tx, order)
+    const { dueCents, pendingCents } = await balanceIn(tx, order)
     const { currency } = await storeRow(tx, storeId)
-    let collected: (MethodCopy & { cents: number; short: string | null }) | null = null
+    if (pendingCents > 0)
+      throw new StoreError(
+        409,
+        "PAYMENT_PENDING",
+        `Hay un pago de ${formatMoney(pendingCents, currency)} por confirmar. Confírmalo, o di que no coincide, antes de entregar: sin pago confirmado no se entrega.`,
+      )
+    const door = doorPaymentsOf(input)
+    if (dueCents === 0 && door.length > 0)
+      throw new StoreError(
+        409,
+        "NOTHING_DUE",
+        `El pedido ${pad(order.number)} ya no debe nada. Recarga para verlo.`,
+      )
     if (dueCents > 0) {
-      if (input.collectedCents === null || input.collectedCents === 0)
+      const sum = door.reduce((total, one) => total + one.amountCents, 0)
+      if (sum === 0)
         throw new StoreError(400, "VALIDATION_ERROR", "Escribe cuánto cobraste", {
           collectedCents: "Escribe cuánto cobraste al entregar",
         })
-      const method = await methodFor(tx, storeId, order, "al_recibir", input.methodId)
-      // Lo cobrado en la puerta se anota tal cual; si no es lo que faltaba, queda escrito para revisarlo.
-      const short =
-        input.collectedCents !== dueCents
-          ? `Cobró ${formatMoney(input.collectedCents, currency)} de ${formatMoney(dueCents, currency)}`
-          : null
-      collected = { ...method, cents: input.collectedCents, short }
-      const now = new Date()
+      if (sum !== dueCents)
+        throw new StoreError(
+          400,
+          "VALIDATION_ERROR",
+          sum < dueCents
+            ? `Falta cobrar ${formatMoney(dueCents - sum, currency)}: sin todo el pago no se entrega. Anota lo que falta o pásalo a otro día.`
+            : `Es más de lo que falta (${formatMoney(dueCents, currency)}): anota solo lo que debía, sin el vuelto.`,
+          { collectedCents: `Falta cobrar ${formatMoney(dueCents, currency)}` },
+        )
+    }
+    const methods: MethodCopy[] = []
+    for (const one of door)
+      methods.push(await methodFor(tx, storeId, order, "al_recibir", one.methodId))
+    // La foto del voucher va con lo cobrado con tarjeta (el POS), o con lo único cobrado.
+    const withPhoto = voucher
+      ? Math.max(
+          0,
+          methods.findIndex((m) => m.methodType === "48"),
+        )
+      : -1
+    const now = new Date()
+    for (const [i, one] of door.entries())
       await tx.insert(orderPayment).values({
         storeId,
         orderId,
         kind: "al_recibir",
         status: "confirmado",
-        amountCents: input.collectedCents,
-        ...method,
-        note: short,
+        amountCents: one.amountCents,
+        ...methods[i]!,
+        courierId: order.courierId,
+        ...(i === withPhoto && voucher
+          ? { photo: Buffer.from(voucher.photo), photoType: voucher.type }
+          : {}),
         createdBy: person.userId,
         reviewedBy: person.userId,
         reviewedAt: now,
       })
-    }
     await mustSale(tx, order, person.userId)
     await setState(tx, order, "entregado")
     if (order.state === "por_salir" && order.deliveryType !== "OnSitePickup")
       await logEvent(tx, storeId, orderId, person.userId, "salio", { completado: true })
     await logEvent(tx, storeId, orderId, person.userId, "entregado", {
-      ...(collected
-        ? { cobrado: collected.cents, medio: collected.methodName, moneda: currency }
+      ...(door.length > 0
+        ? {
+            cobrado: dueCents,
+            medio: [...new Set(methods.map((m) => m.methodName))].join(" y "),
+            moneda: currency,
+          }
         : {}),
-      ...(collected?.short ? { porRevisar: collected.short } : {}),
     })
     await notifyCustomer(tx, order, person.userId, currency, "entregado")
     return orderDetailIn(tx, storeId, orderId)
@@ -1845,6 +2007,35 @@ export async function previewChange(
   })
 }
 
+/**
+ * La franja y el repartidor con que vuelve a salir: lo elegido (una de las franjas de la tienda, o
+ * la que ya tenía) o lo que ya tenía. Devuelve lo que se guarda y lo que cambió, para su historia.
+ */
+async function movedTo(
+  tx: Db,
+  order: OrderRow,
+  actorUserId: string,
+  input: { slot?: z.infer<typeof slotInput> | null; courier?: z.infer<typeof courierChoice> },
+) {
+  const set: Partial<OrderRow> = {}
+  const detail: Record<string, string> = {}
+  const before = slotOf(order)
+  if (input.slot !== undefined && !sameSlot(input.slot, before)) {
+    await checkSlotIn(tx, order.storeId, input.slot, before)
+    set.slotStart = input.slot?.start ?? null
+    set.slotEnd = input.slot?.end ?? null
+    detail.franja = input.slot ? slotLabel(input.slot) : "sin franja"
+  }
+  if (input.courier !== undefined) {
+    const courier = await courierFor(tx, order.storeId, actorUserId, input.courier)
+    if ((courier?.id ?? null) !== order.courierId) {
+      set.courierId = courier?.id ?? null
+      detail.repartidor = courier?.name ?? "sin repartidor"
+    }
+  }
+  return { set, detail }
+}
+
 /** Un día desde hoy (el de la tienda): no se entrega en el pasado. */
 async function dayFromToday(tx: Db, storeId: string, day: string) {
   if (day < (await todayIn(tx, storeId)))
@@ -1868,10 +2059,12 @@ export async function markMissed(
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state !== "en_camino" && order.state !== "por_salir") throw stateError(order)
     await dayFromToday(tx, storeId, input.deliverOn)
-    await setState(tx, order, "por_salir", { deliverOn: input.deliverOn })
+    const move = await movedTo(tx, order, person.userId, input)
+    await setState(tx, order, "por_salir", { deliverOn: input.deliverOn, ...move.set })
     await logEvent(tx, storeId, orderId, person.userId, "no_entregado", {
       motivo: input.reason,
       dia: dayText(input.deliverOn),
+      ...move.detail,
     })
     return orderDetailIn(tx, storeId, orderId)
   })
@@ -1888,17 +2081,104 @@ export async function reschedule(
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
-    if (order.deliverOn === input.deliverOn)
+    const move = await movedTo(tx, order, person.userId, input)
+    if (order.deliverOn === input.deliverOn && Object.keys(move.detail).length === 0)
       throw new StoreError(409, "NO_CHANGE", `Ya sale el ${dayText(input.deliverOn)}`, {
         deliverOn: `Ya sale el ${dayText(input.deliverOn)}`,
       })
-    await dayFromToday(tx, storeId, input.deliverOn)
+    if (order.deliverOn !== input.deliverOn) await dayFromToday(tx, storeId, input.deliverOn)
     await tx
       .update(saleOrder)
-      .set({ deliverOn: input.deliverOn, updatedAt: new Date() })
+      .set({ deliverOn: input.deliverOn, ...move.set, updatedAt: new Date() })
       .where(eq(saleOrder.id, orderId))
     await logEvent(tx, storeId, orderId, person.userId, "reprogramado", {
-      dia: `${dayText(order.deliverOn)} → ${dayText(input.deliverOn)}`,
+      ...(order.deliverOn !== input.deliverOn
+        ? { dia: `${dayText(order.deliverOn)} → ${dayText(input.deliverOn)}` }
+        : {}),
+      ...move.detail,
+    })
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/**
+ * «Cambiar repartidor» (Despachos): mientras no se entrega. Lo que cobre en la puerta queda a
+ * nombre de quien lo lleva entonces.
+ */
+export async function assignCourier(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof courierInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (!OPEN.includes(order.state)) throw stateError(order)
+    const move = await movedTo(tx, order, person.userId, { courier: input.courier })
+    if (!move.detail.repartidor)
+      throw new StoreError(409, "NO_CHANGE", "Ya lo lleva esa persona", {
+        courier: "Ya lo lleva esa persona",
+      })
+    await tx
+      .update(saleOrder)
+      .set({ ...move.set, updatedAt: new Date() })
+      .where(eq(saleOrder.id, orderId))
+    await logEvent(tx, storeId, orderId, person.userId, "repartidor", move.detail)
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/**
+ * La agencia y el número de envío de un pedido por agencia (tablero 17), al salir o después: el
+ * número llega cuando la agencia lo da.
+ */
+export async function setShipping(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof shippingInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
+    const shipping = shippingOf(order, input)
+    if (shipping.agency === order.agency && shipping.tracking === order.tracking)
+      throw new StoreError(409, "NO_CHANGE", "Ya está anotado así")
+    await tx
+      .update(saleOrder)
+      .set({ ...shipping, updatedAt: new Date() })
+      .where(eq(saleOrder.id, orderId))
+    await logEvent(tx, storeId, orderId, person.userId, "envio", {
+      ...(shipping.agency ? { agencia: shipping.agency } : {}),
+      ...(shipping.tracking ? { envio: shipping.tracking } : {}),
+    })
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/**
+ * «Avisar» (decisión 4): la persona abrió el WhatsApp de su celular con el aviso escrito y lo envió
+ * ella. Queda en la historia como «enviado por usted», nunca como entregado: gestorIA no lo vio
+ * salir ni llegar.
+ */
+export async function noteSentByYou(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof sentByYouInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (order.state === "anulado") throw stateError(order)
+    await logEvent(tx, storeId, orderId, person.userId, "aviso", {
+      tipo: "despacho",
+      texto: input.text,
+      enviado: false,
+      porUsted: true,
+      motivo: SENT_BY_YOU,
     })
     return orderDetailIn(tx, storeId, orderId)
   })

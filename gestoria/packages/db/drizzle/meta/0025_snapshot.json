@@ -1,6 +1,6 @@
 {
-  "id": "eb38c9eb-3704-4719-b46c-f63d83874ed9",
-  "prevId": "3eff0262-3e7c-4a42-86b2-481c6c169b6a",
+  "id": "6b073e4b-40de-4ecd-9f0d-a8f870ab5af8",
+  "prevId": "03cedff8-7b82-48b8-abf8-0e9f6d491405",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2268,191 +2268,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.push_choice": {
-      "name": "push_choice",
-      "schema": "",
-      "columns": {
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kinds": {
-          "name": "kinds",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "last_event_seq": {
-          "name": "last_event_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "chats_seen": {
-          "name": "chats_seen",
-          "type": "uuid[]",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "push_choice_member_fkey": {
-          "name": "push_choice_member_fkey",
-          "tableFrom": "push_choice",
-          "columnsFrom": [
-            "store_id",
-            "user_id"
-          ],
-          "tableTo": "store_member",
-          "columnsTo": [
-            "store_id",
-            "user_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "push_choice_pkey": {
-          "name": "push_choice_pkey",
-          "columns": [
-            "store_id",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "push_choice_kinds_check": {
-          "name": "push_choice_kinds_check",
-          "value": "\"push_choice\".\"kinds\" is null or \"push_choice\".\"kinds\" <@ array['pagos','chats','no_entregado','sofi_pedido','dinero']::text[]"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.push_device": {
-      "name": "push_device",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "endpoint": {
-          "name": "endpoint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "p256dh": {
-          "name": "p256dh",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "auth": {
-          "name": "auth",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "welcomed_at": {
-          "name": "welcomed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "push_device_user_idx": {
-          "name": "push_device_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "push_device_user_id_fkey": {
-          "name": "push_device_user_id_fkey",
-          "tableFrom": "push_device",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "tableTo": "account_copy",
-          "columnsTo": [
-            "user_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "push_device_endpoint_key": {
-          "name": "push_device_endpoint_key",
-          "columns": [
-            "endpoint"
-          ],
-          "nullsNotDistinct": false
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "push_device_keys_check": {
-          "name": "push_device_keys_check",
-          "value": "char_length(\"push_device\".\"endpoint\") between 10 and 1000 and char_length(\"push_device\".\"p256dh\") between 1 and 200 and char_length(\"push_device\".\"auth\") between 1 and 100"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.sale_order": {
       "name": "sale_order",
       "schema": "",
@@ -4480,6 +4295,70 @@
         "store_payment_method_details_check": {
           "name": "store_payment_method_details_check",
           "value": "char_length(\"store_payment_method\".\"details\") <= 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_setup": {
+      "name": "store_setup",
+      "schema": "",
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "store_setup_store_id_fkey": {
+          "name": "store_setup_store_id_fkey",
+          "tableFrom": "store_setup",
+          "columnsFrom": [
+            "store_id"
+          ],
+          "tableTo": "store",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "store_setup_skipped_check": {
+          "name": "store_setup_skipped_check",
+          "value": "skipped <@ ARRAY['datos','catalogo','pagos','entregas','chats','sofi','equipo']::text[]"
         }
       },
       "isRLSEnabled": false

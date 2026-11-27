@@ -9,15 +9,17 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
+  Input,
   toast,
 } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import { Textarea } from "@odentia/ui/components/textarea"
 import { ConfirmDialog, EmptyState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CreditCard, Plus, Trash2, Truck } from "lucide-react"
+import { Clock, CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { api } from "./lib/api"
+import type { Slot } from "./lib/despachos"
 import {
   COLLECTIONS,
   DELIVERY_COSTS,
@@ -56,6 +58,7 @@ import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 interface Lists {
   payments: PaymentMethod[]
   deliveries: DeliveryMethod[]
+  slots: Slot[]
 }
 
 const LISTS_KEY = (storeId: string) => ["pagos-y-entregas", storeId]
@@ -151,6 +154,9 @@ function PaymentsAndDeliveries({ part }: { part: "pagos" | "entregas" }) {
           )}
         </Section>
       )}
+      {part === "entregas" && lists.data ? (
+        <SlotsSection storeId={store.id} slots={lists.data.slots ?? []} canEdit={canEdit} />
+      ) : null}
       {payment ? (
         <PaymentForm
           storeId={store.id}
@@ -857,5 +863,147 @@ function DeliveryForm({
         <FormAlert error={save.error} />
       </FieldGroup>
     </FormSheet>
+  )
+}
+
+/** «09:30» → 570 minutos; vacío o mal escrito, null. */
+function minutesOf(time: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time)
+  if (!match) return null
+  const minutes = Number(match[1]) * 60 + Number(match[2])
+  return minutes <= 24 * 60 ? minutes : null
+}
+
+/**
+ * Las franjas de entrega (Despachos): opcionales. Un pedido sin franja sale igual, en «Sin franja»;
+ * con ellas, Despachos agrupa cada día por franja y «Pasar a…» deja elegirla. Cada cambio se guarda
+ * al momento; quitar una no cambia los pedidos que ya la tienen.
+ */
+function SlotsSection({
+  storeId,
+  slots,
+  canEdit,
+}: {
+  storeId: string
+  slots: Slot[]
+  canEdit: boolean
+}) {
+  const queryClient = useQueryClient()
+  const id = useId()
+  const [start, setStart] = useState("")
+  const [end, setEnd] = useState("")
+  const save = useMutation({
+    mutationFn: (next: { start: number; end: number }[]) =>
+      api(`/api/tiendas/${storeId}/franjas`, { method: "PATCH", body: { slots: next } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
+      setStart("")
+      setEnd("")
+      toast.success("Franjas guardadas")
+    },
+  })
+  const from = minutesOf(start)
+  const to = minutesOf(end)
+  const plain = slots.map((slot) => ({ start: slot.start, end: slot.end }))
+  const problem =
+    from === null || to === null
+      ? null
+      : from >= to
+        ? "La franja termina después de empezar"
+        : plain.some((slot) => slot.start === from && slot.end === to)
+          ? "Esa franja ya está"
+          : null
+  return (
+    <section aria-labelledby={id} className="elevated overflow-hidden rounded-xl border bg-card">
+      <div className="flex flex-col gap-1 border-b px-5 py-4">
+        <h2 id={id} className="text-base font-semibold">
+          Franjas de entrega
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Opcionales. En Despachos, cada día se ordena por franja; un pedido sin franja sale igual.
+        </p>
+      </div>
+      <div className="flex flex-col gap-4 px-5 py-4">
+        {slots.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay franjas.</p>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {slots.map((slot) => (
+              <li
+                key={`${slot.start}-${slot.end}`}
+                className="flex items-center gap-1 rounded-full border py-1 pr-1 pl-3 text-sm"
+              >
+                <Clock aria-hidden className="size-3.5 text-muted-foreground" />
+                {slot.label}
+                {canEdit ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    aria-label={`Quitar la franja ${slot.label}`}
+                    disabled={save.isPending}
+                    onClick={() =>
+                      save.mutate(plain.filter((s) => s.start !== slot.start || s.end !== slot.end))
+                    }
+                  >
+                    <Trash2 aria-hidden />
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+        {canEdit ? (
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (from !== null && to !== null && !problem)
+                save.mutate([...plain, { start: from, end: to }])
+            }}
+          >
+            <FieldGroup className="flex-row flex-wrap items-end gap-3">
+              <Field className="w-36">
+                <FieldLabel htmlFor={`${id}-desde`}>Desde</FieldLabel>
+                <Input
+                  id={`${id}-desde`}
+                  type="time"
+                  step={1800}
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                />
+              </Field>
+              <Field className="w-36" data-invalid={problem ? true : undefined}>
+                <FieldLabel htmlFor={`${id}-hasta`}>Hasta</FieldLabel>
+                <Input
+                  id={`${id}-hasta`}
+                  type="time"
+                  step={1800}
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  aria-invalid={problem ? true : undefined}
+                  aria-describedby={problem ? `${id}-problema` : undefined}
+                />
+              </Field>
+              <SubmitButton
+                type="submit"
+                variant="outline"
+                pending={save.isPending}
+                disabled={from === null || to === null || Boolean(problem)}
+              >
+                <Plus aria-hidden />
+                Agregar franja
+              </SubmitButton>
+            </FieldGroup>
+            {problem ? (
+              <FieldError id={`${id}-problema`} className="basis-full">
+                {problem}
+              </FieldError>
+            ) : null}
+          </form>
+        ) : null}
+        <FormAlert error={save.error} />
+      </div>
+    </section>
   )
 }

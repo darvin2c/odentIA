@@ -47,6 +47,7 @@ import { promotion as promotionTable } from "@odentia/db/schema/promotions"
 import { and, asc, desc, eq, inArray, isNull, or, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { livePersonalLinkToken } from "./booking-links.js"
 import { budgetAwaitsAnswer, OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
+import { type BudgetDelivery, budgetDeliveries } from "./budget-delivery.js"
 import { wholeReturnedChargeSql } from "./charge-returns.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
@@ -235,6 +236,11 @@ export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
    * sus colegas, pero solo cambia lo suyo (`ownBudgetSql`); el resto, según su permiso.
    */
   canChange: boolean
+  /**
+   * Si le llegó: lo que dice el estado de su mensaje (`budget-delivery.ts`), no el
+   * estado del presupuesto. Nulo en un borrador. Es de la clínica: lo público no lo lleva.
+   */
+  delivery: BudgetDelivery | null
 }
 
 /** Quién actúa en la ruta: el servidor limita al odontólogo a lo que indicó. */
@@ -745,6 +751,7 @@ function withTotals(
     choiceText: budgetChoiceText({ status: budget.status, items, options }),
     decidedByName: budget.decidedBy ? (names.get(budget.decidedBy) ?? null) : null,
     canChange: true,
+    delivery: null,
   }
 }
 
@@ -755,13 +762,16 @@ async function loadBudget(
   budget: BudgetRow,
 ): Promise<BudgetWithTotals> {
   const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
-  return withTotals(
-    budget,
-    lines,
-    await listOptions(tx, orgId, [budget.id]),
-    await emptyCurrencyOf(tx, orgId, lines),
-    await notedByNames(tx, [budget]),
-  )
+  return {
+    ...withTotals(
+      budget,
+      lines,
+      await listOptions(tx, orgId, [budget.id]),
+      await emptyCurrencyOf(tx, orgId, lines),
+      await notedByNames(tx, [budget]),
+    ),
+    delivery: (await budgetDeliveries(tx, orgId, [budget])).get(budget.id) ?? null,
+  }
 }
 
 /**
@@ -3369,18 +3379,20 @@ export async function listBudgetsForPatients(
   for (const option of options)
     optionsOf.set(option.budgetId, [...(optionsOf.get(option.budgetId) ?? []), option])
   const names = await notedByNames(tx, budgets)
+  const deliveries = await budgetDeliveries(tx, orgId, budgets)
   for (const budget of budgets) {
     const list = out.get(budget.patientId) ?? []
     const own = lines.get(budget.id) ?? []
-    list.push(
-      withTotals(
+    list.push({
+      ...withTotals(
         budget,
         own,
         optionsOf.get(budget.id) ?? [],
         await emptyCurrencyOf(tx, orgId, own),
         names,
       ),
-    )
+      delivery: deliveries.get(budget.id) ?? null,
+    })
     out.set(budget.patientId, list)
   }
   return out
@@ -3414,6 +3426,7 @@ export async function listBudgets(
   )
   const result: BudgetWithTotals[] = []
   const names = await notedByNames(tx, budgets)
+  const deliveries = await budgetDeliveries(tx, orgId, budgets)
   for (const budget of budgets) {
     const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
     result.push({
@@ -3425,6 +3438,7 @@ export async function listBudgets(
         names,
       ),
       canChange: own === null || own.has(budget.id),
+      delivery: deliveries.get(budget.id) ?? null,
     })
   }
   return result

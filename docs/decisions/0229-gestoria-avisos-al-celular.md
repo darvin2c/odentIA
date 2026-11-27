@@ -1,4 +1,4 @@
-# 0227 · gestorIA avisa al celular con la app instalable, a cada rol lo suyo
+# 0229 · gestorIA avisa al celular con la app instalable, a cada rol lo suyo
 
 Fecha: 2026-11-27 · Estado: aceptada · Entrega 5 del lienzo «gestorIA como odentIA» (tablero 15 y
 decisión 9; sobre ADR 0177 y 0203)
@@ -55,4 +55,4 @@ instalable y push web (ADR 0177), pero ese código vivía en las clínicas, que 
 - `shared/packages/ui-patterns/src/device-push.ts`, `packages/clinic-app/src/lib/pwa.ts`.
 - `gestoria/apps/api/src/avisos.ts`, `gestoria/apps/web/src/avisos.tsx`,
   `gestoria/apps/web/src/lib/avisos.ts`, `gestoria/apps/web/public/sw.js`.
-- `gestoria/packages/db/drizzle/0024_avisos_al_celular.sql` y `0025_reglas_avisos_al_celular.sql`.
+- `gestoria/packages/db/drizzle/0028_avisos_al_celular.sql` y `0029_reglas_avisos_al_celular.sql`.

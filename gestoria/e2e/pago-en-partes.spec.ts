@@ -168,12 +168,15 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
   await expect(sheet).toBeVisible()
   await sheet.getByRole("button", { name: "Entregado y cobrado" }).click()
   const deliver = page.getByRole("alertdialog")
-  await expect(deliver.getByLabel("¿Cuánto cobraste?")).toHaveValue("37")
+  await expect(deliver.getByLabel("Cobraste")).toHaveValue("37")
   await expect(deliver.getByText("Falta cobrar S/ 37 de S/ 117.")).toBeVisible()
-  await expect(deliver.getByText("Queda anotado con Efectivo al recibir.")).toBeVisible()
+  await expect(deliver.getByLabel("Medio").locator("option:checked")).toHaveText(
+    "Efectivo al recibir",
+  )
+  await expect(deliver.getByText("Suma S/ 37: es lo que falta.")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "pago-en-partes-entregar-telefono")
-  await deliver.getByRole("button", { name: "Entregado y cobrado" }).click()
+  await deliver.getByRole("button", { name: "Cobré S/ 37 y entregué" }).click()
   await expect(deliver).toHaveCount(0)
   await expect(sheet.getByText("Nada: está pagado")).toBeVisible()
   await expect(sheet.getByText("Efectivo al recibir · S/ 37")).toBeVisible()

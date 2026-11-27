@@ -21,6 +21,7 @@ import {
 } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql, budgetLineUnitsSql, budgetValueOptionSql } from "./budget-awaiting.js"
+import { budgetDeliveries } from "./budget-delivery.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, lastIsUncertainOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
@@ -1301,11 +1302,21 @@ async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: bo
     and (not ${ownOnly} or b.created_by=${userId} or exists (select 1 from treatment_budget_item own_line
       join treatment_plan_item own_item on own_item.id=own_line.plan_item_id and own_item.organization_id=own_line.organization_id
       where own_line.organization_id=${orgId} and own_line.budget_id=b.id and own_item.created_by=${userId}))`
-  const items = await tx.execute<WaitingBudgets["items"][number]>(sql`
-    select b.id, b.patient_id as "patientId", pp.display_name as "patientName", b.title,
+  const rows = await tx.execute<Omit<WaitingBudgets["items"][number], "notReached"> & { status: string }>(sql`
+    select b.id, b.patient_id as "patientId", pp.display_name as "patientName", b.title, b.status,
       ${iso(sql`b.presented_at`)} as "presentedAt"
     from treatment_budget b join patient p on p.id=b.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where ${scope} order by b.presented_at nulls last, b.id limit 20`)
+  // Lo que no le llegó se dice en su fila: hay que reenviarlo, no preguntarle qué respondió.
+  const deliveries = await budgetDeliveries(
+    tx,
+    orgId,
+    rows.map((row) => ({ id: row.id, status: row.status, presentedAt: row.presentedAt ? new Date(row.presentedAt) : null })),
+  )
+  const items = rows.map(({ status, ...row }) => {
+    const delivery = deliveries.get(row.id)
+    return { ...row, notReached: status === "presentado" && delivery && !delivery.reached ? delivery.text : null }
+  })
   const [count] = await tx.execute<{ total: number; oldestPresentedAt: string | null }>(sql`
     select count(*)::int as total, ${iso(sql`min(b.presented_at)`)} as "oldestPresentedAt" from treatment_budget b where ${scope}`)
   return { total: count?.total ?? 0, oldestPresentedAt: count?.oldestPresentedAt ?? null, items }

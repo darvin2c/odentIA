@@ -309,3 +309,121 @@ export function useDirty(values: unknown): boolean {
   const [initial] = useState(() => JSON.stringify(values))
   return JSON.stringify(values) !== initial
 }
+
+/** Una lista para elegir, con su etiqueta y su error. */
+export function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  error,
+  placeholder,
+  className,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string; disabled?: boolean }[]
+  error?: string
+  placeholder?: string
+  className?: string
+}) {
+  const id = useId()
+  return (
+    <Field data-invalid={error ? true : undefined} className={className}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={SELECT_CLASSES}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+      >
+        {placeholder ? (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        ) : null}
+        {options.map((o) => (
+          <option key={o.value} value={o.value} disabled={o.disabled}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </Field>
+  )
+}
+
+/** Un día, con su etiqueta y su error. */
+export function DateField({
+  label,
+  value,
+  onChange,
+  min,
+  error,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  min?: string
+  error?: string
+}) {
+  const id = useId()
+  return (
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Input
+        id={id}
+        type="date"
+        value={value}
+        min={min}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+      />
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </Field>
+  )
+}
+
+/** La captura (o el voucher) de un pago, que se abre en grande con un toque. */
+export function ReceiptImage({
+  storeId,
+  orderId,
+  paymentId,
+}: {
+  storeId: string
+  orderId: string
+  paymentId: string
+}) {
+  const blob = useQuery({
+    queryKey: ["captura", storeId, paymentId],
+    queryFn: () =>
+      api<Blob>(`/api/tiendas/${storeId}/pedidos/${orderId}/pagos/${paymentId}/captura`, {
+        as: "blob",
+      }),
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!blob.data) return
+    const next = URL.createObjectURL(blob.data)
+    setUrl(next)
+    return () => URL.revokeObjectURL(next)
+  }, [blob.data])
+  if (blob.isError)
+    return (
+      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+        <ImageOff className="size-4" aria-hidden /> No se pudo abrir la captura
+      </span>
+    )
+  return url ? (
+    <a href={url} target="_blank" rel="noreferrer" className="block w-fit">
+      <img src={url} alt="Captura del pago" className="max-h-64 rounded-lg border object-contain" />
+    </a>
+  ) : (
+    <span className="block h-24 w-40 animate-pulse rounded-lg bg-muted" />
+  )
+}

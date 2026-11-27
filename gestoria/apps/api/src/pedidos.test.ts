@@ -414,16 +414,21 @@ describe("al recibir (decisión 4)", () => {
     })
   })
 
-  it("si cobró otro monto, se anota tal cual y queda escrito para revisarlo", async () => {
+  it("sin todo el pago no se entrega (tablero 24): ni menos ni más de lo que falta", async () => {
     const id = (
       await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.efectivo }))
     ).json.order.id
-    const done = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+    const short = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
       collectedCents: 10000,
     })
-    expect(done.json.order.state).toBe("entregado")
-    expect(done.json.order.payments[0].amountCents).toBe(10000)
-    expect(done.json.order.payments[0].note).toMatch(/^Cobró S\/\s100 de S\/\s139$/)
+    expect(short.status).toBe(400)
+    expect(short.json.error.message).toMatch(/^Falta cobrar S\/\s39/)
+    const over = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: 20000,
+    })
+    expect(over.status).toBe(400)
+    const detail = await call("lucia", "GET", `${base}/pedidos/${id}`)
+    expect(detail.json.order).toMatchObject({ state: "por_salir", payments: [] })
   })
 })
 

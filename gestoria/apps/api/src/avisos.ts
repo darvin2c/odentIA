@@ -17,7 +17,7 @@ import { can, type StorePermission, type StoreSeat } from "./permisos.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
- * Los avisos al celular (lienzo «gestorIA como odentIA», tablero 15; ADR 0227): gestorIA se
+ * Los avisos al celular (lienzo «gestorIA como odentIA», tablero 15; ADR 0229): gestorIA se
  * instala desde el navegador y avisa con la app cerrada, como ya avisa odentIA (ADR 0177), por
  * push web y no por WhatsApp: no cuesta nada.
  *
