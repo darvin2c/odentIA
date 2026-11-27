@@ -14,6 +14,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { customerProfileIn } from "./perfil.js"
 import { balancesIn, unpaidBalance } from "./saldo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -460,7 +461,7 @@ export async function customerDetail(
   customerId: string,
 ) {
   uuidOr404(customerId)
-  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx, seat) => {
     const head = await rootRow(tx, storeId, customerId)
     const members = await tx
       .select()
@@ -736,6 +737,8 @@ export async function customerDetail(
         name: similarNames.get(id)?.name ?? "",
         phone: similarNames.get(id)?.phone ?? null,
       })),
+      /** «Lo que Argos sabe de ella» y cuándo se le puede escribir (`perfil.ts`). */
+      profile: await customerProfileIn(tx, storeId, head.id, seat),
     }
   })
 }
@@ -986,7 +989,7 @@ export async function customerForOrderIn(
  * La ficha de la clienta de una conversación (la que se ve, si quedó dentro de otra): la del último
  * pedido de ese chat que tiene ficha. Nunca se busca por el teléfono ni por el nombre.
  */
-async function conversationCustomerIn(
+export async function conversationCustomerIn(
   tx: Db,
   storeId: string,
   conversationId: string,

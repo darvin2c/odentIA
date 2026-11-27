@@ -211,11 +211,28 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
-- Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
-  fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
+- Argos no decide con el modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son
+  textos fijos, uno por motivo y pedido. El modelo solo lee lo que dijo la clienta (abajo, «El perfil
+  de la clienta»). Solo Dueño y Administrador ven Reportes (`reportes.ver`).
 - Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
   `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
   las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
+
+## El perfil de la clienta (ADR 0240)
+
+- Argos perfila solo (`apps/api/src/sofi/perfilar.ts`, en su vuelta) y la ficha lo muestra
+  (`customerProfileIn` de `apps/api/src/perfil.ts`, sobre la familia de fichas unidas). Cada dato es
+  una fila de `customer_fact` con su fuente, su cita y su hora: nada se edita. El de hoy es el último
+  de la tienda o, si no hay, el último. Lo que corrige una persona («Corregir», `ventas.atender`)
+  queda «Lo puso la tienda» y Argos no lo vuelve a escribir; la base también se lo niega (`0051`).
+- Argos usa el modelo (el de Sofi) SOLO para leer lo que ella escribió y la dirección de su última
+  entrega: lo de ella va como mensaje del usuario y cada dato trae su cita, que el código comprueba
+  tal cual en el mensaje o la dirección, con la medida del catálogo y una fecha que existe; lo demás
+  se descarta. Lee cada mensaje una vez (`argos_reading`), nunca a media conversación ni «Probar a
+  Sofi». Las cifras (la medida de sus compras, su canal) y toda decisión siguen siendo cuentas fijas.
+  Lo que cuesta leer queda en el registro de la vuelta: no se cobra.
+- El permiso para escribirle (`customer_consent`) lo anota solo Sofi, de un mensaje de ella y con sus
+  palabras. Nadie del equipo dice por ella que sí.
 
 ## El acuerdo con la administración (B7)
 

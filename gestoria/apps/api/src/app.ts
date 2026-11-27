@@ -18,7 +18,6 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
-import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   choicesInput,
   deviceInput,
@@ -29,6 +28,7 @@ import {
   storeChoices,
   subscribeInput,
 } from "./avisos.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   createExchange,
   exchangeInput,
@@ -146,6 +146,7 @@ import {
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import { correctFact, factInput } from "./perfil.js"
 import { skipInput, skipStep } from "./primeros-pasos.js"
 import { setDeliverySlots, slotsInput } from "./repartidores.js"
 import { argosBoard } from "./sofi/argos.js"
@@ -837,6 +838,12 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/clientes/:customerId/separar", async (c) => {
     const { id, customerId } = c.req.param()
     return c.json(await separateCustomer(deps.appDb, c.get("person"), id, customerId))
+  })
+  // «Corregir» un dato de «Lo que Argos sabe de ella»: queda «Lo puso la tienda».
+  app.post("/api/tiendas/:id/clientes/:customerId/datos", async (c) => {
+    const input = await bodyOf(c, factInput)
+    const { id, customerId } = c.req.param()
+    return c.json(await correctFact(deps.appDb, c.get("person"), id, customerId, input))
   })
 
   // El link de pago de la tienda (B4): se conecta en Pagos y entregas.
