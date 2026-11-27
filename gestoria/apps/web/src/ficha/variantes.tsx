@@ -26,6 +26,7 @@ import { readValues } from "../catalogo"
 import {
   cellKey,
   type Draft,
+  emptyCell,
   type Grid,
   type GridRow,
   NO_AXIS,
@@ -563,25 +564,12 @@ function SizesChip({ grid }: { grid: Grid }) {
       )
       const cells: Grid["cells"] = {}
       for (const row of g.rows)
-        for (const column of columns) {
-          const old =
-            g.cells[cellKey(row.id, column.id)] ??
-            (g.columnName === null ? g.cells[cellKey(row.id, NO_AXIS)] : undefined)
+        // Lo que tenía sin tallas pasa a la primera talla.
+        for (const [i, column] of columns.entries())
           cells[cellKey(row.id, column.id)] =
-            old && before.length ? old : (old ?? { stock: 0, priceCents: null, barcode: null })
-        }
-      // Lo que tenía sin tallas pasa a la primera talla.
-      if (g.columnName === null)
-        for (const row of g.rows)
-          for (const [i, column] of columns.entries())
-            cells[cellKey(row.id, column.id)] =
-              i === 0
-                ? (g.cells[cellKey(row.id, NO_AXIS)] ?? {
-                    stock: 0,
-                    priceCents: null,
-                    barcode: null,
-                  })
-                : { stock: 0, priceCents: null, barcode: null }
+            g.cells[cellKey(row.id, column.id)] ??
+            (g.columnName === null && i === 0 ? g.cells[cellKey(row.id, NO_AXIS)] : undefined) ??
+            emptyCell()
       const gone = before.filter((c) => !columns.includes(c)).map((c) => c.value)
       d.promotions = d.promotions.filter(
         (p) => !(p.scope?.axis === "columns" && gone.some((v) => sameText(v, p.scope!.value))),
@@ -670,7 +658,12 @@ function SizesChip({ grid }: { grid: Grid }) {
 
 /** El motivo para bajar el stock: se pide aquí, junto a la cuadrícula, y no frena lo demás. */
 function StockReason({ cells }: { cells: number }) {
-  const { setReason } = useFichaContext()
+  const { setReason, base, draft } = useFichaContext()
+  // Sumar el primer color o la primera talla arma las variantes de nuevo: su stock sale de las de
+  // antes y entra en las nuevas, y eso también lleva su motivo en el kardex.
+  const reshaped =
+    (base.grid?.rowName === null && draft.grid?.rowName !== null) ||
+    (base.grid?.columnName === null && draft.grid?.columnName !== null)
   const [choice, setChoice] = useState<string | null>(null)
   const [other, setOther] = useState("")
   const options = ["Conté y corregí", "Se dañó o se perdió", "Se vendió fuera de gestorIA", "Otro"]
@@ -684,7 +677,9 @@ function StockReason({ cells }: { cells: number }) {
       aria-labelledby="motivo-stock"
     >
       <p id="motivo-stock" className="text-sm font-semibold">
-        Bajaste el stock de {cells} {cells === 1 ? "variante" : "variantes"}. ¿Por qué?
+        {reshaped
+          ? "Las variantes se arman de nuevo con la opción que sumaste. ¿Por qué cambia el stock?"
+          : `Bajaste el stock de ${cells} ${cells === 1 ? "variante" : "variantes"}. ¿Por qué?`}
       </p>
       <p className="text-sm text-muted-foreground">
         Queda en el kardex con tu nombre. Lo demás de la ficha ya se guarda; esto, al elegir el
@@ -737,8 +732,8 @@ export function VariantsCard() {
   if (!grid)
     return (
       <Section id="variantes" title="Variantes" summary={`${sheet.variants.length} variantes`}>
-        <PageNotice tone="aviso" label="Tres opciones">
-          Este producto tiene tres opciones: la cuadrícula tiene solo colores y tallas. Sus
+        <PageNotice tone="aviso" label="Sin cuadrícula">
+          La cuadrícula es de colores y tallas, y las opciones de este producto son otras. Sus
           variantes se ven aquí y su stock se cambia en el kardex.
         </PageNotice>
         <ul className="flex flex-col divide-y rounded-xl border text-sm">
@@ -770,9 +765,10 @@ export function VariantsCard() {
     g?.cells[transpose ? cellKey(b, a) : cellKey(a, b)]
   const total = grid.rows.length * grid.columns.length
   const readStock = (text: string) => {
-    if (!text.trim()) return "0"
-    const n = Number(text.trim())
-    return Number.isInteger(n) && n >= 0 && n <= 100_000 ? String(n) : undefined
+    const clean = text.trim()
+    if (!clean) return "0"
+    // Solo cifras: «1.000» o «2,5» no se adivinan.
+    return /^\d{1,6}$/.test(clean) && Number(clean) <= 100_000 ? String(Number(clean)) : undefined
   }
   const readPrice = (text: string) => {
     if (!text.trim()) return null
@@ -844,8 +840,7 @@ export function VariantsCard() {
                     return
                   }
                   g.rows.push({ id, value, hex: null, hex2: null, photoId: null })
-                  for (const column of g.columns)
-                    g.cells[cellKey(id, column.id)] = { stock: 0, priceCents: null, barcode: null }
+                  for (const column of g.columns) g.cells[cellKey(id, column.id)] = emptyCell()
                 })
               }}
             >
@@ -897,7 +892,7 @@ export function VariantsCard() {
             change(text, (d) => {
               for (const { row, column, value } of cells) {
                 const key = transpose ? cellKey(column, row) : cellKey(row, column)
-                const cell = d.grid!.cells[key] ?? { stock: 0, priceCents: null, barcode: null }
+                const cell = d.grid!.cells[key] ?? emptyCell()
                 if (measure === "stock") cell.stock = Number(value ?? 0)
                 else if (measure === "precio") {
                   const cents = value === null ? null : Number(value)

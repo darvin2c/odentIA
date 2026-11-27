@@ -300,6 +300,21 @@ describe("la cuadrícula de tallas y colores (decisión 6)", () => {
     expect(kardex.json.movements).toMatchObject([{ kind: "entrada", quantity: 2, balance: 2 }])
   })
 
+  it("un producto nuevo con una opción «Color» la tiene como su color, en el lugar que esté", async () => {
+    const created = await call("rosa", "POST", `${base}/productos`, {
+      name: "Botín con color",
+      listPriceCents: 19900,
+      options: [
+        { name: "Talla", values: ["38"] },
+        { name: "Color", values: ["marrón"] },
+      ],
+    })
+    expect(created.status).toBe(201)
+    const sheet = await call("rosa", "GET", `${base}/productos/${created.json.product.id}`)
+    expect(sheet.json.product.colorOption).toBe(1)
+    expect(sheet.json.product.colors).toMatchObject([{ value: "marrón", hex: null }])
+  })
+
   it("el catálogo dice de cada producto sus colores, su estado y qué tan lista está para Sofi", async () => {
     const list = await call("lucia", "GET", `${base}/catalogo`)
     expect(list.status).toBe(200)

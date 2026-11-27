@@ -51,6 +51,8 @@ export function Hoja(props: HojaProps) {
   const [anchor, setAnchor] = useState<Pos>({ r: 0, c: 0 })
   const [focus, setFocus] = useState<Pos>({ r: 0, c: 0 })
   const [editing, setEditing] = useState<string | null>(null)
+  /** Lo escrito ya se aplicó o se canceló: el blur que sigue no lo vuelve a aplicar. */
+  const settled = useRef(false)
   const [dragging, setDragging] = useState(false)
   const [flash, setFlash] = useState<Set<string>>(new Set())
   const [active, setActive] = useState(false)
@@ -124,6 +126,7 @@ export function Hoja(props: HojaProps) {
   }
 
   function commit(text: string, then?: "down" | "right" | "left" | "up") {
+    settled.current = true
     apply(text)
     setEditing(null)
     grid.current?.focus({ preventScroll: true })
@@ -198,6 +201,7 @@ export function Hoja(props: HojaProps) {
 
   function startEdit(initial: string) {
     if (!edit) return
+    settled.current = false
     setEditing(initial)
   }
 
@@ -425,7 +429,9 @@ export function Hoja(props: HojaProps) {
                           onFocus={(e) => {
                             if (e.target.value.length > 1) e.target.select()
                           }}
-                          onBlur={() => editing != null && commit(editing)}
+                          onBlur={() => {
+                            if (!settled.current && editing != null) commit(editing)
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               e.preventDefault()
@@ -435,6 +441,7 @@ export function Hoja(props: HojaProps) {
                               commit(editing, e.shiftKey ? "left" : "right")
                             } else if (e.key === "Escape") {
                               e.preventDefault()
+                              settled.current = true
                               setEditing(null)
                               grid.current?.focus()
                             } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {

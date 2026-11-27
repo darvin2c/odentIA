@@ -320,7 +320,9 @@ function NewPromotion({ onClose }: { onClose: () => void }) {
     onSubmit: async ({ value }) => {
       const [axis, ...rest] = value.scope.split(":")
       const scope: DraftPromotion["scope"] =
-        value.scope === "todo" ? null : { axis: axis as "rows" | "columns", value: rest.join(":") }
+        value.scope === "todo"
+          ? null
+          : { axis: axis as "rows" | "columns", index: -1, value: rest.join(":") }
       change(`Promoción «${value.name.trim()}»`, (d) => {
         d.promotions.push({
           name: value.name.trim(),

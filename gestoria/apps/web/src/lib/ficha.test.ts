@@ -6,6 +6,7 @@ import {
   draftOf,
   gridBody,
   gridOf,
+  heldOf,
   idsOf,
   loweredCells,
   patchOf,
@@ -164,12 +165,52 @@ describe("el borrador de la ficha", () => {
       ],
     })
     const base = draftOf(saved)
-    expect(base.promotions[0]?.scope).toEqual({ axis: "rows", value: "negra" })
+    expect(base.promotions[0]?.scope).toEqual({ axis: "rows", index: 1, value: "negra" })
     const draft = copy(base)
     draft.promotions[0]!.percentOff = 15
     expect(patchOf(base, draft, saved)?.promotions).toEqual([
       expect.objectContaining({ percentOff: 15, scope: { optionIndex: 1, optionValue: "negra" } }),
     ])
+  })
+})
+
+describe("lo que espera para enviarse", () => {
+  it("la promoción de un color nuevo espera a que se guarde ese color, no va como de todo", () => {
+    const base = draftOf(sheet())
+    const draft = copy(base)
+    draft.grid!.rows.push({ id: "r-nuevo", value: "roja", hex: null, hex2: null, photoId: null })
+    draft.promotions.push({
+      name: "Roja",
+      percentOff: 20,
+      startsOn: "2026-12-01",
+      endsOn: "2026-12-10",
+      scope: { axis: "rows", index: -1, value: "roja" },
+    })
+    draft.name = "Zapatilla"
+    expect(heldOf(draft, sheet()).promotions).toBeTruthy()
+    expect(patchOf(base, draft, sheet())).toEqual({ name: "Zapatilla" })
+  })
+
+  it("el color se reconoce por su nombre aunque nadie lo haya marcado; dos opciones sin color no van en cuadrícula", () => {
+    const talla = sheet({
+      colorOption: null,
+      options: [
+        { name: "Talla", values: ["35", "36"] },
+        { name: "Color", values: ["blanca", "negra"] },
+      ],
+      variants: [],
+    })
+    expect(gridOf(talla)?.rowName).toBe("Color")
+    expect(gridOf(talla)?.columnName).toBe("Talla")
+    const material = sheet({
+      colorOption: null,
+      options: [
+        { name: "Material", values: ["cuero"] },
+        { name: "Talla", values: ["35"] },
+      ],
+      variants: [],
+    })
+    expect(gridOf(material)).toBeNull()
   })
 })
 

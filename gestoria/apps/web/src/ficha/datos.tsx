@@ -21,7 +21,7 @@ import {
   useAppForm,
   useFormSurface,
 } from "@odentia/ui-patterns"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MessageCircleQuestion, Plus, Settings2, Trash2 } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { z } from "zod"
@@ -49,6 +49,15 @@ import { FieldProblem, Section, Sub, useTyped } from "./piezas"
 
 export const TEMPLATES_KEY = (storeId: string) => ["plantillas", storeId]
 export const PRODUCT_KEY = (storeId: string, productId: string) => ["producto", storeId, productId]
+
+/** Las plantillas de los rubros de la tienda (`GET /plantillas`), para la ficha y el catálogo. */
+export function useTemplates(storeId: string) {
+  return useQuery({
+    queryKey: TEMPLATES_KEY(storeId),
+    queryFn: () => api<{ rubros: RubroTemplate[] }>(`/api/tiendas/${storeId}/plantillas`),
+    staleTime: 60_000,
+  })
+}
 
 const isEmpty = (v: RubroValue | null | undefined) =>
   v === undefined ||

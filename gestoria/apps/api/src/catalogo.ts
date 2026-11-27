@@ -809,6 +809,14 @@ export async function productHistory(
   })
 }
 
+/** La opción del color: la que se llama así (como en la migración `0034`); null si no hay. */
+export function colorOptionOf(options: ProductOption[]): number | null {
+  const i = options.findIndex((o) =>
+    ["color", "colores", "tono", "tonos"].includes(o.name.trim().toLocaleLowerCase("es")),
+  )
+  return i >= 0 ? i : null
+}
+
 /** Crea el producto con todas las combinaciones de sus opciones, cada una con stock 0. */
 export async function createProductIn(
   tx: Db,
@@ -827,6 +835,7 @@ export async function createProductIn(
       listPriceCents: input.listPriceCents,
       minPriceCents: input.minPriceCents,
       options: input.options,
+      colorOption: colorOptionOf(input.options),
     })
     .returning({ id: product.id })
   const skus = taken ?? (await takenSkus(tx, storeId))

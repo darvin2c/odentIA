@@ -17,7 +17,7 @@ import { Download, Package, Plus, Trash2, Upload } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { MoneyInput } from "./campos"
-import { TEMPLATES_KEY } from "./ficha/datos"
+import { useTemplates } from "./ficha/datos"
 import { StateBadge } from "./ficha/lateral"
 import { SofiDot, Swatch } from "./ficha/piezas"
 import { api } from "./lib/api"
@@ -73,11 +73,7 @@ export function CatalogPage() {
   const canEdit = store.permissions.includes("configuracion")
   const catalog = useCatalog(store.id)
   const navigate = useNavigate()
-  const templates = useQuery({
-    queryKey: TEMPLATES_KEY(store.id),
-    queryFn: () => api<{ rubros: RubroTemplate[] }>(`/api/tiendas/${store.id}/plantillas`),
-    staleTime: 60_000,
-  })
+  const templates = useTemplates(store.id)
   const [adding, setAdding] = useState(false)
   const [uploading, setUploading] = useState(false)
   const products = catalog.data?.products ?? []
@@ -158,8 +154,14 @@ export function CatalogPage() {
         cell: ({ row }) => {
           const item = row.original
           const { unit, unitOne } = unitsOf(templates.data?.rubros, item.rubro)
+          // Por encargo, con cupo o en preventa se vende sin stock: no se dice «Agotado».
+          const sellsAnyway = ["encargo", "cupo", "preventa"].includes(item.state)
           return item.stock === 0 ? (
-            <Badge variant="outline">Agotado</Badge>
+            sellsAnyway ? (
+              <span className="text-muted-foreground">Sin stock · se vende igual</span>
+            ) : (
+              <Badge variant="outline">Agotado</Badge>
+            )
           ) : (
             <span className="tabular-nums">
               {item.stock} {item.stock === 1 ? unitOne : unit}

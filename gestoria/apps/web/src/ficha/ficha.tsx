@@ -45,7 +45,7 @@ import { StoreHeader, useStoreContext } from "../tiendas"
 import { type SaveStatus, useFicha, useFichaStore } from "./borrador"
 import { HistoryDrawer, KardexDrawer, SearchDialog, ShortcutsDialog } from "./cajones"
 import { type Ficha, FichaContext } from "./contexto"
-import { DataCard, PRODUCT_KEY, TEMPLATES_KEY } from "./datos"
+import { DataCard, PRODUCT_KEY, useTemplates } from "./datos"
 import { PhotoCarousel, PhotosCard } from "./fotos"
 import {
   ActivityCard,
@@ -256,11 +256,7 @@ export function ProductPage() {
     queryKey: PRODUCT_KEY(store.id, productId),
     queryFn: () => api<{ product: Sheet }>(`/api/tiendas/${store.id}/productos/${productId}`),
   })
-  const templates = useQuery({
-    queryKey: TEMPLATES_KEY(store.id),
-    queryFn: () => api<{ rubros: RubroTemplate[] }>(`/api/tiendas/${store.id}/plantillas`),
-    staleTime: 60_000,
-  })
+  const templates = useTemplates(store.id)
   const saveApi = useMemo(
     () => ({
       get: () =>

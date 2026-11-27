@@ -9,13 +9,16 @@ import {
   gridChanged,
   gridOf,
   type History,
+  heldOf,
   idsOf,
   loweredCells,
+  onBase,
   PATCH_FIELDS,
   type PatchField,
   patchOf,
   record,
   type Sheet,
+  same,
 } from "../lib/ficha"
 
 /**
@@ -66,7 +69,10 @@ const storageKey = (id: string) => `gestoria:ficha:${id}`
 
 /** Una copia que se puede cambiar sin tocar el original. */
 const clone = <T>(value: T): T => structuredClone(value)
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+/** Esta pestaña: un borrador que otra pestaña está guardando no se recupera aquí. */
+const TAB = typeof crypto !== "undefined" ? crypto.randomUUID() : "pestaña"
+/** Lo que se considera vivo: otra pestaña que anotó su borrador hace menos de esto. */
+const ALIVE_MS = 30_000
 
 export class FichaStore {
   private state: State
@@ -79,6 +85,11 @@ export class FichaStore {
   private gridRejected: string | null = null
   /** La cuadrícula que baja el stock frente al de ahora y espera su motivo. */
   private needsReason: string | null = null
+  /** El producto ya no está o ya no se puede cambiar: no se intenta más. */
+  private closed = false
+  private restored = false
+  /** Cuántas pantallas lo usan: se suelta solo sin ninguna. */
+  mounted = 0
 
   constructor(
     sheet: Sheet,
@@ -129,7 +140,14 @@ export class FichaStore {
     if (same(next, before)) return
     this.set({
       draft: next,
-      history: record(this.state.history, before, label, options.group, Date.now()),
+      history: record(
+        this.state.history,
+        before,
+        label,
+        options.group,
+        Date.now(),
+        this.state.base.grid,
+      ),
       last: options.group ? this.state.last : { label, at: Date.now() },
     })
     this.afterChange()
@@ -139,10 +157,13 @@ export class FichaStore {
     const step = this.state.history.undo.at(-1)
     if (!step || this.readOnly) return null
     this.set({
-      draft: step.draft,
+      draft: onBase(step, this.state.base.grid),
       history: {
         undo: this.state.history.undo.slice(0, -1),
-        redo: [...this.state.history.redo, { ...step, draft: this.state.draft }],
+        redo: [
+          ...this.state.history.redo,
+          { ...step, draft: this.state.draft, base: this.state.base.grid },
+        ],
       },
       last: { label: `Deshiciste: ${step.label}`, at: Date.now() },
     })
@@ -154,9 +175,12 @@ export class FichaStore {
     const step = this.state.history.redo.at(-1)
     if (!step || this.readOnly) return null
     this.set({
-      draft: step.draft,
+      draft: onBase(step, this.state.base.grid),
       history: {
-        undo: [...this.state.history.undo, { ...step, draft: this.state.draft }],
+        undo: [
+          ...this.state.history.undo,
+          { ...step, draft: this.state.draft, base: this.state.base.grid },
+        ],
         redo: this.state.history.redo.slice(0, -1),
       },
       last: { label: `Rehiciste: ${step.label}`, at: Date.now() },
@@ -210,7 +234,7 @@ export class FichaStore {
   /** Guarda ya lo que falte (al salir de la página o al pedirlo). */
   async flush(): Promise<void> {
     clearTimeout(this.timer)
-    if (this.readOnly) return
+    if (this.readOnly || this.closed) return
     if (this.inflight) {
       this.again = true
       return
@@ -287,7 +311,7 @@ export class FichaStore {
       this.set({
         status: {
           kind: "incomplete",
-          message: "Completa el largo, el ancho y el alto del paquete para guardarlo",
+          message: Object.values(heldOf(draft, this.state.sheet))[0] ?? "Hay algo a medio escribir",
         },
       })
     this.persist()
@@ -306,6 +330,7 @@ export class FichaStore {
     try {
       fresh = await this.api.get()
     } catch (error) {
+      if (this.isFinal(error)) return "rejected"
       this.offline(error)
       return "offline"
     }
@@ -340,12 +365,15 @@ export class FichaStore {
       this.onSaved(saved)
       return "saved"
     } catch (error) {
+      if (this.isFinal(error)) return "rejected"
       if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
         this.gridRejected = JSON.stringify(sent)
         const fields = Object.keys(error.fields).length ? error.fields : { grid: error.message }
+        // El motivo era para ese intento: el próximo cambio lo vuelve a pedir.
         this.set({
           errors: { ...this.state.errors, ...prefixGrid(fields) },
           status: { kind: "rejected", message: error.message },
+          reason: "",
         })
         return "rejected"
       }
@@ -388,7 +416,20 @@ export class FichaStore {
     this.set({ base, draft })
   }
 
+  /**
+   * Sin permiso o sin el producto (lo borraron, o ya no está en la tienda): no se reintenta. Lo
+   * escrito se queda en la pantalla y se dice.
+   */
+  private isFinal(error: unknown): boolean {
+    if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) return false
+    this.closed = true
+    clearTimeout(this.timer)
+    this.set({ status: { kind: "rejected", message: error.message } })
+    return true
+  }
+
   private failPatch(error: unknown, sent: Draft, keys: string[]): "rejected" | "offline" {
+    if (this.isFinal(error)) return "rejected"
     if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
       const fields = Object.keys(error.fields).length
         ? error.fields
@@ -419,6 +460,8 @@ export class FichaStore {
     const message =
       error instanceof Error ? error.message : "No hay conexión con gestorIA. Lo intento de nuevo."
     this.set({ status: { kind: "offline", message } })
+    // Sigue viva: otra pestaña no recupera este borrador mientras se reintenta.
+    this.persist()
     clearTimeout(this.timer)
     this.timer = setTimeout(() => void this.flush(), RETRY)
   }
@@ -435,6 +478,8 @@ export class FichaStore {
             updatedAt: this.state.sheet.updatedAt,
             base: this.state.base,
             draft: this.state.draft,
+            tab: TAB,
+            at: Date.now(),
           }),
         )
     } catch {
@@ -442,31 +487,73 @@ export class FichaStore {
     }
   }
 
-  /** Si quedó un borrador de antes sobre la misma ficha, vuelve y se guarda. */
+  /**
+   * Si quedó un borrador de antes sobre la misma ficha, vuelve: lo que se cambió frente a su
+   * base, puesto sobre la ficha de ahora (la cuadrícula, sobre el stock de ahora al guardarse).
+   * El de otra pestaña que sigue abierta no se toca: lo guarda ella.
+   */
   private restore() {
     try {
       const raw = localStorage.getItem(storageKey(this.state.sheet.id))
       if (!raw) return
-      const kept = JSON.parse(raw) as { updatedAt: string; base: Draft; draft: Draft }
-      if (kept.updatedAt !== this.state.sheet.updatedAt) {
+      const kept = JSON.parse(raw) as {
+        updatedAt: string
+        base: Draft
+        draft: Draft
+        tab?: string
+        at?: number
+      }
+      if (kept.tab && kept.tab !== TAB && Date.now() - (kept.at ?? 0) < ALIVE_MS) return
+      const base = this.state.base
+      const draft = { ...base }
+      const fields = PATCH_FIELDS.filter((f) => !same(kept.base[f], kept.draft[f]))
+      for (const field of fields) (draft as Record<string, unknown>)[field] = kept.draft[field]
+      // La cuadrícula solo si sigue siendo la misma de entonces (mismos colores y tallas).
+      const sameAxes =
+        kept.base.grid &&
+        base.grid &&
+        same(
+          kept.base.grid.rows.map((r) => r.value),
+          base.grid.rows.map((r) => r.value),
+        ) &&
+        same(
+          kept.base.grid.columns.map((c) => c.value),
+          base.grid.columns.map((c) => c.value),
+        )
+      let keptBase = base
+      if (sameAxes && !same(kept.base.grid, kept.draft.grid)) {
+        draft.grid = kept.draft.grid
+        keptBase = { ...base, grid: kept.base.grid }
+      }
+      if (same(draft, base) && keptBase === base) {
         localStorage.removeItem(storageKey(this.state.sheet.id))
         return
       }
       this.state = {
         ...this.state,
-        base: kept.base,
-        draft: kept.draft,
+        base: keptBase,
+        draft,
         status: { kind: "pending" },
         last: { label: "Recuperé lo que no se había guardado", at: Date.now() },
       }
-      this.timer = setTimeout(() => void this.flush(), DELAY)
+      this.restored = true
     } catch {
       // Lo guardado no se lee: se empieza de lo del servidor.
     }
   }
 
-  dispose() {
-    clearTimeout(this.timer)
+  /** Empieza a guardar lo recuperado (ya en la pantalla, para que se vea cómo va). */
+  start() {
+    if (this.restored && !this.inflight) {
+      this.restored = false
+      clearTimeout(this.timer)
+      this.timer = setTimeout(() => void this.flush(), DELAY)
+    }
+  }
+
+  /** Si se puede soltar: no queda nada por guardar ni se está guardando. */
+  idle(): boolean {
+    return !this.inflight && (this.closed || this.pendingCount() === 0)
   }
 }
 
@@ -502,23 +589,36 @@ function prefixGrid(fields: Record<string, string>) {
   )
 }
 
-/** El borrador de la ficha en la pantalla: se crea con la ficha y se va con ella. */
+/**
+ * Un solo borrador por producto en la pestaña: volver a la ficha mientras se guarda lo de antes (o
+ * mientras reintenta sin red) usa el mismo, nunca dos que envíen el mismo cambio de stock.
+ */
+const stores = new Map<string, FichaStore>()
+
+/** El borrador de la ficha en la pantalla: uno por producto, que sigue mientras le quede algo. */
 export function useFichaStore(
   sheet: Sheet | undefined,
   api: SaveApi,
   onSaved: (sheet: Sheet) => void,
   readOnly: boolean,
 ) {
+  const key = sheet ? `${sheet.id}:${readOnly ? "ver" : "cambiar"}` : null
   // biome-ignore lint/correctness/useExhaustiveDependencies: uno por producto; lo demás no cambia
-  const store = useMemo(
-    () => (sheet ? new FichaStore(sheet, api, onSaved, readOnly) : null),
-    [sheet?.id, readOnly],
-  )
+  const store = useMemo(() => {
+    if (!sheet || !key) return null
+    const kept = stores.get(key)
+    if (kept) return kept
+    const created = new FichaStore(sheet, api, onSaved, readOnly)
+    stores.set(key, created)
+    return created
+  }, [key])
   useEffect(() => {
     if (store && sheet) store.receive(sheet)
   }, [store, sheet])
   useEffect(() => {
-    if (!store) return
+    if (!store || !key) return
+    store.mounted++
+    store.start()
     // Al salir de la ficha o esconder la pestaña, se guarda lo que falte.
     const hide = () => {
       if (document.visibilityState === "hidden") void store.flush()
@@ -529,10 +629,13 @@ export function useFichaStore(
     return () => {
       document.removeEventListener("visibilitychange", hide)
       window.removeEventListener("online", online)
-      void store.flush()
-      store.dispose()
+      // Lo que falta se guarda; el borrador se suelta cuando ya no le queda nada.
+      store.mounted--
+      void store.flush().then(() => {
+        if (store.mounted === 0 && store.idle()) stores.delete(key)
+      })
     }
-  }, [store])
+  }, [store, key])
   return store
 }
 

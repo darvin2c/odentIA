@@ -230,27 +230,43 @@ export interface Draft {
 }
 
 export interface DraftPromotion extends Promotion {
-  scope: { axis: "rows" | "columns"; value: string } | null
+  /**
+   * De un color o una talla: su eje y su valor (sigue al eje si se reordenan las opciones). Sin
+   * eje (un producto de tres opciones), el índice de su opción tal cual vino.
+   */
+  scope: { axis: "rows" | "columns" | null; index: number; value: string } | null
 }
 
 /** Los ids de las filas y columnas: el nombre que tenían al cargarse, para seguirlas al renombrar. */
-let seq = 0
-export const newId = (prefix: string) => `${prefix}${++seq}`
+/** Un id que no se repite, tampoco con los de un borrador recuperado de otra visita. */
+export const newId = (prefix: string) => `${prefix}${crypto.randomUUID().slice(0, 8)}`
+
+/** Una celda vacía: sin stock, con el precio del producto y sin código de barras. */
+export const emptyCell = (): GridCell => ({ stock: 0, priceCents: null, barcode: null })
+
+export const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/** La opción del color: la de `colorOption` o, si no la marcó nadie, la que se llama así. */
+export function colorIndexOf(sheet: Pick<Sheet, "options" | "colorOption">): number | null {
+  if (sheet.colorOption !== null && sheet.options[sheet.colorOption]) return sheet.colorOption
+  const i = sheet.options.findIndex((o) =>
+    ["color", "colores", "tono", "tonos"].includes(o.name.trim().toLocaleLowerCase("es")),
+  )
+  return i >= 0 ? i : null
+}
 
 /** Las opciones del producto como cuadrícula: el color son las filas; la otra, las columnas. */
 export function axesOf(sheet: Pick<Sheet, "options" | "colorOption">): {
   rows: number | null
   columns: number | null
 } {
-  const { options, colorOption } = sheet
+  const { options } = sheet
   if (options.length > 2) return { rows: null, columns: null }
-  if (colorOption !== null && options[colorOption])
-    return {
-      rows: colorOption,
-      columns: options.length === 2 ? (colorOption === 0 ? 1 : 0) : null,
-    }
-  // Sin color: dos opciones van la primera en filas; una sola, en columnas (como las tallas).
-  if (options.length === 2) return { rows: 0, columns: 1 }
+  const color = colorIndexOf(sheet)
+  if (color !== null)
+    return { rows: color, columns: options.length === 2 ? (color === 0 ? 1 : 0) : null }
+  // Sin color, una sola opción va en columnas (como las tallas). Dos opciones sin color no
+  // caben: la cuadrícula guardaría la primera como color (`saveGrid` del servidor).
   if (options.length === 1) return { rows: null, columns: 0 }
   return { rows: null, columns: null }
 }
@@ -263,8 +279,8 @@ export function gridOf(
   sheet: Pick<Sheet, "options" | "colorOption" | "colors" | "variants">,
   ids?: { rows: Map<string, string>; columns: Map<string, string> },
 ): Grid | null {
-  if (sheet.options.length > 2) return null
   const axes = axesOf(sheet)
+  if (sheet.options.length > 0 && axes.rows === null && axes.columns === null) return null
   const rowOption = axes.rows === null ? null : sheet.options[axes.rows]!
   const columnOption = axes.columns === null ? null : sheet.options[axes.columns]!
   const idOf = (map: Map<string, string> | undefined, value: string, prefix: string) =>
@@ -353,16 +369,20 @@ export function draftOf(sheet: Sheet, grid: Grid | null = gridOf(sheet)): Draft 
     comboPercentOff: sheet.comboPercentOff,
     offers: { ...sheet.offers },
     quantityPrices: sheet.quantityPrices.map((q) => ({ ...q })),
-    promotions: sheet.promotions.map(({ scope, ...promo }) => {
-      const axis = scope ? axisOfIndex(scope.optionIndex) : null
-      return { ...promo, scope: scope && axis ? { axis, value: scope.optionValue } : null }
-    }),
+    promotions: sheet.promotions.map(({ scope, ...promo }) => ({
+      ...promo,
+      scope: scope
+        ? {
+            axis: axisOfIndex(scope.optionIndex),
+            index: scope.optionIndex,
+            value: scope.optionValue,
+          }
+        : null,
+    })),
     links: sheet.links.map(({ productId, kind }) => ({ productId, kind })),
     grid,
   }
 }
-
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 /** Los campos del producto que se guardan con `PATCH /productos/:id`. */
 export const PATCH_FIELDS = [
@@ -397,6 +417,45 @@ export function changedFields(base: Draft, draft: Draft): PatchField[] {
  * ese mismo valor (`rejected`). De los datos del rubro van solo los que cambiaron (`null` borra).
  * Las promociones de un color o una talla llevan el índice de su opción en el producto guardado.
  */
+/** El índice de la opción de una promoción de un color o una talla en lo guardado; -1 si no está. */
+function scopeIndex(
+  scope: NonNullable<DraftPromotion["scope"]>,
+  draft: Draft,
+  saved: Pick<Sheet, "options">,
+) {
+  if (scope.axis === null) return scope.index
+  const name = scope.axis === "rows" ? draft.grid?.rowName : draft.grid?.columnName
+  const index = name ? saved.options.findIndex((o) => sameText(o.name, name)) : -1
+  // El color o la talla todavía no se guardó (la cuadrícula espera): la promoción espera con ella.
+  if (index < 0 || !saved.options[index]?.values.some((v) => sameText(v, scope.value))) return -1
+  return index
+}
+
+/**
+ * Lo que está a medio escribir y espera para enviarse, con por qué: las medidas van las tres
+ * juntas, la preventa con su día y una promoción de un color o una talla con ese color guardado.
+ */
+export function heldOf(
+  draft: Draft,
+  saved: Pick<Sheet, "options">,
+): Partial<Record<PatchField, string>> {
+  const held: Partial<Record<PatchField, string>> = {}
+  const dims = [draft.package.lengthMm, draft.package.widthMm, draft.package.heightMm]
+  if (dims.some((v) => v === null) && dims.some((v) => v !== null))
+    held.package = "Completa el largo, el ancho y el alto del paquete para guardarlo"
+  if (draft.status?.kind === "preventa" && !draft.status.date)
+    held.status = "Elige el día que llega la preventa para guardarla"
+  if (draft.promotions.some((p) => p.scope && scopeIndex(p.scope, draft, saved) < 0))
+    held.promotions = "La promoción se guarda cuando se guarde su color o su talla"
+  return held
+}
+
+/**
+ * El cambio que se envía: solo los campos que cambiaron, menos los que el servidor ya rechazó con
+ * ese mismo valor (`rejected`) y los que esperan (`heldOf`). De los datos del rubro van solo los
+ * que cambiaron (`null` borra). Las promociones de un color o una talla llevan el índice de su
+ * opción en el producto guardado.
+ */
 export function patchOf(
   base: Draft,
   draft: Draft,
@@ -404,7 +463,10 @@ export function patchOf(
   rejected: Partial<Record<string, string>> = {},
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {}
+  const held = heldOf(draft, saved)
   for (const field of changedFields(base, draft)) {
+    if (held[field]) continue
+    if (rejected[field] === JSON.stringify(draft[field])) continue
     if (field === "rubroData") {
       const data: Record<string, unknown> = {}
       for (const key of new Set([
@@ -423,30 +485,13 @@ export function patchOf(
       }
       continue
     }
-    if (rejected[field] === JSON.stringify(draft[field])) continue
-    // A medio escribir no se envía: las medidas van las tres juntas y la preventa con su día.
-    if (field === "package") {
-      const dims = [draft.package.lengthMm, draft.package.widthMm, draft.package.heightMm]
-      if (dims.some((v) => v === null) && dims.some((v) => v !== null)) continue
-    }
-    if (field === "status" && draft.status?.kind === "preventa" && !draft.status.date) continue
     if (field === "promotions") {
-      body.promotions = draft.promotions.map(({ scope, ...promo }) => {
-        const name = scope
-          ? scope.axis === "rows"
-            ? draft.grid?.rowName
-            : draft.grid?.columnName
-          : null
-        const optionIndex = name ? saved.options.findIndex((o) => sameText(o.name, name)) : -1
-        return {
-          ...promo,
-          scope: scope && optionIndex >= 0 ? { optionIndex, optionValue: scope.value } : null,
-        }
-      })
-      continue
-    }
-    if (field === "status") {
-      body.status = draft.status
+      body.promotions = draft.promotions.map(({ scope, ...promo }) => ({
+        ...promo,
+        scope: scope
+          ? { optionIndex: scopeIndex(scope, draft, saved), optionValue: scope.value }
+          : null,
+      }))
       continue
     }
     body[field] = draft[field]
@@ -553,6 +598,8 @@ export function idsOf(grid: Grid | null) {
 
 export interface Step {
   draft: Draft
+  /** La cuadrícula guardada cuando se anotó: al volver, el stock se suma sobre la de ahora. */
+  base?: Grid | null
   label: string
   group?: string
   at: number
@@ -570,14 +617,33 @@ export function record(
   label: string,
   group: string | undefined,
   now: number,
+  base: Grid | null = null,
 ): History {
   const last = history.undo.at(-1)
   if (group && last?.group === group && now - last.at < 1500)
     return { undo: [...history.undo.slice(0, -1), { ...last, at: now }], redo: [] }
   return {
-    undo: [...history.undo, { draft: before, label, group, at: now }].slice(-100),
+    undo: [...history.undo, { draft: before, base, label, group, at: now }].slice(-100),
     redo: [],
   }
+}
+
+/**
+ * Un paso de deshacer o rehacer sobre lo guardado de ahora: el stock que tenía de más o de menos
+ * frente a su cuadrícula guardada se pone sobre la de ahora. Así, si se vendió algo después, volver
+ * atrás no revive lo vendido.
+ */
+export function onBase(step: Step, now: Grid | null): Draft {
+  const grid = step.draft.grid
+  if (!grid || !step.base || !now) return step.draft
+  const cells = { ...grid.cells }
+  for (const [key, cell] of Object.entries(grid.cells)) {
+    const then = step.base.cells[key]
+    const current = now.cells[key]
+    if (!then || !current) continue
+    cells[key] = { ...cell, stock: Math.max(0, current.stock + cell.stock - then.stock) }
+  }
+  return { ...step.draft, grid: { ...grid, cells } }
 }
 
 /* ------------------------------------------------------------------ números y textos */
