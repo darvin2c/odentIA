@@ -96,7 +96,12 @@ export const usageEvent = z.object({
   }),
 })
 
-/** Pide soporte: abre un caso de la cuenta, a nombre de quien pregunta. */
+/**
+ * Pide soporte: abre un caso de la cuenta, a nombre de quien pregunta. Puede preguntar cualquier
+ * rol de la cuenta (ADR 0221): por eso dice, si la app lo sabe, desde qué pantalla y con qué rol,
+ * como el caso que abre una clínica desde su Ayuda. Los dos son opcionales: una app que todavía
+ * no los manda sigue entrando igual.
+ */
 export const SUPPORT_KINDS = ["pregunta", "problema", "cobro"] as const
 export const supportEvent = z.object({
   type: z.literal("soporte.pedido"),
@@ -107,6 +112,10 @@ export const supportEvent = z.object({
     kind: z.enum(SUPPORT_KINDS),
     question: z.string().trim().min(1).max(500),
     detail: z.string().trim().max(4000).nullable().optional(),
+    /** La pantalla de la app desde la que preguntó (su ruta dentro de la cuenta). */
+    screen: z.string().trim().min(1).max(200).nullable().optional(),
+    /** El rol de quien preguntó en la cuenta, con el nombre que le da la app. */
+    role: z.string().trim().min(1).max(80).nullable().optional(),
   }),
 })
 
@@ -279,13 +288,18 @@ export const accountState = z.object({
       }),
     )
     .default([]),
-  /** Los casos de soporte de la cuenta con las respuestas del equipo. */
+  /**
+   * Los casos de soporte de la cuenta con las respuestas del equipo. `userId` es quien lo abrió:
+   * la app le muestra a cada persona solo lo suyo (ADR 0221). Sin él (una administración que aún
+   * no lo manda), el caso es solo de quien ve el plan.
+   */
   support: z.array(
     z.object({
       id: z.string(),
       status: z.string(),
       question: z.string(),
       createdAt: instant,
+      userId: z.string().nullable().optional(),
       replies: z.array(z.object({ body: z.string(), at: instant })),
     }),
   ),
