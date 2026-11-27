@@ -334,6 +334,8 @@ export function stateName(order: {
   if (toRefund && (order.state === "por_salir" || order.state === "en_camino"))
     return order.state === "por_salir" ? "Por salir · falta devolver" : "En camino · falta devolver"
   if (toRefund && order.state === "entregado") return "Entregado · falta devolver"
+  // Ya devuelto, tampoco: no se cobró nada en el cambio.
+  if ((order.totalCents ?? 0) < 0 && order.state === "por_salir") return "Por salir"
   switch (order.state) {
     case "por_pagar":
       return "Por pagar"

@@ -128,6 +128,14 @@ describe("los cambios y devoluciones (tablero 17)", () => {
         totalCents: -12900,
       }),
     ).toBe("Entregado")
+    expect(
+      stateName({
+        state: "por_salir",
+        paymentCollection: "comprobante",
+        balance: done,
+        totalCents: -12900,
+      }),
+    ).toBe("Por salir")
   })
 
   it("lo que vuelve se nombra como en el pedido, y el aviso va escrito en el enlace", () => {

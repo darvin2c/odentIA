@@ -598,7 +598,9 @@ function NextStep({ order }: { order: OrderDetail }) {
     anulado: order.cancelReason ? `Anulado: ${order.cancelReason}` : null,
   }
   const missed = missedReason(order)
-  // Un cambio que cuesta menos o una devolución: lo que sobra se devuelve y se anota.
+  // Un cambio que cuesta menos o una devolución: lo que sobra se devuelve y se anota. Sin nada que
+  // cobrar, el cambio no dice «Pagado»: lo que importa es recoger lo que vuelve.
+  const noCharge = order.exchangeOf !== null && order.totalCents <= 0
   const refund =
     order.exchangeOf && order.balance.overCents > 0 && order.state !== "anulado"
       ? `Falta devolver ${money(order.balance.overCents, store.currency)}: cuando lo devuelvas desde tu app, usa «Anotar la devolución».`
@@ -607,13 +609,13 @@ function NextStep({ order }: { order: OrderDetail }) {
     por_salir: order.stockPending
       ? (text.por_salir ?? "")
       : `Listo para salir: recoge lo que vuelve. ${refund ?? ""}`.trim(),
-    en_camino: `Va en camino. ${refund ?? ""}`.trim(),
+    en_camino: `Va en camino: al entregar, recoge lo que vuelve. ${refund ?? ""}`.trim(),
     entregado: refund ?? "",
   }
   const message =
     missed !== null && !order.stockPending
       ? `Volvió sin entregar («${missed}»). Sale ${order.deliverOn ? dayName(order.deliverOn, storeToday(store.timeZone)) : "cuando elijas"}${due > 0 ? `; al entregar, cobra ${dueText}` : ""}.`
-      : refund
+      : refund || noCharge
         ? exchangeText[order.state] || text[order.state]
         : text[order.state]
   if (!message) return null

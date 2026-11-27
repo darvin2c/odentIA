@@ -154,7 +154,7 @@ test("Andrea cambia la 38 por la 39 con un pedido nuevo, sin tocar el entregado"
   // Lo único que llevó ya va marcado; falta el motivo y lo que se lleva.
   await expect(form.getByRole("checkbox", { name: /Sandalia de cambio 38/ })).toBeChecked()
   await form.getByLabel("¿Por qué?").selectOption("Le quedó chica")
-  await form.getByLabel("Se lleva").selectOption(setup.t39)
+  await form.getByLabel("Se lleva", { exact: true }).selectOption(setup.t39)
   await expect(form.getByText("De la 39 quedan 3.")).toBeVisible()
   const summary = form.locator("section[aria-live]")
   await expect(summary.getByText(/Diferencia S\/\s0/)).toBeVisible()
@@ -223,6 +223,8 @@ test("Fiorella devuelve la suya y la tienda anota lo que le devolvió", async ({
   await expect(dialog).toHaveCount(0)
   await expect(refund.getByText(/Devuelto · Yape de la tienda/)).toBeVisible()
   await expect(refund.getByText("Anotó lo que devolvió")).toBeVisible()
+  // Ya devuelto, no dice «Pagado»: falta recoger lo que vuelve.
+  await expect(refund.getByText("Listo para salir: recoge lo que vuelve.")).toBeVisible()
   await page.setViewportSize(DESKTOP)
   await noSideScroll(page)
   await shot(page, "devolucion-anotada-escritorio")
