@@ -312,7 +312,7 @@ export interface Ent {
   fecha: string
   estado: Estado
   /** El único botón cuando necesita a una persona. */
-  boton?: { texto: string; tipo: "listo" | "confirmar" | "asignar" | "numero" }
+  boton?: { texto: string; tipo: "listo" | "confirmar" | "asignar" | "numero" | "pasar" }
   /** «Pagado», «Falta S/ 169 · al recibir», «Pago por confirmar». */
   cobro: { texto: string; tono: "ok" | "falta" | "espera" }
   falta: number
@@ -349,6 +349,9 @@ export function entregaDe(p: Pedido): Ent | null {
   } else if (p.paso === "por_salir") estado = p.noEntregado ? "no_entregado" : "por_salir"
   else if (p.paso === "en_camino") estado = "en_camino"
   else estado = "entregado"
+  // Quedó en un feriado (se anotó antes de marcarlo): lo decide una persona.
+  if (FERIADOS[fecha] && !boton && !["entregado", "en_camino"].includes(estado))
+    boton = { texto: "Pasar a otro día", tipo: "pasar" }
   const cobro: Ent["cobro"] =
     k.porConfirmar > 0
       ? { texto: "Pago por confirmar", tono: "espera" }
