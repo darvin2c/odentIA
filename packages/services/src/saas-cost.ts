@@ -1,4 +1,10 @@
+import { ACCOUNT_APP_INFO } from "@odentia/auth/apps"
 import type { Db } from "@odentia/db"
+import {
+  appAiUsage,
+  SAAS_ACCOUNT_EXTERNAL_APPS,
+  type SaasAccountExternalApp,
+} from "@odentia/db/schema/admin-accounts"
 import { type AiUsageOrigin, aiUsage } from "@odentia/db/schema/agent"
 import { organization } from "@odentia/db/schema/auth"
 import { conversation } from "@odentia/db/schema/crm"
@@ -38,6 +44,9 @@ import { saasTermsAt } from "./saas-commercial-terms.js"
  *   que pasó al equipo) va en su fila, como lo que regalamos.
  * - El espacio es lo guardado al precio del proveedor.
  * - El servidor y los gastos fijos son un estimado repartido por clínica.
+ * - La Ayuda de una app que es otro sistema (gestorIA) no es de ninguna clínica:
+ *   va aparte, por app y en el mes de Lima (`app_ai_usage`), como lo que regalamos,
+ *   y suma en lo que nos costó del resumen de todas.
  */
 
 /** Lo que nos cuesta guardar un GB un mes en el proveedor (Cloudflare R2, estudio del 2026-10-23). */
@@ -592,8 +601,26 @@ async function idleSince(
   return !used
 }
 
+/**
+ * Lo que regala odentIA por la Ayuda de una app que es otro sistema (`app_ai_usage`, origen
+ * `ayuda`): la pregunta no dice de qué cuenta es, así que va por app y no en una clínica.
+ */
+export interface AppHelpCost {
+  app: SaasAccountExternalApp
+  /** «Ayuda de gestorIA». */
+  label: string
+  /** El mes en curso de la administración, en la hora de Lima. */
+  period: { start: Date; end: Date }
+  calls: number
+  costMicros: number
+  /** Llamadas sin costo conocido: no están en el total. */
+  unpricedCalls: number
+}
+
 export interface CostMarginOverview {
   clinics: ClinicCostMargin[]
+  /** La Ayuda de cada app que es otro sistema, con uso en el mes: su costo entra en los totales. */
+  apps: AppHelpCost[]
   founders: number
   chargedCents: number
   costMicros: number
@@ -604,7 +631,56 @@ export interface CostMarginOverview {
   marginAfterCommissionPct: number | null
 }
 
-/** Todas las clínicas activas en lo que va del mes de cada una (tablero O3), con «Para revisar» arriba. */
+/** Perú no cambia de hora: el mes de Lima empieza a las 05:00 UTC de su primer día. */
+const LIMA_OFFSET_MS = 5 * 3_600_000
+
+/** El mes en curso en Lima: el de la administración, que no tiene el tramo de una suscripción. */
+function limaMonth(now: Date): { start: Date; end: Date } {
+  const lima = new Date(now.getTime() - LIMA_OFFSET_MS)
+  const at = (month: number) => new Date(Date.UTC(lima.getUTCFullYear(), month, 1) + LIMA_OFFSET_MS)
+  return { start: at(lima.getUTCMonth()), end: at(lima.getUTCMonth() + 1) }
+}
+
+/** Lo que costó en el mes la Ayuda de cada app que es otro sistema (solo las que la usaron). */
+export async function getAppHelpCosts(tx: Db, now = new Date()): Promise<AppHelpCost[]> {
+  const period = limaMonth(now)
+  const rows = await tx
+    .select({
+      app: appAiUsage.app,
+      calls: sql<number>`coalesce(sum(${appAiUsage.calls}), 0)::int`,
+      costMicros: sql<number>`coalesce(sum(${appAiUsage.costMicros}), 0)::bigint`,
+      unpricedCalls: sql<number>`coalesce(sum(${appAiUsage.calls}) filter (where ${appAiUsage.costMicros} is null), 0)::int`,
+    })
+    .from(appAiUsage)
+    .where(
+      and(
+        eq(appAiUsage.origin, "ayuda"),
+        gte(appAiUsage.createdAt, period.start),
+        lt(appAiUsage.createdAt, period.end),
+      ),
+    )
+    .groupBy(appAiUsage.app)
+  return SAAS_ACCOUNT_EXTERNAL_APPS.flatMap((app) => {
+    const row = rows.find((item) => item.app === app)
+    if (!row || Number(row.calls) === 0) return []
+    return [
+      {
+        app,
+        label: `Ayuda de ${ACCOUNT_APP_INFO[app].name}`,
+        period,
+        calls: Number(row.calls),
+        costMicros: Number(row.costMicros),
+        unpricedCalls: Number(row.unpricedCalls),
+      },
+    ]
+  })
+}
+
+/**
+ * Todas las clínicas activas en lo que va del mes de cada una (tablero O3), con «Para revisar»
+ * arriba, y lo que regalamos por la Ayuda de cada app en el mes de Lima: su costo es IA y entra
+ * en lo que nos costó, sin nada cobrado.
+ */
 export async function getCostMarginOverview(tx: Db, now = new Date()): Promise<CostMarginOverview> {
   const subs = await tx
     .select({ orgId: saasSubscription.organizationId })
@@ -617,8 +693,10 @@ export async function getCostMarginOverview(tx: Db, now = new Date()): Promise<C
     )
   const clinics: ClinicCostMargin[] = []
   for (const sub of subs) clinics.push(await getClinicCostMargin(tx, sub.orgId, { now }))
+  const apps = await getAppHelpCosts(tx, now)
+  const appMicros = apps.reduce((sum, item) => sum + item.costMicros, 0)
   const charged = clinics.reduce((sum, item) => sum + item.chargedCents, 0)
-  const cost = clinics.reduce((sum, item) => sum + item.costMicros, 0)
+  const cost = clinics.reduce((sum, item) => sum + item.costMicros, 0) + appMicros
   const commission = clinics.reduce((sum, item) => sum + item.commissionCents, 0)
   return {
     clinics: clinics.sort(
@@ -626,10 +704,11 @@ export async function getCostMarginOverview(tx: Db, now = new Date()): Promise<C
         Number(b.alarm || b.idle) - Number(a.alarm || a.idle) ||
         (a.marginPct ?? -1) - (b.marginPct ?? -1),
     ),
+    apps,
     founders: clinics.filter((item) => item.founder).length,
     chargedCents: charged,
     costMicros: cost,
-    aiMicros: clinics.reduce((sum, item) => sum + item.aiMicros, 0),
+    aiMicros: clinics.reduce((sum, item) => sum + item.aiMicros, 0) + appMicros,
     storageMicros: clinics.reduce((sum, item) => sum + item.storageMicros, 0),
     fixedMicros: clinics.reduce((sum, item) => sum + item.fixedMicros, 0),
     marginPct: pct(charged * 10_000, cost),

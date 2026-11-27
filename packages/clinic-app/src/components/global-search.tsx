@@ -20,7 +20,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@odentia/ui/components/command"
-import { AgentMark, DataRefreshMarker, useHeaderCompact } from "@odentia/ui-patterns"
+import { AgentMark, DataRefreshMarker, HELP_NAME, useHeaderCompact } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
@@ -52,7 +52,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { ADMIN_NAME, HELP_NAME } from "../lib/agent-names"
+import { ADMIN_NAME } from "../lib/agent-names"
 import { apiFetch } from "../lib/api"
 import {
   ARGOS_ALLOWANCE_KEY,

@@ -1,7 +1,6 @@
 import { DropdownMenuItem } from "@odentia/ui"
-import { useHeaderCompact } from "@odentia/ui-patterns"
+import { OPEN_HELP_EVENT, useHeaderCompact } from "@odentia/ui-patterns"
 import { CircleHelp } from "lucide-react"
-import { OPEN_HELP_EVENT } from "./help-panel"
 
 /**
  * «Ayuda» en el menú ⋯ del encabezado, solo con la fila compacta (teléfono, o

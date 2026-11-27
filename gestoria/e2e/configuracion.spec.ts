@@ -152,7 +152,7 @@ test("el pedido de soporte sale una vez, arriba, y se responde en Equipo y repar
   await expect(page).toHaveURL(/\/configuracion\/equipo$/)
   await expect(page.getByRole("heading", { name: "Equipo y repartidores" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Dejar entrar" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Repartidores" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Repartidores", exact: true })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "equipo-escritorio")
 })

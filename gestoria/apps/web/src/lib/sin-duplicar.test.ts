@@ -19,9 +19,18 @@ const REPEATED: { pattern: RegExp; instead: string }[] = [
   { pattern: /\bfunction\s+FormSheet\b|<FormSheet\b/, instead: "FormDrawer o FormPanel" },
   { pattern: /\bfunction\s+useDirty\b|\buseDirty\(/, instead: "useFormSurface (isDirty)" },
   { pattern: /\bSELECT_CLASSES\b/, instead: "field.SelectField o Select" },
-  { pattern: /\bfunction\s+FormAlert\b|<FormAlert\b/, instead: "useFormSurface (error junto a los botones)" },
-  { pattern: /\bfunction\s+fieldErrors\b|\bfieldErrors\(/, instead: "useFormSurface (errores en cada campo)" },
-  { pattern: /\bfunction\s+(TextField|SelectField|SwitchField|DateField)\b/, instead: "los campos de useAppForm" },
+  {
+    pattern: /\bfunction\s+FormAlert\b|<FormAlert\b/,
+    instead: "useFormSurface (error junto a los botones)",
+  },
+  {
+    pattern: /\bfunction\s+fieldErrors\b|\bfieldErrors\(/,
+    instead: "useFormSurface (errores en cada campo)",
+  },
+  {
+    pattern: /\bfunction\s+(TextField|SelectField|SwitchField|DateField)\b/,
+    instead: "los campos de useAppForm",
+  },
   { pattern: /\bfunction\s+ErrorBlock\b|<ErrorBlock\b/, instead: "ErrorState" },
   { pattern: /type=["'](date|time|datetime-local)["']/, instead: "los controles de fecha comunes" },
 ]
