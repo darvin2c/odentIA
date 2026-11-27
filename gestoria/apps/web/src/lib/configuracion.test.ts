@@ -221,6 +221,18 @@ describe("cómo está cada parte", () => {
       status: "Sin pasarela",
       pending: true,
     })
+    // El nombre que ya dice cómo se cobra no lo repite.
+    const named = configLines(
+      {
+        ...ROSA,
+        payments: [
+          { name: "Yape", typeCode: "68", collection: "comprobante" },
+          { name: "Efectivo al recibir", typeCode: "10", collection: "al_recibir" },
+        ],
+      },
+      STORE,
+    )
+    expect(named.pagos?.summary).toBe("Yape con captura · Efectivo al recibir")
     expect(lines.entregas).toMatchObject({
       summary: "Reparto en Lima · recojo en tienda · Shalom",
       status: "2 zonas",

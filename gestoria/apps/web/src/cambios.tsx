@@ -290,10 +290,13 @@ export function ExchangeSheet({ order, onClose }: { order: OrderDetail; onClose:
             : `Devolución ${data.order.number} creada`,
         )
         onClose()
+        // Ya se guardó: abrir el pedido nuevo no es «salir sin guardar». La columna del pedido
+        // cuenta lo que se tocó en este cajón (sus listas viven en otro portal) y preguntaba.
         void navigate({
           to: "/tiendas/$id/pedidos",
           params: { id: store.id },
           search: { pedido: data.order.id },
+          ignoreBlocker: true,
         })
       } catch (error) {
         opened?.close()

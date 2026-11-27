@@ -251,7 +251,8 @@ export function OrdersPage() {
           </ul>
         </div>
       ) : null}
-      {open ? <OrderSheet orderId={open} onClose={() => setOpen(null)} /> : null}
+      {/* Otro pedido es otra superficie: lo tocado en el anterior no viaja al nuevo. */}
+      {open ? <OrderSheet key={open} orderId={open} onClose={() => setOpen(null)} /> : null}
       {adding ? (
         <NewOrderSheet
           onClose={() => setAdding(false)}
