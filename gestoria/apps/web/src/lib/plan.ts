@@ -1,4 +1,4 @@
-import type { AccountState, SUPPORT_KINDS } from "@odentia/contract"
+import type { AccountState } from "@odentia/contract"
 
 /**
  * Lo que la pantalla sabe de «Plan y pagos» (paso B7): lo que la administración dijo de la tienda
@@ -129,13 +129,4 @@ export const SUPPORT_STATUS_WORDS: Record<string, string> = {
   en_atencion: "En atención",
   esperando_clinica: "Te respondimos",
   resuelto: "Resuelta",
-}
-
-export type SupportKind = (typeof SUPPORT_KINDS)[number]
-
-/** Los tipos de pregunta del acuerdo, con su nombre. */
-export const SUPPORT_KIND_LABELS: Record<SupportKind, string> = {
-  pregunta: "Una pregunta",
-  problema: "Algo no funciona",
-  cobro: "Sobre un cobro",
 }
