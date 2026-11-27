@@ -467,8 +467,11 @@ export async function receiveTrialPayment(
 
 /* -------------------------------------------------- el aviso de Mercado Pago y la renovación */
 
-/** Cada cuenta de Mercado Pago se mira a lo más una vez por minuto: un aviso inventado no la gasta. */
-const connectSeen = new Map<string, number>()
+/**
+ * Cada cuenta de Mercado Pago se mira a lo más 5 veces por minuto: avisos inventados no gastan la
+ * cuenta ni tapan el aviso de verdad (que llega igual, y Mercado Pago lo reintenta).
+ */
+const connectSeen = new Map<string, { since: number; count: number }>()
 
 const connectNotice = z.object({
   type: z.literal("mp-connect"),
@@ -496,10 +499,11 @@ export async function receiveConnectNotice(
   }
   const notice = connectNotice.safeParse(raw)
   if (!key || !notice.success || notice.data.action !== "application.deauthorized") return
-  const last = connectSeen.get(notice.data.user_id)
-  if (last !== undefined && now - last < 60_000) return
-  if (connectSeen.size > 10_000) connectSeen.clear()
-  connectSeen.set(notice.data.user_id, now)
+  const seen = connectSeen.get(notice.data.user_id)
+  if (!seen || now - seen.since > 60_000) {
+    if (connectSeen.size > 10_000) connectSeen.clear()
+    connectSeen.set(notice.data.user_id, { since: now, count: 1 })
+  } else if (++seen.count > 5) return
   const rows = await ownerDb
     .select()
     .from(storePaymentLink)
@@ -513,10 +517,10 @@ export async function receiveConnectNotice(
   for (const row of rows) {
     // Si Mercado Pago no responde, esa tienda queda como estaba y se sigue con las demás: el aviso
     // responde igual (no cuenta qué tiendas hay) y la próxima vez que se use el token se sabrá.
-    const seen = await deps.adapters[row.provider]
+    const known = await deps.adapters[row.provider]
       .account(openSecret(key, row.storeId, row.accessTokenEnc))
       .catch(() => null)
-    if (seen !== "sin_permiso") continue
+    if (known !== "sin_permiso") continue
     await ownerDb.transaction(async (tx) => {
       await tx
         .update(storePaymentLink)

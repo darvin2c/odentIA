@@ -229,7 +229,7 @@ function MethodRow({
   return (
     <li
       className={cn(
-        "flex items-center gap-3 px-5 py-3",
+        "@container flex items-center gap-3 px-5 py-3",
         method.isActive ? null : "text-muted-foreground",
       )}
     >
@@ -242,18 +242,20 @@ function MethodRow({
         type="button"
         onClick={onOpen}
         disabled={!canEdit}
-        className="flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 enabled:hover:underline-offset-4 disabled:cursor-default sm:flex-row sm:items-center sm:gap-4"
+        className="flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 disabled:cursor-default @xl:flex-row @xl:items-center @xl:gap-4"
       >
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="font-semibold">
+        <span className="flex w-full min-w-0 flex-1 flex-col">
+          <span className="flex flex-wrap items-center gap-x-2 font-semibold">
             {method.name}
             {method.isActive ? null : (
-              <span className="ml-2 text-xs font-normal">· Apagado, Sofi no lo ofrece</span>
+              <Badge variant="outline" className="font-normal">
+                Apagado
+              </Badge>
             )}
           </span>
           <span className="truncate text-sm text-muted-foreground">{lineOf(method, banks)}</span>
         </span>
-        <span className="text-sm text-muted-foreground sm:w-60 sm:shrink-0 sm:text-right">
+        <span className="text-sm text-muted-foreground @xl:w-56 @xl:shrink-0 @xl:text-right">
           {whoConfirms(method)}
         </span>
       </button>
@@ -309,7 +311,7 @@ const trialCents = (currency: string) => 10 ** fractionDigits(currency)
 
 function feeText(currency: string): string | null {
   if (currency !== MERCADO_PAGO_FEE.currency) return null
-  return `Por cada ${money(10000, currency)} recibes ${money(netOf(10000), currency)} al instante · ${String(MERCADO_PAGO_FEE.percent).replace(".", ",")} % + ${money(MERCADO_PAGO_FEE.fixedCents, currency)} + IGV, la comisión que publica Mercado Pago`
+  return `Por cada ${money(10000, currency)} recibes ${money(netOf(10000), currency)} al instante · ${MERCADO_PAGO_FEE.percent} % + ${money(MERCADO_PAGO_FEE.fixedCents, currency)} + IGV, la comisión que publica Mercado Pago`
 }
 
 function LinkCard({
@@ -436,9 +438,6 @@ function LinkCard({
               {[
                 connection.account ? `Cuenta ${connection.account}` : null,
                 "Yape y tarjeta en el link",
-                connection.connectedByName
-                  ? `conectó ${connection.connectedByName} el ${when(connection.connectedAt)}`
-                  : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -563,9 +562,9 @@ function TrialPanel({ trial, currency }: { trial: LinkStatus["trial"]; currency:
         {steps.map((step) => (
           <li key={step.text} className="flex items-center gap-2">
             {step.done ? (
-              <Check aria-hidden className="size-4 text-success" />
+              <Check aria-hidden className="size-4 shrink-0 text-success" />
             ) : (
-              <CircleDashed aria-hidden className="size-4 text-muted-foreground" />
+              <CircleDashed aria-hidden className="size-4 shrink-0 text-muted-foreground" />
             )}
             <span className={step.done ? undefined : "text-muted-foreground"}>
               {step.text}
@@ -1268,7 +1267,7 @@ function ConfirmTable() {
   return (
     <section
       aria-labelledby="cobros-regla"
-      className="elevated overflow-hidden rounded-xl border bg-card"
+      className="@container elevated overflow-hidden rounded-xl border bg-card"
     >
       <div className="px-5 py-4">
         <h2 id="cobros-regla" className="text-base font-semibold">
@@ -1280,7 +1279,7 @@ function ConfirmTable() {
         </p>
       </div>
       <table className="w-full border-t text-sm">
-        <thead className="hidden bg-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:table-header-group">
+        <thead className="hidden bg-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground @2xl:table-header-group">
           <tr>
             <th scope="col" className="px-5 py-2.5">
               Cómo paga la clienta
@@ -1295,16 +1294,16 @@ function ConfirmTable() {
         </thead>
         <tbody className="divide-y">
           {RULES.map((rule) => (
-            <tr key={rule.how} className="flex flex-col gap-0.5 px-5 py-3 sm:table-row sm:p-0">
-              <th scope="row" className="text-left font-medium sm:px-5 sm:py-3">
+            <tr key={rule.how} className="flex flex-col gap-0.5 px-5 py-3 @2xl:table-row @2xl:p-0">
+              <th scope="row" className="text-left font-medium @2xl:px-5 @2xl:py-3">
                 {rule.how}
               </th>
-              <td className="text-muted-foreground sm:px-5 sm:py-3 sm:text-foreground">
-                <span className="sm:hidden">Lo confirma: </span>
+              <td className="text-muted-foreground @2xl:px-5 @2xl:py-3 @2xl:text-foreground">
+                <span className="@2xl:hidden">Lo confirma: </span>
                 {rule.who}
               </td>
-              <td className="text-muted-foreground sm:px-5 sm:py-3 sm:text-foreground">
-                <span className="sm:hidden">Se entrega: </span>
+              <td className="text-muted-foreground @2xl:px-5 @2xl:py-3 @2xl:text-foreground">
+                <span className="@2xl:hidden">Se entrega: </span>
                 {rule.when}
               </td>
             </tr>

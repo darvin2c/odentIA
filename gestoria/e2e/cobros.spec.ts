@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, choose, STORE_ID, surface, type Who } from "./entorno"
+import { ACCOUNT, choose, MP_PORT, STORE_ID, surface, type Who } from "./entorno"
+import { PAY_ORIGIN } from "./mercadopago-de-prueba"
 
 /**
  * Cobros en un navegador (lienzo «gestorIA · Configuración, de nuevo», tablero 6), contra su
@@ -69,7 +70,7 @@ test("Yape con su QR y la transferencia con su CCI revisado", async ({ page }) =
   })
   await expect(yape.getByRole("img", { name: "Tu QR" })).toBeVisible()
   await expect(
-    yape.getByText(/Puedes yapear S\/ 141 al 987 654 321 \(Rosa Quispe M\.\) o escanear este QR/),
+    yape.getByText(/Puedes yapear S\/\s141 al 987 654 321 \(Rosa Quispe M\.\) o escanear este QR/),
   ).toBeVisible()
   await shot(page, "cobros-yape-1440")
   await yape.getByRole("button", { name: "Guardar" }).click()
@@ -106,6 +107,11 @@ test("Mercado Pago entrando a la cuenta: modo prueba con S/ 1, cobrar de verdad 
   page,
 }) => {
   await as("rosa")
+  // El link de Mercado Pago (https) se abre en el Mercado Pago de mentira.
+  await page.context().route(`${PAY_ORIGIN}/**`, async (route) => {
+    const url = route.request().url().replace(PAY_ORIGIN, `http://127.0.0.1:${MP_PORT}`)
+    await route.fulfill({ response: await route.fetch({ url }) })
+  })
   await page.setViewportSize(DESKTOP)
   await page.goto(COBROS)
   await page.getByRole("button", { name: "Conectar con Mercado Pago" }).click()
@@ -117,10 +123,10 @@ test("Mercado Pago entrando a la cuenta: modo prueba con S/ 1, cobrar de verdad 
   await expect(page).toHaveURL(/\/configuracion\/medios-de-pago\?mp=prueba$/)
   await expect(page.getByText("Modo prueba", { exact: true })).toBeVisible()
   await expect(page.getByText(/Cuenta rosa\.quispe@… · Yape y tarjeta en el link/)).toBeVisible()
-  await expect(page.getByText(/Por cada S\/ 100 recibes S\/ 94,70 al instante/)).toBeVisible()
+  await expect(page.getByText(/Por cada S\/\s100 recibes S\/\s94[.,]70 al instante/)).toBeVisible()
 
   // El link de S/ 1 se abre aparte; se paga con la tarjeta de prueba y queda pagado solo.
-  await page.getByRole("button", { name: "Probar con S/ 1" }).click()
+  await page.getByRole("button", { name: /Probar con S\/\s1/ }).click()
   const popup = page.waitForEvent("popup")
   await page.getByRole("link", { name: "Abrir el link de prueba" }).click()
   const pay = await popup
@@ -129,7 +135,7 @@ test("Mercado Pago entrando a la cuenta: modo prueba con S/ 1, cobrar de verdad 
   await pay.close()
   await expect(page.getByText(/^Pagado solo · /)).toBeVisible({ timeout: 15_000 })
   await expect(
-    page.getByText(/Mercado Pago nos avisó y le preguntamos si entró: entró S\/ 1/),
+    page.getByText(/Mercado Pago nos avisó y le preguntamos si entró: entró S\/\s1/),
   ).toBeVisible()
   await shot(page, "cobros-prueba-1440")
   await page.setViewportSize(PHONE)

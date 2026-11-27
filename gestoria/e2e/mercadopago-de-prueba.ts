@@ -11,6 +11,12 @@
 import { createServer } from "node:http"
 import type { LinkAdapter, LinkPayment } from "../apps/api/src/link-de-pago.js"
 
+/**
+ * Donde se paga el link: con https, como lo da Mercado Pago y lo exige la base. El navegador del
+ * recorrido lo desvía a este servidor (`page.context().route`).
+ */
+export const PAY_ORIGIN = "https://mercadopago.e2e"
+
 export function fakeMercadoPago(options: {
   port: number
   /** Adónde avisa el pago (la dirección de avisos del servidor de la tienda). */
@@ -55,7 +61,8 @@ export function fakeMercadoPago(options: {
         cents: order.totalCents,
         notificationURL: order.notificationURL,
       })
-      return { url: `${base}/pagar/${encodeURIComponent(ref)}`, ref }
+      // Con https, como lo exige la base: el recorrido lo lleva a esta página (`PAY_ORIGIN`).
+      return { url: `${PAY_ORIGIN}/pagar/${encodeURIComponent(ref)}`, ref }
     },
     read({ query }) {
       const id = query.get("data.id") ?? ""
