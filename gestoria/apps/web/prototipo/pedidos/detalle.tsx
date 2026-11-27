@@ -155,7 +155,7 @@ export function acciones(p: Pedido): { principal?: [Accion, string]; otras: [Acc
   }
 }
 
-function Bloque({
+export function Bloque({
   title,
   extra,
   children,
@@ -235,7 +235,7 @@ export function Pasos({ p, compacto }: { p: Pedido; compacto?: boolean }) {
   )
 }
 
-function Carrito({ p }: { p: Pedido }) {
+export function Carrito({ p }: { p: Pedido }) {
   const k = cuentas(p)
   return (
     <Bloque title="El carrito">
@@ -285,7 +285,7 @@ function Carrito({ p }: { p: Pedido }) {
   )
 }
 
-function Saldo({
+export function Saldo({
   p,
   onAccion,
 }: {
@@ -383,7 +383,7 @@ function Saldo({
   )
 }
 
-function EntregaB({ p }: { p: Pedido }) {
+export function EntregaB({ p }: { p: Pedido }) {
   const e = p.entrega
   return (
     <Bloque
@@ -421,7 +421,7 @@ function EntregaB({ p }: { p: Pedido }) {
   )
 }
 
-function OrigenB({ p }: { p: Pedido }) {
+export function OrigenB({ p }: { p: Pedido }) {
   const o = p.origen
   return (
     <Bloque title="De dónde vino">

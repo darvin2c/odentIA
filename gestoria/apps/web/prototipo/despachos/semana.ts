@@ -6,6 +6,7 @@ import {
   MAS_PEDIDOS,
   money,
   nuevoId,
+  PASO,
   type Paso,
   type Pedido,
 } from "../pedidos/modelo"
@@ -277,6 +278,135 @@ function semana(rubro: RubroId): Pedido[] {
 }
 MAS_PEDIDOS.push(semana)
 
+/* ---------- Los recojos: cambios y devoluciones que ya aprobó una persona ---------- */
+
+/**
+ * Lo que hay que recoger en la casa de la clienta. Lo arma Sofi según la política de la tienda y lo
+ * aprueba una persona (o lo hace Sofi sola, si la tienda lo deja); en Despachos es una parada más
+ * del día. Es un pedido enlazado al original («cambio de 0141»), como en Pedidos.
+ */
+export interface Recojo {
+  tipo: "cambio" | "devolucion"
+  /** El pedido original. */
+  de: string
+  /** Por qué, en palabras de la clienta. */
+  motivo: string
+  /** Qué se recoge. */
+  recoge: string
+  /** Qué se lleva a cambio, en el mismo viaje. */
+  lleva?: string
+  /** Qué hace el repartidor en la puerta. */
+  puerta: string
+  /** Cuánto se le devuelve, si es devolución. */
+  devuelve?: number
+  aprobo: string
+}
+
+export const RECOJOS: Record<string, Recojo> = {}
+
+function recojos(rubro: RubroId): Pedido[] {
+  const a = lineaDe(rubro, 1)
+  const talla = (l: Linea, t: string): Linea => ({
+    ...l,
+    id: nuevoId("l"),
+    variante: `${l.variante.split(" · ")[0]} · ${t}`,
+  })
+  const b = lineaDe(rubro, 3)
+  const base = (id: string, clienta: string, zona: string, franja: string, rep: string) => ({
+    id,
+    clienta,
+    telefono: `9** *** 2${id.slice(-2)}`,
+    canal: "whatsapp" as const,
+    origen: { k: "sofi" as const },
+    creado: "Ayer",
+    cobro: "link" as const,
+    pagos: [],
+    avisos: [],
+    chat: [],
+    unoPorCiento: false,
+    entrega: {
+      tipo: "moto" as const,
+      zona,
+      envio: 0,
+      dia: "Hoy",
+      franja,
+      repartidor: rep,
+      direccion: DIRECCION(zona, Number(id.slice(-2))),
+    },
+  })
+  const nueva = talla(a, "38")
+  const cambio: Pedido = {
+    ...base("0190", "Nadia Ruiz", "Lince", "2 a 6 p. m.", "Kevin"),
+    paso: "preparando",
+    cambioDe: "0141",
+    lineas: [{ ...talla(a, "37"), vuelve: true }, nueva],
+    eventos: [
+      {
+        id: nuevoId("e"),
+        cuando: "Ayer · 6:10 p. m.",
+        actor: "sofi",
+        quien: "Sofi",
+        texto: "Armó el cambio de talla según la política: primer cambio, sin costo de envío.",
+        paso: "por_pagar",
+      },
+      {
+        id: nuevoId("e"),
+        cuando: "Ayer · 6:32 p. m.",
+        actor: "persona",
+        quien: "Rosa",
+        texto: "Aprobó el cambio.",
+        paso: "pagado",
+      },
+    ],
+  }
+  RECOJOS["0190"] = {
+    tipo: "cambio",
+    de: "0141",
+    motivo: "Le quedó chica: pide una talla más.",
+    recoge: `${a.nombre} · ${a.variante.split(" · ")[0]} · 37, en su caja`,
+    lleva: `${nueva.nombre} · ${nueva.variante}`,
+    puerta:
+      "Le da la 38 para que se la pruebe. Si le queda, recoge la 37 en su caja y le toma una foto.",
+    aprobo: "Rosa, ayer a las 6:32 p. m.",
+  }
+  const devolucion: Pedido = {
+    ...base("0191", "Sandra Vega", "Callao", "9 a 1 p. m.", "Jhon"),
+    paso: "por_salir",
+    cambioDe: "0136",
+    lineas: [{ ...b, id: nuevoId("l"), vuelve: true }],
+    eventos: [
+      {
+        id: nuevoId("e"),
+        cuando: "Ayer · 4:05 p. m.",
+        actor: "sofi",
+        quien: "Sofi",
+        texto: "Armó la devolución: dentro de los 7 días y sin usar, como pide la política.",
+        paso: "por_pagar",
+      },
+      {
+        id: nuevoId("e"),
+        cuando: "Ayer · 4:20 p. m.",
+        actor: "persona",
+        quien: "Rosa",
+        texto: "Aprobó la devolución.",
+        paso: "pagado",
+      },
+    ],
+  }
+  RECOJOS["0191"] = {
+    tipo: "devolucion",
+    de: "0136",
+    motivo: "El color no es como en la foto.",
+    recoge: `${b.nombre} · ${b.variante}, sin usar y en su caja`,
+    puerta:
+      "Revisa que esté sin usar y con su caja, y le toma una foto. Si está usado, no lo recoge y avisa a la tienda.",
+    devuelve: b.precio,
+    aprobo: "Rosa, ayer a las 4:20 p. m.",
+  }
+  return [cambio, devolucion]
+}
+MAS_PEDIDOS.push(recojos)
+
 /* ---------- Las entregas, como las ve Despachos ---------- */
 
 export type Estado =
@@ -307,44 +437,162 @@ export const ESTADO: Record<
   no_entregado: { label: "No se entregó", tono: "destructive" },
 }
 
+/**
+ * La etapa del pedido, con el mismo nombre y color que en Pedidos (`PASO`), más las salidas y el
+ * recojo. Es lo que se ve en cada tarjeta; el cobro va aparte.
+ */
+export type Etapa = Paso | "no_entregado" | "por_recoger" | "recogido"
+export type Tono =
+  | "warning"
+  | "soft"
+  | "success"
+  | "secondary"
+  | "outline"
+  | "destructive"
+  | "default"
+export const ETAPA: Record<Etapa, { label: string; corto: string; tono: Tono }> = {
+  ...PASO,
+  no_entregado: { label: "No se entregó", corto: "No se entregó", tono: "destructive" },
+  por_recoger: { label: "Por recoger", corto: "Por recoger", tono: "default" },
+  recogido: { label: "Recogido", corto: "Recogido", tono: "success" },
+}
+/** El orden de la tira de etapas: el camino y después las salidas y los recojos. */
+export const ORDEN_ETAPAS: Etapa[] = [
+  "por_pagar",
+  "por_confirmar",
+  "pagado",
+  "preparando",
+  "por_salir",
+  "en_camino",
+  "entregado",
+  "no_entregado",
+  "por_recoger",
+  "recogido",
+  "anulado",
+]
+/** El punto de color de cada etapa: el de su Badge. */
+export const PUNTO: Record<Tono, string> = {
+  warning: "bg-warning",
+  soft: "bg-primary/60",
+  success: "bg-success",
+  secondary: "bg-muted-foreground/50",
+  outline: "border border-foreground/60",
+  destructive: "bg-destructive",
+  default: "bg-primary ring-2 ring-primary/30",
+}
+
+export type Boton = "listo" | "confirmar" | "asignar" | "numero" | "pasar"
+
 export interface Ent {
   p: Pedido
   fecha: string
   estado: Estado
-  /** El único botón cuando necesita a una persona. */
-  boton?: { texto: string; tipo: "listo" | "confirmar" | "asignar" | "numero" | "pasar" }
-  /** «Pagado», «Falta S/ 169 · al recibir», «Pago por confirmar». */
+  etapa: Etapa
+  /** La segunda fila: lo que hay que hacer, o lo que pasa solo. */
+  toca: { texto: string; persona: boolean }
+  /** El único botón cuando necesita a una persona. Siempre abre el cajón del pedido. */
+  boton?: { texto: string; tipo: Boton }
+  /** «Pagado», «Falta S/ 169», «Al recibir S/ 169», «S/ 74 por confirmar». Aparte de la etapa. */
   cobro: { texto: string; tono: "ok" | "falta" | "espera" }
   falta: number
+  recojo?: Recojo
+}
+
+const DE_FRANJA: Record<string, string> = {
+  "9 a 1 p. m.": "de 9 a 1",
+  "2 a 6 p. m.": "de 2 a 6 p. m.",
+}
+const deFranja = (f: string | null) => (f ? (DE_FRANJA[f] ?? f) : "hoy")
+
+/** La frase de la segunda fila: qué hay que hacer, o qué pasa solo. */
+function tocaDe(p: Pedido, estado: Estado, fecha: string, recojo?: Recojo): Ent["toca"] {
+  const x = p.entrega
+  const rep = x.repartidor ?? "el repartidor"
+  const k = cuentas(p)
+  const n = p.clienta.split(" ")[0]
+  if (FERIADOS[fecha] && !["entregado", "en_camino"].includes(estado))
+    return { texto: "Quedó en un feriado: pásalo a otro día.", persona: true }
+  if (recojo) {
+    if (p.paso === "entregado") return { texto: `${rep} lo recogió y trajo la foto.`, persona: false }
+    if (p.paso === "preparando" && recojo.lleva)
+      return {
+        texto: `Empaca la talla nueva y dásela a ${rep}: lleva una y recoge otra.`,
+        persona: true,
+      }
+    return {
+      texto: `Sigue solo: ${rep} lo recoge ${deFranja(x.franja)} y toma la foto.`,
+      persona: false,
+    }
+  }
+  switch (estado) {
+    case "no_sale": {
+      const g = p.pagos.find((y) => y.estado === "por_confirmar")
+      return g
+        ? {
+            texto: `Confirma el Yape: dice ${money(g.captura?.monto ?? g.monto)} de ${money(k.total)}.`,
+            persona: true,
+          }
+        : { texto: "Sigue solo: Sofi le recuerda el link. Sin pago no sale.", persona: false }
+    }
+    case "espera_pago":
+      return { texto: `Sigue solo: espera el pago de ${n}; Sofi le recuerda el link.`, persona: false }
+    case "pagado":
+      return {
+        texto: `Sigue solo: pasa a «Preparando» el ${largo(fecha).split(" ").slice(0, 2).join(" ")}, a las 8 a. m.`,
+        persona: false,
+      }
+    case "empacar":
+      return x.tipo === "agencia"
+        ? { texto: `Empácalo y déjalo en ${x.agencia ?? "la agencia"}.`, persona: true }
+        : { texto: `Empácalo y dáselo a ${rep}. Sale ${deFranja(x.franja)}.`, persona: true }
+    case "sin_repartidor":
+      return { texto: `Nadie libre ${deFranja(x.franja)}: elige cómo sale.`, persona: true }
+    case "agencia_numero":
+      return {
+        texto: `Déjalo en ${x.agencia ?? "la agencia"} y anota el N.º de envío.`,
+        persona: true,
+      }
+    case "por_salir":
+      return {
+        texto: `Sigue solo: ${rep} lo recoge y toca «Salí».${k.falta && k.alRecibir ? ` Cobra ${money(k.falta)} en la puerta.` : ""}`,
+        persona: false,
+      }
+    case "en_camino":
+      return x.tipo === "agencia"
+        ? { texto: `Sigue solo: va por ${x.agencia}, N.º ${x.numero}.`, persona: false }
+        : { texto: `Sigue solo: ${rep} lo lleva ${deFranja(x.franja)}.`, persona: false }
+    case "entregado":
+      return { texto: `Entregado por ${x.repartidor ?? x.agencia ?? "la tienda"}.`, persona: false }
+    case "no_entregado":
+      return {
+        texto: `${(p.noEntregado ?? "No se entregó").replace(/\.$/, "")}. Vuelve con ${rep}; sigue solo.`,
+        persona: false,
+      }
+  }
 }
 
 export function entregaDe(p: Pedido): Ent | null {
   const fecha = fechaDe(p.entrega.dia)
   if (!fecha || p.paso === "anulado" || p.entrega.tipo === "recojo") return null
   const k = cuentas(p)
+  const recojo = RECOJOS[p.id]
   let estado: Estado
   let boton: Ent["boton"]
   if (p.paso === "por_confirmar") {
     estado = "no_sale"
-    boton = { texto: "Ver y confirmar", tipo: "confirmar" }
+    boton = { texto: "Ver el Yape", tipo: "confirmar" }
   } else if (p.paso === "por_pagar") estado = fecha === HOY ? "no_sale" : "espera_pago"
   else if (p.paso === "pagado") estado = "pagado"
   else if (p.paso === "preparando") {
     if (p.entrega.tipo === "agencia" && !p.entrega.numero) {
       estado = "agencia_numero"
-      boton = { texto: "Anotar el N.º de Olva", tipo: "numero" }
+      boton = { texto: "Anotar el N.º", tipo: "numero" }
     } else if (!p.entrega.repartidor && p.entrega.tipo !== "agencia") {
       estado = "sin_repartidor"
       boton = { texto: "Elegir cómo sale", tipo: "asignar" }
     } else {
       estado = "empacar"
-      boton = {
-        texto:
-          p.entrega.tipo === "agencia"
-            ? `Listo: lo dejé en ${p.entrega.agencia ?? "la agencia"}`
-            : `Listo: se lo di a ${p.entrega.repartidor}`,
-        tipo: "listo",
-      }
+      boton = { texto: "Empacar", tipo: "listo" }
     }
   } else if (p.paso === "por_salir") estado = p.noEntregado ? "no_entregado" : "por_salir"
   else if (p.paso === "en_camino") estado = "en_camino"
@@ -352,16 +600,38 @@ export function entregaDe(p: Pedido): Ent | null {
   // Quedó en un feriado (se anotó antes de marcarlo): lo decide una persona.
   if (FERIADOS[fecha] && !boton && !["entregado", "en_camino"].includes(estado))
     boton = { texto: "Pasar a otro día", tipo: "pasar" }
-  const cobro: Ent["cobro"] =
-    k.porConfirmar > 0
-      ? { texto: "Pago por confirmar", tono: "espera" }
-      : k.falta > 0
-        ? {
-            texto: `Falta ${money(k.falta)}${k.alRecibir ? " · al recibir" : ""}`,
-            tono: "falta",
-          }
-        : { texto: "Pagado", tono: "ok" }
-  return { p, fecha, estado, boton, cobro, falta: k.falta }
+  const cobro: Ent["cobro"] = recojo?.devuelve
+    ? { texto: `Devolver ${money(recojo.devuelve)}`, tono: "espera" }
+    : recojo
+      ? { texto: "Sin cobro", tono: "ok" }
+      : k.porConfirmar > 0
+        ? { texto: `Falta ${money(k.total - k.confirmado)}`, tono: "espera" }
+        : k.falta > 0
+          ? {
+              texto: k.alRecibir ? `Al recibir ${money(k.falta)}` : `Falta ${money(k.falta)}`,
+              tono: "falta",
+            }
+          : { texto: "Pagado", tono: "ok" }
+  const etapa: Etapa = recojo
+    ? p.paso === "entregado"
+      ? "recogido"
+      : "por_recoger"
+    : estado === "no_entregado"
+      ? "no_entregado"
+      : p.paso
+  return {
+    p,
+    fecha,
+    estado,
+    etapa,
+    boton,
+    toca: (({ texto, persona }) => ({ texto: texto.replace(/\.\.+/g, "."), persona }))(
+      tocaDe(p, estado, fecha, recojo),
+    ),
+    cobro,
+    falta: k.falta,
+    recojo,
+  }
 }
 
 export function entregasDe(list: Pedido[]): Ent[] {

@@ -17,13 +17,13 @@ import {
   PageNotice,
   PageShell,
   PersonAvatar,
+  SideDockProvider,
+  SideDockSlot,
   useIconSidebarWhileMounted,
   useMediaQuery,
 } from "@odentia/ui-patterns"
-import { CalendarCheck, Check, MoreHorizontal, Package, Truck } from "lucide-react"
+import { CalendarCheck, Check, MoreHorizontal, Package, Repeat, Truck, UserRound } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
-import { AccionDrawer } from "../pedidos/acciones"
-import { PedidoDrawer } from "../pedidos/detalle"
 import { money, usePedidos } from "../pedidos/modelo"
 import { useRuta } from "../ruta"
 import {
@@ -35,12 +35,14 @@ import {
   useArrastre,
 } from "./gestos"
 import { ScheduleSnapPager as Pager } from "@odentia/ui-patterns"
-import { Cobro, EntregaHoja, FaltaHoja, Foto, listo, NumeroHoja, PasarHoja } from "./hojas"
+import { PedidoCajon } from "./cajon"
+import { Cobro, FaltaHoja, Foto } from "./hojas"
 import {
   CUPO,
   corto,
   type Ent,
-  ESTADO,
+  type Etapa,
+  ETAPA,
   entregasDe,
   type Faltas,
   FERIADOS,
@@ -51,8 +53,10 @@ import {
   llena,
   necesita,
   ocupadas,
+  ORDEN_ETAPAS,
   ordenar,
   plataDe,
+  PUNTO,
   REPARTIDORES,
   semanaDe,
   sumar,
@@ -67,20 +71,24 @@ import {
  * - Mantener una entrega y moverla a otro día, franja o repartidor abre «Pasar a…» ya lleno.
  * - Arriba, solo lo que necesita a una persona, con su único botón: «Listo: se lo di a Kevin».
  * - Por franja o por repartidor; en escritorio, además, la semana entera.
+ * v2 (lo pidió el dueño):
+ * - Cada entrega muestra su etapa (la de Pedidos) y, aparte, el cobro. Arriba del día, la tira de
+ *   etapas cuenta cuántas hay en cada una; tocar una filtra.
+ * - Cada tarjeta va en dos filas: el pedido, y lo que toca (con su único botón o «Sigue solo»).
+ * - Tocar la tarjeta o su botón abre siempre el cajón del pedido, con lo que toca fijo al pie.
+ *   Soltar una entrega lo abre con «Pasar a…» ya lleno.
+ * - Los recojos de cambios y devoluciones son una parada más del día.
  */
 
 type Vista = "franja" | "rep"
 type Hoja =
-  | { k: "entrega"; id: string }
   | {
-      k: "pasar"
+      k: "pedido"
       id: string
-      inicial?: { fecha?: string; franja?: string | null; rep?: string | null }
+      /** Al soltar: lo que toca es «Pasar a…», ya lleno. */
+      pasar?: { fecha?: string; franja?: string | null; rep?: string | null }
     }
-  | { k: "numero"; id: string }
   | { k: "falta"; rep: string }
-  | { k: "pedido"; id: string }
-  | { k: "confirmar"; id: string }
 
 const titulo = (fecha: string) =>
   `${largo(fecha).replace(/^./, (c) => c.toUpperCase())}${fecha === HOY ? " · hoy" : fecha === sumar(HOY, 1) ? " · mañana" : ""}`
@@ -88,14 +96,80 @@ const titulo = (fecha: string) =>
 function resumen(list: Ent[]) {
   const n = list.length
   const toca = list.filter(necesita).length
-  const hechas = list.filter((e) => e.estado === "entregado").length
   return [
     n === 0 ? "Sin entregas" : `${n} ${n === 1 ? "entrega" : "entregas"}`,
-    hechas ? `${hechas} ${hechas === 1 ? "entregada" : "entregadas"}` : null,
     toca ? `${toca} te ${toca === 1 ? "toca" : "tocan"}` : null,
   ]
     .filter(Boolean)
     .join(" · ")
+}
+
+/** Cuántas hay en cada etapa, en el orden del camino. */
+function porEtapa(list: Ent[]) {
+  return ORDEN_ETAPAS.map((et) => ({ et, n: list.filter((e) => e.etapa === et).length })).filter(
+    (x) => x.n,
+  )
+}
+
+/** El punto de color de una etapa, el de su Badge. */
+export function Punto({ et, className }: { et: Etapa; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("inline-block size-2 shrink-0 rounded-full", PUNTO[ETAPA[et].tono], className)}
+    />
+  )
+}
+
+/**
+ * La tira de etapas: con un vistazo, cuántas hay en cada una. Tocar una filtra el día; tocarla
+ * otra vez, o «Todas», lo quita.
+ */
+function TiraEtapas({
+  list,
+  filtro,
+  setFiltro,
+}: {
+  list: Ent[]
+  filtro: Etapa | null
+  setFiltro: (e: Etapa | null) => void
+}) {
+  const grupos = porEtapa(list)
+  if (!grupos.length) return null
+  return (
+    <div
+      role="group"
+      aria-label="Etapas del día: toca una para ver solo esas"
+      className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0"
+    >
+      <button
+        type="button"
+        aria-pressed={filtro === null}
+        onClick={() => setFiltro(null)}
+        className={cn(
+          "flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          filtro === null ? "border-foreground bg-foreground text-background" : "bg-card",
+        )}
+      >
+        Todas <b className="tabular-nums">{list.length}</b>
+      </button>
+      {grupos.map(({ et, n }) => (
+        <button
+          key={et}
+          type="button"
+          aria-pressed={filtro === et}
+          onClick={() => setFiltro(filtro === et ? null : et)}
+          className={cn(
+            "flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border bg-card px-3.5 text-sm whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            filtro === et && "border-primary bg-primary-soft font-medium",
+          )}
+        >
+          <Punto et={et} />
+          {ETAPA[et].label} <b className="tabular-nums">{n}</b>
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export function DespachosPage() {
@@ -109,8 +183,15 @@ export function DespachosPage() {
   const [faltas, setFaltas] = useState<Faltas>(q.get("falta") ? { [HOY]: [q.get("falta")!] } : {})
   const [caja, setCaja] = useState<Record<string, number>>({})
   const [hoja, setHoja] = useState<Hoja | null>(
-    q.get("hoja") === "falta" ? { k: "falta", rep: "Jhon" } : null,
+    q.get("hoja") === "falta"
+      ? { k: "falta", rep: "Jhon" }
+      : q.get("abrir")
+        ? { k: "pedido", id: q.get("abrir")! }
+        : null,
   )
+  const [filtro, setFiltro] = useState<Etapa | null>(null)
+  // Otro día, otro filtro: la tira es de cada día.
+  useEffect(() => setFiltro(null), [fecha])
   // Un enlace con `?dia=` (desde Inicio o un caso del lienzo) abre ese día aunque ya esté abierto.
   const qDia = q.get("dia")
   const qVista = q.get("vista")
@@ -126,19 +207,8 @@ export function DespachosPage() {
   const delDia = (f: string) => ents.filter((e) => e.fecha === f)
   const porId = (id: string) => ents.find((e) => e.p.id === id)
 
-  const accion = (e: Ent) => {
-    if (!e.boton) return
-    if (e.boton.tipo === "listo") listo(rubro, e)
-    else if (e.boton.tipo === "confirmar") setHoja({ k: "confirmar", id: e.p.id })
-    else if (e.boton.tipo === "numero") setHoja({ k: "numero", id: e.p.id })
-    else
-      setHoja({
-        k: "pasar",
-        id: e.p.id,
-        inicial: e.boton.tipo === "asignar" ? { fecha: e.fecha } : undefined,
-      })
-  }
-  const abrir = (e: Ent) => setHoja({ k: "entrega", id: e.p.id })
+  // Tocar la tarjeta o su botón: siempre el cajón del pedido, con lo que toca al pie.
+  const abrir = (e: Ent) => setHoja({ k: "pedido", id: e.p.id })
   const soltar = (id: string, d: Destino) => {
     const e = porId(id)
     if (!e) return
@@ -154,9 +224,9 @@ export function DespachosPage() {
       (d.rep === undefined || d.rep === e.p.entrega.repartidor)
     if (mismo) return
     setHoja({
-      k: "pasar",
+      k: "pedido",
       id,
-      inicial: {
+      pasar: {
         fecha: d.fecha ?? e.fecha,
         franja: d.franja === undefined ? e.p.entrega.franja : d.franja,
         rep: d.rep === undefined ? undefined : (d.rep ?? undefined),
@@ -176,10 +246,14 @@ export function DespachosPage() {
       feriado: FERIADOS[f],
     }
   }
-  const comun = { ents, faltas, abrir, accion, setHoja, caja, setCaja }
+  const comun = { ents, faltas, abrir, setHoja, caja, setCaja, filtro }
 
   const h = hoja && hoja.k !== "falta" ? porId(hoja.id) : undefined
   return (
+    // La columna lateral: en una ventana ancha, el cajón se abre al lado y no tapa el día.
+    <SideDockProvider>
+    <div className="flex min-w-0">
+    <div className="min-w-0 flex-1">
     <ArrastreProvider
       onSoltar={soltar}
       onSemana={(dir) => setFecha((f) => sumar(f, 7 * dir))}
@@ -274,13 +348,21 @@ export function DespachosPage() {
                 </TabsList>
               </Tabs>
             </div>
+            <TiraEtapas list={delDia(fecha)} filtro={filtro} setFiltro={setFiltro} />
             <Pager
               aria-label="Días: desliza a la izquierda para el día siguiente"
               position={fecha}
               onStep={(dir) => setFecha(sumar(fecha, dir))}
               className="-mx-4 items-start sm:-mx-6"
               paneClassName="px-4 sm:px-6"
-              renderPane={(o) => <DiaPane fecha={sumar(fecha, o)} vista={vista} {...comun} />}
+              renderPane={(o) => (
+                <DiaPane
+                  fecha={sumar(fecha, o)}
+                  vista={vista}
+                  angosto={hoja?.k === "pedido"}
+                  {...comun}
+                />
+              )}
             />
           </>
         )}
@@ -296,32 +378,17 @@ export function DespachosPage() {
         ) : null}
       </PageShell>
 
-      {hoja?.k === "entrega" && h ? (
-        <EntregaHoja
-          e={h}
-          onClose={() => setHoja(null)}
-          onPasar={() => setHoja({ k: "pasar", id: h.p.id })}
-          onAccion={(e) => {
-            setHoja(null)
-            accion(e)
-          }}
-          onVerPedido={() => setHoja({ k: "pedido", id: h.p.id })}
-        />
-      ) : null}
-      {hoja?.k === "pasar" && h ? (
-        <PasarHoja
+      {hoja?.k === "pedido" && h ? (
+        <PedidoCajon
           key={JSON.stringify(hoja)}
           e={h}
-          inicial={hoja.inicial}
+          pasarA={hoja.pasar}
+          dock={!semana}
           faltas={faltas}
           onClose={() => setHoja(null)}
+          onFalta={(rep) => setHoja({ k: "falta", rep })}
         />
       ) : null}
-      {hoja?.k === "numero" && h ? <NumeroHoja e={h} onClose={() => setHoja(null)} /> : null}
-      {hoja?.k === "confirmar" && h ? (
-        <AccionDrawer p={h.p} accion="confirmar" onClose={() => setHoja(null)} />
-      ) : null}
-      {hoja?.k === "pedido" ? <PedidoDrawer pid={hoja.id} onClose={() => setHoja(null)} /> : null}
       {hoja?.k === "falta" ? (
         <FaltaHoja
           rep={hoja.rep}
@@ -331,6 +398,10 @@ export function DespachosPage() {
         />
       ) : null}
     </ArrastreProvider>
+    </div>
+    <SideDockSlot />
+    </div>
+    </SideDockProvider>
   )
 }
 
@@ -362,7 +433,7 @@ interface Comun {
   ents: Ent[]
   faltas: Faltas
   abrir: (e: Ent) => void
-  accion: (e: Ent) => void
+  filtro: Etapa | null
   setHoja: (h: Hoja) => void
   caja: Record<string, number>
   setCaja: (c: Record<string, number>) => void
@@ -376,19 +447,27 @@ function DiaPane({
   ents,
   faltas,
   abrir,
-  accion,
   setHoja,
   caja,
   setCaja,
-}: Comun & { fecha: string; vista: Vista }) {
-  const dia = ordenar(ents.filter((e) => e.fecha === fecha))
+  filtro,
+  angosto,
+}: Comun & { fecha: string; vista: Vista; angosto?: boolean }) {
+  const todoElDia = ordenar(ents.filter((e) => e.fecha === fecha))
+  const dia = filtro ? todoElDia.filter((e) => e.etapa === filtro) : todoElDia
   const toca = dia.filter(necesita)
   const noEntrego = dia.filter((e) => e.estado === "no_entregado")
   const feriado = FERIADOS[fecha]
   const pasado = fecha < HOY
   return (
-    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-6">
-      <div className="flex flex-col gap-5 lg:sticky lg:top-40">
+    // Con el cajón al lado, el día va en una sola columna.
+    <div
+      className={cn(
+        "flex flex-col gap-5",
+        !angosto && "lg:grid lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-6",
+      )}
+    >
+      <div className={cn("flex flex-col gap-5", !angosto && "lg:sticky lg:top-40")}>
         {feriado ? (
           <PageNotice tone="aviso" label="Feriado">
             {largo(fecha).replace(/^./, (c) => c.toUpperCase())}: {feriado}. La tienda no reparte y
@@ -406,11 +485,11 @@ function DiaPane({
             </h3>
             <ul className="flex flex-col gap-2">
               {toca.map((e) => (
-                <TeToca key={e.p.id} e={e} abrir={abrir} accion={accion} />
+                <Tarjeta key={e.p.id} e={e} abrir={abrir} />
               ))}
             </ul>
           </section>
-        ) : dia.length && !pasado ? (
+        ) : dia.length && !pasado && !filtro ? (
           <p className="flex items-center gap-2 rounded-2xl bg-success-soft px-4 py-3 text-sm text-success">
             <Check aria-hidden className="size-4" />
             Nada te toca este día: lo demás avanza solo.
@@ -419,18 +498,17 @@ function DiaPane({
         {vista === "franja" && noEntrego.length ? (
           <Seccion titulo="No se entregó" aviso n={noEntrego.length}>
             {noEntrego.map((e) => (
-              <Tarjeta
-                key={e.p.id}
-                e={e}
-                abrir={abrir}
-                nota={`${e.p.noEntregado} Vuelve ${fecha === HOY ? "hoy" : "este día"}.`}
-              />
+              <Tarjeta key={e.p.id} e={e} abrir={abrir} />
             ))}
           </Seccion>
         ) : null}
       </div>
       <div className="flex flex-col gap-5">
-        {dia.length === 0 ? (
+        {dia.length === 0 && filtro && todoElDia.length ? (
+          <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">
+            Nada en «{ETAPA[filtro].label}» este día.
+          </p>
+        ) : dia.length === 0 ? (
           feriado ? null : (
             <EmptyState
               icon={Truck}
@@ -456,54 +534,11 @@ function DiaPane({
             setHoja={setHoja}
             caja={caja}
             setCaja={setCaja}
+            angosto={angosto}
           />
         )}
       </div>
     </div>
-  )
-}
-
-function TeToca({
-  e,
-  abrir,
-  accion,
-}: {
-  e: Ent
-  abrir: (e: Ent) => void
-  accion: (e: Ent) => void
-}) {
-  const x = e.p.entrega
-  const franja = x.franja ? (FRANJA_NOMBRE[x.franja] ?? x.franja) : "Hoy"
-  const por =
-    e.boton?.tipo === "listo"
-      ? `${franja} · empácalo`
-      : e.boton?.tipo === "confirmar"
-        ? `Mandó un Yape: sin confirmar no sale`
-        : e.boton?.tipo === "asignar"
-          ? `${franja} · nadie libre`
-          : e.boton?.tipo === "numero"
-            ? `${x.agencia} a ${x.zona.split(",")[0]} · falta el N.º`
-            : `Quedó en un feriado`
-  return (
-    <li className="flex items-center gap-2 rounded-xl bg-card p-2 shadow-xs">
-      <button
-        type="button"
-        onClick={() => abrir(e)}
-        className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <Foto e={e} className="size-10" />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-semibold">{e.p.clienta}</span>
-          <span className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">{por}</span>
-        </span>
-      </button>
-      <Button
-        className="h-auto min-h-11 w-[9.25rem] shrink-0 py-1.5 text-center leading-tight whitespace-normal sm:w-auto sm:whitespace-nowrap"
-        onClick={() => accion(e)}
-      >
-        {e.boton?.texto}
-      </Button>
-    </li>
   )
 }
 
@@ -554,25 +589,51 @@ function Seccion({
   )
 }
 
+/** «Tarde · Kevin · Ate»: la franja, quién lo lleva y el distrito. */
+function donde(e: Ent) {
+  const x = e.p.entrega
+  const fr = x.franja ? (FRANJA_NOMBRE[x.franja]?.split(" · ")[0] ?? x.franja) : null
+  const quien =
+    x.tipo === "agencia"
+      ? `${x.agencia}${x.numero ? ` N.º ${x.numero}` : ""}`
+      : (x.repartidor ?? "sin repartidor")
+  return [fr, quien, x.zona.split(",")[0]].filter(Boolean).join(" · ")
+}
+
+/** «Zapatilla Urbana · Negro · 38», y «+1» si lleva más. */
+function lleva(e: Ent) {
+  const va = e.p.lineas.filter((l) => !l.vuelve)
+  const l = va[0] ?? e.p.lineas[0]
+  if (!l) return ""
+  return `${l.nombre} · ${l.variante}${va.length > 1 ? ` · +${va.length - 1}` : ""}`
+}
+
+/**
+ * La tarjeta de una entrega, en dos filas. Arriba, el pedido: la foto, la clienta y el número, lo
+ * que lleva, la etapa, el cobro, la franja, quién lo lleva y el distrito. Abajo, lo que toca: una
+ * frase y, si toca a una persona, su único botón. Tocar cualquier parte abre el cajón del pedido.
+ */
 function Tarjeta({
   e,
   abrir,
   orden,
-  nota,
   compacta,
 }: {
   e: Ent
   abrir: (e: Ent) => void
   orden?: number
-  nota?: string
   compacta?: boolean
 }) {
   const x = e.p.entrega
+  const et = ETAPA[e.etapa]
   const fantasma = () => (
     <span className="flex items-center gap-2">
       <Foto e={e} className="size-9" />
-      <span className="flex min-w-0 flex-col text-sm">
-        <b className="truncate">{e.p.clienta}</b>
+      <span className="flex min-w-0 flex-col gap-0.5 text-sm">
+        <span className="flex items-center gap-1.5">
+          <b className="truncate">{e.p.clienta}</b>
+          <Badge variant={et.tono}>{et.corto}</Badge>
+        </span>
         <span className="truncate text-xs text-muted-foreground">
           Suéltala en un día, una franja o un repartidor
         </span>
@@ -580,72 +641,116 @@ function Tarjeta({
     </span>
   )
   const { props, arrastrando, levantando } = useArrastrable(e.p.id, fantasma)
-  const quien =
-    x.tipo === "agencia"
-      ? `${x.agencia}${x.numero ? ` · N.º ${x.numero}` : ""}`
-      : [x.franja, x.repartidor ?? "sin repartidor"].filter(Boolean).join(" · ")
+  const nombre = `${e.p.clienta}, pedido ${e.p.id}: ${et.label}, ${e.cobro.texto}, ${donde(e)}`
   if (compacta)
     return (
       <button
         type="button"
         {...props}
         onClick={() => abrir(e)}
-        aria-label={`${e.p.clienta}, ${x.zona}, ${x.repartidor ?? x.agencia ?? "sin repartidor"}, ${e.cobro.texto}, ${ESTADO[e.estado].label}`}
+        aria-label={`${nombre}. ${e.toca.texto}`}
         className={cn(
-          "flex min-h-12 w-full touch-manipulation items-center gap-2 rounded-lg border bg-card p-1.5 text-left text-xs outline-none select-none [-webkit-touch-callout:none] hover:border-primary focus-visible:ring-2 focus-visible:ring-ring",
-          e.estado === "entregado" && "opacity-60",
-          (e.estado === "no_sale" || e.estado === "no_entregado") && "border-destructive/50",
+          "flex min-h-12 w-full touch-manipulation items-start gap-1.5 rounded-lg border bg-card p-1.5 text-left text-xs outline-none select-none [-webkit-touch-callout:none] hover:border-primary focus-visible:ring-2 focus-visible:ring-ring",
+          e.etapa === "entregado" && "opacity-60",
+          e.etapa === "no_entregado" && "border-destructive/50",
           necesita(e) && "border-warning",
           arrastrando && "opacity-30",
         )}
       >
         <Foto e={e} className="size-8 rounded-md" />
-        <span className="flex min-w-0 flex-col">
+        <span className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate font-semibold">{nombreCorto(e.p.clienta)}</span>
+          <span className="flex items-center gap-1 truncate">
+            <Punto et={e.etapa} />
+            <span className="truncate">{et.corto}</span>
+          </span>
           <span className="truncate text-muted-foreground">
-            {(x.repartidor ?? x.agencia ?? "Sin rep.").split(" ")[0]} ·{" "}
             <Cobro e={e} corto className="font-normal" />
+            {x.repartidor ? ` · ${x.repartidor}` : ""}
           </span>
         </span>
       </button>
     )
+  const persona = !!e.boton
   return (
-    <li className="list-none">
+    // Toda la tarjeta abre el cajón; con el teclado, la primera fila y el botón son los botones.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: el teclado usa los botones de adentro.
+    <li
+      {...props}
+      onClick={() => abrir(e)}
+      className={cn(
+        "flex list-none touch-manipulation flex-col overflow-hidden rounded-xl border bg-card select-none [-webkit-touch-callout:none] transition-[transform,box-shadow,opacity] duration-200 hover:border-primary",
+        e.etapa === "entregado" && "bg-card/60",
+        e.etapa === "no_entregado" && "border-destructive/40",
+        levantando && "motion-safe:scale-[0.98]",
+        arrastrando && "opacity-30",
+      )}
+    >
       <button
         type="button"
-        {...props}
-        onClick={() => abrir(e)}
-        className={cn(
-          "flex w-full touch-manipulation items-center gap-3 rounded-xl border bg-card p-2.5 text-left outline-none select-none [-webkit-touch-callout:none] transition-[transform,box-shadow,opacity] duration-200 hover:border-primary focus-visible:ring-2 focus-visible:ring-ring",
-          e.estado === "entregado" && "bg-card/60",
-          levantando && "motion-safe:scale-[0.98]",
-          arrastrando && "opacity-30",
-        )}
+        aria-label={`Abrir: ${nombre}`}
+        className="flex w-full items-start gap-3 p-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {orden ? (
           <span
             aria-label={`Parada ${orden}`}
-            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold tabular-nums"
+            className="mt-3 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold tabular-nums"
           >
             {orden}
           </span>
         ) : null}
-        <Foto e={e} className={cn(e.estado === "entregado" && "opacity-60")} />
+        <Foto e={e} className={cn(e.etapa === "entregado" && "opacity-60")} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex items-baseline gap-1.5">
+          <span className="flex min-w-0 items-baseline gap-1.5">
             <span className="truncate font-semibold">{e.p.clienta}</span>
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{e.p.id}</span>
           </span>
-          <span className="truncate text-[13px] text-muted-foreground">
-            {x.zona.split(",")[0]} · {quien}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+            <Badge variant={et.tono}>{et.label}</Badge>
+            <Cobro e={e} corto />
           </span>
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
-            <Cobro e={e} />
-            <Badge variant={ESTADO[e.estado].tono}>{ESTADO[e.estado].label}</Badge>
+          <span className="flex items-center gap-1 truncate text-[13px]">
+            {e.recojo ? (
+              <Repeat aria-hidden className="size-3.5 shrink-0 text-primary" />
+            ) : null}
+            <span className="truncate">
+              {e.recojo
+                ? e.recojo.tipo === "cambio"
+                  ? `Cambio de talla · ${e.recojo.lleva?.split(" · ").slice(1).join(" · ")}`
+                  : `Devolución · ${e.recojo.recoge.split(",")[0]}`
+                : lleva(e)}
+            </span>
           </span>
-          {nota ? <span className="text-[13px] text-destructive">{nota}</span> : null}
+          <span className="truncate text-[13px] text-muted-foreground">{donde(e)}</span>
         </span>
       </button>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-2.5 py-2",
+          persona ? "bg-warning-soft/60" : "bg-muted/40",
+        )}
+      >
+        <p className="flex min-w-[11rem] flex-1 items-start gap-1.5 text-[13px] leading-snug">
+          {persona ? (
+            <UserRound aria-hidden className="mt-0.5 size-3.5 shrink-0 text-warning" />
+          ) : (
+            <Check aria-hidden className="mt-0.5 size-3.5 shrink-0 text-success" />
+          )}
+          <span className={persona ? "" : "text-muted-foreground"}>
+            {e.etapa === "no_entregado" ? <b className="text-destructive">Vuelve. </b> : null}
+            {e.toca.texto}
+          </span>
+        </p>
+        {e.boton ? (
+          <Button
+            type="button"
+            className="ml-auto h-11 shrink-0 px-4 whitespace-nowrap"
+            aria-label={`${e.boton.texto}: ${e.p.clienta}`}
+          >
+            {e.boton.texto}
+          </Button>
+        ) : null}
+      </div>
     </li>
   )
 }
@@ -731,7 +836,9 @@ function PorRepartidor({
   setHoja,
   caja,
   setCaja,
+  angosto,
 }: {
+  angosto?: boolean
   fecha: string
   dia: Ent[]
   ents: Ent[]
@@ -756,7 +863,7 @@ function PorRepartidor({
     },
   ].filter((g) => g.lista.length || (g.rep && hoy))
   return (
-    <div className="flex flex-col gap-5 xl:grid xl:grid-cols-2 xl:items-start">
+    <div className={cn("flex flex-col gap-5", !angosto && "xl:grid xl:grid-cols-2 xl:items-start")}>
       {grupos.map((g) => {
         const falta = g.rep ? (faltas[fecha] ?? []).includes(g.rep) : false
         const plata = g.rep ? plataDe(dia, g.rep) : null
@@ -847,13 +954,7 @@ function PorRepartidor({
             ) : g.lista.length ? (
               <ol className="flex flex-col gap-2">
                 {g.lista.map((e, i) => (
-                  <Tarjeta
-                    key={e.p.id}
-                    e={e}
-                    abrir={abrir}
-                    orden={g.rep ? i + 1 : undefined}
-                    nota={e.estado === "no_entregado" ? `${e.p.noEntregado}` : undefined}
-                  />
+                  <Tarjeta key={e.p.id} e={e} abrir={abrir} orden={g.rep ? i + 1 : undefined} />
                 ))}
               </ol>
             ) : (
@@ -876,7 +977,6 @@ function SemanaTablero({
   ents,
   faltas,
   abrir,
-  accion,
   abrirDia,
 }: Comun & { lunes: string; fecha: string; abrirDia: (f: string) => void }) {
   const dias = semanaDe(lunes)
@@ -889,17 +989,16 @@ function SemanaTablero({
   return (
     <div className="flex flex-col gap-4">
       {toca.length ? (
-        <section
-          aria-label="Te toca esta semana"
-          className="flex flex-col gap-2 rounded-2xl border border-warning/40 bg-warning-soft/50 p-3"
+        <Button
+          variant="outline"
+          className="h-11 self-start border-warning/50 bg-warning-soft/60"
+          onClick={() =>
+            document.getElementById("te-toca-semana")?.scrollIntoView({ behavior: "smooth" })
+          }
         >
-          <h3 className="px-1 text-sm font-semibold">Te toca esta semana · {toca.length}</h3>
-          <ul className="grid grid-cols-2 gap-2 2xl:grid-cols-3">
-            {toca.map((e) => (
-              <TeToca key={e.p.id} e={e} abrir={abrir} accion={accion} />
-            ))}
-          </ul>
-        </section>
+          <UserRound aria-hidden className="text-warning" />
+          Te toca esta semana: {toca.length}
+        </Button>
       ) : null}
       <div
         role="grid"
@@ -933,8 +1032,18 @@ function SemanaTablero({
                   : l.length
                     ? `${l.length} ${l.length === 1 ? "entrega" : "entregas"}`
                     : "—"}
-                {l.some((e) => e.estado === "no_entregado") ? " · 1 vuelve" : ""}
               </span>
+              {l.length && !fer ? (
+                <span className="mt-1 flex h-1.5 w-full gap-px overflow-hidden rounded-full" aria-hidden>
+                  {porEtapa(l).map(({ et, n }) => (
+                    <span
+                      key={et}
+                      style={{ flexGrow: n }}
+                      className={cn("h-full", PUNTO[ETAPA[et].tono].replace(/ring-\S+/g, ""))}
+                    />
+                  ))}
+                </span>
+              ) : null}
             </button>
           )
         })}
@@ -951,10 +1060,32 @@ function SemanaTablero({
           />
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Arrastra una entrega a otro día o franja, o ábrela y usa «Pasar a…». Toca el día para verlo
-        por repartidor.
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {porEtapa(ents.filter((e) => dias.includes(e.fecha))).map(({ et }) => (
+          <span key={et} className="inline-flex items-center gap-1">
+            <Punto et={et} />
+            {ETAPA[et].label}
+          </span>
+        ))}
+        <span className="basis-full">
+          Arrastra una entrega a otro día o franja: se abre su cajón con «Pasar a…» ya lleno. Toca
+          el día para verlo por repartidor.
+        </span>
       </p>
+      {toca.length ? (
+        <section
+          id="te-toca-semana"
+          aria-label="Te toca esta semana"
+          className="flex flex-col gap-2 rounded-2xl border border-warning/40 bg-warning-soft/50 p-3"
+        >
+          <h3 className="px-1 text-sm font-semibold">Te toca esta semana · {toca.length}</h3>
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(22rem,1fr))] gap-2">
+            {toca.map((e) => (
+              <Tarjeta key={e.p.id} e={e} abrir={abrir} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   )
 }

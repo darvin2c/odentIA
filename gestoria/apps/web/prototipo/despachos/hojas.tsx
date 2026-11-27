@@ -1,8 +1,7 @@
-import { Badge, Button, Checkbox, cn, Input, toast } from "@odentia/ui"
-import { DetailDrawer, FormDrawer, RadioChips } from "@odentia/ui-patterns"
+import { Checkbox, cn, Input, toast } from "@odentia/ui"
+import { FormDrawer, RadioChips } from "@odentia/ui-patterns"
 import { ChevronLeft, ChevronRight, CircleAlert, MessageCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
-import { queSigue } from "../pedidos/detalle"
 import { avisar, money, mover, type Pedido, pedidosDe } from "../pedidos/modelo"
 import { useRuta } from "../ruta"
 import { TiraDias } from "./gestos"
@@ -10,7 +9,6 @@ import {
   CUPO,
   corto,
   type Ent,
-  ESTADO,
   entregasDe,
   etiqueta,
   type Faltas,
@@ -194,89 +192,6 @@ function Campo({
       {children(id)}
       {help ? <p className="text-xs text-muted-foreground">{help}</p> : null}
     </div>
-  )
-}
-
-/* ---------- La entrega: la acción rápida ---------- */
-
-export function EntregaHoja({
-  e,
-  onClose,
-  onPasar,
-  onAccion,
-  onVerPedido,
-}: {
-  e: Ent
-  onClose: () => void
-  onPasar: () => void
-  onAccion: (e: Ent) => void
-  onVerPedido: () => void
-}) {
-  const s = queSigue(e.p)
-  const x = e.p.entrega
-  return (
-    <DetailDrawer
-      open
-      onClose={onClose}
-      title={`${e.p.clienta} · ${e.p.id}`}
-      description={`${x.zona} · ${x.dia === "Hoy" ? "hoy" : largo(e.fecha)}${x.franja ? ` · ${x.franja}` : ""}`}
-      footer={
-        <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="outline" className="h-11" onClick={onVerPedido}>
-            Ver el pedido
-          </Button>
-          {e.estado !== "entregado" && e.estado !== "en_camino" ? (
-            <Button variant="outline" className="h-11" onClick={onPasar}>
-              Pasar a…
-            </Button>
-          ) : null}
-          {e.boton ? (
-            <Button className="h-11" onClick={() => onAccion(e)}>
-              {e.boton.texto}
-            </Button>
-          ) : null}
-        </div>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-3">
-          <Foto e={e} className="size-16" />
-          <div className="flex min-w-0 flex-col gap-1">
-            <span className="font-medium">
-              {e.p.lineas.map((l) => `${l.nombre} · ${l.variante}`).join(", ")}
-            </span>
-            <span className="flex flex-wrap items-center gap-2 text-sm">
-              <Badge variant={ESTADO[e.estado].tono}>{ESTADO[e.estado].label}</Badge>
-              <Cobro e={e} />
-            </span>
-          </div>
-        </div>
-        <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">Dirección</dt>
-          <dd>{x.direccion}</dd>
-          <dt className="text-muted-foreground">Quién lo lleva</dt>
-          <dd>
-            {x.tipo === "agencia"
-              ? `${x.agencia ?? "Agencia"}${x.numero ? ` · N.º ${x.numero}` : " · falta el número"}`
-              : (x.repartidor ?? "Nadie todavía")}
-          </dd>
-          {e.p.noEntregado ? (
-            <>
-              <dt className="text-muted-foreground">No se entregó</dt>
-              <dd>{e.p.noEntregado}</dd>
-            </>
-          ) : null}
-        </dl>
-        <p
-          className={cn(
-            "rounded-xl px-3 py-2.5 text-sm",
-            s.persona ? "bg-warning-soft text-foreground" : "bg-muted",
-          )}
-        >
-          {s.texto}
-        </p>
-      </div>
-    </DetailDrawer>
   )
 }
 
