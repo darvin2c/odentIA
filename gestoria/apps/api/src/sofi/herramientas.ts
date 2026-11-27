@@ -30,7 +30,7 @@ import {
   quoteOrderIn,
   variantPrices,
 } from "../pedidos.js"
-import { autoUnitCents } from "../precio.js"
+import { autoUnitCents, floorOf } from "../precio.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
@@ -494,7 +494,7 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
     }
     const fromPrice = (id: string) => {
       const own = byProduct.get(id) ?? []
-      const inStock = own.filter((v) => v.stock > 0)
+      const inStock = own.filter((v) => v.stock > 0 || v.sellsWithoutStock)
       const prices = (inStock.length ? inStock : own).map((v) => autoUnitCents(v.pricing, 1))
       if (prices.length === 0) return null
       const low = Math.min(...prices)
@@ -517,7 +517,11 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
         const own = byProduct.get(p.id) ?? []
         const first = own[0]!
         const price = fromPrice(p.id)!
-        if (first.pricing.percentOff) ctx.trace.percents.add(first.pricing.percentOff)
+        // La promoción puede ser de un color o de una talla: cuenta la de cada variante.
+        for (const v of own) if (v.pricing.percentOff) ctx.trace.percents.add(v.pricing.percentOff)
+        const promoted = own.filter((v) => v.promotion)
+        const wholeProduct =
+          promoted.length === own.length && new Set(promoted.map((v) => v.promotion)).size === 1
         // Lo que dice la descripción («100 % cuero») también se puede repetir.
         for (const percent of percentsIn(p.description)) ctx.trace.percents.add(percent)
         return {
@@ -526,7 +530,7 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
           categoria: p.category,
           descripcion: p.description.slice(0, 400),
           precio: `${price.varies ? "desde " : ""}${money(price.low)}`,
-          ...(first.promotion
+          ...(wholeProduct
             ? { promocion: `${first.promotion} (${first.pricing.percentOff} % menos, ya incluido)` }
             : {}),
           ...(first.pricing.quantityPrices.length
@@ -537,7 +541,11 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
                 ),
               }
             : {}),
-          se_negocia: first.pricing.minPriceCents !== null,
+          // En liquidación o sin mínimo no se negocia (la misma regla del precio).
+          se_negocia: own.some((v) => {
+            const auto = autoUnitCents(v.pricing, 1)
+            return floorOf(v.pricing, auto) < auto
+          }),
           variantes: own.map((v) => {
             const unit = autoUnitCents(v.pricing, 1)
             if (v.pricing.listUnitCents !== unit) money(v.pricing.listUnitCents)
@@ -546,7 +554,10 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
               opciones: v.variantName,
               precio: money(unit),
               stock: v.stock,
-              ...(v.stock === 0 ? { agotada: true } : {}),
+              ...(v.stock === 0 && !v.sellsWithoutStock ? { agotada: true } : {}),
+              ...(v.promotion && !wholeProduct
+                ? { promocion: `${v.promotion} (${v.pricing.percentOff} % menos, ya incluido)` }
+                : {}),
             }
           }),
           parecido: related(p.id, "parecido"),
@@ -563,7 +574,7 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
 async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const input = await toOrderInput(tx, ctx, args)
-    const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
+    const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today, { byAgent: true })
     if (!result.quote) return { ok: false, problemas: problemsOf(result.fields, input) }
     const q = result.quote
     const problem = offerProblem(
@@ -616,7 +627,7 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
 async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchema>) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const input = await toOrderInput(tx, ctx, args, args)
-    const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
+    const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today, { byAgent: true })
     if (!priced.quote) return { ok: false, problemas: problemsOf(priced.fields, input) }
     const problem = offerProblem(
       ctx.offer,

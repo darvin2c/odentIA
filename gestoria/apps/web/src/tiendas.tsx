@@ -44,7 +44,6 @@ import {
   SubmitButton,
   useAppForm,
   useFormSurface,
-  useHeaderCompact,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
@@ -52,12 +51,10 @@ import {
   ArrowLeft,
   Banknote,
   ChartColumn,
-  CircleHelp,
   Copy,
   CreditCard,
   House,
   KeyRound,
-  LifeBuoy,
   MailOpen,
   MessageCircle,
   Package,
@@ -79,6 +76,7 @@ import {
   useState,
 } from "react"
 import { z } from "zod"
+import { HelpMenuItem, StoreHelpButton } from "./ayuda"
 import {
   ApiError,
   api,
@@ -97,7 +95,6 @@ import { configEntryFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { DraftGuard } from "./lib/draft-guard"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
-import { AskForHelpSheet } from "./pedir-ayuda"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
 export function useMe() {
@@ -159,31 +156,6 @@ function OpeningFailed({ error, onRetry }: { error: unknown; onRetry: () => void
         />
       </div>
     </div>
-  )
-}
-
-/**
- * Abre «Pedir ayuda» de la tienda, o `null` si el rol de quien está no pide ayuda (soporte). Es un
- * solo panel para la cabecera y la Ayuda, montado en el armazón: lo escrito sin enviar sigue ahí
- * al volver a abrirlo, desde cualquier pantalla de la tienda.
- */
-const AskForHelpContext = createContext<(() => void) | null>(null)
-
-export function useAskForHelp(): (() => void) | null {
-  return useContext(AskForHelpContext)
-}
-
-/**
- * «Pedir ayuda» en la cabecera, para todo el equipo (`ayuda.pedir`; lienzo «gestorIA como
- * odentIA», tablero 19): abre «Pedir ayuda» ahí mismo, con la pantalla en la que está.
- */
-function AskForHelp({ onOpen }: { onOpen: () => void }) {
-  const compact = useHeaderCompact()
-  return (
-    <Button variant="outline" className="elevated h-9 gap-2 rounded-full px-3" onClick={onOpen}>
-      <LifeBuoy className="size-4" aria-hidden />
-      <span className={compact ? "sr-only" : "max-md:sr-only"}>Pedir ayuda</span>
-    </Button>
   )
 }
 
@@ -345,9 +317,6 @@ export function Shell({
   children: ReactNode
 }) {
   const { pathname } = useLocation()
-  const [asking, setAsking] = useState(false)
-  const canAsk = store?.permissions.includes("ayuda.pedir") ?? false
-  const openAsk = useMemo(() => (canAsk ? () => setAsking(true) : null), [canAsk])
   // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
   const live = authClient.useSession().data?.user
   const canDispatch = store?.permissions.includes("entregas") ?? false
@@ -409,39 +378,27 @@ export function Shell({
       }
       onSignOut={() => void signOut()}
     >
-      <AskForHelpContext.Provider value={openAsk}>
+      {/* La columna lateral, como en las clínicas: en una ventana ancha, lo que se abre al lado (la
+          Ayuda, un formulario de la cuenta) va a la derecha de la página, que le cede el ancho, y
+          salir con algo escrito pregunta antes. La Ayuda (ADR 0227) está en la cabecera de cada
+          pantalla de la tienda; con la fila compacta (el teléfono), en su menú ⋯. */}
+      <SideDockProvider draftGuard={DraftGuard}>
         <HeaderUtilitiesProvider
-          value={{
-            // En la Ayuda, «Pedir ayuda» ya es el botón de la página.
-            utilities:
-              openAsk && !pathname.endsWith("/ayuda") ? <AskForHelp onOpen={openAsk} /> : undefined,
-          }}
+          value={
+            store
+              ? { utilities: <StoreHelpButton store={store} />, menuItems: <HelpMenuItem /> }
+              : {}
+          }
         >
-          {/* La columna lateral de los formularios y detalles, la de las clínicas: al lado de la
-              página, sin taparla, con el aviso de borrador al salir por el menú. */}
-          <SideDockProvider draftGuard={DraftGuard}>
-            <div className="flex min-w-0 flex-1">
-              <div className="flex min-w-0 flex-1 flex-col">
-                {bare ? (
-                  children
-                ) : (
-                  <PageShell className="flex flex-col gap-6">{children}</PageShell>
-                )}
-              </div>
-              <SideDockSlot />
+          {/* La estructura no cambia al abrir o cerrar la columna: la página nunca se remonta. */}
+          <div className="flex min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
             </div>
-          </SideDockProvider>
+            <SideDockSlot />
+          </div>
         </HeaderUtilitiesProvider>
-        {/* Uno por tienda: lo escrito en una no aparece en otra. */}
-        {store && openAsk ? (
-          <AskForHelpSheet
-            key={store.id}
-            store={store}
-            open={asking}
-            onClose={() => setAsking(false)}
-          />
-        ) : null}
-      </AskForHelpContext.Provider>
+      </SideDockProvider>
     </AppShell>
   )
 }
@@ -707,8 +664,8 @@ export function useStoreContext() {
 /**
  * El menú del día (lienzo «gestorIA como odentIA», tablero 4): arriba lo diario, con Inicio
  * primero y Despachos antes de Pedidos, y en «Gestión» lo que se mira de la tienda, con Caja. Solo
- * lo que ya existe: la Bandeja se suma cuando llegue su pantalla, en su lugar. Configuración y
- * Ayuda van al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no
+ * lo que ya existe: la Bandeja se suma cuando llegue su pantalla, en su lugar. Configuración va
+ * al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no
  * sale.
  */
 function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
@@ -759,17 +716,14 @@ function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
 
 /**
  * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas ve solo sus
- * avisos al celular: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
+ * avisos al celular: no ve lo que no puede tocar). La Ayuda está en la cabecera.
  */
 function storeFooter(store: MyStore): AppShellNavItem[] {
   // Abre en «Lo que falta» o, si no la ve, en lo primero suyo: a Ventas, sus avisos al celular.
   const first = configEntryFor(store)
-  return [
-    ...(first
-      ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
-      : []),
-    { label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp },
-  ]
+  return first
+    ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
+    : []
 }
 
 /**

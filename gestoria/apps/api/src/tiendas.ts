@@ -44,7 +44,7 @@ import {
 
 export class StoreError extends Error {
   constructor(
-    readonly status: 400 | 403 | 404 | 409 | 429,
+    readonly status: 400 | 403 | 404 | 409 | 429 | 502 | 503,
     readonly code: string,
     message: string,
     readonly fields?: Record<string, string>,
@@ -65,6 +65,18 @@ const CONSTRAINT_ERRORS: Record<string, () => StoreError> = {
   product_variant_sku_uidx: () =>
     new StoreError(409, "SKU_TAKEN", "Ese código ya es de otra variante", {
       sku: "Ese código ya es de otra variante",
+    }),
+  product_store_code_uidx: () =>
+    new StoreError(409, "CODE_TAKEN", "Ese código ya es de otro producto", {
+      code: "Ese código ya es de otro producto",
+    }),
+  product_store_web_slug_uidx: () =>
+    new StoreError(409, "SLUG_TAKEN", "Ese nombre del link ya es de otro producto", {
+      webSlug: "Ese nombre del link ya es de otro producto",
+    }),
+  product_variant_barcode_uidx: () =>
+    new StoreError(409, "BARCODE_TAKEN", "Ese código de barras ya es de otra variante", {
+      barcode: "Ese código de barras ya es de otra variante",
     }),
   product_variant_stock_check: () =>
     new StoreError(409, "NOT_ENOUGH_STOCK", "No alcanza el stock para ese movimiento"),

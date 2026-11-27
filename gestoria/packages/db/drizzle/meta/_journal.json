@@ -239,6 +239,34 @@
       "when": 1795805419993,
       "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795810587036,
+      "tag": "0034_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795810617339,
+      "tag": "0035_reglas_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795811411690,
+      "tag": "0036_el_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795811414235,
+      "tag": "0037_reglas_precio_de_la_ficha",
+      "breakpoints": true
     }
   ]
 }

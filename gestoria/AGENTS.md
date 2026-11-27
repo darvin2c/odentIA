@@ -57,11 +57,30 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `costos.ver`: la API no se lo devuelve a Ventas.
 - Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
 
+## La ficha del producto (lienzo «La ficha del producto»)
+
+- Las plantillas de los rubros son fijas en `apps/api/src/rubros.ts`; la tienda guarda solo lo que
+  ajusta (`store_template_field`). Los datos del rubro se validan contra esa plantilla, con «No
+  aplica». Lo que falta nunca frena una venta: es el nivel de `readinessOf`, calculado en la API.
+- Qué colores hay y su orden son los valores de la opción del color (`product.color_option`);
+  `product_color` guarda solo su hex y la foto que manda Sofi. No hay dos listas de colores.
+- «Tallas y stock» (`ficha.ts`, `saveGrid`) guarda todo de una vez: cambiar un nombre no rehace
+  la variante y el stock entra al kardex (subir es entrada; bajar o quitar con stock pide motivo).
+- El estado lo pone la tienda (encargo, cupo, preventa, liquidación, ya no se vende); disponible
+  y agotado salen del stock (`saleStateOf`). Por encargo, cupo o preventa se anota sin stock; lo
+  que ya no se vende no entra a un pedido nuevo. El cupo por día todavía no se cuenta.
+- El precio de revendedora, el combo, las promociones de un color o una talla y la liquidación
+  son opciones de `autoUnit`/`floorOf` en `precio.ts`; lo que Sofi puede ofrecer de cada producto
+  solo la frena a ella (`byAgent`). El simulador es `lowestQuote`: nunca otra cuenta.
+- Lo que Sofi no supo (`preguntas.ts`): Sofi solo anota la pregunta; Ventas responde y propone
+  guardarla; quien tiene `configuracion` la guarda en la ficha. Cada cambio de la ficha va al
+  historial (`product_event`), campo por campo, con la forma de `productPatch`.
+
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
 - El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en
-  «Gestión», Catálogo, Caja y Reportes); al pie, Configuración y Ayuda. Una pantalla nueva entra en
-  su lugar del tablero 4, no antes.
+  «Gestión», Catálogo, Caja y Reportes); al pie, Configuración. La Ayuda está en la cabecera, no en
+  el menú. Una pantalla nueva entra en su lugar del tablero 4, no antes.
 - Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`, con nombres
   de tarea (Tu tienda, Vender, Conexiones, Tu equipo, Para ti, Tu cuenta gestorIA): cada apartado
   lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
@@ -247,17 +266,33 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`supportStateOf`); a cualquier otra persona, 404. «Salir» termina solo la entrada, nunca la
   sesión. Ventas ve solo quién mira y hasta cuándo; soporte no ve la lista de soporte.
 
-## La Ayuda (entrega 7 del lienzo «gestorIA como odentIA»)
+## La Ayuda (entrega 7 del lienzo «gestorIA como odentIA»; ADR 0227)
 
-- La guía es `apps/api/src/ayuda.ts`: una pregunta por tarea, solo de lo que gestorIA hace hoy. Un
-  cambio de pantalla, botón o permiso cambia su respuesta en el mismo cambio, y una pantalla nueva
-  suma su pregunta. Quién puede sale de `needs` con `permisos.ts`, nunca del texto; lo que va entre
-  «» existe en la pantalla (lo prueban `apps/api/src/ayuda.test.ts`, si cambia la guía, y
-  `apps/web/src/lib/ayuda-guia.test.ts`, si cambia la pantalla).
-- «Pedir ayuda» es de todo el equipo (`ayuda.pedir`; soporte no), en la cabecera y en la Ayuda,
-  con la pantalla y el rol de quien pregunta: sale por `soporte.pedido` a la Bandeja de la
-  administración. Cada persona ve solo sus preguntas y respuestas (`helpView`, ADR 0221); «Plan y
-  pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de `plan`.
+- Es la misma de las clínicas: el botón «Ayuda» de la cabecera abre el panel común (`HelpButton`
+  de `@odentia/ui-patterns`, en `apps/web/src/ayuda.tsx`) con Ariadna; en el teléfono, o si la
+  fila no cabe, va en el menú ⋯. No hay página `/ayuda`, ni «Ayuda» en el menú, ni otro botón para
+  escribir a soporte. Abierta en una ventana ancha va en la columna lateral (`SideDockProvider` del
+  armazón) y le quita ancho a la página: una tabla mira su propio ancho (`@container`, como
+  Pedidos), no el de la ventana, y pasa a tarjetas si no cabe.
+- La guía es `apps/api/src/ayuda.ts`, la única fuente: una pregunta por tarea, solo de lo que
+  gestorIA hace hoy, y cada pantalla de `HELP_SCREENS` con su `purpose` y sus `terms` para
+  Ariadna. Un cambio de pantalla, botón o permiso cambia su respuesta en el mismo cambio, y una
+  pantalla nueva suma su pregunta. Quién puede sale de `needs` con `permisos.ts`, nunca del texto;
+  lo que va entre «» existe en la pantalla (lo prueban `apps/api/src/ayuda.test.ts`, si cambia la
+  guía, y `apps/web/src/lib/ayuda-guia.test.ts`, si cambia la pantalla).
+- El servidor responde al panel en `/api/tiendas/:id/ayuda` (`screen`, `ask`, `ask/:id/feedback`,
+  `ask/:id/none`, `requests` y `casos`). Cada pregunta lleva la guía entera, firmada, a Ariadna en
+  la administración (`CONTRACT_PATHS.help`, `askAriadna`), sin nada de la tienda ni de la persona;
+  vuelve en ids de la guía y aquí se hace texto para el rol (`helpReplyOf`): la pantalla solo si
+  el rol la abre y, si no puede hacerlo, a quién pedírselo. Sin el acuerdo o si la administración
+  no responde, solo se responde una pregunta que es exactamente de la guía; lo demás, «Ahora no
+  puedo buscar bien en la guía.». Lo que dice la persona de una respuesta va a
+  `CONTRACT_PATHS.helpFeedback`; si no llega, se dice (502/503).
+- Escribir a soporte desde la Ayuda es de todo el equipo (`ayuda.pedir`; soporte no), con la
+  pantalla y el rol: sale por `soporte.pedido` a la Bandeja de la administración. «Tus casos con
+  soporte», dentro del panel, muestra a cada persona solo lo suyo y sus respuestas (`helpCases`,
+  ADR 0221); «Plan y pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de
+  `plan`. La administración no dice qué respuestas se leyeron: el botón no lleva número.
 
 ## Los avisos al celular (entrega 5 del lienzo «gestorIA como odentIA»; ADR 0229)
 
@@ -280,11 +315,29 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   de `apps/web` de las clínicas (lo vigila `src/lib/limites.test.ts`).
 - Existen siempre `/terminos`, `/privacidad` y `/contacto`: los enlazan los correos de la cuenta.
   El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
-- Solo dice lo que gestorIA ya hace. Sin precios hasta que el usuario defina los planes. Términos y
+- Solo dice lo que gestorIA hace; lo que todavía no existe va como «pronto» y nunca se muestra como
+  pantalla. El precio es el que definió el usuario: USD 19 al mes, que vuelven como saldo, más el
+  1 % de cada pedido que gestorIA genera sola. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
-  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda».
+  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda» cuando el usuario lo
+  decida. «Entrar» lleva al ingreso de la app.
+- Las páginas del plan están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
+  la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
+- El diseño es propio (web v5, versión clara del lienzo): `src/styles/base.css` (blanco, grises
+  neutros, naranja vivo #FE4F02 en superficies y #CF3C00 en botones y textos chicos; Geist fina con
+  la palabra clave en Instrument Serif cursiva), `inicio.css` y `paginas.css`. La cabecera es transparente sobre el héroe y blanca con desenfoque al bajar. Las
+  pantallas de la app son capturas reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras
+  y con `astro:assets`; nunca dibujadas ni recortadas. El chat del héroe va en código: es lo que ve
+  la clienta, no la app.
+- Sofi es el objeto vivo de la web: un globo de chat de vidrio naranja con un shader propio
+  (`src/scripts/sofi.ts`, three.js cargado aparte), en un solo lienzo fijo que viaja a cada
+  `[data-sofi]` (su valor es el humor): flota, da saltitos, mueve la colita al hablar y da una vuelta
+  al festejar. El chat del héroe se puede tocar y dice que sus respuestas son de muestra. El mar de
+  puntos de los rubros es WebGL puro (`src/scripts/puntos.ts`). El movimiento del Inicio es GSAP con ScrollTrigger y Lenis
+  (`src/scripts/inicio.ts`): sin JavaScript o con «reducir movimiento», la página está completa y
+  quieta (lo que se esconde para entrar depende de la clase `mueve`).
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
 
 ## Las piezas comunes

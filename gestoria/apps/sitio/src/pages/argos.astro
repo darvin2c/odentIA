@@ -1,0 +1,112 @@
+---
+// Argos (web v5): el administrador de gestorIA, con lo que hace hoy (apps/api/src/sofi/argos.ts y
+// Reportes): le encarga a Sofi los seguimientos de rutina (recordar el pago, agradecer, avisar que
+// volvió una talla, invitar a volver), te trae lo delicado a «Te toca» y cuenta lo vendido. Las
+// cifras salen de cálculos fijos, no del modelo. Las promociones a la medida van como «pronto».
+import isotipo from "../assets/isotipo.svg?raw"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+
+const marca = isotipo
+  .replace(/ role="[^"]*"/, "")
+  .replace(/ aria-label="[^"]*"/, "")
+  .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
+
+const poderes = [
+  {
+    t: "Vende",
+    d: "Le encarga a Sofi los mensajes que venden: recordar el pago a quien no pagó, agradecer y preguntar si llegó, avisar cuando vuelve la talla que pidieron e invitar a volver a quien no compra hace dos meses. Uno por clienta, nunca masivos.",
+  },
+  {
+    t: "Cuida el stock",
+    d: "Te dice qué reponer, con cuántas personas lo pidieron, y qué pedido pagado espera mercadería para salir.",
+  },
+  {
+    t: "Conoce a tus clientas",
+    d: "En Reportes ves quién volvió a comprar, lo más vendido, lo que se acaba y lo que hizo Sofi.",
+  },
+  {
+    t: "Administra lo delicado",
+    d: "Lo que pide una persona te lo trae a «Te toca»: un pago por confirmar o que no coincide, o una conversación que Sofi te pasó.",
+  },
+]
+const hoy = [
+  {
+    t: "Le pedí a Sofi 3 mensajes para recordar el pago",
+    d: "Salen solos, uno por clienta",
+    c: "#3ddc84",
+  },
+  {
+    t: "Le pedí a Sofi 2 mensajes para avisar que volvió",
+    d: "La Sandalia beige 37 ya tiene stock",
+    c: "#3ddc84",
+  },
+  {
+    t: "Reponer Zapatilla urbana blanca 38",
+    d: "Se acabó y 2 personas la pidieron. Cuando entre, Sofi les avisa sola.",
+    c: "#fe4f02",
+  },
+  {
+    t: "Te toca: confirmar un pago",
+    d: "Pedido 0008 de Carla Mendoza, S/ 120 por Yape (captura)",
+    c: "#ffc247",
+  },
+  {
+    t: "Una conversación espera a una persona",
+    d: "Rocío pregunta por un cambio de talla",
+    c: "#ffc247",
+  },
+]
+---
+<Base
+  title="Argos: el administrador que vende, cuida y ordena tu tienda"
+  description="Argos le encarga a Sofi los mensajes que venden, te dice qué reponer, te muestra quién vuelve a comprar y te trae a «Te toca» lo que pide una persona."
+>
+  <PaginaHeroe
+    etiqueta="Argos"
+    titulo="Argos administra tu tienda"
+    acento="mientras vendes"
+    bajada="Vigila pedidos, pagos, stock y chats. Lo de rutina se lo encarga a Sofi y sale solo; lo delicado te lo trae a «Te toca»."
+  >
+    <div class="p-radar" slot="visual" aria-hidden="true">
+      <span class="p-radar__barrido"></span>
+      <span class="p-radar__ojo"><Fragment set:html={marca} /></span>
+    </div>
+  </PaginaHeroe>
+  <section class="p-bloques" aria-labelledby="hace-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Lo que hace</p>
+        <h2 id="hace-h" class="titulo-2">Vende, cuida, conoce <span class="cur">y ordena</span></h2>
+      </div>
+      <ul class="p-bloques__lista">
+        {poderes.map((p) => <li class="p-bloque" data-aparece><h3>{p.t}</h3><p>{p.d}</p></li>)}
+        <li class="p-bloque" data-aparece><h3>Promociones</h3><p>Promociones a la medida de cada clienta.</p><p><span class="pronto">Pronto</span></p></li>
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="hoy-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Un día con Argos</p>
+        <h2 id="hoy-h" class="titulo-2">Abres la app <span class="cur">y ya está hecho</span></h2>
+        <p class="bajada">Lo que Argos le encargó a Sofi y lo que te toca a ti, en un solo lugar. Las cifras salen de tus pedidos, no se inventan.</p>
+      </div>
+      <ul class="p-alertas" aria-label="Ejemplo de un día con Argos">
+        {hoy.map((a) => (
+          <li class="p-alerta" data-aparece><i style={`background:${a.c}`}></i><span><b>{a.t}</b><small>{a.d}</small></span></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques" aria-labelledby="decides-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Con control humano</p>
+        <h2 id="decides-h" class="titulo-2">Argos propone, <span class="cur">tú decides</span></h2>
+        <p class="bajada">Eliges qué seguimientos le encarga a Sofi. Confirmar un pago o entregar sigue siendo de una persona.</p>
+      </div>
+      <span class="p-heroe__sofi" data-sofi="feliz" data-sofi-escala="0.5" aria-hidden="true"></span>
+    </div>
+  </section>
+</Base>

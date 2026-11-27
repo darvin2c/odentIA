@@ -1,46 +1,196 @@
+import type { HelpAskAnswer, HelpGuideTopic } from "@odentia/contract"
 import { can, ROLE_NAMES, type StorePermission, type StoreSeat } from "./permisos.js"
 
 /**
- * La guía de la Ayuda de gestorIA (entrega 7 del lienzo «gestorIA como odentIA», tablero 19): una
- * pregunta por tarea, con su respuesta y quién puede hacerla. Es la misma idea de la guía de las
- * clínicas (`packages/services/src/help-guide.ts`), sin sus pantallas: las de una tienda son otras.
- * Más adelante, el asistente que contesta solo responde desde aquí (decisión 6).
+ * La guía de la Ayuda de gestorIA (entrega 7 del lienzo «gestorIA como odentIA», tablero 19; ADR
+ * 0227): una pregunta por tarea, con su respuesta y quién puede hacerla. Es la misma idea de la
+ * guía de las clínicas (`packages/services/src/help-guide.ts`), sin sus pantallas: las de una
+ * tienda son otras. Ariadna, la de todas las apps, responde solo desde aquí: viaja entera en cada
+ * pregunta (`helpTopics`) y vuelve en ids de esta guía, que aquí se hacen texto (`helpReplyOf`).
  *
  * - Dice solo lo que gestorIA hace hoy. Lo que todavía no existe no se promete: se suma cuando
  *   llega su pantalla, en el mismo cambio.
  * - Quién puede hacerlo sale de `permisos.ts` (`needs`), nunca del texto: las respuestas no nombran
  *   roles (lo prueba `ayuda.test.ts`).
- * - Cada pregunta lleva a su pantalla, si el rol de quien lee puede abrirla.
+ * - Cada respuesta lleva a su pantalla, si el rol de quien lee puede abrirla.
  */
 
-/** Las pantallas de la tienda a las que lleva una respuesta: su ruta y lo que hace falta para abrirla. */
+/**
+ * Las pantallas de la tienda a las que lleva una respuesta: su ruta, lo que hace falta para
+ * abrirla y, para Ariadna, para qué sirve y con qué palabras la busca la gente.
+ */
 export const HELP_SCREENS = {
-  inicio: { label: "Inicio", path: "/", opens: "ventas.atender" },
-  despachos: { label: "Despachos", path: "/despachos", opens: "entregas" },
-  pedidos: { label: "Pedidos", path: "/pedidos", opens: "ventas.atender" },
-  catalogo: { label: "Catálogo", path: "/catalogo", opens: "catalogo.ver" },
-  caja: { label: "Caja", path: "/caja", opens: "caja" },
-  reportes: { label: "Reportes", path: "/reportes", opens: "reportes.ver" },
+  inicio: {
+    label: "Inicio",
+    path: "/",
+    opens: "ventas.atender",
+    purpose:
+      "Lo que toca hacer hoy en la tienda, con las cifras del día, y los primeros pasos de una tienda que empieza.",
+    terms: [
+      "inicio",
+      "hoy",
+      "pendientes",
+      "qué hago",
+      "primeros pasos",
+      "empezar",
+      "cifras del día",
+    ],
+  },
+  despachos: {
+    label: "Despachos",
+    path: "/despachos",
+    opens: "entregas",
+    purpose:
+      "Lo que sale cada día y quién lo lleva: marcar que salió o se entregó, el repartidor, la agencia, avisar a la clienta y lo que no se entregó.",
+    terms: [
+      "despachos",
+      "entregas",
+      "reparto",
+      "repartidor",
+      "delivery",
+      "agencia",
+      "número de envío",
+      "salió",
+      "no se entregó",
+      "otro día",
+    ],
+  },
+  pedidos: {
+    label: "Pedidos",
+    path: "/pedidos",
+    opens: "ventas.atender",
+    purpose:
+      "Los pedidos de la tienda: anotarlos, cobrarlos, confirmar sus pagos, corregirlos, anularlos y hacer cambios o devoluciones.",
+    terms: [
+      "pedidos",
+      "pedido",
+      "venta",
+      "cobrar",
+      "pago",
+      "captura",
+      "link de pago",
+      "anular",
+      "cambio",
+      "devolución",
+    ],
+  },
+  catalogo: {
+    label: "Catálogo",
+    path: "/catalogo",
+    opens: "catalogo.ver",
+    purpose:
+      "Los productos de la tienda con sus variantes, fotos, precios, precio mínimo, promociones y stock.",
+    terms: ["catálogo", "productos", "stock", "inventario", "kardex", "tallas", "fotos", "precio"],
+  },
+  caja: {
+    label: "Caja",
+    path: "/caja",
+    opens: "caja",
+    purpose:
+      "El efectivo por recibir de cada repartidor y de la tienda, lo cobrado del día por medio de pago y lo que falta cobrar en las entregas del día.",
+    terms: ["caja", "efectivo", "recibir", "cuadrar", "repartidor", "cobrado hoy", "arqueo"],
+  },
+  reportes: {
+    label: "Reportes",
+    path: "/reportes",
+    opens: "reportes.ver",
+    purpose:
+      "Lo vendido y cobrado, lo que falta cobrar, lo más vendido, lo que se acaba y lo que hicieron Sofi y Argos.",
+    terms: ["reportes", "cuánto vendí", "ventas del mes", "cifras", "estadísticas", "Argos"],
+  },
   // Configuración, al pie del menú: abre en «Lo que falta» y cada apartado lo abre quien puede
   // cambiarlo.
-  configuracion: { label: "Lo que falta", path: "/configuracion", opens: "configuracion" },
-  datos: { label: "Datos de la tienda", path: "/configuracion/datos", opens: "configuracion" },
-  marca: { label: "Tu marca", path: "/configuracion/marca", opens: "configuracion" },
+  configuracion: {
+    label: "Lo que falta",
+    path: "/configuracion",
+    opens: "configuracion",
+    purpose:
+      "La entrada de Configuración: lo que le falta a la tienda para vender, con su botón para hacerlo, y cómo está cada parte.",
+    terms: ["lo que falta", "configuración", "ajustes", "empezar a vender", "pendiente"],
+  },
+  datos: {
+    label: "Datos de la tienda",
+    path: "/configuracion/datos",
+    opens: "configuracion",
+    purpose: "El nombre de la tienda, su país y su hora.",
+    terms: [
+      "configuración",
+      "datos de la tienda",
+      "nombre",
+      "hora",
+      "zona horaria",
+      "país",
+      "moneda",
+    ],
+  },
+  marca: {
+    label: "Tu marca",
+    path: "/configuracion/marca",
+    opens: "configuracion",
+    purpose: "El logo, el color, la foto de portada y el nombre del link de la tienda.",
+    terms: ["marca", "logo", "color", "portada", "link de la tienda"],
+  },
   equipo: {
     label: "Equipo y repartidores",
     path: "/configuracion/equipo",
     opens: "equipo.gestionar",
+    purpose:
+      "Quiénes trabajan en la tienda y con qué rol, sus invitaciones y quién de soporte miró la tienda.",
+    terms: ["equipo", "invitar", "roles", "usuarios", "permisos", "soporte"],
   },
-  sofi: { label: "Sofi", path: "/configuracion/sofi", opens: "configuracion" },
-  pagos: { label: "Cobros", path: "/configuracion/medios-de-pago", opens: "configuracion" },
-  entregas: { label: "Entregas", path: "/configuracion/entregas", opens: "configuracion" },
-  avisos: { label: "Avisos al celular", path: "/configuracion/avisos", opens: "avisos.recibir" },
-  plan: { label: "Plan y pagos", path: "/configuracion/plan", opens: "plan" },
-} as const satisfies Record<string, { label: string; path: `/${string}`; opens: StorePermission }>
+  sofi: {
+    label: "Sofi",
+    path: "/configuracion/sofi",
+    opens: "configuracion",
+    purpose:
+      "Cómo vende Sofi, la vendedora de la tienda: lo que debe saber, sus seguimientos y la prueba escribiéndole como cliente.",
+    terms: ["Sofi", "vendedora", "asistente", "bot", "probar", "seguimientos", "horario"],
+  },
+  pagos: {
+    label: "Cobros",
+    path: "/configuracion/medios-de-pago",
+    opens: "configuracion",
+    purpose:
+      "Los medios de pago que ofrece Sofi (Yape, Plin, transferencias) y la conexión con Mercado Pago para los links de pago.",
+    terms: ["medios de pago", "Yape", "Plin", "transferencia", "cuenta bancaria", "Mercado Pago"],
+  },
+  entregas: {
+    label: "Entregas",
+    path: "/configuracion/entregas",
+    opens: "configuracion",
+    purpose:
+      "Las formas de entrega (reparto, recojo en tienda o agencia), su precio por zona, cuándo llega y desde qué compra es gratis.",
+    terms: ["entregas", "envío", "delivery", "zonas", "agencia", "recojo", "costo de envío"],
+  },
+  avisos: {
+    label: "Avisos al celular",
+    path: "/configuracion/avisos",
+    opens: "avisos.recibir",
+    purpose:
+      "Recibir en el celular los avisos de lo que tu rol puede resolver (pagos por confirmar, chats, entregas), aunque gestorIA esté cerrada, y elegir cuáles.",
+    terms: ["avisos", "notificaciones", "celular", "push", "instalar", "alertas"],
+  },
+  plan: {
+    label: "Plan y pagos",
+    path: "/configuracion/plan",
+    opens: "plan",
+    purpose: "El plan de la tienda, lo que se le cobró, sus pagos y los comprobantes.",
+    terms: ["plan", "cobro", "pagar el plan", "comprobante", "suscripción", "factura"],
+  },
+} as const satisfies Record<
+  string,
+  {
+    label: string
+    path: `/${string}`
+    opens: StorePermission
+    purpose: string
+    terms: readonly string[]
+  }
+>
 export type HelpScreen = keyof typeof HELP_SCREENS
 
 export interface HelpFaq {
-  /** Su nombre fijo: no cambia aunque se reescriba la pregunta (`?pregunta=` de la Ayuda). */
+  /** Su nombre fijo, único en la guía: es el que vuelve de Ariadna (`faq:<id>`). */
   id: string
   q: string
   /** La respuesta, en párrafos cortos. */
@@ -515,39 +665,253 @@ export function whoCan(permission: StorePermission): string {
   return `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
 }
 
-/** Una respuesta como la ve quien lee: quién puede, si puede quien lee y su pantalla, si la abre. */
-export interface HelpFaqView {
-  id: string
-  q: string
-  a: readonly string[]
-  /** «Dueño, Administrador y Ventas». */
-  who: string
-  /** Cuántos roles pueden: para decir «Lo puede hacer» o «Lo pueden hacer». */
-  whoCount: number
-  /** Si el rol de quien lee puede hacerlo. */
-  you: boolean
-  /** Su pantalla, solo si quien lee puede abrirla. */
-  screen: { label: string; path: string } | null
+/* ---------- Lo que la Ayuda muestra y lo que Ariadna lee ---------- */
+
+const SCREEN_KEYS = Object.keys(HELP_SCREENS) as HelpScreen[]
+const FAQS = HELP_GUIDE.flatMap((group) => group.faqs)
+
+/** Lo que dice cuando no responde. */
+export const HELP_WORDS = {
+  notInGuide: "Esto no está en la guía, y no quiero inventarlo.",
+  cannotSearch: "Ahora no puedo buscar bien en la guía.",
+  doubt: "No estoy segura de qué preguntas. ¿Es alguna de estas?",
+} as const
+
+/** Una respuesta de la guía como la muestra el panel común (`helpReply` de la Ayuda). */
+export interface HelpAnswerText {
+  topicId: string
+  where: string
+  text: string
+  /** Su pantalla en la tienda, solo si el rol de quien pregunta la abre. */
+  path: string | null
+  /** Si su rol no puede hacerlo: a quién pedírselo. */
+  restriction: string | null
 }
 
-/** La guía para un rol: todas las preguntas (cada una dice quién puede), con lo suyo marcado. */
-export function helpGuideFor(
+/** Lo que responde la Ayuda, con la forma del panel común (`helpReply` de `@odentia/ui-patterns`). */
+export interface HelpReplyBody {
+  askId: string
+  kind: "guia" | "duda" | "nada" | "datos"
+  say: string | null
+  written: string | null
+  answers: HelpAnswerText[]
+  blockers: { text: string; where: string | null; path: string | null }[]
+  choices: { question: string; where: string }[]
+  /** gestorIA no tiene un agente de las cifras en la Ayuda. */
+  argos: false
+  argosNote: null
+  basedOn: string
+}
+
+/** La ruta dentro de la tienda, sin lo que va tras `?` o `#`: `/tiendas/<id>/pedidos` → `/pedidos`. */
+export function storePath(path: string, storeId: string): string {
+  const base = `/tiendas/${storeId}`
+  const bare = path.split(/[?#]/, 1)[0] ?? ""
+  const inside = bare === base || bare.startsWith(`${base}/`) ? bare.slice(base.length) : bare
+  return (inside.startsWith("/") ? inside : `/${inside}`).slice(0, 200)
+}
+
+/** La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. */
+export function helpScreenOf(path: string): HelpScreen | null {
+  let found: HelpScreen | null = null
+  for (const key of SCREEN_KEYS) {
+    const screen: string = HELP_SCREENS[key].path
+    const inside = screen === "/" ? path === "/" : path === screen || path.startsWith(`${screen}/`)
+    if (inside && (!found || screen.length > HELP_SCREENS[found].path.length)) found = key
+  }
+  return found
+}
+
+/** El nombre de la pantalla y hasta tres preguntas suyas que el rol de quien la abre puede hacer. */
+export function helpScreenView(
   seat: StoreSeat,
-): { id: string; title: string; faqs: HelpFaqView[] }[] {
-  return HELP_GUIDE.map((group) => ({
-    id: group.id,
-    title: group.title,
-    faqs: group.faqs.map((faq) => {
-      const screen = HELP_SCREENS[faq.screen]
-      return {
+  path: string,
+): { title: string | null; suggestions: string[] } {
+  const screen = helpScreenOf(path)
+  if (!screen) return { title: null, suggestions: [] }
+  return {
+    title: HELP_SCREENS[screen].label,
+    suggestions: FAQS.filter((faq) => faq.screen === screen && can(seat, faq.needs))
+      .slice(0, 3)
+      .map((faq) => faq.q),
+  }
+}
+
+/** La guía entera para Ariadna: un tema por pantalla, con sus preguntas. Nada de la tienda. */
+export function helpTopics(): HelpGuideTopic[] {
+  return SCREEN_KEYS.map((key) => {
+    const screen = HELP_SCREENS[key]
+    return {
+      id: key,
+      path: screen.path,
+      title: screen.label,
+      // Los apartados de Configuración cuelgan de ella en el menú.
+      parent: screen.path.startsWith("/configuracion") ? "Configuración" : null,
+      purpose: screen.purpose,
+      terms: [...screen.terms],
+      faqs: FAQS.filter((faq) => faq.screen === key).map((faq) => ({
         id: faq.id,
         q: faq.q,
-        a: faq.a,
-        who: whoCan(faq.needs),
-        whoCount: TEAM_ROLES.filter((role) => can(role, faq.needs)).length,
-        you: can(seat, faq.needs),
-        screen: can(seat, screen.opens) ? { label: screen.label, path: screen.path } : null,
-      }
-    }),
-  }))
+        a: faq.a.join("\n\n"),
+      })),
+    }
+  })
+}
+
+/** «Con tu rol (Ventas) no se puede: …», si el rol no tiene el permiso. */
+function restrictionFor(seat: StoreSeat, needs: StorePermission): string | null {
+  if (can(seat, needs)) return null
+  const many = TEAM_ROLES.filter((role) => can(role, needs)).length > 1
+  return `Con tu rol (${ROLE_NAMES[seat]}) no se puede: pídeselo a quien sí puede. ${many ? "Lo pueden hacer" : "Lo puede hacer"}: ${whoCan(needs)}.`
+}
+
+/** La pantalla en la tienda, si el rol la abre. */
+function pathFor(seat: StoreSeat, storeId: string, screen: HelpScreen): string | null {
+  const { path, opens } = HELP_SCREENS[screen]
+  if (!can(seat, opens)) return null
+  return `/tiendas/${storeId}${path === "/" ? "" : path}`
+}
+
+function isScreen(id: string): id is HelpScreen {
+  return Object.hasOwn(HELP_SCREENS, id)
+}
+
+/** Lo que la guía dice de un id de Ariadna (`faq:<id>` o `tema:<id>`) para ese rol; nulo si no es de la guía. */
+export function helpAnswerFor(
+  seat: StoreSeat,
+  storeId: string,
+  ref: string,
+): HelpAnswerText | null {
+  const at = ref.indexOf(":")
+  const kind = ref.slice(0, at)
+  const id = ref.slice(at + 1)
+  if (kind === "faq") {
+    const faq = FAQS.find((one) => one.id === id)
+    if (!faq) return null
+    return {
+      topicId: faq.screen,
+      where: HELP_SCREENS[faq.screen].label,
+      text: faq.a.join("\n\n"),
+      path: pathFor(seat, storeId, faq.screen),
+      restriction: restrictionFor(seat, faq.needs),
+    }
+  }
+  if (kind === "tema" && isScreen(id)) {
+    const screen = HELP_SCREENS[id]
+    return {
+      topicId: id,
+      where: screen.label,
+      text: screen.purpose,
+      path: pathFor(seat, storeId, id),
+      restriction: restrictionFor(seat, screen.opens),
+    }
+  }
+  return null
+}
+
+/** Una opción de la duda: tocarla pregunta su texto tal cual. */
+function choiceFor(ref: string): { question: string; where: string } | null {
+  const id = ref.slice(ref.indexOf(":") + 1)
+  if (ref.startsWith("faq:")) {
+    const faq = FAQS.find((one) => one.id === id)
+    return faq ? { question: faq.q, where: HELP_SCREENS[faq.screen].label } : null
+  }
+  if (ref.startsWith("tema:") && isScreen(id)) {
+    const { label } = HELP_SCREENS[id]
+    return { question: `¿Para qué sirve ${label}?`, where: label }
+  }
+  return null
+}
+
+function reply(
+  kind: HelpReplyBody["kind"],
+  parts: Partial<HelpReplyBody> & { askId: string },
+): HelpReplyBody {
+  return {
+    kind,
+    say: null,
+    written: null,
+    answers: [],
+    blockers: [],
+    choices: [],
+    argos: false,
+    argosNote: null,
+    basedOn: "",
+    ...parts,
+  }
+}
+
+function guideReply(askId: string, answers: HelpAnswerText[], written: string | null) {
+  const places = [...new Set(answers.map((answer) => answer.where))]
+  return reply("guia", {
+    askId,
+    written,
+    answers,
+    basedOn: `La guía de gestorIA: ${places.join(" y ")}.`,
+  })
+}
+
+/**
+ * Lo que respondió Ariadna (solo ids de esta guía) hecho texto para el rol de quien preguntó:
+ * cada respuesta con su pantalla, si la abre, y a quién pedírselo, si su rol no puede.
+ */
+export function helpReplyOf(
+  answer: HelpAskAnswer,
+  seat: StoreSeat,
+  storeId: string,
+): HelpReplyBody {
+  const { askId } = answer
+  if (answer.verdict === "seguro") {
+    const answers = answer.shown
+      .map((ref) => helpAnswerFor(seat, storeId, ref))
+      .filter((one): one is HelpAnswerText => one !== null)
+    if (answers.length > 0) return guideReply(askId, answers, answer.written)
+  }
+  if (answer.verdict === "duda") {
+    const choices = answer.offered
+      .map(choiceFor)
+      .filter((one): one is { question: string; where: string } => one !== null)
+    if (choices.length > 0) return reply("duda", { askId, say: HELP_WORDS.doubt, choices })
+  }
+  if (answer.verdict === "datos") {
+    const path = pathFor(seat, storeId, "reportes")
+    if (path)
+      return reply("datos", {
+        askId,
+        say: "Eso es de las cifras de tu tienda, y no está en la guía. Las ves en Reportes.",
+        answers: [{ topicId: "reportes", where: "Reportes", text: "", path, restriction: null }],
+      })
+    return reply("datos", {
+      askId,
+      say: `Eso es de las cifras de tu tienda, y no está en la guía. Pídeselo a quien ve Reportes: ${whoCan("reportes.ver")}.`,
+    })
+  }
+  return reply("nada", { askId, say: HELP_WORDS.notInGuide })
+}
+
+/** Para comparar una pregunta con las de la guía: sin tildes, signos ni mayúsculas. */
+function plain(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+}
+
+/**
+ * Sin Ariadna (sin el acuerdo, o la administración no respondió): una pregunta que es
+ * exactamente una de la guía se responde tal cual, sin modelo; cualquier otra, no se inventa.
+ */
+export function helpReplyWithoutAriadna(
+  question: string,
+  seat: StoreSeat,
+  storeId: string,
+  askId: string,
+): HelpReplyBody {
+  const asked = plain(question)
+  const faq = FAQS.find((one) => plain(one.q) === asked)
+  const answer = faq ? helpAnswerFor(seat, storeId, `faq:${faq.id}`) : null
+  if (answer) return guideReply(askId, [answer], null)
+  return reply("nada", { askId, say: HELP_WORDS.cannotSearch })
 }
