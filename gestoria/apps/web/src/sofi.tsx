@@ -675,16 +675,14 @@ function WhenToPerson({ overview }: { overview: SofiOverview }) {
             value={
               settings.afterHoursSells
                 ? "Sofi sigue vendiendo: cobra con link y arma pedidos"
-                : "Sofi no responde: el chat espera a una persona"
+                : "Sofi solo avisa cuándo le responden y te pasa el chat"
             }
           />
         </dl>
         {words ? (
           <p className="rounded-lg bg-surface-muted p-3 text-sm">
-            <span className="text-muted-foreground">
-              Lo que es para una persona, lo deja listo:{" "}
-            </span>
-            «{words.afterHours}»
+            <span className="text-muted-foreground">Lo que es para una persona, avisa así: </span>«
+            {words.afterHours}»
           </p>
         ) : null}
       </Panel>

@@ -364,6 +364,9 @@ async function load(
         }
       : DEFAULT_CHOICES
     const answers = await answersForAgent(tx, storeId)
+    // Lo que dicen sus respuestas («S/ 10 el envío a Lurín») se puede repetir aunque la haya leído
+    // en otro turno, como antes el texto libre.
+    for (const a of answers) factAmounts.push(...amountsIn(a.answer, currency))
     const team = teamNow(choices.teamHours, timeZone, now)
     const offers = allowedOffers(choices)
     const deliveryLines = deliveries.map((d) => {
@@ -542,10 +545,28 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
     await waitForPerson(deps, storeId, conv.id, STOP_REASONS[loaded.stop])
     return { status: "detenida", reason: loaded.stop }
   }
-  // Fuera del horario del equipo, si la tienda no quiere que venda sola: espera a una persona
-  // (la de prueba sigue, para probarla).
+  // Fuera del horario del equipo, si la tienda no quiere que venda sola: le dice cuándo le
+  // responden (un aviso fijo, sin modelo) y espera a una persona. La de prueba sigue, para probarla.
   if (!test && !loaded.team.open && !loaded.choices.afterHoursSells) {
-    await waitForPerson(deps, storeId, conv.id, "Fuera del horario del equipo")
+    const reason = "Fuera del horario del equipo"
+    await withAgent(deps.appDb, SOFI_ACTOR, storeId, async (tx) => {
+      await tx.insert(conversationMessage).values({
+        storeId,
+        conversationId: conv.id,
+        author: "sofi",
+        text: loaded.team.back ? handoffLater(loaded.team.back) : SOFI_HANDOFF,
+        delivery: "sin_enviar",
+        detail: {
+          paso: reason,
+          ...(loaded.team.back ? { fuera_de_horario: loaded.team.back } : {}),
+        },
+        actorUserId: SOFI_ACTOR,
+      })
+      await tx
+        .update(conversation)
+        .set({ handler: "persona", waitingReason: reason, updatedAt: new Date() })
+        .where(and(eq(conversation.id, conv.id), eq(conversation.storeId, storeId)))
+    })
     return { status: "fuera_de_horario" }
   }
   const started = Date.now()
@@ -703,7 +724,8 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
         }
       : {}),
     ...(trace.refused.length ? { no_dejo: trace.refused } : {}),
-    ...(later ? { fuera_de_horario: later } : {}),
+    // Solo si el aviso fijo dijo cuándo le responden (no cuando vendió fuera del horario).
+    ...(later && (trace.handoff || text === null) ? { fuera_de_horario: later } : {}),
     ...(problems.length ? { frenado: problems } : {}),
     ...(failure ? { fallo: failure } : {}),
     ...(handoff ? { paso: handoff } : {}),

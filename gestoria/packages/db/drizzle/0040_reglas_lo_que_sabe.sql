@@ -46,6 +46,12 @@ CREATE POLICY agent_gap_create ON agent_gap FOR INSERT TO gestoria_app
   );--> statement-breakpoint
 CREATE POLICY agent_gap_close ON agent_gap FOR UPDATE TO gestoria_app
   USING (store_id = app_store_id() AND outcome IS NULL)
-  WITH CHECK (store_id = app_store_id() AND closed_by = app_user_id() AND outcome IS NOT NULL);--> statement-breakpoint
+  WITH CHECK (
+    store_id = app_store_id() AND closed_by = app_user_id() AND outcome IS NOT NULL
+    -- La respuesta, si la hay, es de la misma tienda (la llave foránea no pasa por las reglas).
+    AND (answer_id IS NULL OR EXISTS (
+      SELECT 1 FROM store_agent_answer a WHERE a.id = answer_id AND a.store_id = app_store_id()
+    ))
+  );--> statement-breakpoint
 CREATE POLICY agent_gap_agent_close ON agent_gap AS RESTRICTIVE FOR UPDATE TO gestoria_app
   USING (NOT app_is_agent());

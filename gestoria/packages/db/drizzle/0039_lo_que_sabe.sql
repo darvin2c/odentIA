@@ -49,9 +49,14 @@ CREATE UNIQUE INDEX "agent_gap_open_uidx" ON "agent_gap" USING btree ("conversat
 CREATE INDEX "agent_gap_store_idx" ON "agent_gap" USING btree ("store_id","question_key");--> statement-breakpoint
 CREATE INDEX "store_agent_answer_store_idx" ON "store_agent_answer" USING btree ("store_id","created_at");--> statement-breakpoint
 ALTER TABLE "store_agent" ADD CONSTRAINT "store_agent_choices_check" CHECK (tone IN ('cercana','formal','directa') and address IN ('tu','usted') and emojis IN ('ninguno','pocos') and ("store_agent"."handoff_over_cents" is null or "store_agent"."handoff_over_cents" > 0));--> statement-breakpoint
--- Lo que la tienda ya le había escrito no se pierde: queda como una respuesta, que la tienda
--- puede partir en preguntas. La columna vieja ya no se lee y se borra en un cambio siguiente.
+-- Lo que la tienda ya le había escrito no se pierde: queda como respuesta (en dos si pasa de 1000
+-- caracteres; el texto viejo llegaba a 2000), que la tienda puede partir en preguntas. La columna
+-- vieja ya no se lee y se borra en un cambio siguiente.
 INSERT INTO "store_agent_answer" ("store_id", "question", "answer", "created_by", "updated_by", "created_at", "updated_at")
-SELECT "store_id", 'Lo que le escribiste antes a Sofi', left(btrim("knowledge"), 1000), "updated_by", "updated_by", "updated_at", "updated_at"
+SELECT "store_id", 'Lo que le escribiste antes a Sofi', btrim(left(btrim("knowledge"), 1000)), "updated_by", "updated_by", "updated_at", "updated_at"
 FROM "store_agent"
-WHERE char_length(btrim("knowledge")) > 0;
+WHERE char_length(btrim("knowledge")) > 0;--> statement-breakpoint
+INSERT INTO "store_agent_answer" ("store_id", "question", "answer", "created_by", "updated_by", "created_at", "updated_at")
+SELECT "store_id", 'Lo que le escribiste antes a Sofi (sigue)', btrim(substr(btrim("knowledge"), 1001, 1000)), "updated_by", "updated_by", "updated_at" + interval '1 second', "updated_at"
+FROM "store_agent"
+WHERE char_length(btrim(substr(btrim("knowledge"), 1001, 1000))) > 0;

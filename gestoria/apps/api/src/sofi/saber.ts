@@ -83,6 +83,20 @@ export async function knowledgeView(appDb: Db, person: Person, storeId: string) 
   })
 }
 
+/** Sofi lee hasta `MAX_ANSWERS` preguntas: más no se agregan, para que ninguna quede sin leer. */
+async function roomForAnswer(tx: Db, storeId: string) {
+  const [row] = await tx
+    .select({ n: count() })
+    .from(storeAgentAnswer)
+    .where(eq(storeAgentAnswer.storeId, storeId))
+  if ((row?.n ?? 0) >= MAX_ANSWERS)
+    throw new StoreError(
+      409,
+      "TOO_MANY_ANSWERS",
+      `Sofi lee hasta ${MAX_ANSWERS} preguntas: junta o quita alguna antes de agregar otra`,
+    )
+}
+
 export async function addAnswer(
   appDb: Db,
   person: Person,
@@ -90,6 +104,7 @@ export async function addAnswer(
   input: z.infer<typeof answerInput>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    await roomForAnswer(tx, storeId)
     const [row] = await tx
       .insert(storeAgentAnswer)
       .values({ storeId, ...input, createdBy: person.userId, updatedBy: person.userId })
@@ -161,6 +176,7 @@ export async function answerGap(
   input: z.infer<typeof gapAnswerInput>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    await roomForAnswer(tx, storeId)
     const [row] = await tx
       .insert(storeAgentAnswer)
       .values({
