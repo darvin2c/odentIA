@@ -167,9 +167,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Los tipos de lo afectado: un cambio puede romper a quien depende de él.
+      # Los tipos de lo afectado: un cambio puede romper a quien depende de él. Cuatro a la vez:
+      # con todos los paquetes (un cambio en shared/), diez tsc juntos agotan la memoria del
+      # runner y GitHub cancela el job sin decir error (main del 27 nov, #734).
       - if: matrix.tipos != ''
-        run: pnpm exec turbo run typecheck ${{ matrix.tipos }}
+        run: pnpm exec turbo run typecheck ${{ matrix.tipos }} --concurrency=4
       - if: matrix.pruebas != ''
         run: pnpm exec turbo run test ${{ matrix.pruebas }} ${{ matrix.opciones }}
 
