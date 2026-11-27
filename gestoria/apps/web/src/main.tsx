@@ -19,7 +19,6 @@ import {
 import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { DeviceNoticesPage } from "./avisos"
-import { HelpPage } from "./ayuda"
 import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
@@ -239,14 +238,6 @@ const storeChildren = [
   moved("/pagos-y-entregas", "/configuracion/medios-de-pago"),
   moved("/equipo", "/configuracion/equipo"),
   moved("/plan", "/configuracion/plan"),
-  createRoute({
-    getParentRoute: () => storeRoute,
-    path: "/ayuda",
-    // «?pregunta=…» abre esa respuesta de la guía.
-    validateSearch: (s: Record<string, unknown>): { pregunta?: string } =>
-      typeof s.pregunta === "string" ? { pregunta: s.pregunta } : {},
-    component: HelpPage,
-  }),
 ]
 
 /**

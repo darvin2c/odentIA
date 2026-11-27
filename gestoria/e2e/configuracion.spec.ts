@@ -6,8 +6,8 @@ import { ACCOUNT, STORE_ID, type Who } from "./entorno"
 /**
  * El menú del día y Configuración en un navegador (lienzo «gestorIA como odentIA», tableros 4 y
  * 10; «gestorIA · Configuración, de nuevo», tablero 3), contra su servidor y su base de verdad:
- * - El menú lleva lo diario y, al pie, Configuración y Ayuda. Configuración abre en «Lo que
- *   falta», con sus grupos de tarea y cada parte en una línea.
+ * - El menú lleva lo diario y, al pie, Configuración; la Ayuda está en la cabecera. Configuración
+ *   abre en «Lo que falta», con sus grupos de tarea y cada parte en una línea.
  * - El buscador de Configuración encuentra una parte por lo que hay dentro y la abre con Enter.
  * - En el teléfono, Configuración es un índice: una parte por pantalla, sin «Cambiar sección».
  * - El pedido de soporte sale una vez, en la franja de arriba, y se responde en Equipo.
@@ -223,7 +223,9 @@ test("Ventas, al abrir Configuración, llega a sus avisos al celular", async ({ 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
   await expect(page.getByRole("navigation", { name: "Principal" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Ayuda" })).toBeVisible()
+  // La Ayuda es el botón de la cabecera, no un enlace del menú.
+  await expect(page.getByRole("button", { name: "Ayuda", exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Ayuda" })).toHaveCount(0)
   // Configuración le abre lo único suyo, sin pasar por «Lo que falta».
   await page.getByRole("link", { name: "Configuración" }).click()
   await expect(page).toHaveURL(/\/configuracion\/avisos$/)

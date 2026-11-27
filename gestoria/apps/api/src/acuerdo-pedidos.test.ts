@@ -331,6 +331,28 @@ describe("la entrada de soporte", () => {
       (await call("soporteConCodigo", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/quitar`))
         .status,
     ).toBe(403)
+    // En la Ayuda soporte pregunta a la guía, pero no se escribe a sí mismo ni tiene casos.
+    const screen = await call(
+      "soporteConCodigo",
+      "GET",
+      `/api/tiendas/${storeId}/ayuda/screen?path=${encodeURIComponent(`/tiendas/${storeId}/catalogo`)}`,
+    )
+    expect(screen.status).toBe(200)
+    expect(screen.json.data).toMatchObject({
+      title: "Catálogo",
+      suggestions: [],
+      attached: { screen: "Catálogo", role: "Soporte de gestorIA", clinic: "Zapatos Rosa" },
+    })
+    expect(
+      (
+        await call("soporteConCodigo", "POST", `/api/tiendas/${storeId}/ayuda/requests`, {
+          question: "Hola, ¿me ayudan?",
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/ayuda/casos`)).status,
+    ).toBe(403)
     // La primera entrada queda anotada una vez.
     const actions = (await events(storeId)).map((e) => e.action)
     expect(actions.filter((a) => a.startsWith("soporte."))).toEqual([

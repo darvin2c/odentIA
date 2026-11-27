@@ -179,8 +179,10 @@ export function OrdersPage() {
         />
       ) : null}
       {orders.length > 0 ? (
-        <div className="elevated overflow-hidden rounded-xl border bg-card">
-          <div className="hidden grid-cols-[3.5rem_minmax(0,1.1fr)_minmax(0,1.8fr)_5.5rem_minmax(0,1fr)_minmax(0,1fr)_9.5rem] gap-4 border-b bg-surface-muted px-4 py-2.5 text-xs font-semibold text-muted-foreground lg:grid">
+        // La tabla pide su ancho, no el de la ventana: con la Ayuda abierta al lado, si no cabe,
+        // pasa a tarjetas.
+        <div className="@container elevated overflow-hidden rounded-xl border bg-card">
+          <div className="hidden grid-cols-[3.5rem_minmax(0,1.1fr)_minmax(0,1.8fr)_5.5rem_minmax(0,1fr)_minmax(0,1fr)_9.5rem] gap-4 border-b bg-surface-muted px-4 py-2.5 text-xs font-semibold text-muted-foreground @3xl:grid">
             <span>Pedido</span>
             <span>Cliente</span>
             <span>Productos</span>
@@ -195,14 +197,14 @@ export function OrdersPage() {
                 <button
                   type="button"
                   onClick={() => setOpen(order.id)}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 px-4 py-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset lg:grid-cols-[3.5rem_minmax(0,1.1fr)_minmax(0,1.8fr)_5.5rem_minmax(0,1fr)_minmax(0,1fr)_9.5rem] lg:items-center"
+                  className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 px-4 py-3 text-left transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset @3xl:grid-cols-[3.5rem_minmax(0,1.1fr)_minmax(0,1.8fr)_5.5rem_minmax(0,1fr)_minmax(0,1fr)_9.5rem] @3xl:items-center"
                 >
-                  <span className="hidden font-mono text-sm tabular-nums lg:block">
+                  <span className="hidden font-mono text-sm tabular-nums @3xl:block">
                     {order.number}
                   </span>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-semibold">
-                      <span className="font-mono font-normal text-muted-foreground lg:hidden">
+                      <span className="font-mono font-normal text-muted-foreground @3xl:hidden">
                         {order.number} ·{" "}
                       </span>
                       {order.customerName}
@@ -214,10 +216,10 @@ export function OrdersPage() {
                       {order.test ? <Badge variant="outline">Prueba</Badge> : null}
                     </span>
                   </span>
-                  <span className="col-start-1 min-w-0 text-sm lg:line-clamp-2 lg:col-start-auto">
+                  <span className="col-start-1 min-w-0 text-sm @3xl:col-start-auto @3xl:line-clamp-2">
                     {lineSummary(order.lines)}
                   </span>
-                  <span className="col-start-2 row-start-1 flex flex-col text-right tabular-nums lg:col-start-auto lg:row-start-auto">
+                  <span className="col-start-2 row-start-1 flex flex-col text-right tabular-nums @3xl:col-start-auto @3xl:row-start-auto">
                     <span className="font-semibold">{money(order.totalCents, store.currency)}</span>
                     {order.balance.dueCents > 0 && order.balance.dueCents < order.totalCents ? (
                       <span className="text-xs text-warning">
@@ -225,7 +227,7 @@ export function OrdersPage() {
                       </span>
                     ) : null}
                   </span>
-                  <span className="col-start-1 min-w-0 text-sm lg:col-start-auto">
+                  <span className="col-start-1 min-w-0 text-sm @3xl:col-start-auto">
                     {order.paymentName}
                     {order.confirmedBy ? (
                       <span className="text-muted-foreground">
@@ -234,11 +236,11 @@ export function OrdersPage() {
                       </span>
                     ) : null}
                   </span>
-                  <span className="col-start-1 min-w-0 text-sm text-muted-foreground lg:col-start-auto">
+                  <span className="col-start-1 min-w-0 text-sm text-muted-foreground @3xl:col-start-auto">
                     {order.deliveryName}
                     {order.deliverOn ? ` · ${dayName(order.deliverOn, today)}` : ""}
                   </span>
-                  <span className="col-start-2 row-start-2 justify-self-end lg:col-start-auto lg:row-start-auto lg:justify-self-start">
+                  <span className="col-start-2 row-start-2 justify-self-end @3xl:col-start-auto @3xl:row-start-auto @3xl:justify-self-start">
                     <StateBadge order={order} />
                   </span>
                 </button>

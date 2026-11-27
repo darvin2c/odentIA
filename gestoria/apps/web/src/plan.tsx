@@ -12,6 +12,7 @@ import {
   ErrorState,
   FormDrawer,
   LoadingState,
+  openSupportRequest,
   PageNotice,
   useAppForm,
   useFormSurface,
@@ -38,13 +39,13 @@ import {
 } from "./lib/plan"
 import { money, moneyInput, readMoney } from "./lib/tienda"
 import { shrinkPhoto } from "./piezas"
-import { StoreHeader, useAskForHelp, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Plan y pagos» (lienzo B, paso B7; lienzo «gestorIA · Configuración, de nuevo», tablero 10): lo
  * que la administración dice de la tienda, de arriba abajo: este mes en una frase, lo que hay por
  * pagar, cada pedido que cuenta (cuando el acuerdo lo mande), lo que se cobró y los pagos. Solo el
- * Dueño (el plan, decisión 7). Se pregunta con «Pedir ayuda», arriba, como en toda la tienda. Si
+ * Dueño (el plan, decisión 7). Se pregunta desde la Ayuda de arriba, como en toda la tienda. Si
  * la administración no responde, se ve lo último que se supo y de cuándo es: la tienda sigue
  * funcionando igual.
  */
@@ -141,7 +142,10 @@ const owedOf = (charge: Charge) =>
  * paga y el tope.
  */
 function ThisMonth({ state }: { state: Known }) {
-  const askForHelp = useAskForHelp()
+  const { store } = useStoreContext()
+  // Pedir otro tope es pedírselo a gestorIA: abre la Ayuda con el mensaje a soporte ya escrito,
+  // para que la persona lo lea, lo complete y lo envíe ella. Soporte no escribe.
+  const canAsk = store.permissions.includes("ayuda.pedir")
   const { plan, access, budget } = state
   const title = plan ? `Pagas ${money(plan.priceCents, plan.currency)} al mes` : "Sin plan todavía"
   // Lo que pasa del saldo lo dice la administración (`spentCents`); gestorIA no lo suma ni le
@@ -224,12 +228,18 @@ function ThisMonth({ state }: { state: Known }) {
                 : "Si quieres uno, pídelo."
             }
             action={
-              askForHelp ? (
+              canAsk ? (
                 <Button
                   variant="link"
                   size="sm"
                   className="h-auto min-h-11 self-start p-0 sm:min-h-0"
-                  onClick={askForHelp}
+                  onClick={() =>
+                    openSupportRequest(
+                      budget.capCents !== null
+                        ? `Quiero cambiar mi tope del mes (hoy ${money(budget.capCents, budget.currency ?? "")}) a: `
+                        : "Quiero poner un tope del mes de: ",
+                    )
+                  }
                 >
                   {budget.capCents !== null ? "Pedir otro tope" : "Pedir un tope"}
                 </Button>
@@ -613,8 +623,8 @@ function Payments({ state, view }: { state: Known; view: PlanView }) {
 }
 
 /**
- * Las preguntas de la tienda sobre el plan y sus respuestas. Se pregunta con «Pedir ayuda», arriba
- * en todas las páginas; aquí el Dueño ve las de toda la tienda.
+ * Las preguntas de la tienda sobre el plan y sus respuestas. Se pregunta desde la «Ayuda» de
+ * arriba, escribiendo a soporte; aquí el Dueño ve las de toda la tienda.
  */
 function Questions({ view }: { view: PlanView }) {
   const cases = view.state?.found ? view.state.support : []
@@ -626,7 +636,8 @@ function Questions({ view }: { view: PlanView }) {
           Preguntas de la tienda
         </h2>
         <p className="text-sm text-muted-foreground">
-          Para preguntar algo más, toca «Pedir ayuda» arriba. Te respondemos aquí y en la Ayuda.
+          Para preguntar algo más, abre «Ayuda» arriba y escribe a soporte. Te respondemos aquí y en
+          la Ayuda.
         </p>
       </div>
       <ul className="flex flex-col gap-2">
