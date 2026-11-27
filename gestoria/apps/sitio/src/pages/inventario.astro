@@ -1,0 +1,55 @@
+---
+// Inventario (web v5): el stock solo cambia con un movimiento del kardex (ADR 0206). El ejemplo es
+// un resumen de los datos y lo dice, nunca una pantalla dibujada.
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+
+const movimientos = [
+  ["Entrada de mercadería", "+ 6", "6"],
+  ["Venta · pedido 0016", "− 1", "5"],
+  ["Ajuste · «par con falla»", "− 1", "4"],
+  ["Venta · pedido 0018", "− 2", "2"],
+]
+---
+<Base
+  title="Inventario en gestorIA: stock por variante, siempre al día"
+  description="Cada venta y cada entrada mueven el stock por variante. Un ajuste a mano pide motivo, y Sofi solo ofrece lo que tienes."
+>
+  <PaginaHeroe
+    etiqueta="Inventario"
+    titulo="Stock por variante,"
+    acento="siempre al día"
+    bajada="Cada venta y cada entrada mueven el stock. Sofi solo ofrece lo que tienes, y nadie lo cambia sin dejar el motivo."
+    segundo={{ href: "/catalogo", label: "Ver catálogo" }}
+  >
+    <div class="p-bloque" slot="visual" style="background:#fff;width:min(460px,100%)">
+      <p class="p-bloque__n">Ejemplo de movimientos · Blanca · 38</p>
+      <div class="p-tabla p-tabla--3" role="table" aria-label="Movimientos de ejemplo" style="margin-top:14px">
+        <span role="columnheader">Movimiento</span><span role="columnheader">Cambio</span><span role="columnheader">Queda</span>
+        {movimientos.map(([m, c, q]) => (
+          <Fragment>
+            <span role="cell">{m}</span><span role="cell" class:list={[c?.startsWith("+") ? "p-mas-v" : "p-menos"]}>{c}</span><span role="cell"><b>{q}</b></span>
+          </Fragment>
+        ))}
+      </div>
+      <p class="p-bloque__n" style="margin-top:12px">Un resumen de los datos, no una pantalla de la app.</p>
+    </div>
+  </PaginaHeroe>
+  <section class="p-bloques" aria-label="Cómo funciona el stock">
+    <div class="marco p-bloques__lista">
+      <div class="p-bloque" data-aparece><h3>Cada movimiento cuenta</h3><p>El stock solo cambia con un movimiento: una venta, una entrada o un ajuste. Queda registrado quién lo hizo.</p></div>
+      <div class="p-bloque" data-aparece><h3>Ajustes con motivo</h3><p>Un ajuste a mano pide un motivo escrito. Así sabes por qué falta o sobra algo.</p></div>
+      <div class="p-bloque" data-aparece><h3>Cada rol ve lo suyo</h3><p>Ventas ve el catálogo y el stock, pero no los cambia ni ve tus costos.</p></div>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="sin-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Sin sobreventa</p>
+        <h2 id="sin-h" class="titulo-2">Si no hay, <span class="cur">Sofi no lo ofrece</span></h2>
+        <p class="bajada">Cuando se acaba una talla, Sofi ofrece las que quedan.</p>
+      </div>
+      <span class="p-heroe__sofi" data-sofi="decidida" data-sofi-escala="0.5" aria-hidden="true"></span>
+    </div>
+  </section>
+</Base>

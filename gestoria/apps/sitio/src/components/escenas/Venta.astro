@@ -1,0 +1,125 @@
+---
+// La venta por capítulos (web v5): una escena fija que avanza con el scroll, con el chat, la oferta,
+// el pedido y la ruta (src/scripts/inicio.ts, venta).
+import { DESPUES, MENSAJES } from "../../lib/venta"
+
+const pasos = [
+  {
+    t: "Atiende al instante",
+    d: "La clienta escribe a la hora que sea. Sofi contesta con tu catálogo y tu stock, y muestra primero el valor del producto.",
+    hasta: 2,
+    humor: "atenta",
+  },
+  {
+    t: "Negocia sin bajar de tu mínimo",
+    d: "Si piden rebaja, Sofi hace una sola oferta y pone un plazo para pagar. Tu precio mínimo no se toca.",
+    hasta: 4,
+    humor: "decidida",
+  },
+  {
+    t: "Anota el pedido y cobra",
+    d: "Con el sí, anota el pedido con su envío y su total, y pide el pago con tus medios.",
+    pronto: "«Pagar ahora» con Yape o tarjeta",
+    hasta: 6,
+    humor: "atenta",
+  },
+  {
+    t: "Avisa a la clienta",
+    d: "Una captura de Yape la confirma una persona de tu equipo. Apenas se confirma, Sofi le avisa a la clienta.",
+    hasta: 9,
+    humor: "feliz",
+  },
+  {
+    t: "Coordina la entrega",
+    d: "Sin pago confirmado no se entrega. Con el pago confirmado, el pedido queda listo para salir hoy.",
+    pronto: "gestorIA Reparto",
+    hasta: 9,
+    humor: "atenta",
+  },
+  {
+    t: "Suma algo antes de que salga",
+    d: "Antes de que el pedido salga, Sofi ofrece algo más para el mismo envío.",
+    hasta: 11,
+    humor: "feliz",
+  },
+]
+const venta = [...MENSAJES, ...DESPUES]
+---
+  <!-- ============================================================ la venta por capítulos -->
+  <section class="venta" id="venta" aria-labelledby="venta-h" data-venta>
+    <div class="venta__pin" data-venta-pin>
+      <div class="marco venta__marco">
+        <div class="venta__texto">
+          <p class="etiqueta">Una venta de verdad</p>
+          <h2 id="venta-h" class="titulo-3">Sofi vende de punta a punta. <span class="cur">Tú empacas.</span></h2>
+          <ol class="pasos" data-pasos>
+            {pasos.map((p, i) => (
+              <li class="paso" data-paso={i} data-hasta={p.hasta} data-humor={p.humor}>
+                <span class="paso__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{p.t}</h3>
+                  <p>{p.d}</p>
+                  {p.pronto && <p class="paso__pronto"><span class="pronto">Pronto</span> {p.pronto}</p>}
+                  <button type="button" class="paso__ver" data-ir-paso={i}><span aria-hidden="true">▶</span> Verlo en el teléfono</button>
+                </div>
+                <span class="paso__avance" aria-hidden="true"><i></i></span>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div class="venta__escena" data-venta-escena>
+          <div class="cel venta__cel">
+            <div class="cel__isla" aria-hidden="true"></div>
+            <div class="cel__estado" aria-hidden="true"><span>9:53</span><span class="cel__senal"><i></i><i></i><i></i></span></div>
+            <div class="cel__cabeza">
+              <span class="cel__avatar" aria-hidden="true">CR</span>
+              <span class="cel__quien"><b>Calzados Rosa</b><small>en línea</small></span>
+            </div>
+            <ol class="cel__chat" aria-label="La venta completa: Valeria compra una zapatilla blanca talla 38 y suma unas medias" data-chat="venta">
+              {venta.map((m, i) => (
+                <li class:list={["msj", m.de === "clienta" ? "msj--ella" : "msj--sofi"]} data-msj={i}>
+                  <span class="sr">{m.de === "clienta" ? "Valeria:" : "Sofi:"}</span>{m.texto}<span class="msj__hora" aria-hidden="true">{m.hora}</span>
+                </li>
+              ))}
+            </ol>
+            <div class="cel__entrada" aria-hidden="true"><span>Mensaje</span><i></i></div>
+          </div>
+          <span class="venta__sofi" data-sofi="atenta" data-sofi-escala="0.5" aria-hidden="true"></span>
+          <p class="venta__ahora" aria-hidden="true"><span></span>Ahora: <b data-ahora>01 · {pasos[0]?.t}</b></p>
+
+          <div class="tarjeta tarjeta--regla" data-tarjeta="1">
+            <p class="tarjeta__titulo">La oferta de Sofi</p>
+            <div class="regla" aria-hidden="true">
+              <span class="regla__piso"></span>
+              <span class="regla__marca regla__marca--min" style="--x:0%"><b>S/ 100</b><small>Tu mínimo</small></span>
+              <span class="regla__marca regla__marca--pide" style="--x:34.5%"><b>S/ 110</b><small>Pide</small></span>
+              <span class="regla__marca regla__marca--oferta" style="--x:69%"><b>S/ 120</b><small>Oferta</small></span>
+              <span class="regla__marca regla__marca--lista" style="--x:100%"><b>S/ 129</b><small>Lista</small></span>
+              <span class="regla__punto" data-regla-punto></span>
+            </div>
+            <p class="tarjeta__nota">Envío gratis si paga hasta mañana, 10:58 a. m. <span class="sr">Lista S/ 129, la clienta pide S/ 110, Sofi ofrece S/ 120 todo incluido y tu mínimo es S/ 100.</span></p>
+          </div>
+
+          <div class="tarjeta tarjeta--pedido" data-tarjeta="2">
+            <div class="tarjeta__fila"><b>Pedido 0018</b><span class="estado" data-estado><span class="estado__a">Pago por confirmar</span><span class="estado__b">Pago confirmado</span></span></div>
+            <small>Valeria Soto · WhatsApp · Yape</small>
+            <div class="tarjeta__fila"><span>Zapatilla urbana blanca 38</span><span>S/ 120</span></div>
+            <div class="tarjeta__fila"><span>Reparto a Surco</span><span>Gratis</span></div>
+            <div class="tarjeta__fila tarjeta__total"><span>Total</span><span>S/ 120</span></div>
+            <p class="tarjeta__pronto"><span class="pronto">Pronto</span> «Pagar ahora» con Yape o tarjeta</p>
+          </div>
+
+          <div class="tarjeta tarjeta--ruta" data-tarjeta="4">
+            <svg class="ruta" viewBox="0 0 300 110" aria-hidden="true">
+              <path class="ruta__base" d="M14 92 C 80 96, 96 30, 160 40 S 250 70, 286 18"></path>
+              <path class="ruta__trazo" data-ruta d="M14 92 C 80 96, 96 30, 160 40 S 250 70, 286 18"></path>
+              <circle class="ruta__a" cx="14" cy="92" r="5"></circle>
+              <circle class="ruta__b" cx="286" cy="18" r="6"></circle>
+            </svg>
+            <p><b>Sale hoy · Reparto a Surco</b></p>
+            <p class="tarjeta__pronto"><span class="pronto">Pronto</span> gestorIA Reparto, la app del repartidor</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>

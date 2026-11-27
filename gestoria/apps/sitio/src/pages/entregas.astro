@@ -1,0 +1,59 @@
+---
+// Entregas (web v5): las formas de entrega y la regla de oro. gestorIA Reparto todavía no existe:
+// va como «pronto», sin pantallas.
+import { Image } from "astro:assets"
+import menuPedido from "../assets/pantallas/menu-pedido.png"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+
+const formas = [
+  {
+    t: "Reparto en Lima",
+    d: "Por distrito, con su costo. Sofi puede regalar el envío si tú lo permites.",
+  },
+  { t: "Envío a provincia", d: "Por agencia, con el costo que pongas." },
+  { t: "Recojo en la tienda", d: "La clienta pasa a recoger cuando el pedido está listo." },
+]
+---
+<Base
+  title="Entregas en gestorIA: sale con su pago confirmado"
+  description="Reparto en Lima, envío a provincia o recojo en la tienda, cada uno con su costo. Sin pago confirmado no se entrega; si paga al recibir, se anota lo cobrado."
+>
+  <PaginaHeroe
+    etiqueta="Entregas"
+    titulo="Sale con su pago"
+    acento="confirmado"
+    bajada="Sin pago confirmado no se entrega. Así no quedan pedidos entregados sin cobrar."
+    segundo={{ href: "/cobros", label: "Ver cobros" }}
+  >
+    <div class="p-hojita" slot="visual">
+      <Image src={menuPedido} alt="El pedido 0004 de Luis Paredes, «Pagado · por salir», con su pago confirmado" widths={[420, 840]} sizes="420px" />
+    </div>
+  </PaginaHeroe>
+  <section class="p-bloques" aria-labelledby="formas-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Formas de entrega</p>
+        <h2 id="formas-h" class="titulo-2">Como entregas hoy, <span class="cur">con cada costo claro</span></h2>
+        <p class="bajada">Cada forma de entrega con su costo y lo que Sofi puede negociar del envío.</p>
+      </div>
+      <ul class="p-bloques__lista">
+        {formas.map((f) => <li class="p-bloque" data-aparece><h3>{f.t}</h3><p>{f.d}</p></li>)}
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="regla-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">La regla</p>
+        <h2 id="regla-h" class="titulo-2">Si paga al recibir, <span class="cur">se anota</span></h2>
+        <p class="bajada">Quien entrega anota cuánto cobró y con qué medio, y recién lo da por entregado.</p>
+      </div>
+      <div class="p-bloque" data-aparece>
+        <p><span class="pronto">Pronto</span></p>
+        <h3>gestorIA Reparto</h3>
+        <p>La app del repartidor: la ruta del día, el cobro al recibir y «Entregado» solo con el pago confirmado. Todavía no existe: no mostramos pantallas hasta que esté lista.</p>
+      </div>
+    </div>
+  </section>
+</Base>
