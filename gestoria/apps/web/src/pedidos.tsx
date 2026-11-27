@@ -1053,16 +1053,19 @@ export interface ChosenCustomer {
   phone: string | null
 }
 
-/** Lo que trae «Repetir pedido»: la clienta y lo de su última compra, con los precios de hoy. */
+/**
+ * Un pedido que se abre desde la ficha de la clienta: con ella elegida y, en «Repetir pedido»,
+ * lo de su última compra (`number` en adelante), con los precios de hoy.
+ */
 export interface OrderDraft {
   customer: ChosenCustomer
-  number: string
-  channel: OrderChannel
-  lines: { variantId: string; quantity: number; text: string }[]
-  deliveryMethodId: string | null
-  zone: string | null
-  address: string
-  paymentMethodId: string | null
+  number?: string
+  channel?: OrderChannel
+  lines?: { variantId: string; quantity: number; text: string }[]
+  deliveryMethodId?: string | null
+  zone?: string | null
+  address?: string
+  paymentMethodId?: string | null
 }
 
 export function NewOrderSheet({
@@ -1072,7 +1075,7 @@ export function NewOrderSheet({
 }: {
   onClose: () => void
   onCreated: (id: string) => void
-  /** «Repetir pedido» desde la ficha de la clienta. */
+  /** Desde la ficha de la clienta: ella elegida y, al repetir, lo de su última compra. */
   draft?: OrderDraft
 }) {
   const { store } = useStoreContext()
@@ -1100,9 +1103,9 @@ export function NewOrderSheet({
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
   const [channel, setChannel] = useState<OrderChannel>(draft?.channel ?? "otro")
-  const nextKey = useRef(draft?.lines.length || 1)
+  const nextKey = useRef(draft?.lines?.length || 1)
   const [lines, setLines] = useState<LineDraft[]>(() =>
-    draft?.lines.length
+    draft?.lines?.length
       ? draft.lines.map((l, key) => ({
           key,
           variantId: l.variantId,
@@ -1134,7 +1137,7 @@ export function NewOrderSheet({
 
   // «Repetir pedido»: lo que ya no se vende o ya no está encendido queda por elegir, con lo que
   // llevó la vez anterior a la vista.
-  const repeating = Boolean(draft)
+  const repeating = Boolean(draft?.number)
   useEffect(() => {
     if (!repeating || !sellable.data) return
     const ids = new Set(sellable.data.variants.filter((v) => v.stock > 0).map((v) => v.id))
@@ -1261,9 +1264,11 @@ export function NewOrderSheet({
       wide
       title={draft ? `Nuevo pedido para ${draft.customer.name}` : "Anotar un pedido"}
       description={
-        draft
+        draft?.number
           ? `Lo mismo de su pedido ${draft.number}, con los precios de hoy. Cambia lo que haga falta.`
-          : "Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
+          : draft
+            ? "Va a su ficha. Se arma con los mismos precios y límites que usa Sofi."
+            : "Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
       }
       onClose={onClose}
       onSubmit={submit}

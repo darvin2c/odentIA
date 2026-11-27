@@ -36,9 +36,15 @@ describe("cómo se dice una clienta", () => {
     expect(sinceText("2026-10-10T15:00:00")).toBe("clienta desde oct 2026")
   })
 
-  it("escribirle por WhatsApp solo con el código del país, que lo envía la persona", () => {
+  it("escribirle por WhatsApp con su código, o como del país de la tienda; lo envía la persona", () => {
     expect(whatsappLink(["987 654 321", "+51 987 654 321"])).toBe("https://wa.me/51987654321")
+    // Anotado sin el código: en una tienda del Perú es un celular del Perú.
+    expect(whatsappLink(["987 654 321"], "PE")).toBe("https://wa.me/51987654321")
+    // El que trae su código manda, aunque la tienda sea de otro país.
+    expect(whatsappLink(["+56 9 6123 4567"], "PE")).toBe("https://wa.me/56961234567")
+    // Sin el país de la tienda no se adivina; lo que no es un número, tampoco.
     expect(whatsappLink(["987 654 321"])).toBeNull()
+    expect(whatsappLink(["123"], "PE")).toBeNull()
     expect(whatsappLink([])).toBeNull()
   })
 

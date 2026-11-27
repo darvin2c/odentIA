@@ -27,7 +27,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { ArrowLeft, MessageCircle, Repeat, UserRound } from "lucide-react"
+import { ArrowLeft, MessageCircle, Plus, Repeat, UserRound } from "lucide-react"
 import { type ReactNode, useEffect, useId, useState } from "react"
 import { api } from "./lib/api"
 import {
@@ -310,7 +310,8 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
       toast.success("Listo: volvió a ser otra ficha, con sus pedidos")
     },
   })
-  const write = whatsappLink(customer.phones)
+  const write = whatsappLink(customer.phones, customer.country)
+  const joinedNotes = customer.members.filter((m) => m.note)
   const contact = [
     channelsText(customer.channels),
     ...customer.phones,
@@ -319,9 +320,11 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
   ]
     .filter(Boolean)
     .join(" · ")
-  const draft: OrderDraft | undefined = customer.repeat
+  const chosen = { id: customer.id, name: customer.name, phone: customer.phones[0] ?? null }
+  // «Repetir pedido» trae lo de su última compra; sin compras, el pedido nuevo va a su ficha.
+  const draft: OrderDraft = customer.repeat
     ? {
-        customer: { id: customer.id, name: customer.name, phone: customer.phones[0] ?? null },
+        customer: chosen,
         number: customer.repeat.number,
         channel: customer.repeat.channel,
         lines: customer.repeat.lines.map((l) => ({
@@ -334,7 +337,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
         address: customer.repeat.address,
         paymentMethodId: customer.repeat.paymentMethodId,
       }
-    : undefined
+    : { customer: chosen }
 
   return (
     <article
@@ -362,9 +365,9 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
               Escribirle
             </Button>
           ) : null}
-          <Button onClick={() => setRepeating(true)} disabled={!draft}>
-            <Repeat aria-hidden />
-            Repetir pedido
+          <Button onClick={() => setRepeating(true)}>
+            {customer.repeat ? <Repeat aria-hidden /> : <Plus aria-hidden />}
+            {customer.repeat ? "Repetir pedido" : "Anotar un pedido"}
           </Button>
         </div>
       </header>
@@ -403,12 +406,22 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
                 : ""}
             </p>
           </>
-        ) : (
+        ) : joinedNotes.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Su talla, cómo prefiere recibir, lo que conviene recordar. Es del equipo: la clienta no
             lo ve.
           </p>
-        )}
+        ) : null}
+        {/* Lo que se anotó en una ficha que se le unió: unir no lo mueve ni lo borra. */}
+        {joinedNotes.map((m) => (
+          <div key={m.id} className="flex flex-col gap-0.5 border-t pt-2 first:border-t-0">
+            <p className="whitespace-pre-line text-sm">{m.note}</p>
+            <p className="text-xs text-muted-foreground">
+              De la ficha que se le unió
+              {m.channels.length > 0 ? `, por ${channelsText(m.channels)}` : ""}
+            </p>
+          </div>
+        ))}
       </div>
 
       <Section title={customer.purchases === 1 ? "1 compra" : `${customer.purchases} compras`}>
@@ -513,7 +526,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
         }}
       />
       {editing ? <EditCustomerSheet customer={customer} onClose={() => setEditing(false)} /> : null}
-      {repeating && draft ? (
+      {repeating ? (
         <NewOrderSheet
           draft={draft}
           onClose={() => setRepeating(false)}
@@ -874,7 +887,11 @@ function EditCustomerSheet({
           maxLength={30}
           placeholder="+51 987 654 321"
           error={errors.phone}
-          help="Con el código del país, «Escribirle» abre su WhatsApp."
+          help={
+            customer.country
+              ? undefined
+              : "Con el código del país, «Escribirle» abre su WhatsApp."
+          }
         />
         <Field data-invalid={errors.note ? true : undefined}>
           <FieldLabel htmlFor={noteId}>Lo que sabemos</FieldLabel>

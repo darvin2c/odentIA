@@ -99,7 +99,7 @@ beforeAll(async () => {
   })
   for (const who of Object.keys(people) as Who[]) await call(who, "GET", "/api/yo")
   await db.ownerDb.insert(store).values([
-    { id: storeId, name: "Calzados Rosa", currency: "PEN", createdBy: "u-rosa" },
+    { id: storeId, name: "Calzados Rosa", currency: "PEN", country: "PE", createdBy: "u-rosa" },
     { id: otherStore, name: "Otra tienda", currency: "PEN", createdBy: "u-ajena" },
   ])
   await db.ownerDb.insert(storeMember).values([
@@ -235,6 +235,11 @@ describe("cada pedido, con la ficha de su clienta", () => {
 
 describe("¿Es la misma clienta?", () => {
   it("«Sí, es la misma»: la más nueva queda dentro de la más antigua y la ficha junta todo", async () => {
+    // Lo que el equipo anotó en la ficha nueva no se pierde al unirla.
+    const noted = await call("lucia", "PATCH", `${base}/clientes/${otraMariela}`, {
+      note: "Talla 38",
+    })
+    expect(noted.status).toBe(200)
     const merged = await call("lucia", "POST", `${base}/clientes/unir`, {
       a: otraMariela,
       b: mariela,
@@ -246,7 +251,11 @@ describe("¿Es la misma clienta?", () => {
     expect(detail.id).toBe(mariela)
     expect(detail.purchases).toBe(3)
     expect(detail.phones).toEqual(["+51 987 654 321", "987654321"])
-    expect(detail.members).toMatchObject([{ id: otraMariela, channels: ["messenger"] }])
+    expect(detail.members).toMatchObject([
+      { id: otraMariela, channels: ["messenger"], note: "Talla 38" },
+    ])
+    // El país de la tienda, para leer un teléfono anotado sin su código («Escribirle»).
+    expect(detail.country).toBe("PE")
     expect(detail.history).toMatchObject([
       {
         action: "unida",

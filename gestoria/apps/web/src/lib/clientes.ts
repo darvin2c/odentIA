@@ -1,3 +1,4 @@
+import { normalizeCountry, toE164 } from "@odentia/ui-patterns"
 import { CHANNELS, dayName, localToday, type OrderChannel, type OrderState } from "./pedidos"
 import type { PaymentCollection } from "./tienda"
 
@@ -63,6 +64,8 @@ export interface CustomerDetail {
   id: string
   name: string
   phone: string | null
+  /** El país de la tienda (ISO 3166-1): un teléfono sin su código se lee como de ese país. */
+  country: string | null
   phones: string[]
   channels: OrderChannel[]
   since: string
@@ -81,7 +84,14 @@ export interface CustomerDetail {
     text: string
   }[]
   addresses: { address: string; deliveryName: string; zone: string | null }[]
-  members: { id: string; name: string; phone: string | null; channels: OrderChannel[] }[]
+  /** Las fichas que se le unieron, con su «Lo que sabemos» (unir no lo mueve ni lo borra). */
+  members: {
+    id: string
+    name: string
+    phone: string | null
+    channels: OrderChannel[]
+    note: string
+  }[]
   history: CustomerHistoryItem[]
   repeat: RepeatDraft | null
   similar: { id: string; name: string; phone: string | null }[]
@@ -120,13 +130,18 @@ export function sinceText(iso: string): string {
 }
 
 /**
- * El enlace para escribirle por WhatsApp desde el celular, si uno de sus teléfonos está con su
- * código de país («+51 …»): sin él no se sabe a qué país marcar. Lo envía la persona.
+ * El enlace para escribirle por WhatsApp desde el celular (lo envía la persona). Cada teléfono se
+ * lee en E.164 con los metadatos estándar: el que tiene su código («+51 …») vale siempre; el que se
+ * anotó sin él, como del país de la tienda. Sin ninguno que sea un número posible, no hay enlace:
+ * no se adivina el país.
  */
-export function whatsappLink(phones: string[]): string | null {
-  const international = phones.find((p) => p.trim().startsWith("+"))
-  const digits = international?.replace(/\D/g, "") ?? ""
-  return digits.length >= 8 ? `https://wa.me/${digits}` : null
+export function whatsappLink(phones: string[], country?: string | null): string | null {
+  const region = normalizeCountry(country)
+  for (const phone of phones) {
+    const e164 = phone.trim().startsWith("+") || region ? toE164(phone, region) : null
+    if (e164) return `https://wa.me/${e164.slice(1)}`
+  }
+  return null
 }
 
 /** Por qué se sugiere que son la misma. */

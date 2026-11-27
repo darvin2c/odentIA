@@ -9,6 +9,7 @@ import {
   type PaymentCollection,
   saleOrder,
   saleOrderLine,
+  store,
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
@@ -597,10 +598,16 @@ export async function customerDetail(
         : []
       ).map((row) => [row.id, row]),
     )
+    // El país de la tienda: con él, un teléfono anotado sin su código se lee como de ese país.
+    const [shop] = await tx
+      .select({ country: store.country })
+      .from(store)
+      .where(eq(store.id, storeId))
     return {
       id: head.id,
       name: head.name,
       phone: head.phone,
+      country: shop?.country ?? null,
       phones: members.map((m) => m.phone).filter((p): p is string => Boolean(p)),
       channels: channelsOf(),
       since: members[0]?.createdAt ?? head.createdAt,
@@ -619,10 +626,19 @@ export async function customerDetail(
         text: (linesBy.get(o.id) ?? []).map(lineText).join(", "),
       })),
       addresses,
-      /** Las fichas que están dentro de esta: por dónde llegó cada una. */
+      /**
+       * Las fichas que están dentro de esta: por dónde llegó cada una y su «Lo que sabemos», que
+       * unir no mueve ni borra (se ve en la ficha y vuelve con ella al separar).
+       */
       members: members
         .filter((m) => m.id !== head.id)
-        .map((m) => ({ id: m.id, name: m.name, phone: m.phone, channels: channelsOf(m.id) })),
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          phone: m.phone,
+          channels: channelsOf(m.id),
+          note: m.note,
+        })),
       /**
        * Lo que decidió el equipo, lo último primero. `self`: la decisión habla de esta ficha frente
        * a otra (la unieron a otra, o la separaron de otra); si no, de `with` frente a esta.
