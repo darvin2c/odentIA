@@ -61,14 +61,16 @@ const SCREENS: [path: string, name: string][] = [
   ["/catalogo", "Catálogo"],
   ["/caja", "Caja"],
   ["/reportes", "Reportes"],
+  ["/configuracion/datos", "Datos de la tienda"],
   ["/configuracion/marca", "Tu marca"],
-  ["/configuracion/equipo", "Equipo"],
+  ["/configuracion/equipo", "Equipo y repartidores"],
   ["/configuracion/sofi", "Sofi"],
-  ["/configuracion/medios-de-pago", "Medios de pago"],
-  ["/configuracion/entregas", "Formas de entrega y zonas"],
+  ["/configuracion/medios-de-pago", "Cobros"],
+  ["/configuracion/entregas", "Entregas"],
+  ["/configuracion/avisos", "Avisos al celular"],
   ["/configuracion/plan", "Plan y pagos"],
-  // Datos de la tienda es la entrada de Configuración: después de sus apartados.
-  ["/configuracion", "Datos de la tienda"],
+  // «Lo que falta» es la entrada de Configuración: después de sus apartados.
+  ["/configuracion", "Lo que falta"],
   ["/ayuda", "Ayuda"],
 ]
 

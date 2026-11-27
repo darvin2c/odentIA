@@ -1,9 +1,7 @@
 import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
-import { Switch } from "@odentia/ui/components/switch"
 import {
   AgentMark,
   ErrorState,
-  FormChoiceField,
   PageNotice,
   SubmitButton,
   submitErrorMessage,
@@ -15,6 +13,7 @@ import { Link } from "@tanstack/react-router"
 import { MessageSquarePlus, SendHorizontal } from "lucide-react"
 import { type KeyboardEvent, useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import { ToggleField } from "./campos"
 import { api } from "./lib/api"
 import { STATE_TONE, stateName } from "./lib/pedidos"
 import { AGENT_STOP_WORDS } from "./lib/plan"
@@ -120,18 +119,7 @@ function Settings({ settings }: { settings: AgentSettings }) {
   const { onSubmit, isSubmitting, error } = useFormSurface(form)
   const switchField = (name: SwitchName, label: (on: boolean) => string) => (
     <form.AppField name={name}>
-      {(field) => (
-        <FormChoiceField label={label(field.state.value)}>
-          {(control) => (
-            <Switch
-              {...control.props}
-              checked={field.state.value}
-              disabled={!canEdit}
-              onCheckedChange={(next) => field.handleChange(next)}
-            />
-          )}
-        </FormChoiceField>
-      )}
+      {() => <ToggleField label={label} disabled={!canEdit} />}
     </form.AppField>
   )
   return (

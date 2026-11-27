@@ -5,21 +5,19 @@ import {
   clockMinutes,
   EmptyState,
   ErrorState,
-  FormChoiceField,
   FormDrawer,
   RadioChips,
   SubmitButton,
   submitErrorMessage,
   TimeSelect,
   useAppForm,
-  useFieldContext,
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Clock, CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { z } from "zod"
-import { MoneyInput } from "./campos"
+import { MoneyInput, ToggleField } from "./campos"
 import { api } from "./lib/api"
 import type { Slot } from "./lib/despachos"
 import {
@@ -41,7 +39,7 @@ import { PaymentLinkSection } from "./link-de-pago"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
- * Configuración › Medios de pago y › Formas de entrega y zonas (lienzo B, tablero 6; «gestorIA como
+ * Configuración › Cobros y › Entregas (lienzo B, tablero 6; «gestorIA como
  * odentIA», tablero 10): con qué le pagan a la tienda y cómo llega el pedido. Igual que «Medios de
  * pago» de odentIA: un nombre libre y un tipo de una lista estándar. Lo que se apaga, Sofi deja de
  * ofrecerlo. Los cambia quien tiene `configuracion`; soporte los mira sin cambiarlos.
@@ -77,12 +75,12 @@ function PaymentsAndDeliveries({ part }: { part: "pagos" | "entregas" }) {
     <>
       {part === "pagos" ? (
         <StoreHeader
-          title="Medios de pago"
+          title="Cobros"
           subtitle="Con qué te pagan. Lo que apagues, Sofi deja de ofrecerlo."
         />
       ) : (
         <StoreHeader
-          title="Formas de entrega y zonas"
+          title="Entregas"
           subtitle="Cómo llega el pedido y cuánto cuesta. Lo que apagues, Sofi deja de ofrecerlo."
         />
       )}
@@ -426,22 +424,6 @@ const paymentSchema = z.object({
   isActive: z.boolean(),
 })
 
-/** «Encendido» dentro de un formulario: el texto dice cómo queda. */
-function ActiveField({ on, off }: { on: string; off: string }) {
-  const field = useFieldContext<boolean>()
-  return (
-    <FormChoiceField label={field.state.value ? on : off}>
-      {(control) => (
-        <Switch
-          {...control.props}
-          checked={field.state.value}
-          onCheckedChange={(next) => field.handleChange(next)}
-        />
-      )}
-    </FormChoiceField>
-  )
-}
-
 function PaymentForm({
   storeId,
   method,
@@ -587,7 +569,11 @@ function PaymentForm({
           )}
         </form.Subscribe>
         <form.AppField name="isActive">
-          {() => <ActiveField on="Encendido: Sofi lo ofrece" off="Apagado: Sofi no lo ofrece" />}
+          {() => (
+            <ToggleField
+              label={(on) => (on ? "Encendido: Sofi lo ofrece" : "Apagado: Sofi no lo ofrece")}
+            />
+          )}
         </form.AppField>
         {method ? (
           <DeleteButton
@@ -909,7 +895,11 @@ function DeliveryForm({
           }
         </form.Subscribe>
         <form.AppField name="isActive">
-          {() => <ActiveField on="Encendida: Sofi la ofrece" off="Apagada: Sofi no la ofrece" />}
+          {() => (
+            <ToggleField
+              label={(on) => (on ? "Encendida: Sofi la ofrece" : "Apagada: Sofi no la ofrece")}
+            />
+          )}
         </form.AppField>
         {method ? (
           <DeleteButton

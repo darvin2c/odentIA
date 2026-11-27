@@ -166,7 +166,7 @@ export function stepView(
         detail: facts.country
           ? `${store.name} · ${countryName(facts.country)} · hora de ${(store.timeZone.split("/").at(-1) ?? store.timeZone).replaceAll("_", " ")}`
           : "El país de tu tienda y su hora, con la que se cuenta «hoy».",
-        action: go("Completar", CONFIG_PATH),
+        action: go("Completar", `${CONFIG_PATH}/datos`),
       }
     case "catalogo":
       return {

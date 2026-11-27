@@ -25,10 +25,11 @@ import {
   useFieldContext,
   useFormSurface,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Plus, Trash2 } from "lucide-react"
-import { useCallback, useId, useSyncExternalStore } from "react"
+import { useId } from "react"
 import { z } from "zod"
 import { MoneyInput } from "./campos"
 import { api } from "./lib/api"
@@ -195,27 +196,6 @@ export function DeliveryStepDialog({
 }
 
 /* ------------------------------------------------------------------------------- piezas */
-
-/**
- * Lo escrito en un formulario de `useAppForm`, al día: para lo que se dice mientras se llena (la
- * suma de lo cobrado, el botón «Pasar a mañana») y lo que aparece según lo elegido.
- */
-export function useFormValues<T>(form: {
-  store: {
-    readonly state: { values: T }
-    subscribe: (listener: () => void) => { unsubscribe: () => void }
-  }
-}): T {
-  const { store } = form
-  const subscribe = useCallback(
-    (listener: () => void) => {
-      const subscription = store.subscribe(listener)
-      return () => subscription.unsubscribe()
-    },
-    [store],
-  )
-  return useSyncExternalStore(subscribe, () => store.state.values)
-}
 
 /** «Hoy», «Mañana» y el calendario para otro día (desde hoy, el de la tienda). */
 function DayButtons({
@@ -549,7 +529,7 @@ function ShipDialog({
     fieldMap: (key) =>
       key === "agency" && form.state.values.agency === NEW ? "otherAgency" : undefined,
   })
-  const otherAgency = useFormValues(form).agency === NEW
+  const otherAgency = useStore(form.store, (s) => s.values.agency) === NEW
   return (
     <FormDrawer
       {...surface}
@@ -668,7 +648,7 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
     fieldMap: (key) =>
       key === "collectedCents" ? `lines[${form.state.values.lines.length - 1}].amount` : undefined,
   })
-  const lines = useFormValues(form).lines
+  const lines = useStore(form.store, (s) => s.values.lines)
   const sum = sumOf(lines)
   const card = filledOf(lines).some(
     (line) => methods.find((m) => m.id === line.methodId)?.typeCode === "48",
@@ -708,7 +688,7 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
           {methods.length === 0 && !options.isPending ? (
             <p className="text-sm text-warning">
               La tienda no tiene un medio para cobrar al recibir. Agrégalo en Configuración, en
-              Medios de pago.
+              Cobros.
             </p>
           ) : null}
           <form.AppField name="lines" mode="array">
@@ -961,7 +941,7 @@ function MissedDialog({ target, onClose }: { target: DeliveryTarget; onClose: ()
   const surface = useFormSurface(form, {
     fieldMap: (key) => ({ reason: "other", deliverOn: "day" })[key],
   })
-  const values = useFormValues(form)
+  const values = useStore(form.store, (s) => s.values)
   return (
     <FormDrawer
       {...surface}
@@ -1051,7 +1031,7 @@ function MoveDialog({ target, onClose }: { target: DeliveryTarget; onClose: () =
   const surface = useFormSurface(form, {
     fieldMap: (key) => (key === "deliverOn" ? "day" : undefined),
   })
-  const values = useFormValues(form)
+  const values = useStore(form.store, (s) => s.values)
   const slot = slotOf(values.slot, options)
   return (
     <FormDrawer
@@ -1150,7 +1130,7 @@ function NoticeDialog({ target, onClose }: { target: DeliveryTarget; onClose: ()
     },
   })
   const surface = useFormSurface(form)
-  const text = useFormValues(form).text
+  const text = useStore(form.store, (s) => s.values.text)
   const link = noticeLink(target.customerPhone, text.trim(), store.country)
   return (
     <FormDrawer

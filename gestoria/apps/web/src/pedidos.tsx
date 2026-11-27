@@ -27,6 +27,7 @@ import {
   useFormSurface,
   ViewTabs,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useSearch } from "@tanstack/react-router"
 import {
@@ -47,7 +48,7 @@ import { z } from "zod"
 import { InstallCard } from "./avisos"
 import { ExchangeAction, ExchangeLinks, RefundAction, RefundLines, ReturnLines } from "./cambios"
 import { MoneyInput } from "./campos"
-import { type DeliveryStep, DeliveryStepDialog, targetOf, useFormValues } from "./entregas"
+import { type DeliveryStep, DeliveryStepDialog, targetOf } from "./entregas"
 import { api } from "./lib/api"
 import {
   CUSTOMER_KEY,
@@ -1021,7 +1022,7 @@ function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => v
   const surface = useFormSurface(form, {
     fieldMap: { amountCents: "amount", captura: "file" },
   })
-  const file = useFormValues(form).file
+  const file = useStore(form.store, (s) => s.values.file)
   const [preview, setPreview] = useState<string | null>(null)
   useEffect(() => {
     if (!file) return setPreview(null)
@@ -1566,7 +1567,7 @@ export function NewOrderSheet({
       await create.mutateAsync(bodyOf(value).sentBody)
     },
   })
-  const values = useFormValues(form)
+  const values = useStore(form.store, (s) => s.values)
 
   // «Repetir pedido»: lo que ya no se vende o ya no está encendido queda por elegir, con lo que
   // llevó la vez anterior a la vista. No cuenta como algo escrito.

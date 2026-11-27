@@ -15,9 +15,11 @@ describe("la pantalla desde la que se pide ayuda", () => {
     })
     expect(screenOf(`/tiendas/${STORE}/ayuda?pregunta=plan`, STORE).name).toBe("Ayuda")
     expect(screenOf(`/tiendas/${STORE}/clientes/c-1`, STORE).name).toBe("Clientes")
-    // Configuración: cada apartado con su nombre, y su entrada es «Datos de la tienda».
+    // Configuración: cada apartado con su nombre, y su entrada es «Lo que falta».
     expect(screenOf(`/tiendas/${STORE}/configuracion/marca`, STORE).name).toBe("Tu marca")
-    expect(screenOf(`/tiendas/${STORE}/configuracion`, STORE).name).toBe("Datos de la tienda")
+    expect(screenOf(`/tiendas/${STORE}/configuracion/datos`, STORE).name).toBe("Datos de la tienda")
+    expect(screenOf(`/tiendas/${STORE}/configuracion/medios-de-pago`, STORE).name).toBe("Cobros")
+    expect(screenOf(`/tiendas/${STORE}/configuracion`, STORE).name).toBe("Lo que falta")
   })
 
   it("una sección que no conoce es el inicio de la tienda, y nunca pasa de 200 letras", () => {

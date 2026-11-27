@@ -12,10 +12,11 @@ import {
   useFormSubmitError,
   useFormSurface,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { HandCoins, Plus, Repeat, Trash2 } from "lucide-react"
-import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { type FormEvent, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { MoneyInput } from "./campos"
 import { DayChoice } from "./entregas"
@@ -100,23 +101,6 @@ export function ReturnLines({ order }: { order: OrderDetail }) {
         </li>
       ))}
     </ul>
-  )
-}
-
-/**
- * Lo que el formulario tiene ahora, para lo que se dibuja fuera de sus campos (el resumen, lo que
- * aparece según lo elegido). Es `useStore` de TanStack Form, que gestorIA no trae por su cuenta.
- */
-function useFormState<S, T>(
-  store: { readonly state: S; subscribe: (listener: () => void) => { unsubscribe: () => void } },
-  select: (state: S) => T,
-): T {
-  return useSyncExternalStore(
-    (listener) => {
-      const subscription = store.subscribe(listener)
-      return () => subscription.unsubscribe()
-    },
-    () => select(store.state),
   )
 }
 
@@ -317,7 +301,7 @@ export function ExchangeSheet({ order, onClose }: { order: OrderDetail; onClose:
       }
     },
   })
-  const values = useFormState(form.store, (s) => s.values)
+  const values = useStore(form.store, (s) => s.values)
   const surface = useFormSurface(form, {
     fieldMap: (key) => exchangeField(form.state.values, key),
   })
@@ -838,9 +822,9 @@ function RefundDialog({ order, onClose }: { order: OrderDetail; onClose: () => v
       })
     },
   })
-  const amount = useFormState(form.store, (s) => s.values.amount)
-  const methodId = useFormState(form.store, (s) => s.values.methodId)
-  const pending = useFormState(form.store, (s) => s.isSubmitting)
+  const amount = useStore(form.store, (s) => s.values.amount)
+  const methodId = useStore(form.store, (s) => s.values.methodId)
+  const pending = useStore(form.store, (s) => s.isSubmitting)
   const error = useFormSubmitError(form)
   const chosenName = methods.find((m) => m.id === (methodId || proposed))?.name
   return (
