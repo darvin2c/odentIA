@@ -1,0 +1,77 @@
+---
+// Cobros (web v5): los medios de pago, cómo se confirma cada uno y la pantalla real de Pedidos.
+// «Pagar ahora» todavía no existe: va como «pronto».
+import { Image } from "astro:assets"
+import pedidoPorConfirmar from "../assets/pantallas/pedido-por-confirmar.png"
+import pedidosTableta from "../assets/pantallas/pedidos-tableta.png"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+
+const medios = [
+  {
+    t: "Yape, Plin o transferencia",
+    d: "La clienta paga y manda la captura. Una persona de tu equipo la revisa y toca «Confirmar pago» o «No coincide».",
+    dato: "La confirma una persona",
+    ok: false,
+  },
+  {
+    t: "Link de pago",
+    d: "Sofi lo manda por el chat. Cuando la clienta paga, el pago queda confirmado solo.",
+    dato: "Se confirma solo",
+    ok: true,
+  },
+  {
+    t: "Al recibir",
+    d: "Quien entrega anota cuánto cobró y con qué medio, y recién lo da por entregado.",
+    dato: "Lo anota quien entrega",
+    ok: false,
+  },
+]
+---
+<Base
+  title="Cobros en gestorIA: cada pedido con su pago"
+  description="Sofi pide el pago con Yape, Plin, transferencia o link de pago. Ves cuánto falta cobrar y si cada pago está confirmado. Sin pago confirmado, no se entrega."
+>
+  <PaginaHeroe
+    etiqueta="Cobros"
+    titulo="Cada pedido,"
+    acento="con su pago"
+    bajada="Sofi pide el pago con tus medios. Ves cuánto falta cobrar y si cada pago está confirmado o por confirmar. Sin pago confirmado, no se entrega."
+    segundo={{ href: "/entregas", label: "Ver entregas" }}
+  >
+    <div class="p-cel" slot="visual">
+      <Image src={pedidoPorConfirmar} alt="El pedido 0008 de Carla Mendoza con el pago por Yape por confirmar" widths={[300, 600]} sizes="300px" />
+    </div>
+  </PaginaHeroe>
+  <section class="p-bloques" aria-labelledby="medios-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Medios de pago</p>
+        <h2 id="medios-h" class="titulo-2">Cobra como ya cobras, <span class="cur">sin perseguir capturas</span></h2>
+      </div>
+      <ul class="p-bloques__lista">
+        {medios.map((m) => (
+          <li class="p-bloque" data-aparece>
+            <h3>{m.t}</h3>
+            <p>{m.d}</p>
+            <span class:list={["p-dato", m.ok ? "p-dato--ok" : "p-dato--espera"]}>{m.dato}</span>
+          </li>
+        ))}
+      </ul>
+      <div class="p-tarjeta-naranja p-fila-pronto" data-aparece><span class="pronto">Pronto</span><p>«Pagar ahora»: la clienta paga con Yape o tarjeta en un toque, desde el chat.</p></div>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="ve-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Lo que ve tu tienda</p>
+        <h2 id="ve-h" class="titulo-2">Qué falta cobrar <span class="cur">y qué sale hoy</span></h2>
+        <p class="bajada">La pantalla real de Pedidos: cada pedido con su total, su pago, su entrega y su estado.</p>
+      </div>
+      <figure class="p-ventana" style="margin-top: 40px" data-aparece>
+        <div class="p-ventana__barra" aria-hidden="true"><i></i><i></i><i></i><span>app.gestoria24.com/pedidos</span></div>
+        <Image src={pedidosTableta} alt="Pedidos de Calzados Rosa: 13 abiertos, 5 para entregar hoy y 2 con pago por confirmar" widths={[720, 1440, 2160]} sizes="(min-width: 1320px) 1240px, calc(100vw - 32px)" />
+      </figure>
+    </div>
+  </section>
+</Base>
