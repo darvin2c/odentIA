@@ -784,6 +784,12 @@ function MissedDialog({ target, onClose }: { target: DeliveryTarget; onClose: ()
   )
 }
 
+/** «Pasar a hoy», «Pasar a mañana», «Pasar al jue, 27 nov». */
+function moveLabel(day: string, today: string): string {
+  const name = dayName(day, today)
+  return ["hoy", "mañana"].includes(name) ? `Pasar a ${name}` : `Pasar al ${name}`
+}
+
 /** «Pasar a…»: otro día, otra franja u otro repartidor, sin anular nada. */
 function MoveDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
   const { store } = useStoreContext()
@@ -806,7 +812,7 @@ function MoveDialog({ target, onClose }: { target: DeliveryTarget; onClose: () =
           ? `Ahora sale ${dayName(target.deliverOn, today)}${target.slot ? `, ${target.slot.label}` : ""}. Elige cuándo va: nada se anula.`
           : "Elige cuándo sale: nada se anula."
       }
-      confirmLabel={`Pasar al ${dayName(day, today)}${slot ? ` ${slot.label}` : ""}`}
+      confirmLabel={`${moveLabel(day, today)}${slot ? `, ${slot.label}` : ""}`}
       cancelLabel="Volver"
       pending={action.isPending}
       confirmDisabled={!day || !courier.ready}

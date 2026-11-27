@@ -95,7 +95,10 @@ export function DispatchPage() {
         <p className="flex flex-1 flex-col justify-center rounded-lg border px-3 py-1.5 text-sm sm:hidden">
           <span className="font-semibold">
             {dayName(chosen, today)}
-            {chosen === today ? "" : ` · ${chosen.slice(8)}`}
+            {/* «mañana» y «ayer» no dicen el número; los demás días ya lo traen. */}
+            {["mañana", "ayer"].includes(dayName(chosen, today))
+              ? ` · ${Number(chosen.slice(8))}`
+              : ""}
           </span>
           {summary ? (
             <span className="text-xs text-muted-foreground">{dayCountText(summary, today)}</span>
