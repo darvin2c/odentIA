@@ -23,10 +23,34 @@ export type DeliveryType =
   | "LockerDelivery"
 export type DeliveryCost = "gratis" | "fijo" | "por_zona" | "se_acuerda"
 
+/** Cuándo llega lo de una zona: hoy antes de la hora de corte, al día siguiente o en días fijos. */
+export type ZoneLead = "hoy" | "manana" | "dias"
+
+/**
+ * Una zona de reparto: sus distritos por su código UBIGEO del INEI, su precio, cuándo llega (la
+ * hora de corte en minutos desde las 00:00 de la tienda; los días, 1 lunes … 7 domingo), sus
+ * franjas (de las de la tienda), si acepta pago al recibir y si le alcanza el envío gratis.
+ */
 export interface DeliveryZone {
   name: string
   priceCents: number
+  districts: string[]
+  lead: ZoneLead
+  cutoff: number | null
+  weekdays: number[]
+  slots: { start: number; end: number }[]
+  payOnDelivery: boolean
+  freeShipping: boolean
 }
+
+export interface OpeningHours {
+  days: number[]
+  opens: number
+  closes: number
+}
+
+export type ReadyIn = "1h" | "2h" | "dia_siguiente"
+export type Freight = "al_recoger" | "antes"
 
 export interface DeliveryMethod {
   id: string
@@ -40,6 +64,11 @@ export interface DeliveryMethod {
   acceptsPayOnDelivery: boolean
   maxDiscountCents: number | null
   freeFromCents: number | null
+  openingHours: OpeningHours[]
+  readyIn: ReadyIn | null
+  agencies: string[]
+  freight: Freight | null
+  freightCents: number | null
   isActive: boolean
 }
 

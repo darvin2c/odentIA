@@ -53,6 +53,7 @@ import {
   type PaymentMethod,
   readMoney,
 } from "./lib/tienda"
+import { type DeliverySetup, FAILED_TRIP_NOTE } from "./lib/zonas"
 import { ReceiptImage, shrinkPhoto } from "./piezas"
 import { useStoreContext } from "./tiendas"
 
@@ -888,6 +889,24 @@ function PendingPayments({ target }: { target: DeliveryTarget }) {
 }
 
 /** «No se entregó»: con su motivo y cuándo va, con su franja y quién lo lleva. */
+/**
+ * La regla de la tienda si la clienta no está (Configuración › Entregas): se recuerda al anotar
+ * «No se entregó». Solo informa; el envío de otro viaje no se cobra solo.
+ */
+function FailedTripNote() {
+  const { store } = useStoreContext()
+  const setup = useQuery({
+    queryKey: ["pagos-y-entregas", store.id, "entregas"],
+    queryFn: () => api<DeliverySetup>(`/api/tiendas/${store.id}/entregas`),
+  })
+  if (!setup.data) return null
+  return (
+    <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
+      La regla de la tienda si la clienta no está: {FAILED_TRIP_NOTE[setup.data.failedTrip]}.
+    </p>
+  )
+}
+
 function MissedDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
   const { store } = useStoreContext()
   const today = storeToday(store.timeZone)
@@ -954,6 +973,7 @@ function MissedDialog({ target, onClose }: { target: DeliveryTarget; onClose: ()
       onClose={onClose}
     >
       <FieldGroup>
+        <FailedTripNote />
         <form.AppField name="choice">
           {(field) => (
             <field.Group legend="¿Qué pasó?">

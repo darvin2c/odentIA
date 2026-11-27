@@ -577,8 +577,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
-          "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
+          "En Configuración, en Entregas: eliges desde qué distrito despachas y «Usar la plantilla de Lima» (los 50 distritos de Lima y el Callao en 6 zonas, con precios de partida que cambias) o «Prefiero armarlas yo». Los distritos se eligen en el mapa (tocas uno y eliges su zona o «No entrego ahí») o en la lista de cada zona; un distrito está en una sola zona.",
+          "Cada zona, con «Editar»: su precio, cuándo llega (hoy antes de una hora, al día siguiente o en días fijos), sus franjas, si acepta pago al recibir y si tiene envío gratis. En «Reglas», desde qué compra es gratis, quién paga si la clienta no está y dónde se paga al recibir. Sofi cotiza con el distrito de la clienta.",
+          "El recojo y la agencia van en sus tarjetas («Agregar recojo», «Agregar agencia»). Las franjas, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin. Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
         screen: "entregas",
