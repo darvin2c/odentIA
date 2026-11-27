@@ -855,6 +855,61 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
     expect(again.status).toBe(409)
   })
 
+  it("lo que la tienda apaga, cotizar no lo deja ofrecer; y la compra grande la pasa a una persona", async () => {
+    await call(
+      "rosa",
+      "PATCH",
+      `${base}/sofi`,
+      settings({ offerShipping: false, handoffOverCents: 20000 }),
+    )
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Lo voy a pensar",
+      use("cotizar", () => ({
+        lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+        entrega_id: ids.reparto,
+        envio_cobrado: 0,
+      })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(false)
+        expect(result.problemas[0]).toContain("La tienda no deja ofrecer envío gratis")
+        return {
+          toolCalls: [
+            toolCall("cotizar", {
+              lineas: [{ variante_id: ids.t38, cantidad: 1, precio_unitario: 119 }],
+              entrega_id: ids.reparto,
+            }),
+          ],
+        }
+      },
+      (r) => ({ content: `Te la dejo en ${lastTool(r).total} si lo pagas hoy.` }),
+    )
+    expect(lastSofi(sent).basis.why).toEqual(
+      expect.arrayContaining([
+        "Ofreció de tu lista: un descuento, sin bajar de tu mínimo.",
+        "Intentó ofrecer envío gratis o más barato y tu regla no lo dejó.",
+      ]),
+    )
+    // S/ 129 × 2 + envío pasa de S/ 200: no lo anota.
+    const big = await write(
+      await newTest(),
+      "Quiero dos",
+      use("armar_pedido", () => ({
+        lineas: [{ variante_id: ids.t38, cantidad: 2 }],
+        entrega_id: ids.reparto,
+        nombre: "Ana",
+      })),
+      (r) => {
+        expect(lastTool(r).problema).toContain("pasa el chat a una persona")
+        return { content: "Te paso con el equipo." }
+      },
+    )
+    expect(big.conversation.orders).toEqual([])
+    await call("rosa", "PATCH", `${base}/sofi`, settings())
+  })
+
   it("fuera del horario del equipo dice cuándo le responden, y si la tienda lo pide, espera a una persona", async () => {
     // Domingo 29 de noviembre de 2026, 10 p. m. en Lima; el equipo atiende de lunes a sábado.
     const sunday = new Date("2026-11-30T03:00:00Z")

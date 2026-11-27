@@ -690,6 +690,19 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
     estilo: styleWords(loaded.choices),
     ...(trace.read.length ? { sabe: trace.read.map((r) => r.question) } : {}),
     ...(trace.gap ? { pregunta: trace.gap } : {}),
+    // Lo que ofreció de la lista de la tienda (las cotizaciones cuyo total dijo) y lo que no lo dejó.
+    ...(offered !== null && text
+      ? {
+          ofrecio: [
+            ...new Set(
+              trace.offers
+                .filter((o) => amountsIn(text, loaded.currency).includes(o.totalCents))
+                .flatMap((o) => o.kinds),
+            ),
+          ],
+        }
+      : {}),
+    ...(trace.refused.length ? { no_dejo: trace.refused } : {}),
     ...(later ? { fuera_de_horario: later } : {}),
     ...(problems.length ? { frenado: problems } : {}),
     ...(failure ? { fallo: failure } : {}),

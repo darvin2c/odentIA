@@ -34,7 +34,13 @@ import { autoUnitCents } from "../precio.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
-import type { AgentChoices } from "./opciones.js"
+import {
+  type AgentChoices,
+  notAllowedWords,
+  type OfferKind,
+  offerKindsOf,
+  offerNotAllowed,
+} from "./opciones.js"
 import { amountsIn, percentsIn } from "./revisar.js"
 import { noteGapIn } from "./saber.js"
 
@@ -73,7 +79,9 @@ export interface TurnTrace {
   /** Pasó la conversación a una persona, con este motivo. */
   handoff: string | null
   /** Las cotizaciones negociadas de este turno: su total y lo que cede. De ahí sale la oferta. */
-  offers: { totalCents: number; cededCents: number }[]
+  offers: { totalCents: number; cededCents: number; kinds: OfferKind[] }[]
+  /** Lo que intentó ofrecer y la tienda no deja (`offerNotAllowed`). */
+  refused: OfferKind[]
   /** Lo que leyó de «Lo que sabe» (`leer_lo_que_sabe`): lo que dice «Por qué» en la prueba. */
   read: { id: string; question: string }[]
   /** La pregunta que no supo responder, si la anotó al pasar el chat a una persona. */
@@ -88,6 +96,7 @@ export function newTrace(): TurnTrace {
     quotes: new Map(),
     handoff: null,
     offers: [],
+    refused: [],
     read: [],
     gap: null,
   }
@@ -99,7 +108,10 @@ export function newTrace(): TurnTrace {
  * respuesta. Si no escribió ningún total (dijo «S/ 10 menos» sin el total), cuenta la que menos
  * cede: así una prueba que no dijo no le deja mejorar la oferta después.
  */
-export function offeredIn(trace: Pick<TurnTrace, "offers">, said: number[]): number | null {
+export function offeredIn(
+  trace: { offers: { totalCents: number; cededCents: number }[] },
+  said: number[],
+): number | null {
   if (trace.offers.length === 0) return null
   const shown = trace.offers.filter((o) => said.includes(o.totalCents))
   return shown.length
@@ -603,8 +615,15 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
       await collectionOf(tx, ctx.storeId, input.paymentMethodId),
     )
     if (problem) return { ok: false, problemas: [problem] }
+    // Lo que la tienda no deja ofrecer (ADR 0234) no se cotiza: Sofi no lo puede decir.
+    const kinds = offerKindsOf(q, ctx.choices)
+    const refused = offerNotAllowed(kinds, ctx.choices)
+    if (refused) {
+      if (!ctx.trace.refused.includes(refused)) ctx.trace.refused.push(refused)
+      return { ok: false, problemas: [notAllowedWords(refused, ctx.choices)] }
+    }
     if (q.negotiated)
-      ctx.trace.offers.push({ totalCents: q.totalCents, cededCents: q.marginUsedCents })
+      ctx.trace.offers.push({ totalCents: q.totalCents, cededCents: q.marginUsedCents, kinds })
     const money = (cents: number) => {
       ctx.trace.amounts.add(cents)
       return formatMoney(cents, ctx.currency)
@@ -655,6 +674,14 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
       await collectionOf(tx, ctx.storeId, input.paymentMethodId),
     )
     if (problem) return { ok: false, problemas: [problem] }
+    const refused = offerNotAllowed(offerKindsOf(priced.quote, ctx.choices), ctx.choices)
+    if (refused) return { ok: false, problemas: [notAllowedWords(refused, ctx.choices)] }
+    // Las compras grandes las atiende la tienda, si así lo eligió: Sofi pasa el chat.
+    if (ctx.choices.handoffOverCents !== null && priced.quote.totalCents > ctx.choices.handoffOverCents)
+      throw new ToolProblem(
+        `La tienda atiende ella los pedidos de más de ${formatMoney(ctx.choices.handoffOverCents, ctx.currency)}: no lo anotes, pasa el chat a una persona (pasar_a_persona)`,
+        "MONTO_ALTO",
+      )
     // Solo con un resumen que el cliente ya vio y respondió (tablero 8: «manda el resumen con
     // el total para que el cliente lo confirme»).
     if (!ctx.shownQuotes.has(quoteKey(input, priced.quote.totalCents)))
