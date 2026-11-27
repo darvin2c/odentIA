@@ -13,8 +13,9 @@ import {
   Smartphone,
   X,
 } from "lucide-react"
+import { RadioChips } from "@odentia/ui-patterns"
 import { useState } from "react"
-import { RUBROS } from "../datos"
+import { foto, RUBROS } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { PhoneFrame } from "../vitrina/marcos"
 import {
@@ -27,6 +28,7 @@ import {
   type Pedido,
   usePedidos,
 } from "./modelo"
+import { recogido } from "./vuelta"
 
 type Forma = "link" | "efectivo" | "yape" | "pos"
 
@@ -349,6 +351,12 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
           <Badge variant="warning">Cobrar {money(k.falta || k.porConfirmar)}</Badge>
         )}
       </span>
+      {p.cambioDe && p.lineas.some((l) => l.vuelve) ? (
+        <span className="rounded-lg bg-primary-soft px-2 py-1 text-xs text-primary-soft-foreground">
+          Lleva {p.lineas.find((l) => !l.vuelve)?.variante} · recoge{" "}
+          {p.lineas.find((l) => l.vuelve)?.variante}, con su foto
+        </span>
+      ) : null}
       {p.paso === "en_camino" ? (
         <span className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" aria-label={`Llamar a ${n}`}>
@@ -391,6 +399,82 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
   )
 }
 
+const ESTADOS = ["Sin uso, con su caja", "Con uso", "Con falla"] as const
+
+/** La tarea «Recoger»: la foto de cómo está el producto y «Recogí». Lo deja en la tienda. */
+function Recoger({ p }: { p: Pedido }) {
+  const { rubro } = useRuta()
+  const v = p.vuelta!
+  const [abierto, setAbierto] = useState(false)
+  const [foto1, setFoto] = useState(false)
+  const [estado, setEstado] = useState<string | null>(v.motivo === "falla" ? "Con falla" : null)
+  const n = `${p.clienta.split(" ")[0]} ${p.clienta.split(" ")[1]?.[0] ?? ""}.`
+  const l = v.vuelven[0]!
+  return (
+    <li className="flex flex-col gap-2 rounded-xl border border-primary/40 bg-card p-3">
+      <span className="flex items-start gap-2">
+        <span className="min-w-0 flex-1">
+          <b className="block text-sm">
+            {p.id} · {n}
+          </b>
+          <span className="flex items-start gap-1 text-xs text-muted-foreground">
+            <MapPin className="mt-0.5 size-3 shrink-0" aria-hidden />
+            {p.entrega.direccion}
+          </span>
+        </span>
+        <Badge variant="soft">Recoger</Badge>
+      </span>
+      <span className="flex items-center gap-2 text-xs">
+        {l.foto ? <img src={foto(l.foto)} alt="" className="size-9 rounded-lg object-cover" /> : null}
+        <span>
+          Recoge <b>{l.nombre}</b> · {l.variante}. No cobra nada.
+        </span>
+      </span>
+      {!abierto ? (
+        <Button size="sm" onClick={() => setAbierto(true)}>
+          Recoger
+        </Button>
+      ) : (
+        <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-2">
+          <Button size="sm" variant={foto1 ? "outline" : "default"} onClick={() => setFoto(true)}>
+            <Camera aria-hidden />
+            {foto1 ? "Foto tomada · volver a tomar" : "Tomar la foto de cómo está"}
+          </Button>
+          {foto1 ? (
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              {l.foto ? <img src={foto(l.foto)} alt="Foto al recoger" className="size-12 rounded-lg object-cover" /> : null}
+              La foto queda en el pedido.
+            </span>
+          ) : null}
+          <span id={`est-${p.id}`} className="text-xs font-medium">
+            ¿Cómo está?
+          </span>
+          <RadioChips
+            aria-labelledby={`est-${p.id}`}
+            value={estado}
+            options={ESTADOS.map((e) => ({ value: e, label: e }))}
+            onChange={setEstado}
+          />
+          <Button
+            size="sm"
+            disabled={!foto1 || !estado}
+            onClick={() => {
+              recogido(rubro, p, "Kevin", estado!.toLowerCase())
+              toast.success("Recogido. Lo dejas en la tienda al cerrar tu ruta.")
+            }}
+          >
+            <Check aria-hidden />
+            Recogí
+          </Button>
+          {!foto1 ? (
+            <span className="text-xs text-muted-foreground">«Recogí» se activa con la foto.</span>
+          ) : null}
+        </div>
+      )}
+    </li>
+  )
+}
+
 /** gestorIA Reparto: la app del repartidor, para todas sus tiendas. Aquí, solo lo de este flujo. */
 function App() {
   const { rubro } = useRuta()
@@ -404,6 +488,13 @@ function App() {
       ["por_salir", "en_camino", "entregado", "preparando"].includes(p.paso),
   )
   const porSalir = mias.filter((p) => p.paso === "por_salir")
+  const recojos = all.filter(
+    (p) =>
+      p.vuelta?.estado === "aprobado" &&
+      p.vuelta.como.startsWith("recojo") &&
+      (p.vuelta.repartidor ?? "Kevin") === "Kevin" &&
+      p.vuelta.dia === "Hoy",
+  )
   const efectivo = all
     .flatMap((p) => p.pagos)
     .filter((g) => g.medio === "efectivo" && g.quien === "Kevin" && g.cuando.startsWith("Hoy"))
@@ -415,7 +506,7 @@ function App() {
         <span className="flex-1">
           <b className="block text-[15px]">Hoy · jueves 27</b>
           <span className="text-xs text-muted-foreground">
-            Kevin · {mias.length + 1} entregas de 2 tiendas
+            Kevin · {mias.length + 1} entregas{recojos.length ? ` y ${recojos.length} recojo` : ""} de 2 tiendas
           </span>
         </span>
         <Badge variant="secondary">gestorIA Reparto</Badge>
@@ -425,7 +516,7 @@ function App() {
           <span className="flex items-center gap-2 text-sm font-semibold">
             <span className="size-3 rounded-full" style={{ background: R.store.color }} />
             {R.store.name}
-            <span className="font-normal text-muted-foreground">· {mias.length}</span>
+            <span className="font-normal text-muted-foreground">· {mias.length + recojos.length}</span>
           </span>
           {porSalir.length ? (
             <Button
@@ -456,6 +547,9 @@ function App() {
             </Button>
           ) : null}
           <ul className="flex flex-col gap-2">
+            {recojos.map((x) => (
+              <Recoger key={x.id} p={x} />
+            ))}
             {mias
               .filter((x) => x.paso !== "preparando")
               .map((x) => (

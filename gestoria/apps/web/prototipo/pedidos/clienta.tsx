@@ -23,9 +23,11 @@ import {
   mover,
   nuevoId,
   type Pedido,
+  todoElChat,
   trasPagar,
   usePedidos,
 } from "./modelo"
+import { VueltaClienta } from "./vuelta-ui"
 
 /** Los pasos que ve la clienta en su link: pocos, con su hora. */
 function pasosClienta(p: Pedido) {
@@ -218,6 +220,8 @@ function SuLink({ p, rubro }: { p: Pedido; rubro: keyof typeof RUBROS }) {
           </ol>
         )}
 
+        {p.vuelta ? <VueltaClienta p={p} /> : null}
+
         <div className="box gap-2">
           {p.lineas.map((l) => (
             <div key={l.id} className="flex items-center gap-3">
@@ -370,6 +374,19 @@ function SuLink({ p, rubro }: { p: Pedido; rubro: keyof typeof RUBROS }) {
 function SuWhatsApp({ p, rubro }: { p: Pedido; rubro: keyof typeof RUBROS }) {
   const R = RUBROS[rubro]
   const m = marca(R)
+  // Lo del cambio o la devolución va después de los avisos de la compra.
+  const deAviso = (a: (typeof p.avisos)[number]) => ({
+    who: "so",
+    text: a.texto,
+    h: a.cuando.split("· ")[1] ?? "",
+    card: a.clave === "link",
+  })
+  const avisos = p.avisos.filter(
+    (a) =>
+      !(a.clave === "link" && p.chat.some((c) => c.texto.includes("carrito"))) &&
+      !todoElChat(p).some((c) => c.texto === a.texto),
+  )
+  const vuelta = !!p.vuelta
   const msgs = [
     ...p.chat.map((c, i) => ({
       who: c.de === "clienta" ? "me" : "so",
@@ -377,19 +394,14 @@ function SuWhatsApp({ p, rubro }: { p: Pedido; rubro: keyof typeof RUBROS }) {
       h: c.hora,
       card: i === p.chat.length - 1 && c.de === "sofi" && c.texto.includes("carrito"),
     })),
-    // Los avisos que no están ya en la conversación (el carrito, si Sofi ya lo mandó ahí).
-    ...p.avisos
-      .filter(
-        (a) =>
-          !(a.clave === "link" && p.chat.some((c) => c.texto.includes("carrito"))) &&
-          !p.chat.some((c) => c.texto === a.texto),
-      )
-      .map((a) => ({
-        who: "so",
-        text: a.texto,
-        h: a.cuando.split("· ")[1] ?? "",
-        card: a.clave === "link",
-      })),
+    ...avisos.filter((a) => !vuelta || a.clave !== "cambio").map(deAviso),
+    ...(p.vuelta?.chat ?? []).map((c) => ({
+      who: c.de === "clienta" ? "me" : "so",
+      text: c.texto,
+      h: c.hora,
+      card: false,
+    })),
+    ...avisos.filter((a) => vuelta && a.clave === "cambio").map(deAviso),
   ]
   return (
     <div className="vv" style={{ ...m.style, height: "100%" } as CSSProperties}>
@@ -449,7 +461,7 @@ export function ClientaPage() {
         secondary={{
           label: "Volver al pedido",
           icon: <ArrowLeft aria-hidden />,
-          onClick: () => ir("/pedidos", { extra: `p=${p.id}` }),
+          onClick: () => ir(`/pedidos/${p.id}`),
         }}
       />
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -524,7 +536,7 @@ export function ClientaPage() {
       <Button
         variant="outline"
         className="self-start"
-        onClick={() => ir("/pedidos", { extra: `p=${p.id}` })}
+        onClick={() => ir(`/pedidos/${p.id}`)}
       >
         Ver el pedido en la tienda
       </Button>

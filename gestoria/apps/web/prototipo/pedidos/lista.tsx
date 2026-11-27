@@ -17,17 +17,18 @@ import {
   Megaphone,
   Plus,
   Route,
+  ScrollText,
   Sparkles,
   Store,
   UserRound,
   Workflow,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { foto } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { useTienda } from "../tienda"
 import { AccionDrawer, Anotar } from "./acciones"
-import { PedidoDrawer } from "./detalle"
+import { LoQueAprende, unToque } from "./vuelta-ui"
 import {
   type Accion,
   CANAL,
@@ -39,6 +40,7 @@ import {
   type Paso,
   type Pedido,
   teToca,
+  tocaDe,
   usePedidos,
 } from "./modelo"
 import { ConRouter } from "./router"
@@ -50,6 +52,7 @@ type Vista =
   | "en_camino"
   | "entregados"
   | "anulados"
+  | "vueltas"
   | "todos"
 const VISTAS: Record<Vista, { label: string; pasos: Paso[] | null }> = {
   abiertos: {
@@ -61,6 +64,7 @@ const VISTAS: Record<Vista, { label: string; pasos: Paso[] | null }> = {
   en_camino: { label: "En camino", pasos: ["en_camino"] },
   entregados: { label: "Entregados", pasos: ["entregado"] },
   anulados: { label: "Anulados", pasos: ["anulado"] },
+  vueltas: { label: "Cambios y devoluciones", pasos: null },
   todos: { label: "Todos", pasos: null },
 }
 
@@ -86,6 +90,7 @@ export function TeTocaPedidos({
   max?: number
 }) {
   const toca = teToca(list).slice(0, max)
+  const t = (p: Pedido) => tocaDe(p)!
   if (!toca.length) return null
   return (
     <section aria-labelledby="toca-h" className="flex flex-col gap-3">
@@ -113,11 +118,11 @@ export function TeTocaPedidos({
                 <span className="text-xs text-muted-foreground">
                   {p.id} · {p.clienta}
                 </span>
-                <span className="font-medium leading-snug">{p.toca!.texto}</span>
+                <span className="font-medium leading-snug">{t(p).texto}</span>
               </span>
             </button>
-            <Button size="sm" className="self-start" onClick={() => onAccion(p, p.toca!.accion)}>
-              {p.toca!.boton}
+            <Button size="sm" className="self-start" onClick={() => onAccion(p, t(p).accion)}>
+              {t(p).boton}
             </Button>
           </li>
         ))}
@@ -135,6 +140,27 @@ function Foto({ p }: { p: Pedido }) {
     />
   ) : (
     <span className="size-12 shrink-0 rounded-lg bg-muted" />
+  )
+}
+
+/** El estado del pedido y, si algo vuelve, el de su cambio o devolución. */
+function EstadoBadge({ p }: { p: Pedido }) {
+  const v = p.vuelta
+  if (!v || v.estado === "cerrado" || v.estado === "rechazado")
+    return <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
+  const t = v.tipo === "cambio" ? "Cambio" : "Devolución"
+  const e =
+    v.estado === "solicitado"
+      ? "por aprobar"
+      : v.estado === "recibido"
+        ? "por revisar"
+        : v.estado === "revisado"
+          ? "por devolver"
+          : "en vuelta"
+  return (
+    <Badge variant="warning">
+      {t} {e}
+    </Badge>
   )
 }
 
@@ -177,16 +203,22 @@ function OrigenIcon({ p }: { p: Pedido }) {
 }
 
 function Lista() {
-  const { rubro, q } = useRuta()
+  const { rubro } = useRuta()
   const all = usePedidos(rubro)
   const owner = useTienda((s) => s.rol === "dueno")
   const isMobile = useIsMobile()
   const { get } = useListSearch()
-  const [vista, setVista] = useState<Vista>("abiertos")
+  const [vista, setVistaS] = useState<Vista>(memo.vista)
+  const setVista = (v: Vista) => {
+    memo.vista = v
+    setVistaS(v)
+  }
   const [anotar, setAnotar] = useState(false)
   const [accion, setAccion] = useState<{ p: Pedido; a: Accion } | null>(null)
-  const abierto = q.get("p")
-  const abrir = (id: string | null) => ir("/pedidos", { extra: id ? `p=${id}` : "" })
+  const abrir = (id: string) => ir(`/pedidos/${id}`)
+  const hacer = (p: Pedido, a: Accion) => {
+    if (!unToque(rubro, p, a)) setAccion({ p, a })
+  }
 
   const busca = (get("q") ?? "").toLowerCase()
   const fDia = get("dia")
@@ -204,7 +236,11 @@ function Lista() {
       (!fOrigen || p.origen.k === fOrigen),
   )
   const enVista = (v: Vista) =>
-    filtrados.filter((p) => !VISTAS[v].pasos || VISTAS[v].pasos!.includes(p.paso))
+    filtrados.filter((p) =>
+      v === "vueltas"
+        ? !!p.vuelta || !!p.cambioDe
+        : !VISTAS[v].pasos || VISTAS[v].pasos!.includes(p.paso),
+    )
   // La tabla recibe la misma lista mientras no cambie nada: una lista nueva en cada render la
   // vuelve a medir sin fin.
   // biome-ignore lint/correctness/useExhaustiveDependencies: depende de lo que filtra
@@ -284,8 +320,8 @@ function Lista() {
                   </span>
                   <span className="truncate text-xs font-normal text-muted-foreground">{lleva}</span>
                   <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
-                    {p.toca ? <Badge variant="warning">Te toca</Badge> : null}
+                    <EstadoBadge p={p} />
+                    {tocaDe(p) ? <Badge variant="warning">Te toca</Badge> : null}
                     <span className="text-sm font-normal">
                       <Cobro p={p} />
                     </span>
@@ -316,8 +352,8 @@ function Lista() {
           const p = row.original
           return (
             <span className="flex flex-wrap items-center gap-1.5">
-              <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
-              {p.toca ? <Badge variant="warning">Te toca</Badge> : null}
+              <EstadoBadge p={p} />
+              {tocaDe(p) ? <Badge variant="warning">Te toca</Badge> : null}
             </span>
           )
         },
@@ -390,6 +426,11 @@ function Lista() {
         }}
         menu={[
           {
+            label: "Política de cambios y devoluciones",
+            icon: <ScrollText aria-hidden />,
+            onSelect: () => ir("/pedidos/politica"),
+          },
+          {
             label: "Ver lo que ve la clienta",
             icon: <Route aria-hidden />,
             onSelect: () => ir("/clienta", { extra: "p=0165" }),
@@ -401,7 +442,7 @@ function Lista() {
           },
         ]}
       />
-      <TeTocaPedidos list={all} onAbrir={abrir} onAccion={(p, a) => setAccion({ p, a })} />
+      <TeTocaPedidos list={all} onAbrir={abrir} onAccion={hacer} />
       {!isMobile ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <KpiCard
@@ -456,6 +497,7 @@ function Lista() {
           searchLabel="Buscar en pedidos"
           searchPlaceholder="Nombre, número o teléfono"
         />
+        {vista === "vueltas" ? <LoQueAprende list={all} /> : null}
         <DataTable table={table} onRowClick={(p) => abrir(p.id)} />
         {!filas.length ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
@@ -463,7 +505,6 @@ function Lista() {
           </p>
         ) : null}
       </div>
-      {abierto ? <PedidoDrawer key={abierto} pid={abierto} onClose={() => abrir(null)} /> : null}
       {anotar ? <Anotar onClose={() => setAnotar(false)} /> : null}
       {accion ? (
         <AccionDrawer
@@ -476,9 +517,19 @@ function Lista() {
   )
 }
 
+/** Los filtros y la vista de la lista, para volver a ella tal como estaba. */
+const memo: { filtros: Record<string, string | undefined>; vista: Vista } = {
+  filtros: {},
+  vista: "abiertos",
+}
+
 /** Pedidos: lo que necesita a una persona arriba, y la lista por estado, con filtros. */
 export function PedidosPage() {
-  const scope = useScopedListSearch({})
+  const scope = useScopedListSearch(memo.filtros)
+  // «Volver a Pedidos» regresa a la lista con sus filtros: se guardan al salir.
+  useEffect(() => {
+    memo.filtros = scope.search as typeof memo.filtros
+  }, [scope.search])
   return (
     <ConRouter>
       <ListSearchScope value={scope}>

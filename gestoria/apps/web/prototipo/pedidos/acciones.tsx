@@ -5,9 +5,11 @@ import { CircleAlert, Link2, MessageCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { DISTRITOS, foto, RUBROS } from "../datos"
 import { useRuta } from "../ruta"
+import { ExcepcionDrawer, RevisarDrawer } from "./vuelta-ui"
 import {
   type Accion,
   agregar,
+  asignarSolo,
   avisar,
   cuentas,
   type Medio,
@@ -86,6 +88,28 @@ function Resumen({ rows }: { rows: [string, string, ("falta" | "favor" | "ok")?]
   )
 }
 
+/* ---------- Empacar: un toque, sin cajón ---------- */
+
+/** «Listo: se lo di a Kevin». Pasa a «Por salir» y a Kevin le llega a su app. */
+export function empacar(rubro: Parameters<typeof mover>[0], p: Pedido) {
+  const rep = p.entrega.repartidor ?? "el repartidor"
+  mover(
+    rubro,
+    p.id,
+    (x) => {
+      x.paso = "por_salir"
+      x.toca = undefined
+    },
+    {
+      actor: "persona",
+      quien: "Rosa",
+      texto: `Lo empacó y se lo dio a ${rep}. Le llegó a su app.`,
+      paso: "por_salir",
+    },
+  )
+  toast.success(`Listo: lo tiene ${rep}. Sigue solo.`)
+}
+
 /* ---------- Ver y confirmar un pago (Yape o Plin al número de la tienda) ---------- */
 
 function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
@@ -156,28 +180,51 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
             g.monto = n
             g.quien = "Lucía"
             x.toca = undefined
-            const kk = cuentas(x)
-            if (kk.falta > 0) x.cobro = "al_recibir"
             x.paso = trasPagar(x)
-            if (sofi)
-              avisar(
-                x,
-                "pagado",
-                kk.falta > 0
-                  ? `¡Recibimos tus ${money(n)}, ${nombre}! Faltan ${money(kk.falta)}: los pagas en tu link o al recibir.`
-                  : `¡Pago recibido, ${nombre}! Ya lo estamos preparando.`,
-              )
+            if (sofi && cuentas(x).falta <= 0)
+              avisar(x, "pagado", `¡Pago recibido, ${nombre}! Ya lo estamos preparando.`)
           },
           {
             actor: "persona",
             quien: "Lucía",
-            texto: `Confirmó el Yape de ${money(n)}${queda > 0 ? `. Faltan ${money(queda)}, al recibir` : ""}.`,
+            texto: `Confirmó el ${MEDIOCORTO[pago.medio]} de ${money(n)}: lo que llegó.`,
             paso: "pagado",
           },
         )
+        if (queda > 0)
+          mover(
+            rubro,
+            p.id,
+            (x) => {
+              x.cobro = "link"
+              if (sofi)
+                avisar(x, "link", textoFalta(nombre, n, queda, RUBROS[rubro].store.slug))
+            },
+            {
+              actor: "sofi",
+              quien: "Sofi",
+              texto: sofi
+                ? `Le escribió sola a ${nombre} para cobrar los ${money(queda)} que faltan, con su link. Quedan en el saldo; sin pago confirmado no se entrega.`
+                : `Los ${money(queda)} que faltan quedan en el saldo. A ${nombre} no le llegó nada.`,
+            },
+          )
+        // Si sale hoy, gestorIA le asigna al repartidor de siempre.
+        mover(rubro, p.id, (x) => {
+          if (x.paso !== "preparando") return
+          const a = asignarSolo(x)
+          if (a)
+            x.eventos.push({
+              id: nuevoId("e"),
+              cuando: "Hoy · ahora",
+              actor: "gestoria",
+              quien: "gestorIA",
+              texto: `Sale hoy: pasó a Preparando. ${a}`,
+              paso: "preparando",
+            })
+        })
         toast.success(
           queda > 0
-            ? `Confirmado. Falta cobrar ${money(queda)}.`
+            ? `Confirmado. Sofi le cobra los ${money(queda)} que faltan.`
             : "Pago confirmado. El pedido sigue solo.",
         )
         onClose()
@@ -228,7 +275,7 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
             label="¿Cuánto llegó?"
             help={
               queda > 0
-                ? `Se confirma lo que llegó y quedan ${money(queda)} por cobrar, en el link o al recibir. El pedido ya puede salir.`
+                ? `Se confirma lo que llegó. Los ${money(queda)} que faltan quedan en el saldo y Sofi se los cobra con su link.`
                 : "Con esto el pedido queda pagado y sigue solo."
             }
           >
@@ -247,7 +294,7 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
             set={setSofi}
             texto={
               queda > 0
-                ? `«¡Recibimos tus ${money(n)}, ${nombre}! Faltan ${money(queda)}: los pagas en tu link o al recibir.»`
+                ? `«${textoFalta(nombre, n, queda, RUBROS[rubro].store.slug)}»`
                 : `«¡Pago recibido, ${nombre}! Ya lo estamos preparando.»`
             }
           />
@@ -284,6 +331,11 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
   )
 }
 
+/** Lo que Sofi le escribe sola a la clienta cuando falta una parte. */
+function textoFalta(nombre: string, llego: number, falta: number, slug: string) {
+  return `¡Recibimos tus ${money(llego)}, ${nombre}! Faltan ${money(falta)}: los pagas aquí con Yape o tarjeta. ${slug}.gestoria24.com/carrito/F${Math.round(falta)}`
+}
+
 const MEDIOCORTO: Record<Medio, string> = {
   link: "la pasarela",
   yape: "Yape",
@@ -307,18 +359,28 @@ function PasarA({ p, onClose, asignar }: { p: Pedido; onClose: () => void; asign
         ? "Hoy"
         : "Vie 28",
   )
-  const [franja, setFranja] = useState<string | null>(p.entrega.franja ?? "2 a 6 p. m.")
-  const [rep, setRep] = useState<string | null>(p.entrega.repartidor ?? (asignar ? "Kevin" : null))
-  const [sofi, setSofi] = useState(!asignar)
+  // Sin repartidor libre en su franja: se propone la siguiente franja con quien sí puede.
+  const sinLibre = !!asignar && p.toca?.accion === "asignar"
+  const [franja, setFranja] = useState<string | null>(
+    sinLibre ? "6 a 9 p. m." : (p.entrega.franja ?? "2 a 6 p. m."),
+  )
+  const [rep, setRep] = useState<string | null>(
+    sinLibre ? "Jhon" : (p.entrega.repartidor ?? (asignar ? "Kevin" : null)),
+  )
+  const [sofi, setSofi] = useState(!asignar || sinLibre)
   const nombre = p.clienta.split(" ")[0]
   const texto = `«${nombre}, tu pedido llega ${dia === "Hoy" ? "hoy" : `el ${dia?.toLowerCase()}`} entre ${franja}${rep && rep !== "Lo recoge en tienda" ? ` con ${rep}` : ""}.»`
   return (
     <FormDrawer
       open
       onClose={onClose}
-      title={asignar ? "Asignar repartidor" : "Pasar a…"}
-      description={`Pedido ${p.id} · ${p.clienta} · ${p.entrega.zona}`}
-      submitLabel={asignar ? "Asignar" : "Pasar"}
+      title={sinLibre ? "No hay repartidor libre" : asignar ? "Cambiar repartidor" : "Pasar a…"}
+      description={
+        sinLibre
+          ? `Pedido ${p.id} · ${p.clienta} · ${p.entrega.zona}. De ${p.entrega.franja} Kevin y Jhon van llenos: elige otra franja, otro día o que lo recoja.`
+          : `Pedido ${p.id} · ${p.clienta} · ${p.entrega.zona}`
+      }
+      submitLabel={sinLibre ? "Guardar" : asignar ? "Cambiar" : "Pasar"}
       onSubmit={(e) => {
         e.preventDefault()
         mover(
@@ -327,23 +389,25 @@ function PasarA({ p, onClose, asignar }: { p: Pedido; onClose: () => void; asign
           (x) => {
             x.entrega.dia = dia
             x.entrega.franja = franja
-            x.entrega.repartidor = rep
+            x.entrega.repartidor = rep === "Lo recoge en tienda" ? null : rep
+            if (rep === "Lo recoge en tienda") x.entrega.tipo = "recojo"
             x.toca = undefined
             x.noEntregado = undefined
-            if (rep && dia === "Hoy" && (x.paso === "preparando" || x.paso === "pagado"))
-              x.paso = "por_salir"
+            if (dia === "Hoy" && x.paso === "pagado") x.paso = "preparando"
             if (sofi) avisar(x, "cambio", texto.slice(1, -1))
           },
           {
             actor: "persona",
             quien: "Rosa",
             texto: asignar
-              ? `Se lo dio a ${rep}, ${dia?.toLowerCase()} de ${franja}.`
+              ? `${sinLibre ? "Eligió" : "Cambió a"} ${rep}, ${dia?.toLowerCase()} de ${franja}.${sofi ? " Sofi le avisó." : ""}`
               : `Lo pasó a ${dia?.toLowerCase()}, de ${franja}${rep ? `, con ${rep}` : ""}.${sofi ? " Sofi le avisó." : ""}`,
-            paso: rep && dia === "Hoy" ? "por_salir" : undefined,
+            paso: undefined,
           },
         )
-        toast.success(asignar ? `Lo lleva ${rep}.` : `Pasó a ${dia?.toLowerCase()}.`)
+        toast.success(
+          asignar ? `Lo lleva ${rep}. Cuando lo empaques, es un toque.` : `Pasó a ${dia?.toLowerCase()}.`,
+        )
         onClose()
       }}
     >
@@ -579,13 +643,20 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const prod = R.products().find((x) => x.id === l.pid)
   const [colorName, tallaVieja] = l.variante.split(" · ")
   const idx = prod?.sizes.indexOf(tallaVieja ?? "") ?? -1
-  const [por, setPor] = useState<string | null>("Le quedó chica")
+  const [por, setPor] = useState<string | null>(p.cambioPide ? "No le gustó" : "Le quedó chica")
   const [que, setQue] = useState<string | null>("cambio")
   const [talla, setTalla] = useState<string | null>(prod?.sizes[idx + 1] ?? tallaVieja ?? null)
   const [paga, setPaga] = useState<string | null>("La tienda")
   const [sofi, setSofi] = useState(true)
   const envio = paga === "La tienda" ? 0 : p.entrega.envio
+  // Lo que pidió en el chat, si es otro modelo: cuesta distinto y por eso lo decide una persona.
+  const pide = p.cambioPide
+  const sale = pide ?? { ...l, variante: [colorName, talla].filter(Boolean).join(" · ") }
+  const dif = sale.precio - l.precio
+  const cobrar = Math.max(0, dif) + envio
+  const queSale = pide ? `${pide.nombre} ${pide.variante}` : `la ${talla}`
   const nombre = p.clienta.split(" ")[0]
+  const avisoCambio = `Listo, ${nombre}: el viernes entre 2 y 6 p. m. ${p.entrega.repartidor ?? "Kevin"} te lleva ${queSale} y recoge la ${tallaVieja ?? "que vuelve"}. ${cobrar ? `Son ${money(cobrar)} de diferencia: los pagas en tu link y sale solo.` : "No pagas nada."}`
   const nuevoNum = String(Math.max(...pedidosDe(rubro).map((x) => Number(x.id))) + 1).padStart(
     4,
     "0",
@@ -603,11 +674,10 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
           const n: Pedido = {
             ...structuredClone(p),
             id: nuevoNum,
-            paso: "por_salir",
             creado: "Hoy · ahora",
             origen: { k: "equipo", quien: "Lucía" },
             lineas: [
-              { ...l, id: nuevoId("l"), variante: [colorName, talla].filter(Boolean).join(" · ") },
+              { ...sale, id: nuevoId("l") },
               { ...l, id: nuevoId("l"), vuelve: true },
             ],
             entrega: {
@@ -615,9 +685,11 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
               envio,
               dia: "Vie 28",
               franja: "2 a 6 p. m.",
-              repartidor: "Kevin",
+              repartidor: p.entrega.repartidor ?? "Kevin",
             },
-            cobro: envio ? "al_recibir" : "link",
+            cobro: "link",
+            paso: cobrar ? "por_pagar" : "pagado",
+            separadoHasta: cobrar ? "Vie 28 · 11:00 a. m." : undefined,
             pagos: [],
             eventos: [
               {
@@ -625,13 +697,14 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
                 cuando: "Hoy · ahora",
                 actor: "persona",
                 quien: "Lucía",
-                texto: `Creó el cambio del ${p.id}: vuelve la ${tallaVieja} (${por?.toLowerCase()}), sale la ${talla}. Kevin recoge una y lleva la otra en el mismo viaje.`,
-                paso: "por_salir",
+                texto: `Creó el cambio del ${p.id}: vuelve la ${tallaVieja} (${por?.toLowerCase()}), sale ${queSale}.${cobrar ? ` Hay ${money(cobrar)} por cobrar: Sofi le manda su link.` : ""} Kevin recoge una y lleva la otra en el mismo viaje.`,
+                paso: "por_pagar",
               },
             ],
             avisos: [],
             chat: [],
             cambioDe: p.id,
+            cambioPide: undefined,
             toca: undefined,
             unoPorCiento: false,
             estrella: false,
@@ -642,7 +715,15 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
               cuando: "Hoy · ahora",
               clave: "cambio",
               estado: "enviado",
-              texto: `Listo, ${nombre}: el viernes entre 2 y 6 p. m. Kevin te lleva la ${talla} y recoge la ${tallaVieja}. ${envio ? `El envío es ${money(envio)}.` : "No pagas nada."}`,
+              texto: avisoCambio,
+            })
+          if (sofi && cobrar)
+            n.eventos.push({
+              id: nuevoId("e"),
+              cuando: "Hoy · ahora",
+              actor: "sofi",
+              quien: "Sofi",
+              texto: `Le mandó su link a ${nombre} por los ${money(cobrar)}. Cuando pague, sale solo.`,
             })
           agregar(rubro, n)
           mover(
@@ -709,14 +790,29 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
             aria-labelledby={id}
             value={que}
             options={[
-              { value: "cambio", label: "Otra talla" },
+              { value: "cambio", label: pide ? "Lo que pidió" : "Otra talla" },
               { value: "devolucion", label: "Nada: es una devolución" },
             ]}
             onChange={setQue}
           />
         )}
       </Campo>
-      {que === "cambio" && prod && prod.sizes.length > 1 ? (
+      {que === "cambio" && pide ? (
+        <Campo label="Lo que pidió" help="Lo pidió en el chat con Sofi. Hay stock.">
+          {() => (
+            <div className="flex items-center gap-3 rounded-xl border p-3 text-sm">
+              {pide.foto ? (
+                <img src={foto(pide.foto)} alt="" className="size-10 rounded-lg object-cover" />
+              ) : null}
+              <span className="min-w-0 flex-1">
+                <b>{pide.nombre}</b> · {pide.variante}
+              </span>
+              <span className="tabular-nums">{money(pide.precio)}</span>
+            </div>
+          )}
+        </Campo>
+      ) : null}
+      {que === "cambio" && !pide && prod && prod.sizes.length > 1 ? (
         <Campo label="La talla nueva" help={`De la ${talla} quedan 3.`}>
           {(id) => (
             <RadioChips
@@ -732,7 +828,7 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
         <>
           <Campo
             label="El envío del cambio lo paga"
-            help="Kevin recoge la que vuelve y lleva la nueva en el mismo viaje."
+            help={`${p.entrega.repartidor ?? "Kevin"} recoge la que vuelve y lleva la nueva en el mismo viaje.`}
           >
             {(id) => (
               <RadioChips
@@ -746,18 +842,16 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
           <Resumen
             rows={[
               ["Vuelve", `− ${money(l.precio)}`],
-              ["Sale", money(l.precio)],
+              ["Sale", money(sale.precio)],
               ["Envío del cambio", envio ? money(envio) : "Gratis"],
-              envio
-                ? ["Falta cobrar · al recibir", money(envio), "falta"]
-                : ["Falta cobrar", "Nada", "ok"],
+              cobrar
+                ? ["Falta cobrar · Sofi le manda su link", money(cobrar), "falta"]
+                : dif < 0
+                  ? ["A su favor", money(-dif), "favor"]
+                  : ["Falta cobrar", "Nada", "ok"],
             ]}
           />
-          <SofiAvisa
-            on={sofi}
-            set={setSofi}
-            texto={`«Listo, ${nombre}: el viernes entre 2 y 6 p. m. Kevin te lleva la ${talla} y recoge la ${tallaVieja}. ${envio ? `El envío es ${money(envio)}.` : "No pagas nada."}»`}
-          />
+          <SofiAvisa on={sofi} set={setSofi} texto={`«${avisoCambio}»`} />
         </>
       ) : (
         <p className="rounded-xl border p-3 text-sm">
@@ -1234,6 +1328,10 @@ export function AccionDrawer({
       return <Anular p={p} onClose={onClose} />
     case "link":
       return <MandarLink p={p} onClose={onClose} />
+    case "revisar":
+      return <RevisarDrawer p={p} onClose={onClose} />
+    case "excepcion":
+      return <ExcepcionDrawer p={p} onClose={onClose} />
     case "deshacer":
       return pagoId ? <Deshacer p={p} pagoId={pagoId} onClose={onClose} /> : null
     default:

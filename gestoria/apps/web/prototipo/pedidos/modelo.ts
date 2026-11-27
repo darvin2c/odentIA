@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react"
 import { type Producto, RUBROS, type RubroId } from "../datos"
+import { type AccionV, nuevaVuelta, reiniciarVueltas, type Vuelta, vueltaToca } from "./vuelta"
 
 /**
  * Los pedidos del prototipo, en memoria: una tienda de ejemplo por rubro, con los casos del lienzo
@@ -85,6 +86,10 @@ export interface Evento {
   texto: string
   /** Un paso del camino que este evento completa. */
   paso?: Paso
+  /** El trozo del chat que importa, tal como lo escribió la clienta. */
+  cita?: string
+  /** Una foto que acompaña al paso: la captura del Yape o el voucher del POS. */
+  adjunto?: "captura" | "voucher" | "recojo" | "falla"
 }
 
 export type Medio = "link" | "yape" | "plin" | "efectivo" | "pos"
@@ -180,6 +185,10 @@ export interface Pedido {
   cambioEn?: string
   /** Lo que pasó en la última salida, si no se entregó. */
   noEntregado?: string
+  /** Lo que pidió para cambiar, si cuesta distinto o no hay stock: lo decide una persona. */
+  cambioPide?: Linea
+  /** El pedido de cambio o devolución de este pedido entregado, con sus propios pasos. */
+  vuelta?: Vuelta
   /** Lo que espera a una persona, con su único botón. */
   toca?: { texto: string; boton: string; accion: Accion; urgente?: boolean }
   /** Lo generó gestorIA sola: cuenta para el 1 %. */
@@ -198,6 +207,8 @@ export type Accion =
   | "link"
   | "anular"
   | "cobrar"
+  | "empacar"
+  | AccionV
 
 /* ---------- Cuentas: un solo saldo ---------- */
 
@@ -240,6 +251,7 @@ const CLIENTAS = {
   carmen: "Carmen Rojas",
   mariela: "Mariela Ríos",
   lucero: "Lucero Torres",
+  patricia: "Patricia Vega",
 }
 
 function fotoDe(p: Producto, color?: string) {
@@ -275,7 +287,15 @@ function linea(p: Producto | undefined, ci = 0, si = 2, qty = 1, precio?: number
   }
 }
 
-const ev = (cuando: string, actor: Actor, quien: string, texto: string, paso?: Paso): Evento => ({
+const ev = (
+  cuando: string,
+  actor: Actor,
+  quien: string,
+  texto: string,
+  paso?: Paso,
+  extra: Pick<Evento, "cita" | "adjunto"> = {},
+): Evento => ({
+  ...extra,
   id: id("e"),
   cuando,
   actor,
@@ -342,6 +362,7 @@ function seed(rubro: RubroId): Pedido[] {
         "Sofi",
         "Armó el pedido, separó el producto 24 horas y le mandó su carrito con «Pagar ahora».",
         "por_pagar",
+        { cita: "ya, la quiero" },
       ),
     ],
     avisos: [
@@ -423,12 +444,13 @@ function seed(rubro: RubroId): Pedido[] {
         "Carla",
         "Mandó la captura de un Yape al número de la tienda.",
         "por_confirmar",
+        { cita: "Ya te yapeé 👍", adjunto: "captura" },
       ),
       ev(
         "Jue 27 · 9:12 a. m.",
         "sofi",
         "Sofi",
-        "Leyó la captura: dice un monto distinto al del pedido. La dejó en «Te toca» sin decirle nada a Carla.",
+        "Leyó la captura: dice menos que el pedido. Una persona confirma lo que llegó; después Sofi le cobra a Carla lo que falta con su link.",
       ),
     ],
     avisos: [],
@@ -447,7 +469,7 @@ function seed(rubro: RubroId): Pedido[] {
     carla.pagos[0]!.monto = t
     carla.pagos[0]!.captura!.monto = t - 27
     carla.toca = {
-      texto: `La captura del Yape de Carla dice ${money(t - 27)}; el pedido es ${money(t)}.`,
+      texto: `Confirma el Yape de Carla: la captura dice ${money(t - 27)} y el pedido es ${money(t)}. Lo que falta lo cobra Sofi.`,
       boton: "Ver y confirmar",
       accion: "confirmar",
       urgente: false,
@@ -499,6 +521,7 @@ function seed(rubro: RubroId): Pedido[] {
         "Diana",
         "Mandó la captura de un Yape de S/ 80.",
         "por_confirmar",
+        { adjunto: "captura" },
       ),
       ev(
         "Mié 26 · 10:20 a. m.",
@@ -511,7 +534,7 @@ function seed(rubro: RubroId): Pedido[] {
         "Jue 27 · 8:00 a. m.",
         "gestoria",
         "gestorIA",
-        "Llegó su día: pasó a Preparando.",
+        "Llegó su día: pasó a Preparando y asignó a Kevin (Surco, 9 a 1 p. m.).",
         "preparando",
       ),
       ev(
@@ -583,7 +606,7 @@ function seed(rubro: RubroId): Pedido[] {
         "Mié 26 · 8:00 a. m.",
         "gestoria",
         "gestorIA",
-        "Llegó su día: pasó a Preparando.",
+        "Llegó su día: pasó a Preparando y asignó a Kevin (San Juan de Lurigancho, 2 a 6 p. m.).",
         "preparando",
       ),
       ev(
@@ -635,6 +658,10 @@ function seed(rubro: RubroId): Pedido[] {
   }
 
   const andreaLinea = linea(pr(3), 0, 2)
+  const andreaNueva = linea(pr(3), 0, 3)
+  const tallaDe = (l: Linea) => l.variante.split(" · ").at(-1) || l.variante || "otra"
+  const andreaVieja = tallaDe(andreaLinea)
+  const andreaTalla = tallaDe(andreaNueva)
   const andrea: Pedido = {
     id: "0147",
     clienta: CLIENTAS.andrea,
@@ -676,8 +703,14 @@ function seed(rubro: RubroId): Pedido[] {
       ev("Lun 24 · 1:31 p. m.", "sofi", "Sofi", "Armó el pedido.", "por_pagar"),
       ev("Lun 24 · 1:38 p. m.", "clienta", "Andrea", "Mandó la captura del Plin.", "por_confirmar"),
       ev("Lun 24 · 1:40 p. m.", "persona", "Lucía", "Confirmó el Plin.", "pagado"),
-      ev("Mar 25 · 8:00 a. m.", "gestoria", "gestorIA", "Pasó a Preparando.", "preparando"),
-      ev("Mar 25 · 9:00 a. m.", "persona", "Rosa", "Se lo dio a Kevin.", "por_salir"),
+      ev(
+        "Mar 25 · 8:00 a. m.",
+        "gestoria",
+        "gestorIA",
+        "Pasó a Preparando y asignó a Kevin (San Isidro, 2 a 6 p. m.).",
+        "preparando",
+      ),
+      ev("Mar 25 · 9:00 a. m.", "persona", "Rosa", "Lo empacó y se lo dio a Kevin.", "por_salir"),
       ev("Mar 25 · 2:10 p. m.", "repartidor", "Kevin", "Tocó «Salí».", "en_camino"),
       ev(
         "Mar 25 · 3:42 p. m.",
@@ -688,9 +721,17 @@ function seed(rubro: RubroId): Pedido[] {
       ),
       ev(
         "Jue 27 · 9:40 a. m.",
+        "clienta",
+        "Andrea",
+        "Escribió que le quedó chica y quiere una talla más.",
+        undefined,
+        { cita: "me quedó chica 😕 ¿la puedo cambiar por una talla más?" },
+      ),
+      ev(
+        "Jue 27 · 9:41 a. m.",
         "sofi",
         "Sofi",
-        "Andrea escribió que le quedó chica y quiere una talla más. Sofi se lo pasó a una persona: un cambio lo decide la tienda.",
+        `Revisó tu política (2 días de 7, primer cambio sin costo de envío) y el stock: hay la ${andreaTalla} y cuesta lo mismo. Armó el cambio y coordinó con Kevin el mismo viaje.`,
       ),
     ],
     avisos: [
@@ -698,26 +739,109 @@ function seed(rubro: RubroId): Pedido[] {
       av("Mar 25 · 2:10 p. m.", "salio", "Tu pedido salió: llega hoy entre 2 y 6 p. m. con Kevin."),
       av("Mar 25 · 3:42 p. m.", "entregado", "Kevin dejó tu pedido. ¿Te llegó bien?"),
     ],
-    chat: [
-      {
-        de: "clienta",
-        texto: "Hola, me quedó chica 😕 ¿la puedo cambiar por una talla más?",
-        hora: "9:38 a. m.",
-      },
-      {
-        de: "sofi",
-        texto:
-          "¡Claro que sí, Andrea! Le paso tu cambio a la tienda y te escribo en un ratito con el día.",
-        hora: "9:40 a. m.",
-      },
-    ],
-    toca: {
-      texto: "Andrea quiere cambiar por una talla más.",
-      boton: "Cambio o devolución",
-      accion: "cambio",
-    },
+    chat: [],
     unoPorCiento: true,
   }
+
+  /** Un cambio que sí necesita a una persona: el modelo que pide cuesta más. */
+  const patriciaLinea = linea(pr(1), 0, 2)
+  const patricia: Pedido = {
+    id: "0153",
+    clienta: CLIENTAS.patricia,
+    telefono: "955 *** 118",
+    canal: "whatsapp",
+    origen: { k: "sofi" },
+    paso: "entregado",
+    creado: "Sáb 22 · 4:12 p. m.",
+    lineas: [patriciaLinea],
+    entrega: {
+      tipo: "moto",
+      zona: "La Molina",
+      envio: 12,
+      dia: "Lun 24",
+      franja: "9 a 1 p. m.",
+      repartidor: "Jhon",
+      direccion: "Calle Los Fresnos 315, La Molina",
+    },
+    cobro: "link",
+    pagos: [],
+    eventos: [
+      ev("Sáb 22 · 4:12 p. m.", "sofi", "Sofi", "Armó el pedido y le mandó su carrito.", "por_pagar"),
+      ev("Sáb 22 · 4:20 p. m.", "pasarela", "La pasarela", "Confirmó el pago con tarjeta.", "pagado"),
+      ev(
+        "Lun 24 · 8:00 a. m.",
+        "gestoria",
+        "gestorIA",
+        "Pasó a Preparando y asignó a Jhon (La Molina, 9 a 1 p. m.).",
+        "preparando",
+      ),
+      ev("Lun 24 · 8:50 a. m.", "persona", "Rosa", "Lo empacó y se lo dio a Jhon.", "por_salir"),
+      ev("Lun 24 · 9:30 a. m.", "repartidor", "Jhon", "Tocó «Salí».", "en_camino"),
+      ev("Lun 24 · 11:05 a. m.", "repartidor", "Jhon", "Tocó «Entregado».", "entregado"),
+      ev(
+        "Jue 27 · 10:15 a. m.",
+        "clienta",
+        "Patricia",
+        "Escribió que quiere cambiarlas por otro modelo.",
+        undefined,
+        { cita: "¿las puedo cambiar por las otras que vi en tu catálogo?" },
+      ),
+      ev(
+        "Jue 27 · 10:16 a. m.",
+        "sofi",
+        "Sofi",
+        "Revisó tu política (3 días de 7) y el stock: el modelo que pide cuesta S/ 20 más. Armó el cambio con la diferencia por cobrar.",
+      ),
+    ],
+    avisos: [
+      av("Sáb 22 · 4:20 p. m.", "pagado", "¡Pago recibido, Patricia! Sale el lunes entre 9 y 1 p. m."),
+      av("Lun 24 · 9:30 a. m.", "salio", "Tu pedido salió: llega hoy entre 9 y 1 p. m. con Jhon."),
+      av("Lun 24 · 11:05 a. m.", "entregado", "Jhon dejó tu pedido. ¿Te llegó bien?"),
+    ],
+    chat: [],
+    unoPorCiento: true,
+  }
+  patricia.pagos.push({
+    id: id("pg"),
+    medio: "link",
+    monto: cuentas(patricia).total,
+    estado: "confirmado",
+    cuando: "Sáb 22 · 4:20 p. m.",
+    quien: "la pasarela",
+  })
+  patricia.vuelta = nuevaVuelta(rubro, patricia, {
+    id: "C-0153",
+    tipo: "cambio",
+    motivo: "otro_modelo",
+    dice: "¿las puedo cambiar por las otras que vi en tu catálogo?",
+    dias: 3,
+    vuelven: [patriciaLinea],
+    sale: linea(pr(2), 0, 2, 1, patriciaLinea.precio + 20),
+    como: "recojo_mismo",
+    medio: "link",
+    repartidor: "Jhon",
+    dia: "Vie 28",
+    franja: "9 a 1 p. m.",
+    estado: "solicitado",
+    hechos: { solicitado: { quien: "Patricia", cuando: "Jue 27 · 10:15 a. m." } },
+  })
+  andrea.vuelta = nuevaVuelta(rubro, andrea, {
+    id: "C-0147",
+    tipo: "cambio",
+    motivo: "chica",
+    dice: "Hola, me quedó chica 😕 ¿la puedo cambiar por una talla más?",
+    dias: 2,
+    vuelven: [andreaLinea],
+    sale: andreaNueva,
+    como: "recojo_mismo",
+    medio: "plin",
+    repartidor: "Kevin",
+    dia: "Vie 28",
+    franja: "2 a 6 p. m.",
+    estado: "solicitado",
+    hechos: { solicitado: { quien: "Andrea", cuando: "Jue 27 · 9:38 a. m." } },
+  })
+  const vueltas = semillaVueltas(rubro, pr)
 
   const milagros: Pedido = {
     id: "0162",
@@ -831,15 +955,16 @@ function seed(rubro: RubroId): Pedido[] {
         "Jue 27 · 8:00 a. m.",
         "gestoria",
         "gestorIA",
-        "Llegó su día: pasó a Preparando.",
+        "Llegó su día: pasó a Preparando. Buscó repartidor para Los Olivos de 2 a 6 p. m.: Kevin y Jhon ya van llenos en esa franja. Lo dejó en «Te toca».",
         "preparando",
       ),
     ],
     avisos: [],
     chat: [],
     toca: {
-      texto: "Sale hoy de 2 a 6 p. m. y no tiene repartidor.",
-      boton: "Asignar",
+      texto:
+        "No hay repartidor libre para Los Olivos de 2 a 6 p. m.: Kevin y Jhon van llenos. Elige otra franja, otro día o que lo recoja.",
+      boton: "Elegir cómo sale",
       accion: "asignar",
     },
     unoPorCiento: false,
@@ -927,7 +1052,13 @@ function seed(rubro: RubroId): Pedido[] {
         "Armó su carrito en el catálogo y eligió pagar al recibir.",
         "por_pagar",
       ),
-      ev("Jue 27 · 8:00 a. m.", "gestoria", "gestorIA", "Pasó a Preparando.", "preparando"),
+      ev(
+        "Jue 27 · 8:00 a. m.",
+        "gestoria",
+        "gestorIA",
+        "Pasó a Preparando y asignó a Kevin (Santa Anita, 9 a 1 p. m.).",
+        "preparando",
+      ),
       ev(
         "Jue 27 · 8:35 a. m.",
         "persona",
@@ -987,7 +1118,7 @@ function seed(rubro: RubroId): Pedido[] {
         "Jue 27 · 8:00 a. m.",
         "gestoria",
         "gestorIA",
-        "Sale hoy: pasó a Preparando con Kevin, que ya tenía la franja.",
+        "Sale hoy: pasó a Preparando y asignó a Kevin (Santa Anita, 2 a 6 p. m.).",
         "preparando",
       ),
     ],
@@ -1133,9 +1264,581 @@ function seed(rubro: RubroId): Pedido[] {
     jorge,
     mariela,
     lucero,
+    patricia,
     andrea,
     martin,
+    ...vueltas,
   ]
+}
+
+/* ---------- Los cambios y las devoluciones de ejemplo ---------- */
+
+/** Un pedido ya entregado, con su historia de siempre: así empieza cada caso de vuelta. */
+function entregadoEl(o: {
+  id: string
+  clienta: string
+  telefono: string
+  lineas: Linea[]
+  zona: string
+  direccion: string
+  creado: string
+  dia: string
+  medio: Medio
+  repartidor?: string
+  franja?: string
+  agencia?: { nombre: string; numero: string }
+}): Pedido {
+  const n = o.clienta.split(" ")[0]!
+  const rep = o.repartidor ?? "Kevin"
+  const dia = o.creado.split(" · ")[0]!
+  const envio = o.agencia ? 15 : 12
+  const total = o.lineas.reduce((a, l) => a + l.precio * l.qty, 0) + envio
+  const link = o.medio === "link"
+  const eventos: Evento[] = [
+    ev(o.creado, "sofi", "Sofi", "Armó el pedido y le mandó su carrito.", "por_pagar"),
+  ]
+  if (!link)
+    eventos.push(
+      ev(`${dia} · 1:15 p. m.`, "clienta", n, `Mandó la captura del ${MEDIO[o.medio]}.`, "por_confirmar"),
+    )
+  eventos.push(
+    ev(
+      `${dia} · 1:20 p. m.`,
+      link ? "pasarela" : "persona",
+      link ? "La pasarela" : "Lucía",
+      link ? "Confirmó el pago con tarjeta." : `Confirmó el ${MEDIO[o.medio]}.`,
+      "pagado",
+    ),
+    ev(
+      `${o.dia} · 8:00 a. m.`,
+      "gestoria",
+      "gestorIA",
+      o.agencia
+        ? "Pasó a Preparando."
+        : `Pasó a Preparando y asignó a ${rep} (${o.zona}, ${o.franja ?? "2 a 6 p. m."}).`,
+      "preparando",
+    ),
+    ev(
+      `${o.dia} · 9:00 a. m.`,
+      "persona",
+      "Rosa",
+      o.agencia ? "Lo empacó." : `Lo empacó y se lo dio a ${rep}.`,
+      "por_salir",
+    ),
+    ev(
+      `${o.dia} · ${o.agencia ? "11:30 a. m." : "2:10 p. m."}`,
+      o.agencia ? "persona" : "repartidor",
+      o.agencia ? "Rosa" : rep,
+      o.agencia ? `Lo dejó en ${o.agencia.nombre} y anotó el N.º ${o.agencia.numero}.` : "Tocó «Salí».",
+      "en_camino",
+    ),
+    ev(
+      `${o.dia} · 4:05 p. m.`,
+      o.agencia ? "clienta" : "repartidor",
+      o.agencia ? n : rep,
+      o.agencia ? `Lo recogió en ${o.agencia.nombre}.` : "Tocó «Entregado».",
+      "entregado",
+    ),
+  )
+  return {
+    id: o.id,
+    clienta: o.clienta,
+    telefono: o.telefono,
+    canal: "whatsapp",
+    origen: { k: "sofi" },
+    paso: "entregado",
+    creado: o.creado,
+    lineas: o.lineas,
+    entrega: {
+      tipo: o.agencia ? "agencia" : "moto",
+      zona: o.zona,
+      envio,
+      dia: o.dia,
+      franja: o.agencia ? null : (o.franja ?? "2 a 6 p. m."),
+      repartidor: o.agencia ? null : rep,
+      agencia: o.agencia?.nombre,
+      numero: o.agencia?.numero,
+      direccion: o.direccion,
+    },
+    cobro: link ? "link" : "captura",
+    pagos: [
+      {
+        id: id("pg"),
+        medio: o.medio,
+        monto: total,
+        estado: "confirmado",
+        cuando: `${dia} · 1:20 p. m.`,
+        quien: link ? "la pasarela" : "Lucía",
+      },
+    ],
+    eventos,
+    avisos: [
+      av(`${dia} · 1:20 p. m.`, "pagado", `¡Pago recibido, ${n}!`),
+      av(
+        `${o.dia} · 4:05 p. m.`,
+        "entregado",
+        `${o.agencia ? "Ya lo recogiste" : `${rep} dejó tu pedido`}. ¿Te llegó bien?`,
+      ),
+    ],
+    chat: [],
+    unoPorCiento: true,
+  }
+}
+
+/** El momento en que la clienta pide y Sofi atiende según la política (lo mismo en cada caso). */
+function pide(p: Pedido, cuando: string, cita: string, sofi: string) {
+  p.eventos.push(
+    ev(cuando, "clienta", p.clienta.split(" ")[0]!, "Escribió por WhatsApp.", undefined, { cita }),
+    ev(cuando, "sofi", "Sofi", sofi),
+  )
+}
+
+/**
+ * Los casos del lienzo «¿Y cuando algo vuelve?», con la política recomendada del rubro. Andrea
+ * (mismo precio) y Patricia (con diferencia) están en la semilla principal.
+ */
+function semillaVueltas(rubro: RubroId, pr: (i: number) => Producto): Pedido[] {
+  const out: Pedido[] = []
+
+  // Cuesta menos: queda a su favor o se le devuelve. Lo trae a la tienda.
+  const sVieja = linea(pr(4), 0, 2)
+  const sandra = entregadoEl({
+    id: "0143",
+    clienta: "Sandra Ortiz",
+    telefono: "944 *** 310",
+    lineas: [sVieja],
+    zona: "Cercado de Lima",
+    direccion: "Jr. Callao 410, Cercado",
+    creado: "Sáb 22 · 12:40 p. m.",
+    dia: "Lun 24",
+    medio: "yape",
+  })
+  const sDice = "¿puedo cambiarlas por las de tu catálogo que están más baratas? paso por la tienda"
+  pide(
+    sandra,
+    "Jue 27 · 11:20 a. m.",
+    sDice,
+    "Revisó tu política (3 días de 7) y el stock: el modelo que pide cuesta S/ 30 menos. Armó el cambio y ofreció la diferencia como dice tu política.",
+  )
+  sandra.vuelta = nuevaVuelta(rubro, sandra, {
+    id: "C-0143",
+    tipo: "cambio",
+    motivo: "otro_modelo",
+    dice: sDice,
+    dias: 3,
+    vuelven: [sVieja],
+    sale: linea(pr(5), 0, 2, 1, Math.max(39, sVieja.precio - 30)),
+    como: "tienda",
+    medio: "yape",
+    estado: "solicitado",
+    hechos: { solicitado: { quien: "Sandra", cuando: "Jue 27 · 11:20 a. m." } },
+  })
+  out.push(sandra)
+
+  // Falla: garantía. La clienta no paga nada; lo que vuelve no va al stock.
+  const gVieja = linea(pr(6), 0, 1)
+  const gabriela = entregadoEl({
+    id: "0141",
+    clienta: "Gabriela Núñez",
+    telefono: "912 *** 507",
+    lineas: [gVieja],
+    zona: "Miraflores",
+    direccion: "Calle Schell 220, dpto. 401",
+    creado: "Mar 4 · 6:10 p. m.",
+    dia: "Jue 6",
+    medio: "link",
+  })
+  const gDice = "hola, se le despegó la suela 😢 te mando la foto"
+  pide(
+    gabriela,
+    "Lun 24 · 10:05 a. m.",
+    gDice,
+    "Recibió la foto de la falla. Está en garantía: armó el cambio por el mismo, sin costo y con el recojo en el mismo viaje. Pasó el caso a Rosa, con todo el chat.",
+  )
+  gabriela.eventos.at(-2)!.adjunto = "falla"
+  gabriela.vuelta = nuevaVuelta(rubro, gabriela, {
+    id: "C-0141",
+    tipo: "cambio",
+    motivo: "falla",
+    dice: gDice,
+    dias: 18,
+    vuelven: [gVieja],
+    sale: { ...gVieja, id: id("l") },
+    foto: true,
+    como: "recojo_mismo",
+    medio: "link",
+    repartidor: "Kevin",
+    dia: "Mié 26",
+    franja: "2 a 6 p. m.",
+    estado: "recibido",
+    enlazado: "0154",
+    hechos: {
+      solicitado: { quien: "Gabriela", cuando: "Lun 24 · 10:05 a. m." },
+      aprobado: { quien: "Rosa", cuando: "Lun 24 · 10:30 a. m." },
+      vuelve: { quien: "Kevin", cuando: "Mié 26 · 3:40 p. m.", texto: "Recogido" },
+    },
+  })
+  gabriela.cambioEn = "0154"
+  gabriela.eventos.push(
+    ev(
+      "Lun 24 · 10:30 a. m.",
+      "persona",
+      "Rosa",
+      "Aprobó el cambio por falla que dejó listo Sofi: pedido 0154, enlazado. Un toque.",
+    ),
+    ev(
+      "Lun 24 · 10:30 a. m.",
+      "gestoria",
+      "gestorIA",
+      "Asignó a Kevin (Miraflores, mié 26, 2 a 6 p. m.): lleva el par nuevo y recoge el fallado en el mismo viaje.",
+    ),
+    ev(
+      "Mié 26 · 3:40 p. m.",
+      "repartidor",
+      "Kevin",
+      "Tocó «Recogí» con la foto de cómo estaba: «suela despegada en el talón». Lo dejó en la tienda al cerrar su ruta.",
+      undefined,
+      { adjunto: "recojo" },
+    ),
+  )
+  gabriela.avisos.push(
+    av(
+      "Lun 24 · 10:30 a. m.",
+      "cambio",
+      "Listo, Gabriela: el miércoles de 2 a 6 p. m. Kevin te lleva un par nuevo y recoge el fallado. No pagas nada.",
+    ),
+    av("Mié 26 · 3:40 p. m.", "cambio", "Kevin ya recogió el par fallado y te dejó el nuevo. ¿Te quedó bien?"),
+  )
+  const gCambio: Pedido = {
+    ...structuredClone(gabriela),
+    id: "0154",
+    creado: "Lun 24 · 10:30 a. m.",
+    lineas: [
+      { ...gVieja, id: id("l") },
+      { ...gVieja, id: id("l"), vuelve: true },
+    ],
+    entrega: {
+      ...gabriela.entrega,
+      envio: 0,
+      dia: "Mié 26",
+      franja: "2 a 6 p. m.",
+      repartidor: "Kevin",
+    },
+    paso: "entregado",
+    pagos: [],
+    cobro: "link",
+    eventos: [
+      ev(
+        "Lun 24 · 10:30 a. m.",
+        "sofi",
+        "Sofi",
+        "Armó este cambio por falla del 0141: sale un par nuevo igual, vuelve el fallado. Es garantía: no hay nada que cobrar y el envío lo pone la tienda.",
+        "por_pagar",
+        { cita: "se le despegó la suela 😢" },
+      ),
+      ev("Lun 24 · 10:30 a. m.", "gestoria", "gestorIA", "Separó el par y asignó a Kevin para el mié 26.", "pagado"),
+      ev("Mié 26 · 8:00 a. m.", "gestoria", "gestorIA", "Pasó a Preparando.", "preparando"),
+      ev("Mié 26 · 9:10 a. m.", "persona", "Rosa", "Lo empacó y se lo dio a Kevin.", "por_salir"),
+      ev("Mié 26 · 2:05 p. m.", "repartidor", "Kevin", "Tocó «Salí».", "en_camino"),
+      ev(
+        "Mié 26 · 3:40 p. m.",
+        "repartidor",
+        "Kevin",
+        "Entregó el par nuevo y recogió el fallado.",
+        "entregado",
+      ),
+    ],
+    avisos: [],
+    chat: [],
+    cambioDe: "0141",
+    cambioEn: undefined,
+    vuelta: undefined,
+    unoPorCiento: false,
+  }
+  out.push(gabriela, gCambio)
+
+  // No hay stock: Sofi ofreció otra talla o color, saldo a favor o devolución. Eligió el saldo.
+  const kVieja = linea(pr(0), 1, 4)
+  const kiara = entregadoEl({
+    id: "0145",
+    clienta: "Kiara Soto",
+    telefono: "976 *** 044",
+    lineas: [kVieja],
+    zona: "San Juan de Lurigancho",
+    direccion: "Av. Próceres 1880, SJL",
+    creado: "Dom 23 · 7:30 p. m.",
+    dia: "Mar 25",
+    medio: "yape",
+  })
+  const kDice = "me quedó grande, ¿tienes una talla menos?"
+  pide(
+    kiara,
+    "Mié 26 · 6:15 p. m.",
+    kDice,
+    "No hay la talla menos en ese color. Le ofreció, en el orden de tu política: otro color en su talla, saldo a favor o la devolución. Kiara eligió el saldo a favor.",
+  )
+  kiara.vuelta = nuevaVuelta(rubro, kiara, {
+    id: "D-0145",
+    tipo: "devolucion",
+    motivo: "grande",
+    dice: kDice,
+    dias: 1,
+    vuelven: [kVieja],
+    sinStock: `la talla menos en ${kVieja.variante.split(" · ")[0]?.toLowerCase() || "ese color"}`,
+    como: "recojo_solo",
+    medio: "yape",
+    quiere: "saldo",
+    repartidor: "Kevin",
+    dia: "Hoy",
+    franja: "2 a 6 p. m.",
+    estado: "aprobado",
+    hechos: {
+      solicitado: { quien: "Kiara", cuando: "Mié 26 · 6:15 p. m." },
+      aprobado: { quien: "Rosa", cuando: "Mié 26 · 6:40 p. m." },
+    },
+    extra: [
+      { de: "clienta", texto: "mejor déjamelo a favor 👍", hora: "6:20 p. m." },
+      {
+        de: "sofi",
+        texto:
+          "¡Hecho! Kevin pasa a recogerla mañana de 2 a 6 p. m. y, al revisarla, te queda el monto a favor para tu próxima compra.",
+        hora: "6:41 p. m.",
+      },
+    ],
+  })
+  kiara.eventos.push(
+    ev(
+      "Mié 26 · 6:40 p. m.",
+      "persona",
+      "Rosa",
+      "Aprobó la devolución como saldo a favor que dejó lista Sofi. Un toque.",
+    ),
+    ev(
+      "Mié 26 · 6:40 p. m.",
+      "gestoria",
+      "gestorIA",
+      "Asignó el recojo a Kevin (San Juan de Lurigancho, hoy, 2 a 6 p. m.): un viaje solo para recoger. Le llegó la tarea «Recoger» a su app.",
+    ),
+  )
+  out.push(kiara)
+
+  // Devolución de una parte (uno de dos), pagada con Yape: la persona la devuelve desde su app.
+  const d1 = linea(pr(1), 0, 2)
+  const d2 = linea(pr(2), 1, 2)
+  const daniela = entregadoEl({
+    id: "0146",
+    clienta: "Daniela Paz",
+    telefono: "987 *** 221",
+    lineas: [d1, d2],
+    zona: "Surco",
+    direccion: "Av. Benavides 3020, Surco",
+    creado: "Jue 20 · 5:10 p. m.",
+    dia: "Sáb 22",
+    medio: "yape",
+    repartidor: "Jhon",
+  })
+  const dDice = "hola, las otras ya no las quiero, ¿me devuelves la plata?"
+  pide(
+    daniela,
+    "Lun 24 · 9:12 a. m.",
+    dDice,
+    "Revisó tu política (2 días de 7, sin uso y con su caja). Ofreció primero dejarle el dinero a favor; Daniela prefirió que se lo devuelvan por Yape.",
+  )
+  daniela.vuelta = nuevaVuelta(rubro, daniela, {
+    id: "D-0146",
+    tipo: "devolucion",
+    motivo: "no_quiere",
+    dice: dDice,
+    dias: 2,
+    vuelven: [d2],
+    como: "recojo_solo",
+    medio: "yape",
+    quiere: "medio",
+    repartidor: "Jhon",
+    dia: "Mié 26",
+    franja: "9 a 1 p. m.",
+    estado: "revisado",
+    revision: { k: "vender", motivo: "" },
+    persona: "Rosa",
+    hechos: {
+      solicitado: { quien: "Daniela", cuando: "Lun 24 · 9:12 a. m." },
+      aprobado: { quien: "Rosa", cuando: "Lun 24 · 9:30 a. m." },
+      vuelve: { quien: "Jhon", cuando: "Mié 26 · 11:20 a. m.", texto: "Recogido" },
+      revisado: { quien: "Rosa", cuando: "Jue 27 · 9:05 a. m.", texto: "Se puede vender" },
+    },
+    extra: [
+      { de: "clienta", texto: "prefiero la plata por yape porfa", hora: "9:14 a. m." },
+      {
+        de: "sofi",
+        texto: "Perfecto, Daniela. Una persona del equipo ve tu devolución y te aviso por aquí.",
+        hora: "9:14 a. m.",
+      },
+      { de: "clienta", texto: "oye y las sandalias negras ¿tienen en 37?", hora: "9:40 a. m." },
+      { de: "sofi", texto: "¡Sí! Me quedan 2 en 37. Calzan normal. ¿Te armo el carrito?", hora: "9:40 a. m." },
+      { de: "clienta", texto: "¿y ya me devolvieron?", hora: "9:20 a. m." },
+      {
+        de: "sofi",
+        texto:
+          "Eso lo tiene Rosa, del equipo: ya revisó tu par. Le sumé tu mensaje y te escribo apenas salga.",
+        hora: "9:20 a. m.",
+      },
+    ],
+  })
+  daniela.eventos.push(
+    ev(
+      "Lun 24 · 9:14 a. m.",
+      "sofi",
+      "Sofi",
+      "Pasó la devolución a Rosa como un tema, con todo el chat, el motivo y el pedido. Siguió contestando: le mostró otras sandalias.",
+    ),
+    ev("Lun 24 · 9:30 a. m.", "persona", "Rosa", "Aprobó la devolución que dejó lista Sofi. Un toque."),
+    ev(
+      "Lun 24 · 9:30 a. m.",
+      "gestoria",
+      "gestorIA",
+      "Asignó el recojo a Jhon (Surco, mié 26, 9 a 1 p. m.): un viaje solo para recoger.",
+    ),
+    ev(
+      "Mié 26 · 11:20 a. m.",
+      "repartidor",
+      "Jhon",
+      "Tocó «Recogí» con la foto de cómo estaba: «sin uso, con su caja».",
+      undefined,
+      { adjunto: "recojo" },
+    ),
+    ev(
+      "Jue 27 · 9:05 a. m.",
+      "persona",
+      "Rosa",
+      "Revisó lo que volvió: «Se puede vender». Entró al stock como «devolución» en el kardex.",
+    ),
+    ev(
+      "Jue 27 · 9:20 a. m.",
+      "sofi",
+      "Sofi",
+      "Daniela preguntó por su dinero: eso lo tiene Rosa. Sofi sumó el mensaje al tema y le avisó a Rosa.",
+      undefined,
+      { cita: "¿y ya me devolvieron?" },
+    ),
+  )
+  daniela.avisos.push(
+    av(
+      "Lun 24 · 9:30 a. m.",
+      "cambio",
+      "Listo, Daniela: tu devolución está aprobada. Jhon pasa a recoger el par el miércoles de 9 a 1 p. m.",
+    ),
+    av(
+      "Jue 27 · 9:05 a. m.",
+      "cambio",
+      `Daniela, ya revisamos el par. Estamos devolviéndote ${money(d2.precio - 12)} por Yape (el recojo se descontó); te aviso apenas salga.`,
+    ),
+  )
+  out.push(daniela)
+
+  // Devolución total desde provincia, por agencia; pagó con la pasarela.
+  const rVieja = linea(pr(4), 2, 3)
+  const renata = entregadoEl({
+    id: "0140",
+    clienta: "Renata Gil",
+    telefono: "958 *** 731",
+    lineas: [rVieja],
+    zona: "Arequipa",
+    direccion: "Shalom Arequipa · Av. Ejército",
+    creado: "Lun 17 · 8:20 p. m.",
+    dia: "Mié 19",
+    medio: "link",
+    agencia: { nombre: "Shalom", numero: "4471-2290" },
+  })
+  const rDice = "no me convencieron, ¿las puedo devolver? estoy en Arequipa"
+  pide(
+    renata,
+    "Vie 21 · 4:30 p. m.",
+    rDice,
+    "Revisó tu política (2 días de 7). Le explicó que el envío de vuelta por Shalom lo paga ella y le pidió el número. Renata prefirió su dinero a la tarjeta.",
+  )
+  renata.vuelta = nuevaVuelta(rubro, renata, {
+    id: "D-0140",
+    tipo: "devolucion",
+    motivo: "no_quiere",
+    dice: rDice,
+    dias: 2,
+    vuelven: [rVieja],
+    como: "agencia",
+    agencia: { nombre: "Shalom", ciudad: "Arequipa", numero: "8830-1175" },
+    medio: "link",
+    quiere: "medio",
+    estado: "recibido",
+    hechos: {
+      solicitado: { quien: "Renata", cuando: "Vie 21 · 4:30 p. m." },
+      aprobado: { quien: "Rosa", cuando: "Vie 21 · 5:00 p. m." },
+      vuelve: { quien: "Shalom", cuando: "Hoy · 10:15 a. m.", texto: "Llegó por Shalom" },
+    },
+    extra: [
+      { de: "clienta", texto: "ya la mandé, el número es 8830-1175", hora: "11:02 a. m." },
+      {
+        de: "sofi",
+        texto: "¡Gracias, Renata! Lo sigo con Shalom y te aviso cuando llegue y lo revisemos.",
+        hora: "11:02 a. m.",
+      },
+    ],
+  })
+  renata.eventos.push(
+    ev("Vie 21 · 5:00 p. m.", "persona", "Rosa", "Aprobó la devolución que dejó lista Sofi. Un toque."),
+    ev(
+      "Sáb 22 · 11:02 a. m.",
+      "sofi",
+      "Sofi",
+      "Renata mandó el número de Shalom: 8830-1175. Sofi lo anotó y lo sigue sola.",
+    ),
+    ev(
+      "Hoy · 10:15 a. m.",
+      "gestoria",
+      "gestorIA",
+      "Llegó por Shalom, N.º 8830-1175. Pasa a «Te toca» para revisarlo.",
+    ),
+  )
+  out.push(renata)
+
+  // Fuera de plazo (o algo que no se cambia, según el rubro): la clienta insiste.
+  const jVieja = linea(pr(5), 0, 2)
+  const jimena = entregadoEl({
+    id: "0138",
+    clienta: "Jimena Lara",
+    telefono: "921 *** 668",
+    lineas: [jVieja],
+    zona: "Pueblo Libre",
+    direccion: "Av. Bolívar 1120, Pueblo Libre",
+    creado: "Vie 14 · 3:00 p. m.",
+    dia: "Sáb 15",
+    medio: "plin",
+  })
+  const jDice = "¿las puedo cambiar por otro color?"
+  pide(
+    jimena,
+    "Jue 27 · 9:50 a. m.",
+    jDice,
+    "Revisó tu política y se lo explicó con amabilidad, con la regla de la tienda. Jimena insistió: Sofi pasó el caso a una persona, con todo el chat.",
+  )
+  jimena.vuelta = nuevaVuelta(rubro, jimena, {
+    id: "C-0138",
+    tipo: "cambio",
+    motivo: "color",
+    dice: jDice,
+    dias: 12,
+    vuelven: [jVieja],
+    sale: linea(pr(5), 1, 2),
+    categoria: rubro === "cosmetica" ? "abierto" : undefined,
+    como: "recojo_mismo",
+    medio: "plin",
+    repartidor: "Kevin",
+    dia: "Sáb 29",
+    franja: "9 a 1 p. m.",
+    estado: "solicitado",
+    insiste: true,
+    hechos: { solicitado: { quien: "Jimena", cuando: "Jue 27 · 9:50 a. m." } },
+  })
+  out.push(jimena)
+  return out
 }
 
 /* ---------- La tienda de pedidos (en memoria) ---------- */
@@ -1147,6 +1850,8 @@ const emit = () => {
   S = { ...S, version: S.version + 1 }
   for (const f of subs) f()
 }
+/** Vuelve a pintar todo: lo usa la política al cambiar. */
+export const refrescar = emit
 
 /** Otros pedidos de ejemplo que suma otra parte del prototipo (Despachos: el resto de la semana). */
 export const MAS_PEDIDOS: ((r: RubroId) => Pedido[])[] = []
@@ -1173,6 +1878,7 @@ export function usePedido(r: RubroId, pid: string | null): Pedido | undefined {
 }
 
 export function reiniciarPedidos() {
+  reiniciarVueltas()
   S = { porRubro: {}, version: S.version + 1 }
   for (const f of subs) f()
 }
@@ -1182,7 +1888,9 @@ export function mover(
   r: RubroId,
   pid: string,
   fn: (p: Pedido) => void,
-  evento?: { actor: Actor; quien: string; texto: string; paso?: Paso; cuando?: string },
+  evento?: Pick<Evento, "actor" | "quien" | "texto" | "paso" | "cita" | "adjunto"> & {
+    cuando?: string
+  },
 ) {
   const list = pedidosDe(r)
   const i = list.findIndex((p) => p.id === pid)
@@ -1197,6 +1905,8 @@ export function mover(
       quien: evento.quien,
       texto: evento.texto,
       paso: evento.paso,
+      cita: evento.cita,
+      adjunto: evento.adjunto,
     })
   list[i] = p
   S.porRubro[r] = [...list]
@@ -1230,9 +1940,160 @@ export function money(n: number) {
   return c % 100 ? `S/ ${(c / 100).toFixed(2).replace(".", ",")}` : `S/ ${Math.round(n)}`
 }
 
+/**
+ * Lo que espera a una persona, con su único botón. A una persona solo le queda empacar,
+ * confirmar capturas de Yape o Plin y los casos raros (que vienen anotados en `toca`).
+ */
+export function tocaDe(p: Pedido): Pedido["toca"] {
+  if (p.paso === "anulado") return undefined
+  if (p.toca) return p.toca
+  const v = vueltaToca(p)
+  if (v) return v
+  if (p.paso === "por_confirmar" && p.pagos.some((x) => x.estado === "por_confirmar"))
+    return {
+      texto: `Confirma el ${p.pagos.find((x) => x.estado === "por_confirmar")?.medio === "plin" ? "Plin" : "Yape"} de ${p.clienta.split(" ")[0]}: mira tu app y confirma lo que llegó.`,
+      boton: "Ver y confirmar",
+      accion: "confirmar",
+    }
+  if (p.paso === "preparando" && p.entrega.repartidor && p.entrega.tipo === "moto")
+    return {
+      texto: `Empácalo: sale hoy de ${p.entrega.franja} con ${p.entrega.repartidor}.`,
+      boton: `Listo: se lo di a ${p.entrega.repartidor}`,
+      accion: "empacar",
+    }
+  return undefined
+}
+
 /** Lo que necesita a una persona ahora (lo de «Te toca» de pedidos). */
 export function teToca(list: Pedido[]): Pedido[] {
-  return list.filter((p) => p.toca && p.paso !== "anulado")
+  return list.filter((p) => tocaDe(p))
+}
+
+/** El repartidor de siempre de cada zona. Lo usa gestorIA para asignar sola. */
+const DE_SIEMPRE: Record<string, string> = {
+  "La Molina": "Jhon",
+  "Los Olivos": "Jhon",
+  "San Juan de Lurigancho": "Kevin",
+}
+
+/**
+ * gestorIA asigna al repartidor de siempre según la zona y la franja, sin que nadie lo toque.
+ * Devuelve lo que se anota en la historia, o nada si no le toca asignar.
+ */
+export function asignarSolo(x: Pedido): string | null {
+  const e = x.entrega
+  if (e.tipo !== "moto" || e.repartidor || !e.dia) return null
+  e.franja ??= "2 a 6 p. m."
+  e.repartidor = DE_SIEMPRE[e.zona] ?? "Kevin"
+  return `Asignó a ${e.repartidor} (${e.zona}, ${e.franja}).`
+}
+
+/** Tres horas antes de una hora como «Jue 27 · 11:04 p. m.»: cuándo Sofi recuerda el link. */
+export function tresHorasAntes(cuando: string): string {
+  const m = /^(.*?) · (\d+):(\d+) (a|p)\. m\.$/.exec(cuando)
+  if (!m) return cuando
+  const h24 = (Number(m[2]) % 12) + (m[4] === "p" ? 12 : 0) - 3
+  const h = ((h24 + 24) % 12) || 12
+  return `${m[1]} · ${h}:${m[3]} ${h24 >= 12 ? "p" : "a"}. m.`
+}
+
+export interface Falta {
+  actor: Actor
+  quien: string
+  cuando: string
+  texto: string
+  /** El paso del camino que mueve. */
+  paso?: Paso
+}
+
+/** Lo que falta, en orden: quién lo va a mover y cuándo. Casi todo lo hace gestorIA sola. */
+export function loQueFalta(p: Pedido): Falta[] {
+  const n = p.clienta.split(" ")[0]!
+  const e = p.entrega
+  const k = cuentas(p)
+  const dia = e.dia ? (e.dia === "Hoy" ? "hoy" : `el ${e.dia.toLowerCase()}`) : "el día de entrega"
+  const rep = e.repartidor ?? (e.tipo === "moto" ? "El repartidor" : null)
+  const fr = e.franja ? `, de ${e.franja.replace(/\.$/, "")}` : ""
+  const out: Falta[] = []
+  const at = CAMINO.indexOf(p.paso)
+  if (p.paso === "anulado") return out
+  const antes = (s: Paso) => at < CAMINO.indexOf(s)
+  if (p.paso === "por_pagar" && p.cobro === "link" && p.separadoHasta) {
+    out.push({
+      actor: "sofi",
+      quien: "Sofi",
+      cuando: tresHorasAntes(p.separadoHasta),
+      texto: `Le recuerda el link una sola vez, 3 horas antes de que venza. Nadie tiene que tocar nada.`,
+    })
+    out.push({
+      actor: "pasarela",
+      quien: `${n} y la pasarela`,
+      cuando: `Hasta ${p.separadoHasta.toLowerCase()}`,
+      texto: `${n} paga en su link y la pasarela lo confirma sola. Si no paga, se libera el producto y se anula solo.`,
+      paso: "pagado",
+    })
+  }
+  if (p.paso === "por_confirmar")
+    out.push({
+      actor: "persona",
+      quien: "Una persona",
+      cuando: "Ahora",
+      texto: "Mira su app de Yape o Plin y confirma lo que llegó. Si falta algo, Sofi lo cobra con su link.",
+      paso: "pagado",
+    })
+  if (antes("preparando") && e.tipo === "moto")
+    out.push({
+      actor: "gestoria",
+      quien: "gestorIA",
+      cuando:
+        e.dia === "Hoy"
+          ? "Hoy, al confirmar el pago"
+          : `${dia.replace(/^el /, "")[0]!.toUpperCase()}${dia.replace(/^el /, "").slice(1)} · 8 a. m.`,
+      texto: e.repartidor
+        ? `Pasa a Preparando. Ya tiene a ${e.repartidor} (${e.zona}, ${e.franja}).`
+        : `Pasa a Preparando y asigna al repartidor de siempre de ${e.zona}${fr}.`,
+      paso: "preparando",
+    })
+  if (antes("por_salir") && e.tipo === "moto")
+    out.push({
+      actor: "persona",
+      quien: "Una persona",
+      cuando: e.dia === "Hoy" ? "Hoy, antes de la franja" : `${e.dia ?? "Ese día"}, antes de la franja`,
+      texto: e.repartidor
+        ? `Lo empaca y toca «Listo: se lo di a ${e.repartidor}». Un toque.`
+        : "Lo empaca y toca «Listo» cuando se lo da al repartidor. Un toque.",
+      paso: "por_salir",
+    })
+  if (antes("en_camino"))
+    out.push({
+      actor: e.tipo === "agencia" ? "persona" : "repartidor",
+      quien: e.tipo === "agencia" ? "Una persona" : (rep ?? "El repartidor"),
+      cuando: e.tipo === "agencia" ? "Al dejarlo en la agencia" : "Al salir",
+      texto:
+        e.tipo === "agencia"
+          ? `Anota el número de ${e.agencia ?? "la agencia"}; Sofi se lo manda a ${n}.`
+          : `Toca «Salí» y Sofi le avisa a ${n} la franja y quién lo lleva.`,
+      paso: "en_camino",
+    })
+  if (antes("entregado") || p.paso === "en_camino")
+    out.push({
+      actor: e.tipo === "agencia" ? "clienta" : "repartidor",
+      quien: e.tipo === "agencia" ? n : (rep ?? "El repartidor"),
+      cuando: e.tipo === "agencia" ? "Al recogerlo" : `En la puerta${e.franja ? `, de ${e.franja}` : ""}`,
+      texto:
+        e.tipo === "agencia"
+          ? "Lo recoge en la agencia y Sofi le pregunta «¿Te llegó bien?»."
+          : k.falta && p.cobro !== "link"
+            ? `Cobra ${money(k.falta)} y toca «Entregado». Sin pago confirmado no entrega. Sofi le pregunta «¿Te llegó bien?».`
+            : "Toca «Entregado» y Sofi le pregunta «¿Te llegó bien?».",
+      paso: "entregado",
+    })
+  return out
+}
+
+/** Toda la conversación: la del pedido y la del cambio o la devolución. */
+export function todoElChat(p: Pedido): Msg[] {
+  return [...p.chat, ...(p.vuelta?.chat ?? [])]
 }
 
 /** El texto corto de la entrega: «Hoy · 2 a 6 p. m. · Kevin». */

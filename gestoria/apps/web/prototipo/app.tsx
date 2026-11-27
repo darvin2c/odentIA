@@ -37,10 +37,12 @@ import { reiniciar, useTienda } from "./tienda"
 import { DespachosPage } from "./despachos/despachos"
 import { ClientaPage } from "./pedidos/clienta"
 import { ComoAvanzaPage } from "./pedidos/como-avanza"
+import { PedidoPage } from "./pedidos/detalle"
 import { InicioPage } from "./pedidos/inicio"
 import { PedidosPage } from "./pedidos/lista"
 import { reiniciarPedidos, teToca, usePedidos } from "./pedidos/modelo"
 import { RepartoPage } from "./pedidos/reparto"
+import { PoliticaPage } from "./pedidos/vuelta-ui"
 
 const HashLink: ShellLinkComponent = ({ to, className, children, title, onClick }) => (
   <a href={href(to)} className={className} title={title} onClick={onClick}>
@@ -235,11 +237,14 @@ export function App() {
   ]
   const p = ruta.path
   const productId = /^\/catalogo\/(p[\w-]+)$/.exec(p)?.[1]
+  const pedidoId = /^\/pedidos\/(\d{4})$/.exec(p)?.[1]
   let page: React.ReactNode
   if (p === "/inicio") page = <InicioPage />
   else if (p === "/pedidos") page = <PedidosPage />
   else if (p === "/despachos") page = <DespachosPage />
   else if (p === "/pedidos/como-avanza") page = <ComoAvanzaPage />
+  else if (p === "/pedidos/politica") page = <PoliticaPage key={ruta.rubro} />
+  else if (pedidoId) page = <PedidoPage key={`${ruta.rubro}-${pedidoId}`} pid={pedidoId} />
   else if (p === "/clienta") page = <ClientaPage />
   else if (p === "/reparto") page = <RepartoPage />
   else if (p === "/catalogo") page = <CatalogPage />

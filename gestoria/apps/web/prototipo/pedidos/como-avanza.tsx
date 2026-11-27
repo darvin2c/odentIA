@@ -1,7 +1,7 @@
 import { Badge, Button } from "@odentia/ui"
 import { FlowDiagram, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { ArrowLeft, Bot, RotateCcw, UserRound, XCircle } from "lucide-react"
-import { ir } from "../ruta"
+import { href, ir } from "../ruta"
 import { PASO, type Paso } from "./modelo"
 
 const PASOS: { s: Paso; es: string; mueve: string; solo: boolean; avisa?: string }[] = [
@@ -9,26 +9,28 @@ const PASOS: { s: Paso; es: string; mueve: string; solo: boolean; avisa?: string
     s: "por_pagar",
     es: "Sofi, el catálogo o el equipo armaron el pedido. El producto queda separado 24 horas.",
     mueve:
-      "Paga en su link: la pasarela lo confirma sola. Si manda una captura de Yape o Plin, pasa a «Pago por confirmar».",
+      "Paga en su link: la pasarela lo confirma sola. Sofi le recuerda el link una sola vez, 3 horas antes de que venza. Si manda una captura de Yape o Plin, pasa a «Pago por confirmar».",
     solo: true,
   },
   {
     s: "por_confirmar",
     es: "Llegó una captura de Yape o Plin al número de la tienda.",
-    mueve: "Una persona la mira en su app de Yape y toca «Confirmar» o «No coincide».",
+    mueve:
+      "Una persona la mira en su app de Yape y confirma lo que llegó. Si falta algo, Sofi le cobra el resto sola, con su link.",
     solo: false,
   },
   {
     s: "pagado",
     es: "El pago está confirmado, todo o una parte. Ya puede salir.",
-    mueve: "Pasa solo a «Preparando» el día de la entrega, a las 8 a. m.",
+    mueve:
+      "Pasa solo a «Preparando» el día de la entrega, a las 8 a. m., y gestorIA asigna al repartidor de siempre según la zona y la franja.",
     solo: true,
     avisa: "«¡Pago recibido!» y le ofrece sumar algo al mismo envío.",
   },
   {
     s: "preparando",
-    es: "Sale hoy: hay que empacarlo.",
-    mueve: "Una persona lo empaca y se lo da al repartidor, con su franja, en un toque.",
+    es: "Sale hoy y ya tiene repartidor: hay que empacarlo.",
+    mueve: "Una persona lo empaca y toca «Listo: se lo di a Kevin». Un toque.",
     solo: false,
   },
   {
@@ -54,6 +56,39 @@ const PASOS: { s: Paso; es: string; mueve: string; solo: boolean; avisa?: string
   },
 ]
 
+const VUELTA: [string, string, boolean, string][] = [
+  [
+    "Solicitado",
+    "Sofi, sola",
+    true,
+    "La clienta escribe. Sofi pide el motivo (y la foto si vino fallado), revisa el plazo y las reglas, y ofrece lo que dice tu política.",
+  ],
+  [
+    "Aprobado",
+    "Una persona, un toque",
+    false,
+    "Sofi pasa el caso armado como un tema, con el chat. Dentro de la política: «Aprobar». Fuera: la excepción, con su motivo.",
+  ],
+  [
+    "Por recoger o en camino",
+    "gestorIA y el repartidor",
+    true,
+    "gestorIA asigna el recojo por zona y franja; el repartidor toca «Recoger» con la foto. O lo trae a la tienda, o llega por agencia.",
+  ],
+  [
+    "Recibido y revisado",
+    "Una persona",
+    false,
+    "«Se puede vender» vuelve al stock. «Dañado» o «Garantía» no vuelve, con su motivo en el kardex.",
+  ],
+  [
+    "Cambio, dinero o saldo",
+    "Solo, salvo el dinero",
+    true,
+    "El cambio sale solo; el saldo a favor queda solo. El dinero: con la pasarela, al aprobarlo; con Yape o Plin, la persona toca «Ya lo devolví».",
+  ],
+]
+
 /** La máquina de estados del pedido, clara: qué mueve cada paso solo y qué necesita a una persona. */
 export function ComoAvanzaPage() {
   return (
@@ -67,8 +102,10 @@ export function ComoAvanzaPage() {
         }}
       />
       <p className="max-w-3xl text-sm text-muted-foreground">
-        Casi todo avanza solo. Una persona entra en dos pasos (confirmar una captura y empacar) y
-        cuando algo sale de lo normal. Una regla que no se salta: sin pago confirmado no se entrega.
+        Casi todo avanza solo. A una persona solo le queda empacar (un toque), confirmar capturas de
+        Yape o Plin, aprobar los cambios y devoluciones que deja listos Sofi, revisar lo que vuelve
+        y los casos raros, como no tener repartidor libre. Una regla que no se salta: sin pago
+        confirmado no se entrega.
       </p>
       <div className="elevated overflow-x-auto rounded-xl border bg-card p-4">
         <FlowDiagram
@@ -82,7 +119,7 @@ export function ComoAvanzaPage() {
               kind: "paso",
               label: "Preparando",
               actor: "agente",
-              actorLabel: "gestorIA, ese día",
+              actorLabel: "gestorIA: ese día, con repartidor",
             },
             {
               id: "ps",
@@ -168,7 +205,7 @@ export function ComoAvanzaPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold">Las salidas</h2>
-        <ul className="grid gap-2 md:grid-cols-3">
+        <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {[
             [
               RotateCcw,
@@ -183,7 +220,12 @@ export function ComoAvanzaPage() {
             [
               RotateCcw,
               "Cambio o devolución",
-              "Después de entregar: un pedido nuevo, enlazado. El entregado no se toca; lo que vuelve entra al stock con su motivo.",
+              "Tiene su propio camino de vuelta (abajo). Sofi lo atiende según tu política y lo deja listo para aprobar con un toque.",
+            ],
+            [
+              UserRound,
+              "No hay repartidor libre",
+              "gestorIA no encuentra a nadie en esa franja: va a «Te toca» para elegir otra franja, otro día o que lo recojan.",
             ],
           ].map(([I, t, d]) => {
             const Icon = I as typeof XCircle
@@ -198,6 +240,41 @@ export function ComoAvanzaPage() {
             )
           })}
         </ul>
+      </section>
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">El camino de vuelta: cambios y devoluciones</h2>
+        <p className="max-w-3xl text-sm text-muted-foreground">
+          Todo depende de tu política. El pedido entregado no se toca: el cambio o la devolución va
+          enlazado, con sus propios pasos. Con la casilla de Configuración › Sofi marcada (viene
+          así), Sofi te pasa el caso listo; si la desmarcas, hace sola lo que está dentro de tu
+          política.
+        </p>
+        <ol className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+          {VUELTA.map(([t, quien, solo, d], i) => (
+            <li key={t} className="elevated flex flex-col gap-2 rounded-xl border bg-card p-4 text-sm">
+              <span className="flex items-center gap-2">
+                <span className="flex size-5 items-center justify-center rounded-full border text-[11px] font-semibold">
+                  {i + 1}
+                </span>
+                <b>{t}</b>
+              </span>
+              <span
+                className={
+                  solo
+                    ? "inline-flex items-center gap-1 text-xs text-success"
+                    : "inline-flex items-center gap-1 text-xs text-warning"
+                }
+              >
+                {solo ? <Bot className="size-3.5" aria-hidden /> : <UserRound className="size-3.5" aria-hidden />}
+                {quien}
+              </span>
+              <span className="text-muted-foreground">{d}</span>
+            </li>
+          ))}
+        </ol>
+        <a href={href("/pedidos/politica")} className="self-start text-sm font-medium text-primary hover:underline">
+          Ver tu política de cambios y devoluciones
+        </a>
       </section>
       <Button variant="outline" className="self-start" onClick={() => ir("/pedidos")}>
         Ver los pedidos
