@@ -239,6 +239,20 @@
       "when": 1795805419993,
       "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795809171818,
+      "tag": "0035_los_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795809195229,
+      "tag": "0036_reglas_cobros",
+      "breakpoints": true
     }
   ]
 }

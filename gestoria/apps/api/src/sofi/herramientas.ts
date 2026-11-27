@@ -8,7 +8,6 @@ import {
   productVariant,
   saleOrder,
   stockRequest,
-  storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
 import { and, asc, eq, inArray, or } from "drizzle-orm"
@@ -18,6 +17,7 @@ import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
 import { momentWords } from "../hora.js"
+import { chargesOrders, linkStateIn } from "../pasarela.js"
 import {
   addReceiptIn,
   cancelOrderIn,
@@ -334,13 +334,11 @@ async function paymentMethodFor(tx: Db, storeId: string, wanted: string | undefi
     .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
     .orderBy(asc(storePaymentMethod.createdAt))
   if (wanted) return methods.find((m) => m.id === wanted)?.id ?? wanted
-  const [linked] = await tx
-    .select({ provider: storePaymentLink.provider })
-    .from(storePaymentLink)
-    .where(eq(storePaymentLink.storeId, storeId))
+  // Se ofrece el link solo si la pasarela cobra de verdad (no en modo prueba ni sin permiso).
+  const linked = chargesOrders(await linkStateIn(tx, storeId))
   // En el orden de cobro de la tienda; un link sin cuenta conectada no se ofrece.
   const first = methods
-    .filter((m) => m.collection !== "link" || Boolean(linked))
+    .filter((m) => m.collection !== "link" || linked)
     .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])[0]
   if (!first)
     throw new ToolProblem("La tienda no tiene medios de pago encendidos: pásalo a una persona")

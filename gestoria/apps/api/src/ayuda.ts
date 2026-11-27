@@ -418,7 +418,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar otra forma de cobro» y eliges cómo te paga. Yape y Plin piden tu celular, a nombre de quién está y tu QR (lo sueltas o lo pegas con Ctrl+V); ves cómo le llega a la clienta. La transferencia pide tu banco de la lista, la cuenta y el CCI, que se revisa con sus dígitos de control.",
+          "Lo que confirma una persona (Yape, Plin, la transferencia) espera a que alguien del equipo revise la captura; lo que se cobra al recibir lo confirma el repartidor. Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -437,7 +438,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar con Mercado Pago»: entras con la cuenta de la tienda y das permiso, sin copiar ninguna clave. El dinero de cada link llega directo a tu cuenta.",
+          "Empieza en modo prueba: «Probar con S/ 1» crea un link que pagas con la tarjeta de prueba de Mercado Pago, y ves cómo queda pagado solo. En modo prueba ningún pedido se cobra por link. Cuando te guste, «Cobrar de verdad» vuelve a pedir el permiso, esta vez para cobrar.",
+          "Si lo desconectas, los links ya enviados dejan de confirmarse solos: esos pagos los revisas tú.",
         ],
         needs: "configuracion",
         screen: "pagos",
