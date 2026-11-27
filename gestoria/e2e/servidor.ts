@@ -26,7 +26,9 @@ import {
 } from "@odentia/contract"
 import { signMessage } from "@odentia/contract/signing"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
+import { GenericContainer, Wait } from "testcontainers"
 import { createApp } from "../apps/api/src/app.js"
+import { createS3Storage } from "../apps/api/src/archivos.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
 import {
@@ -45,6 +47,21 @@ const WEB = `http://127.0.0.1:${WEB_PORT}`
 const SECRET = `whsec_${Buffer.alloc(32, 3).toString("base64")}`
 
 const db = await startTestDb()
+// Las fotos y los videos (ADR 0236): un RustFS propio, el mismo S3 de desarrollo, que se borra al
+// terminar. Los enlaces firmados apuntan a su puerto en 127.0.0.1: el navegador los abre.
+const rustfs = await new GenericContainer("docker.io/rustfs/rustfs:1.0.1")
+  .withEnvironment({ RUSTFS_ACCESS_KEY: "gestoria", RUSTFS_SECRET_KEY: "gestoria-e2e" })
+  .withExposedPorts(9000)
+  .withWaitStrategy(Wait.forHttp("/health", 9000).forStatusCode(200))
+  .start()
+const storage = createS3Storage({
+  endpoint: `http://127.0.0.1:${rustfs.getMappedPort(9000)}`,
+  region: "us-east-1",
+  accessKeyId: "gestoria",
+  secretAccessKey: "gestoria-e2e",
+  bucket: "gestoria-medios-e2e",
+})
+await storage.ensureBucket()
 const pair = await generateKeyPair("EdDSA", { crv: "Ed25519" })
 const jwk: JWK = { ...(await exportJWK(pair.publicKey)), alg: "EdDSA", kid: "e2e" }
 
@@ -136,6 +153,7 @@ const app = createApp({
   // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
+  storage,
 })
 
 /** Un pedido de la administración, firmado como lo firmaría ella. */
@@ -362,6 +380,7 @@ console.log(`gestoria-e2e: listo (servidor ${API_PORT}, cuenta ${ACCOUNT_PORT})`
 
 const stop = async () => {
   account.close()
+  await rustfs.stop().catch(() => undefined)
   await db.stop()
   process.exit(0)
 }

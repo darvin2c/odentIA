@@ -689,7 +689,7 @@ export function createApp(deps: AppDeps) {
     const bytes = new Uint8Array(await c.req.arrayBuffer())
     const { id, loadId } = c.req.param()
     const result = await loadSheet(deps.appDb, c.get("person"), id, loadId, bytes)
-    return c.json(result, result.errors.length > 0 ? 422 : 200)
+    return c.json(result)
   })
   app.patch("/api/tiendas/:id/cargas/:loadId/productos", async (c) => {
     const input = await bodyOf(c, loadBulkPatch)
@@ -711,7 +711,7 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/cargas/:loadId/crear", async (c) => {
     const { id, loadId } = c.req.param()
     const result = await createFromLoad(deps.appDb, c.get("person"), id, loadId)
-    return c.json(result, result.errors.length > 0 ? 422 : 200)
+    return c.json(result)
   })
   app.delete("/api/tiendas/:id/cargas/:loadId", async (c) => {
     const { id, loadId } = c.req.param()

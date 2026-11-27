@@ -13,7 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Download, Package, Plus, Trash2, Upload } from "lucide-react"
+import { Download, Images, Package, Plus, Trash2, Upload } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { MoneyInput } from "./campos"
@@ -224,10 +224,22 @@ export function CatalogPage() {
         secondary={
           canEdit
             ? {
-                label: "Subir una hoja",
-                icon: <Upload aria-hidden />,
-                onClick: () => setUploading(true),
+                label: "Cargar muchos",
+                icon: <Images aria-hidden />,
+                onClick: () =>
+                  void navigate({ to: "/tiendas/$id/catalogo/cargar", params: { id: store.id } }),
               }
+            : undefined
+        }
+        menu={
+          canEdit
+            ? [
+                {
+                  label: "Subir una hoja",
+                  icon: <Upload aria-hidden />,
+                  onSelect: () => setUploading(true),
+                },
+              ]
             : undefined
         }
       />
