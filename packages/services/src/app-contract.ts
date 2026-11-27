@@ -289,7 +289,11 @@ async function applyUsage(
   return account.id
 }
 
-/** Pide soporte: el caso es de la cuenta y de quien pregunta, como el de una clínica. */
+/**
+ * Pide soporte: el caso es de la cuenta y de quien pregunta, como el de una clínica. Pregunta
+ * cualquier rol de la cuenta (ADR 0221): la pantalla y el rol que manda la app quedan en el caso,
+ * como los que deja la Ayuda de una clínica.
+ */
 async function applySupport(
   tx: Db,
   app: SaasAccountExternalApp,
@@ -308,8 +312,8 @@ async function applySupport(
     kind: data.kind,
     question: data.question,
     detail: data.detail ?? null,
-    screen: "/",
-    role: "",
+    screen: data.screen ?? "/",
+    role: data.role ?? "",
     appVersion: null,
     dedupeKey: createHash("sha256")
       .update(normalizeForSearch(data.question))
@@ -475,6 +479,7 @@ export async function answerAppState(
       status: supportCase.status,
       question: supportCase.question,
       createdAt: supportCase.createdAt,
+      openedBy: supportCase.openedBy,
     })
     .from(supportCase)
     .where(eq(supportCase.organizationId, id))
@@ -575,6 +580,8 @@ export async function answerAppState(
       status: kase.status,
       question: kase.question,
       createdAt: kase.createdAt.toISOString(),
+      // Quién lo abrió: la app le muestra a cada persona solo sus preguntas.
+      userId: kase.openedBy,
       replies: replies
         .filter((reply) => reply.caseId === kase.id)
         .map((reply) => ({ body: reply.body, at: reply.createdAt.toISOString() })),

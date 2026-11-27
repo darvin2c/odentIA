@@ -22,9 +22,11 @@ import {
 } from "@odentia/contract"
 import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { helpGuideFor } from "./ayuda.js"
 import { imageType } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { signMessage } from "./firma.js"
+import { can, ROLE_NAMES, type StoreSeat } from "./permisos.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -289,11 +291,30 @@ export const supportInput = z.object({
 })
 
 /**
+ * «Pedir ayuda» desde cualquier pantalla (entrega 7, tablero 19): lo que pasó y, sin que la persona
+ * lo escriba, la pantalla desde la que pregunta (su ruta dentro de la tienda).
+ */
+export const helpRequestInput = z.object({
+  question: z.string().trim().min(1, "Cuéntanos qué pasó").max(500, "Máximo 500 caracteres"),
+  screen: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((path) => path.startsWith("/"), "La pantalla no se pudo leer")
+    .optional(),
+})
+
+/**
  * Las preguntas de ayuda de la tienda que la administración todavía no devolvió en su estado: las
  * que no salieron y las que salieron después de su última respuesta (aún no están entre sus casos).
- * De la más nueva a la más vieja.
+ * Con `userId`, solo las de esa persona. De la más nueva a la más vieja.
  */
-async function pendingSupport(tx: Db, storeId: string, stateAt: Date | null = null) {
+async function pendingSupport(
+  tx: Db,
+  storeId: string,
+  stateAt: Date | null = null,
+  userId?: string,
+) {
   const rows = await tx
     .select({
       payload: contractOutbox.payload,
@@ -308,6 +329,7 @@ async function pendingSupport(tx: Db, storeId: string, stateAt: Date | null = nu
         stateAt
           ? or(isNull(contractOutbox.sentAt), gt(contractOutbox.sentAt, stateAt))
           : isNull(contractOutbox.sentAt),
+        userId ? sql`${contractOutbox.payload} -> 'data' ->> 'userId' = ${userId}` : undefined,
       ),
     )
     .orderBy(desc(contractOutbox.createdAt))
@@ -319,8 +341,45 @@ async function pendingSupport(tx: Db, storeId: string, stateAt: Date | null = nu
 }
 
 /**
- * Pide ayuda a la administración, a nombre de quien pregunta. Solo el Dueño (el plan). Sin el
- * acuerdo configurado no se acepta: la pregunta no saldría y nadie la respondería.
+ * Deja la pregunta en la bandeja de salida, a nombre de quien pregunta, con su rol y su pantalla
+ * (ADR 0221). Sin el acuerdo configurado no se acepta: la pregunta no saldría y nadie la
+ * respondería.
+ */
+async function enqueueSupport(
+  tx: Db,
+  config: ContractConfig,
+  person: Person,
+  storeId: string,
+  seat: StoreSeat,
+  input: z.infer<typeof supportInput> & { screen?: string },
+  now: Date,
+): Promise<void> {
+  if (!config.secret)
+    throw new StoreError(409, "NOT_CONNECTED", "Todavía no podemos recibir preguntas desde aquí.")
+  if ((await pendingSupport(tx, storeId)).length >= MAX_PENDING_SUPPORT)
+    throw new StoreError(
+      429,
+      "TOO_MANY",
+      "Las preguntas anteriores de la tienda todavía no salen. Espera unos minutos y vuelve a enviar.",
+    )
+  await enqueue(tx, storeId, {
+    type: "soporte.pedido",
+    timestamp: now.toISOString(),
+    data: {
+      account: storeId,
+      userId: person.userId,
+      kind: input.kind,
+      question: input.question,
+      detail: input.detail || null,
+      screen: input.screen || null,
+      role: ROLE_NAMES[seat],
+    },
+  })
+}
+
+/**
+ * Pide ayuda desde «Plan y pagos»: sobre el plan, un cobro o algo que no funciona. Solo el Dueño
+ * (el plan).
  */
 export async function askSupport(
   appDb: Db,
@@ -330,26 +389,65 @@ export async function askSupport(
   input: z.infer<typeof supportInput>,
   now = new Date(),
 ): Promise<void> {
-  await inStore(appDb, person, storeId, "plan", async (tx) => {
-    if (!config.secret)
-      throw new StoreError(409, "NOT_CONNECTED", "Todavía no podemos recibir preguntas desde aquí.")
-    if ((await pendingSupport(tx, storeId)).length >= MAX_PENDING_SUPPORT)
-      throw new StoreError(
-        429,
-        "TOO_MANY",
-        "Tus preguntas anteriores todavía no salen. Espera a que salgan para escribir otra.",
-      )
-    await enqueue(tx, storeId, {
-      type: "soporte.pedido",
-      timestamp: now.toISOString(),
-      data: {
-        account: storeId,
-        userId: person.userId,
-        kind: input.kind,
-        question: input.question,
-        detail: input.detail || null,
-      },
-    })
+  await inStore(appDb, person, storeId, "plan", (tx, seat) =>
+    enqueueSupport(tx, config, person, storeId, seat, { ...input, screen: "/plan" }, now),
+  )
+}
+
+/**
+ * «Pedir ayuda» de la Ayuda y de la cabecera: cualquier rol del equipo (`ayuda.pedir`; decisión 6
+ * del lienzo «gestorIA como odentIA»). Llega a la Bandeja de la administración como las preguntas
+ * de las clínicas, y la respuesta vuelve a quien preguntó (`helpView`).
+ */
+export async function askForHelp(
+  appDb: Db,
+  config: ContractConfig,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof helpRequestInput>,
+  now = new Date(),
+): Promise<void> {
+  await inStore(appDb, person, storeId, "ayuda.pedir", (tx, seat) =>
+    enqueueSupport(tx, config, person, storeId, seat, { kind: "pregunta", ...input }, now),
+  )
+}
+
+/**
+ * La Ayuda de quien la abre: la guía para su rol y, si puede pedir ayuda, sus preguntas con las
+ * respuestas del equipo de gestorIA. Solo las suyas: las de otra persona de la tienda (y lo del
+ * plan, que es del Dueño) no se le muestran (ADR 0221). Las respuestas son las de lo último que
+ * dijo la administración, que se pregunta cada 10 minutos: abrir la Ayuda no la espera.
+ */
+export async function helpView(appDb: Db, config: ContractConfig, person: Person, storeId: string) {
+  return inStore(appDb, person, storeId, "tienda.ver", async (tx, seat) => {
+    const canAsk = can(seat, "ayuda.pedir")
+    const { row, state } = canAsk ? await knownStateIn(tx, storeId) : { row: null, state: null }
+    const pending = canAsk
+      ? await pendingSupport(tx, storeId, row?.receivedAt ?? null, person.userId)
+      : []
+    const cases = state?.found ? state.support.filter((kase) => kase.userId === person.userId) : []
+    return {
+      role: ROLE_NAMES[seat],
+      canAsk,
+      connected: Boolean(config.secret),
+      guide: helpGuideFor(seat),
+      questions: [
+        ...pending.map((one) => ({
+          id: null,
+          question: one.question,
+          createdAt: one.createdAt.toISOString(),
+          status: one.sent ? ("enviada" as const) : ("por_enviar" as const),
+          replies: [] as { body: string; at: string }[],
+        })),
+        ...cases.map((kase) => ({
+          id: kase.id,
+          question: kase.question,
+          createdAt: kase.createdAt,
+          status: kase.status,
+          replies: kase.replies,
+        })),
+      ],
+    }
   })
 }
 

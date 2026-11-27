@@ -29,11 +29,13 @@ import { and, eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
+  askForHelp,
   askSupport,
   CONVERSATION_WINDOW_MS,
   type ContractConfig,
   countConversation,
   deliverOutbox,
+  helpView,
   purgeOutbox,
   refreshStates,
   reviewStoreTeams,
@@ -481,6 +483,108 @@ describe("gestorIA pregunta y nunca se detiene por la administración", () => {
     ).toBe(403)
     const stranger = randomUUID()
     expect((await call("rosa", "GET", `/api/tiendas/${stranger}/plan`)).status).toBe(404)
+  })
+})
+
+describe("la Ayuda: todo el equipo pide ayuda y cada uno ve solo lo suyo (ADR 0221)", () => {
+  const lucia = { userId: "u-lucia", email: people.lucia.email, name: people.lucia.name }
+  const question = "El 0149 dice que falta cobrar, pero ya me pagó todo por Yape"
+
+  it("Ventas pregunta desde su pantalla y sale con su rol; una pantalla rara no entra", async () => {
+    const asked = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda`, {
+      question,
+      screen: "/pedidos?pedido=p-1",
+    })
+    expect(asked.status).toBe(204)
+    const mine = (await outbox("soporte.pedido")).find(
+      (row) => (row.payload.data as Json).userId === "u-lucia",
+    )
+    expect(mine?.payload).toMatchObject({
+      data: {
+        account: storeId,
+        kind: "pregunta",
+        question,
+        screen: "/pedidos?pedido=p-1",
+        role: "Ventas",
+      },
+    })
+    const odd = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda`, {
+      question: "Hola",
+      screen: "https://otra.test/pedidos",
+    })
+    expect(odd.status).toBe(400)
+    // Lo de «Plan y pagos» sigue siendo del Dueño, y sale con su pantalla.
+    const plan = (await outbox("soporte.pedido")).find(
+      (row) => (row.payload.data as Json).userId === "u-rosa",
+    )
+    expect(plan?.payload).toMatchObject({ data: { screen: "/plan", role: "Dueño" } })
+  })
+
+  it("cada persona ve sus preguntas y sus respuestas; las del Dueño no le llegan a Ventas", async () => {
+    const at = new Date().toISOString()
+    admin.states.set(storeId, {
+      ...admin.states.get(storeId),
+      support: [
+        {
+          id: "k-rosa",
+          status: "esperando_clinica",
+          question: "¿Cuándo me cobran?",
+          createdAt: at,
+          userId: "u-rosa",
+          replies: [{ body: "El día 5 de cada mes.", at }],
+        },
+        {
+          id: "k-lucia",
+          status: "esperando_clinica",
+          question: "¿Cómo confirmo un Yape?",
+          createdAt: at,
+          userId: "u-lucia",
+          replies: [{ body: "En el pedido, «Confirmar pago».", at }],
+        },
+        // De una administración que todavía no dice quién lo abrió: solo en «Plan y pagos».
+        { id: "k-viejo", status: "abierto", question: "Hola", createdAt: at, replies: [] },
+      ],
+    })
+    expect(await refreshStates(db.ownerDb, contract, new Date(Date.now() + 44 * 60_000))).toBe(1)
+
+    const forLucia = await call("lucia", "GET", `/api/tiendas/${storeId}/ayuda`)
+    expect(forLucia.status).toBe(200)
+    expect(forLucia.json).toMatchObject({ role: "Ventas", canAsk: true, connected: true })
+    const luciaAsked = (forLucia.json.questions as Json[]).map((one) => one.id ?? one.question)
+    expect(luciaAsked).toEqual([question, "k-lucia"])
+    expect(forLucia.json.questions[0]).toMatchObject({ status: "por_enviar", replies: [] })
+    expect(forLucia.json.questions[1].replies).toEqual([
+      { body: "En el pedido, «Confirmar pago».", at },
+    ])
+    // La guía le dice qué no puede hacer y no la lleva a lo que no abre.
+    const plan = (forLucia.json.guide as Json[])
+      .flatMap((group) => group.faqs as Json[])
+      .find((faq) => faq.id === "plan")
+    expect(plan).toMatchObject({ who: "Dueño", you: false, screen: null })
+
+    const forRosa = await call("rosa", "GET", `/api/tiendas/${storeId}/ayuda`)
+    const rosaAsked = (forRosa.json.questions as Json[]).map((one) => one.id ?? one.question)
+    expect(rosaAsked).toContain("k-rosa")
+    expect(rosaAsked).not.toContain("k-lucia")
+    expect(rosaAsked).not.toContain(question)
+    expect(rosaAsked).not.toContain("k-viejo")
+    // «Plan y pagos» del Dueño sigue con todos los casos de la tienda.
+    const view = await call("rosa", "GET", `/api/tiendas/${storeId}/plan`)
+    expect((view.json.state.support as Json[]).map((kase) => kase.id)).toEqual([
+      "k-rosa",
+      "k-lucia",
+      "k-viejo",
+    ])
+  })
+
+  it("sin secreto, la Ayuda se abre igual pero no acepta preguntas", async () => {
+    const off: ContractConfig = { url: ACCOUNT, secret: "", fetch: adminFetch }
+    await expect(
+      askForHelp(db.appDb, off, lucia, storeId, { question: "Hola" }),
+    ).rejects.toMatchObject({ status: 409 })
+    const view = await helpView(db.appDb, off, lucia, storeId)
+    expect(view).toMatchObject({ connected: false, canAsk: true, role: "Ventas" })
+    expect(view.guide.length).toBeGreaterThan(0)
   })
 })
 

@@ -14,9 +14,8 @@ import {
 import { Textarea } from "@odentia/ui/components/textarea"
 import { EmptyState, KpiCard, PageNotice, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useLocation } from "@tanstack/react-router"
 import { ChevronDown, CreditCard, Upload } from "lucide-react"
-import { type FormEvent, useEffect, useId, useRef, useState } from "react"
+import { type FormEvent, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
 import { when } from "./lib/pedidos"
 import {
@@ -436,7 +435,10 @@ function Payments({ state, view }: { state: Known; view: PlanView }) {
   )
 }
 
-/** Pedir ayuda al equipo de gestorIA y ver sus respuestas. */
+/**
+ * Pedir ayuda al equipo de gestorIA sobre el plan o un cobro, y ver las respuestas de la tienda.
+ * Lo de cada tarea está en la Ayuda, que también tiene «Pedir ayuda» para todo el equipo.
+ */
 function Support({ view }: { view: PlanView }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
@@ -464,24 +466,13 @@ function Support({ view }: { view: PlanView }) {
     ask.mutate()
   }
   const cases = view.state?.found ? view.state.support : []
-  // «Pedir ayuda» de la cabecera llega aquí (`#plan-ayuda`): se ve la ayuda y el foco queda en
-  // su primer campo, también si ya estaba en esta página (cada clic es otra navegación).
-  const location = useLocation()
-  const sectionRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    if (location.hash !== "plan-ayuda") return
-    sectionRef.current?.scrollIntoView({ block: "start" })
-    const first = view.connected ? document.getElementById(kindId) : null
-    ;(first ?? document.getElementById("plan-ayuda"))?.focus({ preventScroll: true })
-  }, [location, view.connected, kindId])
   return (
     <section
-      ref={sectionRef}
       aria-labelledby="plan-ayuda"
-      className="elevated flex scroll-mt-4 flex-col gap-4 rounded-xl border bg-card p-5"
+      className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
     >
       <div className="flex flex-col gap-1">
-        <h2 id="plan-ayuda" tabIndex={-1} className="text-lg font-bold outline-none">
+        <h2 id="plan-ayuda" className="text-lg font-bold">
           Pedir ayuda
         </h2>
         <p className="text-sm text-muted-foreground">
@@ -490,24 +481,6 @@ function Support({ view }: { view: PlanView }) {
             : "Todavía no podemos recibir preguntas desde aquí."}
         </p>
       </div>
-      {/* Mientras gestorIA no tenga su Ayuda, lo que más se pregunta del soporte va aquí. */}
-      <details className="rounded-lg border p-3 text-sm">
-        <summary className="flex min-h-11 cursor-pointer items-center font-medium">
-          ¿Qué ve soporte cuando lo dejo entrar y cómo sé si entró?
-        </summary>
-        <div className="flex flex-col gap-2 pt-1 text-muted-foreground">
-          <p>
-            Soporte de gestorIA entra solo si tú o un Administrador lo dejan entrar, y por los
-            minutos que pidió, que empiezan cuando lo dejas entrar. Ve tu tienda, tu catálogo sin
-            costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones,
-            y no cambia nada. Solo el equipo de gestorIA puede pedirlo.
-          </p>
-          <p>
-            En Equipo ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras
-            mira, «Sacar ahora» lo saca al momento.
-          </p>
-        </div>
-      </details>
       {view.connected ? (
         <form onSubmit={submit} className="flex flex-col gap-4">
           <FieldGroup>

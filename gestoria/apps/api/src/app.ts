@@ -7,8 +7,11 @@ import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
 import {
+  askForHelp,
   askSupport,
   type ContractConfig,
+  helpRequestInput,
+  helpView,
   planReceiptInput,
   planView,
   sendReceipt,
@@ -678,6 +681,17 @@ export function createApp(deps: AppDeps) {
     const bytes =
       file instanceof File && file.size > 0 ? new Uint8Array(await file.arrayBuffer()) : null
     await sendReceipt(deps.appDb, contract, c.get("person"), c.req.param("id"), input, bytes)
+    return c.body(null, 204)
+  })
+
+  // La Ayuda (entrega 7, tablero 19): la guía para el rol de quien la abre y sus preguntas, y
+  // «Pedir ayuda» para todo el equipo.
+  app.get("/api/tiendas/:id/ayuda", async (c) =>
+    c.json(await helpView(deps.appDb, contract, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/ayuda", async (c) => {
+    const input = await bodyOf(c, helpRequestInput)
+    await askForHelp(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
     return c.body(null, 204)
   })
 

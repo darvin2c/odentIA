@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
 import { type AccountConfig, reviewAccountCopies } from "./cuenta.js"
 import { signMessage } from "./firma.js"
-import { seedDemoStore } from "./semilla.js"
+import { DEMO_STORE_ID, seedDemoStore } from "./semilla.js"
 
 const ACCOUNT = "https://api.gestoria.test"
 const WEB = "https://app.gestoria.test"
@@ -280,6 +280,7 @@ describe("los permisos de cada rol (decisión 7)", () => {
       "ventas.atender",
       "pagos.confirmar",
       "entregas",
+      "ayuda.pedir",
     ])
     expect((await call("lucia", "GET", `/api/tiendas/${storeId}/equipo`)).status).toBe(200)
     expect(
@@ -592,9 +593,34 @@ describe("la tienda de ejemplo", () => {
     const me = await app.request("https://servidor.gestoria.test/api/yo", {
       headers: { authorization: `Bearer ${token}` },
     })
-    const body = (await me.json()) as { invitations: { storeName: string; role: string }[] }
+    const body = (await me.json()) as {
+      invitations: { id: string; storeName: string; role: string }[]
+    }
     expect(body.invitations).toEqual([
       expect.objectContaining({ storeName: "Calzados Rosa", role: "owner" }),
+    ])
+
+    // Ya en el equipo, sembrar otra vez no le deja otra invitación y le suma su pregunta en la
+    // Ayuda, que muestra a cada persona solo las suyas.
+    const asYo = (method: string, path: string) =>
+      app.request(`https://servidor.gestoria.test${path}`, {
+        method,
+        headers: { authorization: `Bearer ${token}` },
+      })
+    expect(
+      (await asYo("POST", `/api/invitaciones/${body.invitations[0]?.id}/aceptar`)).status,
+    ).toBe(200)
+    await seedDemoStore(db.ownerDb, "yo@ejemplo.test")
+    const again = (await (await asYo("GET", "/api/yo")).json()) as { invitations: unknown[] }
+    expect(again.invitations).toEqual([])
+    const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {
+      questions: { question: string; replies: unknown[] }[]
+    }
+    expect(help.questions).toEqual([
+      expect.objectContaining({
+        question: "¿Dónde le digo a Sofi el horario de la tienda?",
+        replies: [expect.objectContaining({ body: expect.stringContaining("«Cómo vende»") })],
+      }),
     ])
   })
 })
