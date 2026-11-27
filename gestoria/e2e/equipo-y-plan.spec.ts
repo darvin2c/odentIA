@@ -148,4 +148,10 @@ test("Plan y pagos: este mes en una frase, lo que hay por pagar y qué se verá 
   await expect(page.getByRole("heading", { name: /^Pagas .* al mes$/ })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "plan-telefono")
+  // En el teléfono, lo mismo: la Ayuda se abre encima, con el mensaje ya escrito.
+  await page.getByRole("button", { name: /^Pedir (otro|un) tope$/ }).click()
+  const phoneMessage = surface(page, "Ayuda").getByLabel("Tu mensaje para gestorIA")
+  await expect(phoneMessage).toHaveValue(/^Quiero (cambiar|poner) (mi|un) tope del mes/)
+  await noSideScroll(page)
+  await shot(page, "plan-pedir-tope-telefono")
 })
