@@ -218,6 +218,11 @@ test("la Ayuda dice cómo hacer cada tarea y quién puede, y «Pedir ayuda» que
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
+  // Lo escrito sin enviar se queda: cerrar no pregunta, y sigue ahí al abrirlo desde la Ayuda.
+  await page.getByRole("button", { name: "Pedir ayuda" }).click()
+  await page.getByRole("dialog", { name: "Pedir ayuda" }).getByLabel("¿Qué pasó?").fill("Lo que")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog", { name: "Pedir ayuda" })).toHaveCount(0)
   // Al pie del menú, para todos.
   await page.getByRole("link", { name: "Ayuda", exact: true }).click()
   await expect(page).toHaveURL(/\/ayuda$/)
@@ -237,6 +242,7 @@ test("la Ayuda dice cómo hacer cada tarea y quién puede, y «Pedir ayuda» que
   await answer.getByRole("button", { name: "¿No era esto? Pedir ayuda" }).click()
   const asking = page.getByRole("dialog", { name: "Pedir ayuda" })
   await expect(asking.getByText(/\(Ayuda · Dueño · Calzados Rosa\)/)).toBeVisible()
+  await expect(asking.getByLabel("¿Qué pasó?")).toHaveValue("Lo que")
   await asking.getByLabel("¿Qué pasó?").fill("No encuentro dónde cambiar el nombre de la tienda")
   await page.keyboard.press("Enter")
   await expect(asking).toHaveCount(0)
@@ -259,6 +265,40 @@ test("la Ayuda dice cómo hacer cada tarea y quién puede, y «Pedir ayuda» que
   await shot(page, "ayuda-respuesta-telefono")
   await page.getByRole("link", { name: "Todas las preguntas" }).click()
   await expect(list).toBeVisible()
+})
+
+test("Ventas ve en la Ayuda lo que su rol no hace y solo sus propias preguntas", async ({
+  page,
+}) => {
+  await as("lucia")
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/pedidos`)
+  // «Pedir ayuda» es de todo el equipo, también de Ventas.
+  await expect(page.getByRole("button", { name: "Pedir ayuda" })).toBeVisible()
+  await page.getByRole("link", { name: "Ayuda", exact: true }).click()
+  const plan = "¿Dónde veo mi plan y lo que se me cobró?"
+  await page.getByRole("link", { name: plan }).click()
+  const answer = page.getByRole("article", { name: plan })
+  await expect(
+    answer.getByText(
+      "Lo puede hacer: Dueño. Con tu rol (Ventas) no se puede: pídeselo a quien sí puede.",
+    ),
+  ).toBeVisible()
+  // No la lleva a una pantalla que su rol no abre.
+  await expect(answer.getByRole("link", { name: /^Ir a / })).toHaveCount(0)
+  await noSideScroll(page)
+  await shot(page, "ayuda-ventas-escritorio")
+  // Lo que sí hace la lleva a su pantalla.
+  await page.getByRole("link", { name: "¿Sofi confirma pagos?" }).click()
+  await expect(
+    page
+      .getByRole("article", { name: "¿Sofi confirma pagos?" })
+      .getByRole("link", { name: "Ir a Pedidos" }),
+  ).toBeVisible()
+  // Lo que preguntó la Dueña no le llega.
+  const mine = page.getByRole("region", { name: "Tus preguntas" })
+  await expect(mine.getByText("Todavía no preguntaste nada")).toBeVisible()
+  await expect(page.getByText("No encuentro dónde cambiar el nombre de la tienda")).toHaveCount(0)
 })
 
 test("la conversación que Sofi no atendió espera a una persona, con su motivo", async ({

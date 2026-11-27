@@ -11,6 +11,8 @@ export const STORE_ID = "4f9a3c2e-8b1d-4e6f-9a7c-2d5b8e1f3a60"
 export const PEOPLE = {
   rosa: { id: "e2e-rosa", email: "rosa@calzados.test", name: "Rosa Quispe" },
   ana: { id: "e2e-ana", email: "ana@soporte.test", name: "Ana de Soporte" },
+  /** Atiende la tienda con el rol de Ventas. */
+  lucia: { id: "e2e-lucia", email: "lucia@calzados.test", name: "Lucía Torres" },
 } as const
 export type Who = keyof typeof PEOPLE
 

@@ -90,10 +90,23 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
-    await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID)
-    await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
+    // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta) y si ya
+    // es del equipo: así sembrar otra vez no le deja otra invitación.
     const email = invite?.trim().toLowerCase()
-    if (email) {
+    const [guest] = email
+      ? await tx
+          .select({ userId: accountCopy.userId, member: storeMember.role })
+          .from(accountCopy)
+          .leftJoin(
+            storeMember,
+            and(eq(storeMember.userId, accountCopy.userId), eq(storeMember.storeId, DEMO_STORE_ID)),
+          )
+          .where(eq(accountCopy.email, email))
+          .limit(1)
+      : []
+    await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID, guest?.userId)
+    await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
+    if (email && !guest?.member) {
       const [pending] = await tx
         .select({ id: storeInvitation.id })
         .from(storeInvitation)
@@ -120,9 +133,12 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
 /**
  * «Plan y pagos» de ejemplo (B7): lo que respondería la administración, como si ya hubiera
  * preguntado (en desarrollo, sin `GESTORIA_CONTRACT_SECRET`, no se pregunta y queda esto). Un mes
- * pagado, el actual por pagar, un aviso del tope y una pregunta respondida.
+ * pagado, el actual por pagar, un aviso del tope y preguntas respondidas. Quien usa la demo
+ * (`guestId`, de `GESTORIA_SEMILLA_CORREO`) ve una suya en la Ayuda: la Ayuda muestra a cada
+ * persona solo las suyas. Sin su copia de la cuenta (nunca entró) no se sabe quién es: sembrar
+ * otra vez después de entrar la suma.
  */
-async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
+async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<void> {
   const day = 86_400_000
   const now = Date.now()
   const at = (days: number) => new Date(now + days * day).toISOString()
@@ -225,6 +241,23 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
     ],
     // Cada caso dice quién lo abrió: la Ayuda le muestra a cada persona solo los suyos (ADR 0221).
     support: [
+      ...(guestId
+        ? [
+            {
+              id: "semilla-soporte-3",
+              status: "esperando_clinica",
+              question: "¿Dónde le digo a Sofi el horario de la tienda?",
+              createdAt: at(-2),
+              userId: guestId,
+              replies: [
+                {
+                  body: "En Sofi, en «Cómo vende»: escríbelo en «Lo que debe saber» y guarda. Sofi lo cuenta tal cual.",
+                  at: at(-2),
+                },
+              ],
+            },
+          ]
+        : []),
       {
         id: "semilla-soporte-2",
         status: "esperando_clinica",
