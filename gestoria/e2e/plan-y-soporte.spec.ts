@@ -10,7 +10,8 @@ import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, type Who } from "./entorno"
  * - El aviso de soporte en cada sección: «Dejar entrar» abre la tienda a soporte, solo a mirar y
  *   solo con el código del personal (ADR 0219), con su franja; «Sacar ahora» la cierra, y soporte
  *   ve «El acceso terminó» con quién lo sacó, y la tienda, quién miró y cómo terminó.
- * - La conversación que Sofi no atendió (apagada) espera a una persona con su motivo, en «Te toca».
+ * - La conversación que Sofi no atendió (apagada) espera a una persona con su motivo: Inicio la
+ *   cuenta para la Bandeja.
  * - El armazón común (lienzo «Una cuenta, todas las apps»): el selector de la tienda con el rol,
  *   «Pedir ayuda» en la cabecera, el menú de la persona con Apariencia, y la entrada que recuerda
  *   a quien entró, con su correo entero y «Entrar con otra cuenta».
@@ -314,16 +315,26 @@ test("la conversación que Sofi no atendió espera a una persona, con su motivo"
 }) => {
   await as("rosa")
   await page.setViewportSize(DESKTOP)
-  await page.goto(`${BASE}/reportes`)
-  await expect(page.getByText("Una conversación espera a una persona")).toBeVisible()
-  await expect(page.getByText("Carla: Sofi está apagada")).toBeVisible()
+  // Inicio la cuenta para la Bandeja, que la dibujará con «Abrir Bandeja»: mientras no existe, no
+  // se dibuja una línea sin su botón (tablero 5).
+  const inicio = page.waitForResponse((r) => r.url().endsWith(`/api/tiendas/${STORE_ID}/inicio`))
+  await page.goto(BASE)
+  const home = (await (await inicio).json()) as {
+    waiting: { chats: { customer: string | null; reason: string | null }[] }
+  }
+  expect(home.waiting.chats).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ customer: "Carla", reason: "Sofi está apagada" }),
+    ]),
+  )
+  await expect(page.getByRole("heading", { name: "Te toca" })).toBeVisible()
   await noSideScroll(page)
-  await shot(page, "espera-a-una-persona-escritorio")
+  await shot(page, "inicio-escritorio")
   await page.setViewportSize(PHONE)
   await page.reload()
-  await expect(page.getByText("Carla: Sofi está apagada")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Te toca" })).toBeVisible()
   await noSideScroll(page)
-  await shot(page, "espera-a-una-persona-telefono")
+  await shot(page, "inicio-telefono")
 })
 
 test("la entrada recuerda a quien entró, con su correo entero, y deja entrar con otra", async ({
@@ -346,8 +357,9 @@ test("la entrada recuerda a quien entró, con su correo entero, y deja entrar co
   await page.getByLabel("Correo").fill(rosa.email)
   await page.getByLabel("Contraseña", { exact: true }).fill(CLAVE)
   await page.keyboard.press("Enter")
-  await expect(page).toHaveURL(/\/tiendas\/.+\/pedidos$/)
-  await expect(page.getByRole("heading", { name: "Pedidos" })).toBeVisible()
+  // La tienda abre en Inicio (tablero 5), con lo que le toca.
+  await expect(page).toHaveURL(/\/tiendas\/[^/]+\/?$/)
+  await expect(page.getByRole("heading", { name: "Te toca" })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "tienda-telefono")
 

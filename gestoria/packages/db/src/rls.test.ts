@@ -17,6 +17,7 @@ import {
   storeInvitation,
   storeLink,
   storeMember,
+  storeSetup,
   withPerson,
 } from "./index.js"
 import { startTestDb, type TestDb } from "./testing.js"
@@ -277,6 +278,74 @@ describe("las reglas de cada tienda", () => {
       tx.select({ brandColor: store.brandColor }).from(store),
     )
     expect(after?.brandColor).toBe("#be185d")
+  })
+
+  it("los primeros pasos: cada tienda anota los suyos, a su nombre o sin nombre; el agente no los toca y no se borran", async () => {
+    const inCalzados = async <T>(
+      fn: (tx: Db) => Promise<T>,
+      who: { userId: string; email: string } = rosa,
+    ) =>
+      withPerson(db.appDb, who, async (tx) => {
+        await enterStore(tx, calzados)
+        return fn(tx)
+      })
+    await inCalzados((tx) =>
+      tx
+        .insert(storeSetup)
+        .values({ storeId: calzados, skipped: ["equipo"], updatedBy: rosa.userId }),
+    )
+    // Quedó lista: lo anota el sistema, sin nombre.
+    await inCalzados((tx) => tx.update(storeSetup).set({ finishedAt: new Date(), updatedBy: null }))
+    // Un paso que no existe, no; a nombre de otra persona, tampoco.
+    await expect(
+      inCalzados((tx) =>
+        tx.update(storeSetup).set({ skipped: ["equipo", "otro"] as unknown as ["equipo"] }),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      inCalzados((tx) => tx.update(storeSetup).set({ updatedBy: mario.userId })),
+    ).rejects.toThrow()
+    // No se borra: así la lista no vuelve.
+    await expect(inCalzados((tx) => tx.delete(storeSetup))).rejects.toThrow()
+    // Otra tienda no la ve ni la anota por Calzados.
+    const fromOther = await withPerson(db.appDb, mario, async (tx) => {
+      await enterStore(tx, otra)
+      return tx.select({ storeId: storeSetup.storeId }).from(storeSetup)
+    })
+    expect(fromOther).toEqual([])
+    await expect(
+      withPerson(db.appDb, mario, async (tx) => {
+        await enterStore(tx, otra)
+        await tx.insert(storeSetup).values({ storeId: calzados, updatedBy: mario.userId })
+      }),
+    ).rejects.toThrow()
+    // Sofi no la cambia ni la crea.
+    const sofi = { userId: "agente:sofi", email: "" }
+    await inCalzados(async (tx) => {
+      const changed = await tx
+        .update(storeSetup)
+        .set({ finishedAt: null, updatedBy: null })
+        .returning({ storeId: storeSetup.storeId })
+      expect(changed).toEqual([])
+    }, sofi)
+    // Crear (también al anotar sobre la que ya está) lo revisa la regla de crear: el agente, no.
+    await expect(
+      inCalzados(
+        (tx) =>
+          tx
+            .insert(storeSetup)
+            .values({ storeId: calzados })
+            .onConflictDoUpdate({ target: storeSetup.storeId, set: { finishedAt: null } }),
+        sofi,
+      ),
+    ).rejects.toMatchObject({ cause: { message: expect.stringMatching(/row-level security/) } })
+    const [after] = await inCalzados((tx) =>
+      tx
+        .select({ skipped: storeSetup.skipped, finishedAt: storeSetup.finishedAt })
+        .from(storeSetup),
+    )
+    expect(after?.skipped).toEqual(["equipo"])
+    expect(after?.finishedAt).not.toBeNull()
   })
 
   it("sin persona, la aplicación no ve nada", async () => {

@@ -68,6 +68,7 @@ import {
 } from "./cuenta.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
+import { storeHome } from "./inicio.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
   brandInput,
@@ -118,6 +119,7 @@ import {
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import { skipInput, skipStep } from "./primeros-pasos.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
@@ -573,6 +575,16 @@ export function createApp(deps: AppDeps) {
     const { id, variantId } = c.req.param()
     const movement = await addMovement(deps.appDb, c.get("person"), id, variantId, input)
     return c.json({ movement }, 201)
+  })
+
+  // Inicio (tablero 5): lo que le toca a cada rol, las cifras del día y los primeros pasos de una
+  // tienda nueva (tablero 16), que se saltan con «No lo necesito».
+  app.get("/api/tiendas/:id/inicio", async (c) =>
+    c.json(await storeHome(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/primeros-pasos/saltar", async (c) => {
+    const input = await bodyOf(c, skipInput)
+    return c.json(await skipStep(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
 
   // Los pedidos (B4): armar, cobrar y entregar.

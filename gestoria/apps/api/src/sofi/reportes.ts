@@ -31,6 +31,57 @@ export function periodStart(period: ReportPeriod, today: string, timeZone: strin
 
 const n = (value: unknown) => Number(value ?? 0)
 
+/**
+ * Lo cobrado desde `since`: los pagos confirmados desde entonces, sin los pedidos de prueba. Es la
+ * misma cuenta para «Vendido y cobrado» de Reportes y «Cobrado hoy» de Inicio.
+ */
+export async function collectedSinceIn(tx: Db, storeId: string, since: Date) {
+  // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
+  const [row] = await tx.execute<{ cents: string; orders: string; payments: string }>(sql`
+    select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders,
+      count(*) as payments
+    from order_payment p join sale_order o on o.id = p.order_id
+    where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
+      and p.reviewed_at >= ${since.toISOString()}`)
+  return { cents: n(row?.cents), orders: n(row?.orders), payments: n(row?.payments) }
+}
+
+/**
+ * Lo que falta cobrar y lo que espera a una persona ahora, del saldo de cada pedido
+ * (`order_balance`): la misma cuenta en Reportes e Inicio. Un pedido por pagar con el precio
+ * vencido ya no se cuenta: no se va a cobrar así. Los de prueba y los anulados, tampoco.
+ */
+export async function pendingNowIn(tx: Db, storeId: string, now = new Date()) {
+  const [row] = await tx.execute<{
+    to_confirm: string
+    to_confirm_cents: string
+    to_confirm_payments: string
+    due: string
+    due_cents: string
+  }>(sql`
+    select
+      count(*) filter (where b.pending_cents > 0) as to_confirm,
+      coalesce(sum(b.pending_cents), 0) as to_confirm_cents,
+      coalesce(sum((select count(*) from order_payment p
+        where p.order_id = b.order_id and p.status = 'por_confirmar')), 0) as to_confirm_payments,
+      count(*) filter (where b.due_cents > 0) as due,
+      coalesce(sum(b.due_cents), 0) as due_cents
+    from order_balance b join sale_order o on o.id = b.order_id
+    where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
+      and (o.state <> 'por_pagar' or o.price_expires_at is null
+        or o.price_expires_at > ${now.toISOString()})`)
+  return {
+    /** Los pagos que esperan a una persona: no son «falta cobrar». */
+    toConfirm: {
+      orders: n(row?.to_confirm),
+      cents: n(row?.to_confirm_cents),
+      payments: n(row?.to_confirm_payments),
+    },
+    /** Falta cobrar = total − confirmado − por confirmar, pedido por pedido. */
+    due: { orders: n(row?.due), cents: n(row?.due_cents) },
+  }
+}
+
 export async function storeReport(
   appDb: Db,
   person: Person,
@@ -43,29 +94,8 @@ export async function storeReport(
     const from = periodStart(period, today, timeZone)
     // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
     const since = from.toISOString()
-    const at = now.toISOString()
-    // Vendido y cobrado: los pagos confirmados del periodo, por pedido.
-    const [sold] = await tx.execute<{ cents: string; orders: string }>(sql`
-      select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders
-      from order_payment p join sale_order o on o.id = p.order_id
-      where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
-        and p.reviewed_at >= ${since}`)
-    // Lo que falta cobrar y lo que espera a una persona, hoy, del saldo de cada pedido. Un
-    // pedido por pagar con el precio vencido ya no se cuenta: no se va a cobrar así.
-    const [pending] = await tx.execute<{
-      to_confirm: string
-      to_confirm_cents: string
-      due: string
-      due_cents: string
-    }>(sql`
-      select
-        count(*) filter (where b.pending_cents > 0) as to_confirm,
-        coalesce(sum(b.pending_cents), 0) as to_confirm_cents,
-        count(*) filter (where b.due_cents > 0) as due,
-        coalesce(sum(b.due_cents), 0) as due_cents
-      from order_balance b join sale_order o on o.id = b.order_id
-      where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
-        and (o.state <> 'por_pagar' or o.price_expires_at is null or o.price_expires_at > ${at})`)
+    const sold = await collectedSinceIn(tx, storeId, from)
+    const pending = await pendingNowIn(tx, storeId, now)
     // Conversaciones del periodo y cuántas compraron; quienes volvieron a comprar (siempre).
     const [talks] = await tx.execute<{ total: string; bought: string }>(sql`
       select count(*) as total,
@@ -130,21 +160,19 @@ export async function storeReport(
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_by = ${SOFI_ACTOR} and o.created_at >= ${since}`)
-    const soldOrders = n(sold?.orders)
+    const soldOrders = sold.orders
     const conversations = n(agent?.conversations)
     return {
       period,
       from,
       sold: {
-        cents: n(sold?.cents),
+        cents: sold.cents,
         orders: soldOrders,
-        ticketCents: soldOrders ? Math.round(n(sold?.cents) / soldOrders) : 0,
+        ticketCents: soldOrders ? Math.round(sold.cents / soldOrders) : 0,
       },
       pending: {
-        /** Los pagos que esperan a una persona: no son «falta cobrar». */
-        toConfirm: { orders: n(pending?.to_confirm), cents: n(pending?.to_confirm_cents) },
-        /** Falta cobrar = total − confirmado − por confirmar, pedido por pedido. */
-        due: { orders: n(pending?.due), cents: n(pending?.due_cents) },
+        toConfirm: { orders: pending.toConfirm.orders, cents: pending.toConfirm.cents },
+        due: pending.due,
       },
       conversations: { total: n(talks?.total), bought: n(talks?.bought) },
       returning: n(again?.customers),

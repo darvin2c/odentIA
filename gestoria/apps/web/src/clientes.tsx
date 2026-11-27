@@ -46,6 +46,7 @@ import {
   sinceText,
   whatsappLink,
 } from "./lib/clientes"
+import { HOME_KEY } from "./lib/inicio"
 import { STATE_TONE, stateName } from "./lib/pedidos"
 import { money } from "./lib/tienda"
 import { NewOrderSheet, type OrderDraft } from "./pedidos"
@@ -91,6 +92,8 @@ function useRefreshCustomers() {
       queryClient.invalidateQueries({ queryKey: CUSTOMERS_KEY(store.id) }),
       queryClient.invalidateQueries({ queryKey: CUSTOMER_KEY(store.id) }),
       queryClient.invalidateQueries({ queryKey: SIMILAR_KEY(store.id) }),
+      // «¿Es la misma clienta?» también está en «Te toca» de Inicio.
+      queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) }),
     ])
 }
 
@@ -670,9 +673,9 @@ function CompareSheet({
 
 /**
  * Las parejas por mirar, de a una, hasta que no quede ninguna. Con `involving`, solo las de esa
- * ficha (desde su aviso).
+ * ficha (desde su aviso). También se abre con «Comparar» desde «Te toca» de Inicio.
  */
-function SimilarQueue({
+export function SimilarQueue({
   involving,
   first,
   onClose,

@@ -30,8 +30,10 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
+import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
+import { FILTERS, type OrderFilter } from "./lib/pedidos"
 import { BrandPage } from "./marca"
 import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
@@ -116,7 +118,7 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: el menú del día (los pedidos, las clientas, el catálogo y su
+// La tienda y sus secciones: el menú del día (Inicio, los pedidos, las clientas, el catálogo y su
 // producto, Reportes), y al pie Configuración y la Ayuda.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
@@ -150,19 +152,17 @@ const customersRoute = createRoute({
   component: CustomersLayout,
 })
 const storeChildren = [
-  createRoute({
-    getParentRoute: () => storeRoute,
-    path: "/",
-    beforeLoad: ({ params }) => {
-      throw redirect({ to: "/tiendas/$id/pedidos", params, replace: true })
-    },
-  }),
+  // Inicio (tableros 5 y 16): lo que le toca a cada rol y los primeros pasos de una tienda nueva.
+  createRoute({ getParentRoute: () => storeRoute, path: "/", component: HomePage }),
   createRoute({
     getParentRoute: () => storeRoute,
     path: "/pedidos",
-    // «?pedido=…» abre ese pedido (desde Argos o desde la conversación de prueba).
-    validateSearch: (s: Record<string, unknown>): { pedido?: string } =>
-      typeof s.pedido === "string" ? { pedido: s.pedido } : {},
+    // «?pedido=…» abre ese pedido (desde Inicio o desde la conversación de prueba); «?filtro=…»
+    // abre en ese filtro («Sale hoy» de Inicio).
+    validateSearch: (s: Record<string, unknown>): { pedido?: string; filtro?: OrderFilter } => ({
+      ...(typeof s.pedido === "string" ? { pedido: s.pedido } : {}),
+      ...(FILTERS.some((f) => f.value === s.filtro) ? { filtro: s.filtro as OrderFilter } : {}),
+    }),
     component: OrdersPage,
   }),
   customersRoute.addChildren([
