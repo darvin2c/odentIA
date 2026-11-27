@@ -192,9 +192,30 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         a: [
           "En el pedido, «Cambiar»: la talla, el color, la cantidad, otro producto, la entrega, la dirección o el día, y «Guardar cambios». Es el mismo pedido, con su número y sus pagos: antes de guardar ves el total nuevo y lo que falta cobrar, y lo que cambió queda en su historia. Lo que ya salió del stock se mueve solo.",
           "Se cambia mientras no sale. Si la talla nueva no tiene stock, se guarda igual y no sale hasta que entre. Si sobra de lo que pagó, queda anotado para ver si se devuelve.",
-          "Si ya no va, «Anular pedido» con su motivo. Un pedido pagado lo anula solo quien puede confirmar pagos, y la devolución del dinero se hace fuera de gestorIA. Un pedido entregado ya no se anula.",
+          "Si ya no va, «Anular pedido» con su motivo. Un pedido pagado lo anula solo quien puede confirmar pagos, y la devolución del dinero se hace fuera de gestorIA. Un pedido entregado ya no se anula: si la clienta quiere otra talla o devolverlo, usa «Cambio o devolución».",
         ],
         needs: "ventas.atender",
+        screen: "pedidos",
+      },
+      {
+        id: "cambio-devolucion",
+        q: "¿Cómo hago un cambio o una devolución de un pedido entregado?",
+        a: [
+          "En el pedido entregado, «Cambio o devolución»: marca lo que vuelve y por qué, elige lo que se lleva (otra talla u otro producto) o «Nada: es una devolución», y la entrega del cambio, con quién paga el envío. «Crear el cambio» arma un pedido nuevo, enlazado al entregado; el entregado no cambia su total ni su pago.",
+          "Lo que vuelve entra a tu stock con su motivo al marcar «Entregado» el cambio, cuando llega a la tienda. Si lo nuevo cuesta más, falta cobrar la diferencia, como en cualquier pedido; si cuesta menos, el cambio dice cuánto falta devolver.",
+          "Puedes abrir el WhatsApp de tu celular con el aviso del cambio ya escrito, para enviarlo tú.",
+        ],
+        needs: "ventas.atender",
+        screen: "pedidos",
+      },
+      {
+        id: "anotar-devolucion",
+        q: "Le devolví dinero a una clienta, ¿cómo lo anoto?",
+        a: [
+          "Si un cambio cuesta menos, es una devolución o pagó de más, el pedido dice cuánto falta devolver. Devuélvelo desde tu app y, en el pedido, «Anotar la devolución» con cuánto y con qué medio: queda con tu nombre. gestorIA no mueve el dinero.",
+          "Lo devuelto deja de contar como vendido en Reportes, y un pedido con dinero devuelto ya no se anula.",
+        ],
+        needs: "pagos.confirmar",
         screen: "pedidos",
       },
       {

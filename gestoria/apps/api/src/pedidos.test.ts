@@ -1198,3 +1198,235 @@ describe("deshacer la confirmación de un pago (tablero 7)", () => {
     expect(undo.status).toBe(409)
   })
 })
+
+describe("cambiar o devolver después de entregar (Andrea, tablero 17)", () => {
+  const v = { s38: "", s39: "" }
+  /** Un pedido entregado de una sandalia 38, cobrado en la puerta: S/ 129 + envío S/ 10. */
+  const delivered = async () => {
+    const created = await call(
+      "lucia",
+      "POST",
+      `${base}/pedidos`,
+      order({
+        customerName: "Andrea Castillo",
+        lines: [{ variantId: v.s38, quantity: 1 }],
+        paymentMethodId: ids.efectivo,
+      }),
+    )
+    const id = created.json.order.id as string
+    const done = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: created.json.order.totalCents,
+    })
+    expect(done.json.order.state).toBe("entregado")
+    return { id, number: done.json.order.number as string }
+  }
+  const exchange = (id: string, body: Json = {}, path = "cambio") =>
+    call("lucia", "POST", `${base}/pedidos/${id}/${path}`, {
+      returns: [{ variantId: v.s38, quantity: 1 }],
+      reason: "Le quedó chica",
+      takes: [{ variantId: v.s39, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+      address: "Av. Rivera Navarrete 501, of. 802",
+      ...body,
+    })
+  const stock = async (variantId: string) => (await stockOf(variantId)).stock as number
+
+  beforeAll(async () => {
+    const sandalia = await call("rosa", "POST", `${base}/productos`, {
+      name: "Sandalia de verano",
+      listPriceCents: 12900,
+      options: [{ name: "Talla", values: ["38", "39"] }],
+    })
+    const variants = (await call("rosa", "GET", `${base}/productos/${sandalia.json.product.id}`))
+      .json.product.variants as Json[]
+    v.s38 = variants.find((x) => x.optionValues[0] === "38")!.id
+    v.s39 = variants.find((x) => x.optionValues[0] === "39")!.id
+    for (const variantId of [v.s38, v.s39])
+      await call("rosa", "POST", `${base}/variantes/${variantId}/movimientos`, {
+        kind: "entrada",
+        quantity: 10,
+      })
+  })
+
+  it("el cambio es un pedido nuevo enlazado; el entregado no cambia su total ni su pago", async () => {
+    const original = await delivered()
+    const preview = await exchange(original.id, {}, "cambio/calcular")
+    expect(preview.status).toBe(200)
+    expect(preview.json.summary).toMatchObject({
+      backCents: 12900,
+      takesCents: 12900,
+      deliveryCents: 1000,
+      totalCents: 1000,
+      dueCents: 1000,
+      refundCents: 0,
+      paymentName: "Efectivo",
+      payOnDelivery: true,
+    })
+    const [s38, s39] = [await stock(v.s38), await stock(v.s39)]
+    const created = await exchange(original.id, { whatsapp: true })
+    expect(created.status).toBe(201)
+    expect(created.json.notice).toContain("anotamos tu cambio")
+    const change = created.json.order
+    expect(change).toMatchObject({
+      state: "por_salir",
+      totalCents: 1000,
+      returnCreditCents: 12900,
+      exchangeOf: { id: original.id, number: original.number },
+      customerName: "Andrea Castillo",
+      balance: { dueCents: 1000 },
+    })
+    expect(change.number).not.toBe(original.number)
+    expect(change.lines).toHaveLength(1)
+    expect(change.lines[0]).toMatchObject({ variantName: "39", unitCents: 12900 })
+    expect(change.returns).toEqual([
+      expect.objectContaining({
+        variantName: "38",
+        quantity: 1,
+        unitCents: 12900,
+        returnedAt: null,
+      }),
+    ])
+    const notice = (change.events as Json[]).find((e) => e.action === "aviso")!
+    expect(notice.detail).toMatchObject({ tipo: "cambio", enviado: false, abierto: true })
+    // El entregado: el mismo total y el mismo pago, con el cambio en su historia.
+    const after = (await call("lucia", "GET", `${base}/pedidos/${original.id}`)).json.order
+    expect(after).toMatchObject({ state: "entregado", totalCents: 13900, returnable: [] })
+    expect(after.payments).toHaveLength(1)
+    expect(after.exchanges).toEqual([{ id: change.id, number: change.number, state: "por_salir" }])
+    expect((after.events as Json[]).at(-1)).toMatchObject({
+      action: "cambio",
+      detail: { pedido: change.number, motivo: "Le quedó chica" },
+    })
+    // Nada se mueve hasta que el cambio sale y vuelve.
+    expect([await stock(v.s38), await stock(v.s39)]).toEqual([s38, s39])
+    await call("lucia", "POST", `${base}/pedidos/${change.id}/salio`, {})
+    expect([await stock(v.s38), await stock(v.s39)]).toEqual([s38, s39 - 1])
+    const report = async () => (await call("rosa", "GET", `${base}/reportes?periodo=mes`)).json
+    const sold = (await report()).sold
+    const done = await call("lucia", "POST", `${base}/pedidos/${change.id}/entregado`, {
+      collectedCents: 1000,
+    })
+    expect(done.status).toBe(200)
+    // Lo cobrado del cambio suma a lo vendido, pero el cambio no es otro pedido.
+    const soldAfter = (await report()).sold
+    expect(soldAfter.cents - sold.cents).toBe(1000)
+    expect(soldAfter.orders).toBe(sold.orders)
+    expect(done.json.order.returns[0].returnedAt).not.toBeNull()
+    expect((done.json.order.events as Json[]).find((e) => e.action === "entregado")).toMatchObject({
+      detail: { volvio: ["Sandalia de verano 38"] },
+    })
+    // La 38 vuelve como «devolución», con su motivo y la referencia del cambio.
+    const kardex = await stockOf(v.s38)
+    expect(kardex.stock).toBe(s38 + 1)
+    expect(kardex.movements[0]).toMatchObject({
+      kind: "devolucion",
+      quantity: 1,
+      reason: "Le quedó chica",
+      reference: `Pedido ${change.number}`,
+    })
+  })
+
+  it("lo que ya vuelve en un cambio no vuelve dos veces; anulado el cambio, sí", async () => {
+    const original = await delivered()
+    const first = await exchange(original.id)
+    expect(first.status).toBe(201)
+    const twice = await exchange(original.id)
+    expect(twice.status).toBe(400)
+    expect(twice.json.error.fields["returns.0.quantity"]).toBe("Ya vuelve en otro cambio")
+    const cancelled = await call("lucia", "POST", `${base}/pedidos/${first.json.order.id}/anular`, {
+      reason: "Al final se la queda",
+    })
+    expect(cancelled.json.order.state).toBe("anulado")
+    const back = (await call("lucia", "GET", `${base}/pedidos/${original.id}`)).json.order
+    expect(back.returnable).toEqual([{ variantId: v.s38, quantity: 1 }])
+    expect((await exchange(original.id)).status).toBe(201)
+  })
+
+  it("una devolución, con el envío de la tienda: el total queda bajo cero y sobra lo pagado", async () => {
+    const original = await delivered()
+    const created = await exchange(original.id, {
+      takes: [],
+      reason: "Llegó fallado",
+      storePaysDelivery: true,
+    })
+    expect(created.status).toBe(201)
+    expect(created.json.notice).toContain("anotamos tu devolución")
+    expect(created.json.order).toMatchObject({
+      state: "por_salir",
+      lines: [],
+      deliveryCents: 0,
+      deliveryListCents: 1000,
+      totalCents: -12900,
+      balance: { dueCents: 0, overCents: 12900 },
+    })
+    // «Anotar la devolución»: no más de lo que sobra, con su medio y quién lo devolvió.
+    const id = created.json.order.id as string
+    const before = (await call("rosa", "GET", `${base}/reportes?periodo=mes`)).json
+    const tooMuch = await call("lucia", "POST", `${base}/pedidos/${id}/devolucion`, {
+      amountCents: 20000,
+    })
+    expect(tooMuch.status).toBe(400)
+    expect(tooMuch.json.error.fields).toHaveProperty("amountCents")
+    const refunded = await call("lucia", "POST", `${base}/pedidos/${id}/devolucion`, {
+      amountCents: 12900,
+      methodId: ids.yape,
+    })
+    expect(refunded.status).toBe(200)
+    expect(refunded.json.order).toMatchObject({
+      balance: { dueCents: 0, overCents: 0, refundedCents: 12900, paid: true },
+      refunds: [expect.objectContaining({ amountCents: 12900, methodName: "Yape" })],
+    })
+    expect(refunded.json.order.refunds[0].createdByName).toBe("Lucía Torres")
+    expect((refunded.json.order.events as Json[]).at(-1)).toMatchObject({
+      action: "dinero_devuelto",
+      detail: { monto: 12900, medio: "Yape" },
+    })
+    const again = await call("lucia", "POST", `${base}/pedidos/${id}/devolucion`, {
+      amountCents: 100,
+    })
+    expect(again.status).toBe(409)
+    // Lo devuelto ya salió de la caja: el cambio no se anula, y Reportes deja de contarlo.
+    const cancel = await call("rosa", "POST", `${base}/pedidos/${id}/anular`, {
+      reason: "Me equivoqué",
+    })
+    expect(cancel.status).toBe(409)
+    const after = (await call("rosa", "GET", `${base}/reportes?periodo=mes`)).json
+    expect(after.sold.refundedCents - before.sold.refundedCents).toBe(12900)
+    expect(before.sold.cents - after.sold.cents).toBe(12900)
+  })
+
+  it("un cambio no se «Cambia», y un pedido sin entregar no tiene cambio", async () => {
+    const original = await delivered()
+    const created = await exchange(original.id)
+    const change = await call("lucia", "POST", `${base}/pedidos/${created.json.order.id}/cambiar`, {
+      lines: [{ variantId: v.s39, quantity: 2 }],
+      deliveryMethodId: ids.reparto,
+      address: "",
+      deliverOn: null,
+    })
+    expect(change.status).toBe(409)
+    expect(change.json.error.code).toBe("EXCHANGE")
+    const open = await call(
+      "lucia",
+      "POST",
+      `${base}/pedidos`,
+      order({ lines: [{ variantId: v.s38, quantity: 1 }] }),
+    )
+    expect((await exchange(open.json.order.id)).status).toBe(409)
+  })
+
+  it("solo vuelve lo que se entregó, y otra cuenta no crea cambios en la tienda", async () => {
+    const original = await delivered()
+    const wrong = await exchange(original.id, { returns: [{ variantId: v.s39, quantity: 1 }] })
+    expect(wrong.status).toBe(400)
+    expect(wrong.json.error.fields).toHaveProperty(["returns.0.variantId"])
+    const more = await exchange(original.id, { returns: [{ variantId: v.s38, quantity: 2 }] })
+    expect(more.json.error.fields["returns.0.quantity"]).toBe("Vuelve 1 como máximo")
+    const other = await call("ajena", "POST", `${base}/pedidos/${original.id}/cambio`, {
+      returns: [{ variantId: v.s38, quantity: 1 }],
+      reason: "Le quedó chica",
+      deliveryMethodId: ids.reparto,
+    })
+    expect([403, 404]).toContain(other.status)
+  })
+})

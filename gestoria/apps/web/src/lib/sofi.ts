@@ -65,7 +65,8 @@ export type AnswerStatus =
 
 export interface StoreReport {
   period: "hoy" | "semana" | "mes"
-  sold: { cents: number; orders: number; ticketCents: number }
+  /** Lo cobrado menos lo que la tienda devolvió (`refundedCents`, ya restado). */
+  sold: { cents: number; orders: number; ticketCents: number; refundedCents: number }
   /** Lo que espera a una persona y lo que falta cobrar (total − confirmado − por confirmar). */
   pending: Record<"toConfirm" | "due", { orders: number; cents: number }>
   conversations: { total: number; bought: number }
@@ -83,6 +84,8 @@ export interface StoreReport {
     passedToPerson: number
     orders: number
     cents: number
+    /** Lo que volvió de sus pedidos, a lo que se pagó: el cobro lo descuenta. */
+    returnedCents: number
     marginCents: number
     marginUsedCents: number
     costMicros: number

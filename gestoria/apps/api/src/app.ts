@@ -30,6 +30,13 @@ import {
   subscribeInput,
 } from "./avisos.js"
 import {
+  createExchange,
+  exchangeInput,
+  previewExchange,
+  recordRefund,
+  refundInput,
+} from "./cambios.js"
+import {
   addPhoto,
   catalog,
   createProduct,
@@ -741,6 +748,23 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, rescheduleInput)
     const { id, orderId } = c.req.param()
     return c.json({ order: await reschedule(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  // Cambiar o devolver después de entregar (tablero 17): un pedido nuevo, enlazado al entregado.
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambio/calcular", async (c) => {
+    const input = await bodyOf(c, exchangeInput)
+    const { id, orderId } = c.req.param()
+    return c.json(await previewExchange(deps.appDb, c.get("person"), id, orderId, input))
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambio", async (c) => {
+    const input = await bodyOf(c, exchangeInput)
+    const { id, orderId } = c.req.param()
+    return c.json(await createExchange(deps.appDb, c.get("person"), id, orderId, input), 201)
+  })
+  // «Anotar la devolución»: el dinero que la tienda devolvió de lo que sobra, con su medio.
+  app.post("/api/tiendas/:id/pedidos/:orderId/devolucion", async (c) => {
+    const input = await bodyOf(c, refundInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await recordRefund(deps.appDb, c.get("person"), id, orderId, input) })
   })
   // Despachos (entrega 3): quién lo lleva, la agencia y «Avisar» (enviado por usted).
   app.post("/api/tiendas/:id/pedidos/:orderId/repartidor", async (c) => {

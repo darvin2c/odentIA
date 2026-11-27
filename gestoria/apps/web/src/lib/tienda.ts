@@ -151,7 +151,7 @@ export interface ProductDetail {
 
 export interface Movement {
   id: string
-  kind: "entrada" | "venta" | "anulacion" | "ajuste"
+  kind: "entrada" | "venta" | "anulacion" | "ajuste" | "devolucion"
   quantity: number
   balance: number
   unitCostCents: number | null
@@ -166,6 +166,7 @@ export const MOVEMENT_NAMES: Record<Movement["kind"], string> = {
   venta: "Venta",
   anulacion: "Venta anulada",
   ajuste: "Ajuste",
+  devolucion: "Devolución",
 }
 
 /** Los formatos de cada moneda se arman una vez: una lista larga los pide fila a fila. */

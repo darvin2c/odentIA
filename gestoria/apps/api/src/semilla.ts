@@ -12,6 +12,7 @@ import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
 import { seedDemoPushChoices } from "./semilla-avisos.js"
+import { seedDemoExchanges } from "./semilla-cambios.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
@@ -107,6 +108,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoCorrections(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCustomers(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoExchanges(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPushChoices(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSetupDone(tx as unknown as Db, DEMO_STORE_ID)

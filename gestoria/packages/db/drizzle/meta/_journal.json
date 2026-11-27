@@ -211,6 +211,34 @@
       "when": 1795802171622,
       "tag": "0029_reglas_avisos_al_celular",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795805389900,
+      "tag": "0030_cambios_y_devoluciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795805399283,
+      "tag": "0031_reglas_cambios_y_devoluciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795805408231,
+      "tag": "0032_el_dinero_devuelto",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795805419993,
+      "tag": "0033_reglas_dinero_devuelto",
+      "breakpoints": true
     }
   ]
 }

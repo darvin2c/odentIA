@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
 import { collectedBetween } from "../caja.js"
+import { agentReturnsIn } from "../cambios.js"
 import type { Person } from "../cuenta.js"
 import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
@@ -89,7 +90,14 @@ export async function storeReport(
     const from = periodStart(period, today, timeZone)
     // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
     const since = from.toISOString()
+    // Vendido y cobrado: lo cobrado del periodo (la cuenta de Caja), menos lo que la tienda devolvió
+    // en el periodo (un cambio que costó menos o una devolución, tablero 17). Lo que se cobra de un
+    // cambio suma a lo vendido, pero el cambio no es otro pedido (`collectedBetween`).
     const sold = await collectedSinceIn(tx, storeId, from)
+    const [refunded] = await tx.execute<{ cents: string }>(sql`
+      select coalesce(sum(r.amount_cents), 0) as cents
+      from order_refund r join sale_order o on o.id = r.order_id
+      where r.store_id = ${storeId} and o.test = false and r.created_at >= ${since}`)
     const pending = await pendingNowIn(tx, storeId, now)
     // Conversaciones del periodo y cuántas compraron; quienes volvieron a comprar (siempre).
     const [talks] = await tx.execute<{ total: string; bought: string }>(sql`
@@ -104,14 +112,17 @@ export async function storeReport(
         where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
           and o.conversation_id is not null
         group by o.conversation_id having count(*) >= 2) t`)
-    // De dónde vienen las ventas (el anuncio de cada conversación llega con B2).
+    // De dónde vienen las ventas (el anuncio de cada conversación llega con B2). Un cambio no es
+    // otro pedido, pero su diferencia sí cuenta: lo devuelto resta (tablero 17).
     const channels = await tx.execute<{ channel: string; orders: string; cents: string }>(sql`
-      select o.channel, count(*) as orders, coalesce(sum(o.total_cents), 0) as cents
+      select o.channel, count(*) filter (where o.exchange_of_id is null) as orders,
+        coalesce(sum(o.total_cents), 0) as cents
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_at >= ${since}
       group by o.channel order by 3 desc`)
-    // Lo más vendido (por el kardex) y lo que se acaba, con cuánto alcanza al ritmo del periodo.
+    // Lo más vendido (por el kardex: lo que salió menos lo que volvió, anulado o devuelto) y lo
+    // que se acaba, con cuánto alcanza al ritmo del periodo.
     const products = await tx.execute<{
       product_id: string
       name: string
@@ -124,7 +135,8 @@ export async function storeReport(
           where v2.product_id = p.id and m.kind = 'venta' and m.created_at >= ${since}), 0)
         - coalesce((select sum(m.quantity) from stock_movement m
           join product_variant v3 on v3.id = m.variant_id
-          where v3.product_id = p.id and m.kind = 'anulacion' and m.created_at >= ${since}), 0) as sold,
+          where v3.product_id = p.id and m.kind in ('anulacion', 'devolucion')
+            and m.created_at >= ${since}), 0) as sold,
         coalesce(sum(v.stock) filter (where v.removed_at is null), 0) as stock
       from product p left join product_variant v on v.product_id = p.id
       where p.store_id = ${storeId}
@@ -155,15 +167,21 @@ export async function storeReport(
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_by = ${SOFI_ACTOR} and o.created_at >= ${since}`)
+    // Lo que volvió de lo que vendió Sofi: el cobro del 1 % lo descuenta (tablero 18).
+    const agentReturned = await agentReturnsIn(tx, storeId, since)
     const soldOrders = sold.orders
+    const soldCents = sold.cents - n(refunded?.cents)
     const conversations = n(agent?.conversations)
     return {
       period,
       from,
       sold: {
-        cents: sold.cents,
+        /** Lo cobrado menos lo devuelto. */
+        cents: soldCents,
         orders: soldOrders,
-        ticketCents: soldOrders ? Math.round(sold.cents / soldOrders) : 0,
+        ticketCents: soldOrders ? Math.round(soldCents / soldOrders) : 0,
+        /** Lo que la tienda devolvió en el periodo: ya está restado. */
+        refundedCents: n(refunded?.cents),
       },
       pending: {
         toConfirm: { orders: pending.toConfirm.orders, cents: pending.toConfirm.cents },
@@ -194,6 +212,8 @@ export async function storeReport(
         passedToPerson: n(agent?.passed),
         orders: n(bySofi?.orders),
         cents: n(bySofi?.cents),
+        /** Lo que volvió a la tienda de sus pedidos, a lo que se pagó. */
+        returnedCents: agentReturned,
         marginCents: n(bySofi?.margin),
         marginUsedCents: n(bySofi?.used),
         costMicros: n(agent?.cost),

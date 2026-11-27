@@ -111,7 +111,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El cobro va en orden: link de pago (se confirma solo), captura (la confirma quien tiene
   `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró y
   con qué medio; si pagó una parte antes, cobra lo que falta).
-  Un pedido con un pago lo anula solo quien confirma pagos; uno entregado no se anula.
+  Un pedido con un pago lo anula solo quien confirma pagos; uno entregado no se anula: se cambia o
+  se devuelve con un pedido nuevo (abajo).
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
@@ -140,6 +141,19 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   lo recalcula. El efectivo por recibir (`cashToReceiveIn`) es también una línea de «Te toca», solo
   para quien ve Caja.
 - «Avisar» abre el WhatsApp del celular con el texto y queda «enviado por usted»: nunca entregado.
+
+## Cambios y devoluciones (entrega 8; ADR 0230)
+
+- El entregado no se toca: el cambio es otro pedido (`exchange_of_id`, `createExchangeIn` de
+  `apps/api/src/cambios.ts`), con lo que se lleva en sus líneas y lo que vuelve en
+  `sale_order_return`. Lo que vuelve vale lo que se pagó y se descuenta del total; un total bajo
+  cero es lo que la tienda devuelve. Lo arma una persona: Sofi no (`0031_reglas_cambios_y_devoluciones.sql`).
+- Lo que vuelve entra al kardex como «devolución», con su motivo y la referencia del cambio, al
+  marcar «Entregado» el cambio (`recordReturn` de `stock.ts`); nunca antes. No vuelve dos veces lo
+  mismo, salvo que el cambio se anule. Un cambio no se «Cambia».
+- El dinero devuelto se anota en `order_refund` (medio y quién, `pagos.confirmar`) y el saldo único
+  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto; lo que
+  vuelve de un pedido de Sofi queda para el cobro del 1 % (`agentReturnsIn`).
 
 ## Las clientas (entrega 4)
 

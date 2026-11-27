@@ -14,10 +14,12 @@ import {
   type Db,
   enterStore,
   orderPayment,
+  orderRefund,
   product,
   productVariant,
   saleOrder,
   saleOrderLine,
+  saleOrderReturn,
   stockMovement,
   store,
   storeAgent,
@@ -307,5 +309,54 @@ describe("Sofi en la base", () => {
     expect(await asSofi((tx) => tx.select().from(saleOrder), otra)).toEqual([])
     expect(await asSofi((tx) => tx.select().from(conversationMessage), otra)).toEqual([])
     expect(await asSofi((tx) => tx.select().from(product), otra)).toEqual([])
+  })
+})
+
+describe("Sofi y los cambios (tablero 24)", () => {
+  it("no arma un cambio ni anota lo que vuelve: los pasa a una persona", async () => {
+    await expect(
+      asSofi((tx) =>
+        tx.insert(saleOrder).values({
+          ...anOrder(90, "agente:sofi"),
+          exchangeOfId: orderId,
+          returnCreditCents: 12900,
+          totalCents: 1000,
+        }),
+      ),
+    ).rejects.toThrow()
+    const [variant] = await db.ownerDb
+      .select({ productId: productVariant.productId })
+      .from(productVariant)
+      .where(eq(productVariant.id, variantId))
+    await expect(
+      asSofi((tx) =>
+        tx.insert(saleOrderReturn).values({
+          storeId: calzados,
+          orderId,
+          position: 0,
+          productId: variant!.productId,
+          variantId,
+          productName: "Zapatilla",
+          variantName: "38",
+          sku: "ZAP-38",
+          quantity: 1,
+          unitCents: 12900,
+          reason: "Le quedó chica",
+        }),
+      ),
+    ).rejects.toThrow()
+    // Ni devuelve dinero.
+    await expect(
+      asSofi((tx) =>
+        tx.insert(orderRefund).values({
+          storeId: calzados,
+          orderId,
+          amountCents: 100,
+          methodName: "Yape",
+          methodType: "68",
+          createdBy: "agente:sofi",
+        }),
+      ),
+    ).rejects.toThrow()
   })
 })

@@ -8,9 +8,9 @@ import { constraintError, inStore, StoreError } from "./tiendas.js"
 /**
  * El stock de cada variante y su kardex (decisión 3 del lienzo B). El saldo no se escribe: cada
  * movimiento lo cambia en la base (`stock_movement_apply`), que anota el saldo y rechaza que
- * quede bajo cero. Aquí están las entradas y los ajustes a mano (con motivo escrito), y las dos
- * operaciones de los pedidos: dejar fuera lo de sus líneas (al venderse y en cada cambio) y
- * devolverlo al anular.
+ * quede bajo cero. Aquí están las entradas y los ajustes a mano (con motivo escrito), y las
+ * operaciones de los pedidos: dejar fuera lo de sus líneas (al venderse y en cada cambio),
+ * devolverlo al anular y recibir lo que vuelve de un cambio después de entregar.
  */
 
 const quantity = z.number().int("Escribe un número entero").max(100_000, "Es demasiado")
@@ -238,6 +238,41 @@ export async function cancelSale(tx: Db, storeId: string, actorUserId: string, r
   const used = await referencesUsed(tx, storeId, reference)
   return recordSale(tx, storeId, actorUserId, reference, [], {
     ...(used === 1 ? { stepReference: reference } : {}),
+  })
+}
+
+export interface ReturnLine {
+  variantId: string
+  quantity: number
+  /** Por qué vuelve («Le quedó chica»): queda en el kardex. */
+  reason: string
+}
+
+/**
+ * Lo que vuelve de un cambio o una devolución entra al stock como «devolución» (tablero 17), con su
+ * motivo y la referencia del cambio («Pedido 0171»), cuando llega a la tienda. No toca lo que el
+ * pedido entregado tiene fuera: su venta sigue siendo verdad. Una vez por variante y cambio: el
+ * índice único de cada referencia no deja repetirla.
+ */
+export async function recordReturn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  reference: string,
+  lines: ReturnLine[],
+) {
+  return stockGuard(async () => {
+    for (const line of lines)
+      await tx.insert(stockMovement).values({
+        storeId,
+        variantId: line.variantId,
+        kind: "devolucion",
+        quantity: line.quantity,
+        reason: line.reason,
+        reference,
+        actorUserId,
+      })
+    return lines.length
   })
 }
 

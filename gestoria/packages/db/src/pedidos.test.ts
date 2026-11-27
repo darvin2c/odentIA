@@ -14,8 +14,12 @@ import {
   orderBalance,
   orderEvent,
   orderPayment,
+  orderRefund,
+  product,
+  productVariant,
   saleOrder,
   saleOrderLine,
+  saleOrderReturn,
   store,
   storeMember,
   storePaymentLink,
@@ -403,5 +407,178 @@ describe("los pedidos de cada tienda", () => {
         tx.update(store).set({ timeZone: "'; drop table store" }).where(eq(store.id, calzados)),
       ),
     ).rejects.toThrow()
+  })
+})
+
+describe("los cambios y devoluciones (tablero 17)", () => {
+  it("lo que vuelve se anota solo con su cambio, no se edita y se marca una vez cuándo volvió", async () => {
+    const [shoe] = await db.ownerDb
+      .insert(product)
+      .values({ storeId: calzados, name: "Sandalia beige", listPriceCents: 12900 })
+      .returning()
+    const [v38] = await db.ownerDb
+      .insert(productVariant)
+      .values({ storeId: calzados, productId: shoe!.id, sku: "SAN-38", optionValues: ["38"] })
+      .returning()
+    const back = (orderId: string) => ({
+      storeId: calzados,
+      orderId,
+      position: 0,
+      productId: shoe!.id,
+      variantId: v38!.id,
+      productName: "Sandalia beige",
+      variantName: "38",
+      sku: "SAN-38",
+      quantity: 1,
+      unitCents: 12900,
+      reason: "Le quedó chica",
+    })
+    // Un pedido que no es cambio no tiene nada que vuelva.
+    await expect(inRosa((tx) => tx.insert(saleOrderReturn).values(back(orderId)))).rejects.toThrow()
+    // El cambio y lo que vuelve, en la misma transacción: vuelve S/ 129 y sale S/ 129 + envío S/ 12.
+    const exchangeId = await inRosa(async (tx) => {
+      const [row] = await tx
+        .insert(saleOrder)
+        .values({
+          ...anOrder(calzados, 50, rosa.userId),
+          state: "por_salir",
+          exchangeOfId: orderId,
+          returnCreditCents: 12900,
+          deliveryListCents: 1200,
+          deliveryCents: 1200,
+          totalCents: 1200,
+        })
+        .returning({ id: saleOrder.id })
+      await tx.insert(saleOrderReturn).values(back(row!.id))
+      return row!.id
+    })
+    // Después, ya no se suma nada a lo que vuelve, ni se cambia lo descontado o de dónde sale.
+    await expect(
+      inRosa((tx) =>
+        tx.insert(saleOrderReturn).values({ ...back(exchangeId), position: 1, quantity: 2 }),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      inRosa((tx) =>
+        tx
+          .update(saleOrderReturn)
+          .set({ quantity: 2 })
+          .where(eq(saleOrderReturn.orderId, exchangeId)),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      inRosa((tx) =>
+        tx
+          .update(saleOrder)
+          .set({ returnCreditCents: 0, totalCents: 14100 })
+          .where(eq(saleOrder.id, exchangeId)),
+      ),
+    ).rejects.toThrow()
+    // Lo descontado sale del total: un total que no lo resta no entra.
+    await expect(
+      inRosa((tx) =>
+        tx.insert(saleOrder).values({
+          ...anOrder(calzados, 51, rosa.userId),
+          exchangeOfId: orderId,
+          returnCreditCents: 12900,
+        }),
+      ),
+    ).rejects.toThrow()
+    // Volvió: se marca una vez. Otra tienda no lo ve ni lo marca.
+    expect(
+      await inMario((tx) =>
+        tx
+          .update(saleOrderReturn)
+          .set({ returnedAt: new Date() })
+          .where(eq(saleOrderReturn.orderId, exchangeId))
+          .returning({ id: saleOrderReturn.id }),
+      ),
+    ).toEqual([])
+    const marked = await inRosa((tx) =>
+      tx
+        .update(saleOrderReturn)
+        .set({ returnedAt: new Date() })
+        .where(eq(saleOrderReturn.orderId, exchangeId))
+        .returning({ id: saleOrderReturn.id }),
+    )
+    expect(marked).toHaveLength(1)
+    expect(
+      await inRosa((tx) =>
+        tx
+          .update(saleOrderReturn)
+          .set({ returnedAt: new Date() })
+          .where(eq(saleOrderReturn.orderId, exchangeId))
+          .returning({ id: saleOrderReturn.id }),
+      ),
+    ).toEqual([])
+    expect(await inMario((tx) => tx.select().from(saleOrderReturn))).toEqual([])
+  })
+})
+
+describe("el dinero devuelto (tablero 17)", () => {
+  it("lo devuelto se resta de lo pagado en el saldo, a nombre de quien lo devolvió, y no se edita", async () => {
+    // Una devolución: vuelve S/ 129, sin nada que se lleve ni envío. El total queda en − S/ 129.
+    const refundOrder = await inRosa(async (tx) => {
+      const [row] = await tx
+        .insert(saleOrder)
+        .values({
+          ...anOrder(calzados, 70, rosa.userId),
+          state: "por_salir",
+          exchangeOfId: orderId,
+          returnCreditCents: 12900,
+          itemsAutoCents: 0,
+          subtotalCents: 0,
+          deliveryListCents: 0,
+          deliveryCents: 0,
+          totalCents: -12900,
+        })
+        .returning({ id: saleOrder.id })
+      return row!.id
+    })
+    const balanceOf = () =>
+      inRosa(async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(orderBalance)
+          .where(eq(orderBalance.orderId, refundOrder))
+        return row
+      })
+    expect(await balanceOf()).toMatchObject({
+      dueCents: 0,
+      overCents: 12900,
+      refundedCents: 0,
+      paid: true,
+    })
+    const refund = {
+      storeId: calzados,
+      orderId: refundOrder,
+      amountCents: 12900,
+      methodName: "Plin",
+      methodType: "68" as const,
+      createdBy: rosa.userId,
+    }
+    // Nadie anota lo devuelto a nombre de otro, ni en otra tienda.
+    await expect(
+      inRosa((tx) => tx.insert(orderRefund).values({ ...refund, createdBy: mario.userId })),
+    ).rejects.toThrow()
+    await expect(
+      inMario((tx) => tx.insert(orderRefund).values({ ...refund, createdBy: mario.userId })),
+    ).rejects.toThrow()
+    await inRosa((tx) => tx.insert(orderRefund).values(refund))
+    expect(await balanceOf()).toMatchObject({
+      dueCents: 0,
+      overCents: 0,
+      refundedCents: 12900,
+      paid: true,
+    })
+    await expect(
+      inRosa((tx) =>
+        tx.update(orderRefund).set({ amountCents: 1 }).where(eq(orderRefund.orderId, refundOrder)),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      inRosa((tx) => tx.delete(orderRefund).where(eq(orderRefund.orderId, refundOrder))),
+    ).rejects.toThrow()
+    expect(await inMario((tx) => tx.select().from(orderRefund))).toEqual([])
   })
 })

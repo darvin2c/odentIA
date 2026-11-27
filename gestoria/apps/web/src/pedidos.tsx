@@ -42,6 +42,7 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { InstallCard } from "./avisos"
+import { ExchangeAction, ExchangeLinks, RefundAction, RefundLines, ReturnLines } from "./cambios"
 import { type DeliveryStep, DeliveryStepDialog, targetOf } from "./entregas"
 import { api } from "./lib/api"
 import {
@@ -103,7 +104,7 @@ import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
  * con su motivo.
  */
 
-const ORDERS_KEY = (storeId: string) => ["pedidos", storeId]
+export const ORDERS_KEY = (storeId: string) => ["pedidos", storeId]
 
 function lineSummary(lines: OrderRow["lines"]): string {
   const sold = lines.filter((l) => !l.gift)
@@ -116,7 +117,7 @@ function lineSummary(lines: OrderRow["lines"]): string {
 function StateBadge({
   order,
 }: {
-  order: Pick<OrderRow, "state" | "paymentCollection" | "balance">
+  order: Pick<OrderRow, "state" | "paymentCollection" | "balance" | "totalCents">
 }) {
   return <Badge variant={STATE_TONE[order.state]}>{stateName(order)}</Badge>
 }
@@ -220,6 +221,7 @@ export function OrdersPage() {
                     <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                       {CHANNELS[order.channel].replace(/ \(.*\)$/, "")}
                       {order.bySofi ? " · lo armó Sofi" : ""}
+                      {order.exchangeOf ? ` · cambio del ${order.exchangeOf}` : ""}
                       {order.test ? <Badge variant="outline">Prueba</Badge> : null}
                     </span>
                   </span>
@@ -272,7 +274,7 @@ export function OrdersPage() {
 
 /* ------------------------------------------------------------------- el pedido abierto */
 
-function useOrderAction(storeId: string, orderId: string, onDone?: () => void) {
+export function useOrderAction(storeId: string, orderId: string, onDone?: () => void) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ path, body }: { path: string; body?: unknown; done?: string }) =>
@@ -348,7 +350,7 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function Row({
+export function Row({
   label,
   children,
   strong,
@@ -371,15 +373,23 @@ function OrderBody({ order }: { order: OrderDetail }) {
   const cur = store.currency
   const absorbed = order.deliveryListCents - order.deliveryCents
   const open = !["entregado", "anulado"].includes(order.state)
-  const cancelAllowed = open && (!order.moneyIn || can("pagos.confirmar"))
+  // Con dinero devuelto, el pedido ya no se anula (lo devuelto salió de la caja).
+  const cancelAllowed =
+    open && order.refunds.length === 0 && (!order.moneyIn || can("pagos.confirmar"))
   const notShipped = NOT_SHIPPED.includes(order.state)
   const [changing, setChanging] = useState(false)
   const { balance } = order
+  // Un cambio (tablero 17): lo que vuelve se descuenta; un total bajo cero es lo que se devuelve.
+  const exchange = order.exchangeOf !== null
 
   return (
     <div className="flex flex-col">
       <NextStep order={order} />
-      {notShipped && can("ventas.atender") ? (
+      <ExchangeLinks order={order} />
+      {order.state === "entregado" && order.returnable.length > 0 && can("ventas.atender") ? (
+        <ExchangeAction order={order} />
+      ) : null}
+      {notShipped && !exchange && can("ventas.atender") ? (
         <div className="flex flex-wrap gap-2 pb-2">
           <Button variant="outline" onClick={() => setChanging(true)}>
             <Pencil aria-hidden />
@@ -419,18 +429,35 @@ function OrderBody({ order }: { order: OrderDetail }) {
             </li>
           ))}
         </ul>
+        {order.lines.length === 0 && exchange ? (
+          <p className="text-sm text-muted-foreground">Es una devolución: no se lleva nada.</p>
+        ) : null}
+        <ReturnLines order={order} />
         <div className="mt-1 flex flex-col gap-1 border-t pt-2">
           <Row label="Productos">{money(order.subtotalCents, cur)}</Row>
+          {exchange ? <Row label="Vuelve">− {money(order.returnCreditCents, cur)}</Row> : null}
           <Row
-            label={`Envío · ${order.deliveryName}${order.deliveryZone ? ` (${order.deliveryZone})` : ""}`}
+            label={`${exchange ? "Envío del cambio" : "Envío"} · ${order.deliveryName}${order.deliveryZone ? ` (${order.deliveryZone})` : ""}`}
           >
-            {order.deliveryCents === 0 ? "Gratis" : money(order.deliveryCents, cur)}
+            {order.deliveryListCents === 0
+              ? "Gratis"
+              : order.deliveryCents === 0 && exchange
+                ? `Lo paga la tienda (${money(order.deliveryListCents, cur)})`
+                : order.deliveryCents === 0
+                  ? "Gratis"
+                  : money(order.deliveryCents, cur)}
           </Row>
-          <Row label="Total" strong>
-            {money(order.totalCents, cur)}
-          </Row>
+          {order.totalCents < 0 ? (
+            <Row label="A devolver" strong>
+              {money(-order.totalCents, cur)}
+            </Row>
+          ) : (
+            <Row label="Total" strong>
+              {money(order.totalCents, cur)}
+            </Row>
+          )}
         </div>
-        {order.marginUsedCents > 0 || order.deliveryFreeByPolicy ? (
+        {!exchange && (order.marginUsedCents > 0 || order.deliveryFreeByPolicy) ? (
           <p className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-muted-foreground">
             {[
               order.discountCents > 0 ? `descuento de ${money(order.discountCents, cur)}` : null,
@@ -458,12 +485,16 @@ function OrderBody({ order }: { order: OrderDetail }) {
       </Block>
 
       <Block title="Cobro">
-        <Row label="Medio de pago">{order.paymentName}</Row>
+        {order.totalCents > 0 || !exchange ? (
+          <Row label="Medio de pago">{order.paymentName}</Row>
+        ) : null}
         {order.payments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {order.paymentCollection === "al_recibir"
-              ? "Se cobra al entregar."
-              : "Todavía no hay pagos anotados."}
+            {exchange && order.totalCents <= 0
+              ? "No hay nada que cobrar."
+              : order.paymentCollection === "al_recibir"
+                ? "Se cobra al entregar."
+                : "Todavía no hay pagos anotados."}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -487,12 +518,18 @@ function OrderBody({ order }: { order: OrderDetail }) {
             ) : balance.paid ? (
               <Row label="Falta cobrar">Nada: está pagado</Row>
             ) : null}
-            {balance.overCents > 0 ? (
-              <p className="text-sm text-warning">
-                Sobra {money(balance.overCents, cur)} de lo pagado: revisa si hay que devolverlo.
-              </p>
-            ) : null}
           </div>
+        ) : null}
+        <RefundLines order={order} />
+        {balance.overCents > 0 && order.state !== "anulado" ? (
+          <p className="text-sm text-warning">
+            {exchange
+              ? `Falta devolver ${money(balance.overCents, cur)}.`
+              : `Sobra ${money(balance.overCents, cur)} de lo pagado: revisa si hay que devolverlo.`}
+          </p>
+        ) : null}
+        {balance.overCents > 0 && order.state !== "anulado" && can("pagos.confirmar") ? (
+          <RefundAction order={order} />
         ) : null}
         {order.state === "por_pagar" ? (
           <CollectActions order={order} />
@@ -581,10 +618,26 @@ function NextStep({ order }: { order: OrderDetail }) {
     anulado: order.cancelReason ? `Anulado: ${order.cancelReason}` : null,
   }
   const missed = missedReason(order)
+  // Un cambio que cuesta menos o una devolución: lo que sobra se devuelve y se anota. Sin nada que
+  // cobrar, el cambio no dice «Pagado»: lo que importa es recoger lo que vuelve.
+  const noCharge = order.exchangeOf !== null && order.totalCents <= 0
+  const refund =
+    order.exchangeOf && order.balance.overCents > 0 && order.state !== "anulado"
+      ? `Falta devolver ${money(order.balance.overCents, store.currency)}: cuando lo devuelvas desde tu app, usa «Anotar la devolución».`
+      : null
+  const exchangeText: Partial<Record<OrderDetail["state"], string>> = {
+    por_salir: order.stockPending
+      ? (text.por_salir ?? "")
+      : `Listo para salir: recoge lo que vuelve. ${refund ?? ""}`.trim(),
+    en_camino: `Va en camino: al entregar, recoge lo que vuelve. ${refund ?? ""}`.trim(),
+    entregado: refund ?? "",
+  }
   const message =
     missed !== null && !order.stockPending
       ? `Volvió sin entregar («${missed}»). Sale ${order.deliverOn ? dayName(order.deliverOn, storeToday(store.timeZone)) : "cuando elijas"}${due > 0 ? `; al entregar, cobra ${dueText}` : ""}.`
-      : text[order.state]
+      : refund || noCharge
+        ? exchangeText[order.state] || text[order.state]
+        : text[order.state]
   if (!message) return null
   const warn =
     order.priceExpired ||
@@ -1191,6 +1244,8 @@ const EVENT_TEXT: Record<Exclude<OrderDetail["events"][number]["action"], "aviso
   pago_deshecho: "Deshizo la confirmación del pago",
   repartidor: "Cambió quién lo lleva",
   envio: "Anotó el envío por agencia",
+  cambio: "Creó un cambio",
+  dinero_devuelto: "Anotó lo que devolvió",
 }
 
 function History({ order }: { order: OrderDetail }) {
@@ -1205,7 +1260,9 @@ function History({ order }: { order: OrderDetail }) {
               <span className="text-xs text-muted-foreground">
                 {d.porUsted
                   ? `Aviso a la clienta · ${when(event.createdAt)} · enviado por usted desde su WhatsApp, por ${event.actorName ?? "alguien del equipo"}`
-                  : `Aviso al cliente · ${when(event.createdAt)} · sin enviar: WhatsApp todavía no está conectado`}
+                  : d.abierto
+                    ? `Aviso al cliente · ${when(event.createdAt)} · se abrió en el WhatsApp del celular para enviarlo`
+                    : `Aviso al cliente · ${when(event.createdAt)} · sin enviar: WhatsApp todavía no está conectado`}
               </span>
               <span className="w-fit max-w-full rounded-lg bg-surface-muted px-3 py-1.5 break-words">
                 {String(d.texto ?? "")}
@@ -1213,8 +1270,15 @@ function History({ order }: { order: OrderDetail }) {
             </li>
           )
         const changes = event.detail.cambios
+        const list = (value: unknown) =>
+          Array.isArray(value) && value.length ? value.join(", ") : null
         const extra = [
           Array.isArray(changes) ? changes.join(" · ") : null,
+          typeof d.cambioDe === "string" ? `cambio del ${d.cambioDe}` : null,
+          typeof d.pedido === "string" ? `pedido ${d.pedido}` : null,
+          list(event.detail.vuelve) ? `vuelve ${list(event.detail.vuelve)}` : null,
+          list(event.detail.sale) ? `sale ${list(event.detail.sale)}` : null,
+          list(event.detail.volvio) ? `volvió ${list(event.detail.volvio)}` : null,
           typeof d.motivo === "string" ? `«${d.motivo}»` : null,
           typeof d.dia === "string"
             ? event.action === "no_entregado"
@@ -1227,6 +1291,9 @@ function History({ order }: { order: OrderDetail }) {
           typeof d.medio === "string" ? d.medio : null,
           typeof d.cobrado === "number" ? `cobró ${money(d.cobrado, store.currency)}` : null,
           typeof d.falta === "number" ? `faltan ${money(d.falta, store.currency)}` : null,
+          typeof d.porDevolver === "number"
+            ? `falta devolver ${money(d.porDevolver, store.currency)}`
+            : null,
           typeof d.agencia === "string" ? `por ${d.agencia}` : null,
           typeof d.envio === "string" ? `envío ${d.envio}` : null,
           typeof d.franja === "string" ? d.franja : null,

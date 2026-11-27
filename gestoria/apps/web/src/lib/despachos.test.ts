@@ -11,13 +11,21 @@ import {
   wayText,
 } from "./despachos"
 
-const paid = { confirmedCents: 15200, pendingCents: 0, dueCents: 0, overCents: 0, paid: true }
+const paid = {
+  confirmedCents: 15200,
+  pendingCents: 0,
+  dueCents: 0,
+  overCents: 0,
+  paid: true,
+  refundedCents: 0,
+}
 const due = (cents: number) => ({
   confirmedCents: 0,
   pendingCents: 0,
   dueCents: cents,
   overCents: 0,
   paid: false,
+  refundedCents: 0,
 })
 
 const delivery = (over: Partial<Delivery> = {}): Delivery => ({

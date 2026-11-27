@@ -640,7 +640,7 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
   it("Reportes no cuenta los pedidos de prueba", async () => {
     const report = await call("rosa", "GET", `${base}/reportes?periodo=mes`)
     expect(report.status).toBe(200)
-    expect(report.json.sold).toEqual({ cents: 0, orders: 0, ticketCents: 0 })
+    expect(report.json.sold).toEqual({ cents: 0, orders: 0, ticketCents: 0, refundedCents: 0 })
     expect(report.json.agent.conversations).toBe(0)
   })
 })

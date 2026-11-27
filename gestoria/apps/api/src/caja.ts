@@ -30,8 +30,8 @@ const CASH = sql`p.kind = 'al_recibir' and p.method_type = '10' and p.status = '
 
 /**
  * Lo cobrado entre dos momentos (sin `to`, hasta ahora): los pagos confirmados, por la hora en que
- * se confirmaron. Es la cifra de «Vendido y cobrado» de Reportes, «Cobrado hoy» de Inicio y
- * «Cobrado» de Caja.
+ * se confirmaron. Es la cifra de «Cobrado hoy» de Inicio y «Cobrado» de Caja, y la de «Vendido y
+ * cobrado» de Reportes, que además resta lo que la tienda devolvió (`order_refund`).
  */
 export async function collectedBetween(tx: Db, storeId: string, from: Date, to: Date | null) {
   // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
@@ -55,8 +55,10 @@ export async function collectedBetween(tx: Db, storeId: string, from: Date, to: 
     cents: Number(row.cents),
     orders: Number(row.orders),
   }))
+  // Lo que se cobra de un cambio suma, pero el cambio no es otro pedido (tablero 17).
   const [all] = await tx.execute<{ orders: string; payments: string }>(sql`
-    select count(distinct p.order_id) as orders, count(*) as payments
+    select count(distinct p.order_id) filter (where o.exchange_of_id is null) as orders,
+      count(*) as payments
     from order_payment p join sale_order o on o.id = p.order_id
     where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
       and p.reviewed_at >= ${from.toISOString()} ${until}`)
