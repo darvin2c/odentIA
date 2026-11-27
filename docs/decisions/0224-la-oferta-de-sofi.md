@@ -22,9 +22,11 @@ cuando la rebaja vuelve a aparecer al día siguiente.
   de ADR 0207 (`negotiatedUntil` en `precio.ts`), y si el plazo ya pasó no se renueva solo.
 - **Con pago al recibir no hay rebaja**: es a cambio de pagar ya y baja el riesgo del contra
   entrega. Es regla de Sofi al vender; el equipo sigue negociando como siempre.
-- **Lo que ofrece sale del mismo margen** (ADR 0207) y lo elige con lo que sabe de la clienta en
-  esa conversación: primera compra, compra seguido o siempre pide rebaja (`customerStory`). No une
-  conversaciones por el teléfono.
+- **Lo que ofrece sale del mismo margen** (ADR 0207) y lo elige con lo que sabe de la clienta:
+  primera compra, compra seguido o siempre pide rebaja (`customerStory`). Son los pedidos de su
+  ficha (ADR 0223), con las que una persona le unió y por cualquier chat, más los de esa
+  conversación (`conversationCustomerOrdersIn` en `clientes.ts`). No une conversaciones por el
+  teléfono.
 - **No dice lo que no hizo**: «hablé con la tienda», «el dueño me autorizó» o «te lo separo» no
   salen (`claimsInvented` en la comprobación). Separar el producto todavía no existe.
 
@@ -37,8 +39,9 @@ cuando la rebaja vuelve a aparecer al día siguiente.
 
 ## Consecuencias
 
-- La clienta que vuelve con otro teléfono es otra conversación: hasta que la ficha de la clienta
-  esté en Sofi, la historia es solo la de esa conversación.
+- La clienta que vuelve por otro chat cuenta con lo que compró antes solo cuando ese chat ya lleva
+  su ficha (un pedido anotado con ella) o una persona unió las dos fichas. La oferta sigue siendo
+  una por conversación.
 - Faltan el mensaje único cuando se queda callada, el aviso unas 3 horas antes de que venza, la
   venta antes de que salga el pedido y separar el producto: necesitan programar mensajes, Despachos
   y la reserva de stock.

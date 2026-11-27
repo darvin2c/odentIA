@@ -15,6 +15,7 @@ import {
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm"
 import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
+import { conversationCustomerOrdersIn } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { storeClockIn } from "../hora.js"
 import { type LinkDeps, pad } from "../pedidos.js"
@@ -176,9 +177,9 @@ const BOUGHT = new Set(["por_confirmar", "por_salir", "en_camino", "entregado"])
 const DAY_MS = 86_400_000
 
 /**
- * Lo que se sabe de la clienta por esta conversación, para que Sofi elija qué ofrecer (tablero
- * 21): primera compra, compra seguido o siempre pide rebaja. No une conversaciones por el
- * teléfono: es solo lo que compró aquí.
+ * Lo que se sabe de la clienta, para que Sofi elija qué ofrecer (tablero 21): primera compra,
+ * compra seguido o siempre pide rebaja. Son los pedidos de su ficha, por cualquier chat, y los de
+ * esta conversación (`conversationCustomerOrdersIn`). No une conversaciones por el teléfono.
  */
 export function customerStory(
   orders: { state: string; createdAt: Date; marginUsedCents: number; test: boolean }[],
@@ -187,7 +188,7 @@ export function customerStory(
 ): string {
   // En una de verdad, lo de prueba no cuenta; en la de prueba, todo es de prueba.
   const bought = orders.filter((o) => BOUGHT.has(o.state) && o.test === test)
-  if (bought.length === 0) return "Primera compra: todavía no compró en esta conversación."
+  if (bought.length === 0) return "Primera compra: todavía no compró en la tienda."
   const last = Math.max(...bought.map((o) => o.createdAt.getTime()))
   const days = Math.max(0, Math.floor((now.getTime() - last) / DAY_MS))
   const recent = bought.filter((o) => now.getTime() - o.createdAt.getTime() <= 90 * DAY_MS)
@@ -282,6 +283,8 @@ async function load(
             ),
           )
       : []
+    // Lo que compró la clienta: su ficha (ADR 0223) con todos sus chats, no solo este.
+    const story = await conversationCustomerOrdersIn(tx, storeId, conversationId)
     const currency = shop!.currency
     const { today, timeZone } = await storeClockIn(tx, storeId, now)
     // La oferta vale desde su última compra: lo que compró ya usó la anterior.
@@ -353,8 +356,8 @@ async function load(
       "PEDIDOS DE ESTA CONVERSACIÓN:",
       ...(orderLines.length ? orderLines : ["(ninguno todavía)"]),
       "",
-      "LA CLIENTA (lo que compró en esta conversación):",
-      customerStory(orders, now, conv.channel === "prueba"),
+      "LA CLIENTA (lo que compró en la tienda, por este chat o por otro con su misma ficha):",
+      customerStory(story, now, conv.channel === "prueba"),
     ].join("\n")
     // Lo que escribió el dueño en «Lo que debe saber» también se puede repetir.
     factAmounts.push(...amountsIn(agent?.knowledge ?? "", currency))

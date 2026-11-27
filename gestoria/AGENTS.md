@@ -81,6 +81,24 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 
+## Las clientas (entrega 4)
+
+- La clienta es la persona (ADR 0223): una ficha (`customer`) por clienta, y cada pedido lleva la
+  suya desde `createOrderIn` (`customerForOrderIn` de `apps/api/src/clientes.ts`): la elegida al
+  anotarlo, la de los pedidos anteriores del mismo chat o una nueva. Nunca se busca ni se une por
+  el teléfono o el nombre: eso solo sugiere «¿Es la misma clienta?», que no frena ninguna venta.
+  Los pedidos de «Probar a Sofi» y los de antes de Clientes no tienen ficha.
+- Unir, separar y «son distintas» los decide una persona que atiende (`ventas.atender`). Unir deja
+  la ficha más nueva dentro de la más antigua (`merged_into`), sin mover ni borrar nada; «Separar»
+  la deja sola, con las que se le unieron antes. Lo decidido va a `customer_event` y no se vuelve a
+  preguntar. Un pedido no cambia de ficha. Sofi abre fichas, pero no las cambia ni anota
+  decisiones (`0019_reglas_clientas.sql`).
+- Lo que debe una clienta («Debe» en la lista y en la ficha) no se calcula en Clientes: es la suma
+  del saldo de cada pedido (`order_balance`), en `summariesOf` de `clientes.ts`.
+- «Escribirle» lee cada teléfono en E.164 con lo común (`toE164` de `@odentia/ui-patterns`): el
+  que trae su código vale siempre; el anotado sin él, como del país de la tienda. Sin país, no se
+  adivina.
+
 ## Sofi y Argos (B5)
 
 - Sofi usa las operaciones de `pedidos.ts` (`quoteOrderIn`, `createOrderIn`, `addReceiptIn`,
@@ -94,6 +112,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
+  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
 - Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
