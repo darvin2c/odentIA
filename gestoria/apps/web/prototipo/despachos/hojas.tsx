@@ -378,6 +378,8 @@ export function PasarHoja({
         <Campo label="Franja">
           {(id) => (
             <RadioChips
+              // En el celular, 44 px por opción (la pieza común da 40): va en el PR de shared.
+              className="max-sm:[&_label]:min-h-11 pointer-coarse:[&_label]:min-h-11"
               aria-labelledby={id}
               value={franja}
               options={FRANJAS.map((f) => ({ value: f, label: FRANJA_NOMBRE[f] ?? f }))}
@@ -399,6 +401,8 @@ export function PasarHoja({
         >
           {(id) => (
             <RadioChips
+              // En el celular, 44 px por opción (la pieza común da 40): va en el PR de shared.
+              className="max-sm:[&_label]:min-h-11 pointer-coarse:[&_label]:min-h-11"
               aria-labelledby={id}
               value={rep}
               options={[
