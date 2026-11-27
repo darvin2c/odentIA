@@ -98,6 +98,12 @@ export interface HelpTopicArea {
   about: string
   /** Se hace dentro de una sola cosa de la lista (su atención, su plan): desde ahí, «Llévame» no saca a la lista. */
   inItem?: boolean
+  /**
+   * Dónde está dentro de esa cosa («su atención»): desde fuera, «Llévame» deja en la lista y la
+   * respuesta dice el resto del camino (verificador 2 del 27 nov: «Llévame a Personas › Pacientes» no
+   * llevaba a la tarjeta que explicaba).
+   */
+  reach?: string
 }
 
 const SETTINGS = "Configuración"
@@ -639,6 +645,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "clinica",
         label: "la historia clínica y la atención",
         inItem: true,
+        reach: "su atención",
         about:
           "Atender a un paciente: la atención y su firma, antecedentes y alergias, el examen, diagnósticos, lo realizado, la historia, las recetas, órdenes, consentimientos, imágenes y demás documentos, y el dictado.",
       },
@@ -646,6 +653,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "plan",
         label: "el plan, el presupuesto y los controles",
         inItem: true,
+        reach: "su Plan",
         about:
           "Lo que se le va a hacer y lo que cuesta: los tratamientos del plan y sus sesiones, armar, enviar y responder un presupuesto, sus opciones y descuentos, agendar lo aceptado y los controles.",
       },
@@ -1114,7 +1122,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "ofrecer-dos-opciones",
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
-        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman). Ninguno nace recomendado: lo marcas con «Marcar como recomendada», en el Plan o en «Revisar y enviar»; si los dictas a Clío, va el que dijiste que recomiendas, o lo marcas con un toque en la tarjeta, donde también buscas el camino que Clío no encontró. Sin marca, la persona elige sin ninguno elegido de antemano. El recomendado es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
+        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman); lo que hiciste hoy no entra en ninguno, porque se carga a su cuenta al firmar. Ninguno nace recomendado: lo marcas con «Marcar como recomendada», en el Plan o en «Revisar y enviar»; si los dictas a Clío, va el que dijiste que recomiendas, o lo marcas con un toque en la tarjeta, donde también buscas el camino que Clío no encontró. Sin marca, la persona elige sin ninguno elegido de antemano. El recomendado es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
         forms: [
           "dos caminos",
           "conservar o extraer",

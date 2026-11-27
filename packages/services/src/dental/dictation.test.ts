@@ -747,6 +747,9 @@ describe("dictado en la atención", () => {
     expect(plan?.payload).toMatchObject({ serviceId: fx.service.id, serviceName: "Resina compuesta", priceCents: 120000, currency: "PEN" })
     expect(plan?.summary).toMatch(/^Resina compuesta · S\/\s1,200\.00\nPieza 16 · cara oclusal$/)
     expect(unknownService?.note).toBe("Dijiste «Corona de zirconio» y no está en tus servicios. Elige la prestación.")
+    // Por revisar, la tarjeta dice la nota en vez del resto: la pieza va en el título (verificador 2 del
+    // 27 nov: la de la 46 se titulaba solo «resina»).
+    expect(unknownService?.summary).toBe("Corona de zirconio · Pieza 36")
 
     // Nada entró a la historia todavía.
     const [session] = await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id))

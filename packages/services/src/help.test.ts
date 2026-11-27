@@ -1046,8 +1046,12 @@ describe("la respuesta de cada rol, y «Llévame» dentro de una persona", () =>
     expect(inside.basedOn).toBe("El mapa del sistema: Personas › Pacientes.")
     const fromHome = await askHelp(appDb, org, clinician, { ...filling, screen: "/home" })
     expect(fromHome.answers[0]).toMatchObject({ path: "/people", where: "Personas › Pacientes" })
+    // Verificador 2 del 27 nov: desde fuera, «Llévame» deja en la lista; la respuesta dice el resto del camino.
+    expect(fromHome.answers[0]!.text).toMatch(/\n\nPara llegar: en Personas › Pacientes, abre a la persona y entra a su atención\.$/)
+    expect(inside.answers[0]!.text).not.toContain("Para llegar")
     const onPage = await askHelp(appDb, org, clinician, { ...filling, screen: "/people/p1" })
     expect(onPage.answers[0]).toMatchObject({ path: "/people/p1", where: "su página" })
+    expect(onPage.answers[0]!.text).not.toContain("Para llegar")
     const list = await askHelp(appDb, org, owner, { question: "¿Cómo registro un paciente nuevo?", screen })
     expect(list.answers[0]).toMatchObject({ path: "/people" })
   })

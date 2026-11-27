@@ -2127,6 +2127,9 @@ export async function addEncounterProcedure(
         plannedSessions: directPlannedSessions,
       },
     )
+    // Al indicarse entró al borrador de la persona (`addPlanItem`); hecho hoy, sale con la regla de
+    // la firma: lo que su cargo cubre ya no es presupuesto, y el Plan dice lo que se enviará.
+    await removeDoneFromDraft(tx, orgId, actorUserId, patientId, [row])
     // El servicio directo de una sesión nace realizado: lo que su producto hace con
     // un tratamiento realizado (odentIA: lo tratado queda dibujado). El de varias se
     // dibuja al terminarlo.
@@ -3536,7 +3539,24 @@ async function removeChargedFromDraft(
   charges: ReadonlyArray<{ encounterProcedureId: string | null }>,
   procedures: ReadonlyArray<typeof encounterProcedure.$inferSelect>,
 ): Promise<void> {
-  const charged = procedures.filter((proc) => proc.planItemId && charges.some((charge) => charge.encounterProcedureId === proc.id))
+  const charged = procedures.filter((proc) => charges.some((charge) => charge.encounterProcedureId === proc.id))
+  await removeDoneFromDraft(tx, orgId, actorUserId, patientId, charged)
+}
+
+/**
+ * La única regla de qué de lo hecho hoy sale del borrador (o no entra): lo que su cargo cubre entero,
+ * terminado o cobrado por tratamiento. La usan la firma (`removeChargedFromDraft`) y el servicio
+ * hecho sin indicarlo antes, que al indicarse entraba a lo común de las opciones: el Plan de la
+ * atención decía «A S/ 1,010 · B S/ 1,730» y se enviaba S/ 360 o S/ 1,080 (verificador 2 del 27 nov).
+ */
+async function removeDoneFromDraft(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  procedures: ReadonlyArray<Pick<typeof encounterProcedure.$inferSelect, "planItemId" | "serviceId">>,
+): Promise<void> {
+  const charged = procedures.filter((proc) => proc.planItemId)
   if (!charged.length) return
   const draft = await findDraftBudget(tx, orgId, patientId)
   if (!draft) return

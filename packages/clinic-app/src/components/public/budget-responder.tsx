@@ -225,16 +225,23 @@ export function BudgetResponder({
                   <span className="font-semibold">
                     {option.name?.trim() || option.label} · {portalTotalsText(option, budget)}
                   </span>
-                  <span className="text-muted-foreground">
-                    {[
-                      option.isRecommended ? `La recomienda tu ${appWords().clinician.one}` : null,
-                      budget.items
-                        .filter((item) => item.optionId === option.id)
-                        .map(lineName)
-                        .join(" · "),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
+                  {option.isRecommended ? (
+                    <span className="text-muted-foreground">La recomienda tu {appWords().clinician.one}</span>
+                  ) : null}
+                  {/* Cada línea en su renglón: seguidas con «·», a 390 px no se veía dónde acababa una
+                      (verificador 2 del 27 nov). Dentro de la etiqueta va con roles, no con <ul>. */}
+                  <span
+                    role="list"
+                    aria-label={`${option.name?.trim() || option.label}: lo que incluye`}
+                    className="flex flex-col text-muted-foreground"
+                  >
+                    {budget.items
+                      .filter((item) => item.optionId === option.id)
+                      .map((item) => (
+                        <span key={item.planItemId} role="listitem">
+                          {lineName(item)}
+                        </span>
+                      ))}
                   </span>
                   {option.pros ? <span className="mt-1">A favor: {option.pros}</span> : null}
                   {option.cons ? <span className="mt-1">A considerar: {option.cons}</span> : null}

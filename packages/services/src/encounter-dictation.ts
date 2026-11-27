@@ -759,6 +759,12 @@ function summarize(
       const first = payload["recommended"] === true ? "Opción A · recomendada" : "Opción A"
       return [`${tooth}${tooth ? how : `${how.charAt(0).toUpperCase()}${how.slice(1)}`}, el paciente elige`, `${first}: ${choice(payload as PlanChoice)}`, ...options.map((option, index) => `Opción ${OPTION_LETTER[index + 1]}: ${choice(option)}`)].join("\n")
     }
+    // Sin prestación elegida la tarjeta muestra su nota («Dijiste «resina»… Elige cuál es») y no el
+    // resto: la pieza va en el título, como en «Pieza 36 · dos caminos» (verificador 2 del 27 nov).
+    if (typeof payload["serviceId"] !== "string") {
+      const site = dictation.siteWords(payload)
+      return [`${payload["serviceName"] ?? payload["service"] ?? ""}${site ? ` · ${site}` : ""}`, payload["detail"]].filter(Boolean).join("\n")
+    }
     return [`${payload["serviceName"] ?? payload["service"] ?? ""}${price ? ` · ${price}` : ""}`, dictation.siteWords(payload), payload["detail"]].filter(Boolean).join("\n")
   }
   if (kind === "receta") {

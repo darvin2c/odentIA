@@ -673,7 +673,12 @@ export async function askHelp(
       const inItem = new Set(here?.areas?.filter((area) => area.inItem).map((area) => area.id))
       const answers = built.map(({ option, answer }) => {
         const stays = inside && answer.path && option.topic.id === here?.id && inItem.has(helpAreaOf(option))
-        return stays ? { ...answer, path: screen, where: inside.named ? inside.label : ITEM_PAGE } : answer
+        if (stays) return { ...answer, path: screen, where: inside.named ? inside.label : ITEM_PAGE }
+        // Desde fuera de la persona, «Llévame» deja en la lista: la respuesta dice el resto del camino hasta
+        // donde se hace (verificador 2 del 27 nov: «Llévame a Personas › Pacientes» no llevaba a la tarjeta).
+        const area = option.topic.areas?.find((candidate) => candidate.id === helpAreaOf(option))
+        const outside = answer.path && area?.inItem && area.reach && !(inside && option.topic.id === here?.id)
+        return outside ? { ...answer, text: `${answer.text}\n\nPara llegar: en ${answer.where}, abre a la persona y entra a ${area.reach}.` } : answer
       })
       return reply("guia", {
         askId: await log(first.topic.id, first.kind === "faq" ? first.faq.q : null),

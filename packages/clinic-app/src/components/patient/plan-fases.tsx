@@ -393,6 +393,7 @@ function PlanPhasesGroup({
                               type="button"
                               size="sm"
                               variant="ghost"
+                              aria-label={`Planificar «${item.title}${site(item)}»…`}
                               onClick={() => setPlanning(item)}
                             >
                               Planificar…

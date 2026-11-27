@@ -68,6 +68,19 @@ it("con su sesión de hoy sin firmar, la fila no dice «Completar el tratamiento
   expect(row.textContent).not.toContain("Completar el tratamiento")
 })
 
+// Verificador 2 del 27 nov: los «Planificar…» del Plan se anunciaban igual, sin decir de qué tratamiento eran.
+it("«Planificar…» dice a un lector de pantalla de qué tratamiento es", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const resina = { ...endo, id: "it-resina", title: "Resina", scope: "tooth", toothNumber: 26, status: "pendiente", decisionStatus: "pendiente", sessionsDone: 0, sessions: [] } as unknown as PlanItem
+  render(
+    <QueryClientProvider client={client}>
+      <PlanPhases patientId="p-1" items={[endo, resina]} journeys={[]} selectedId="" onSelect={() => undefined} />
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByRole("button", { name: "Planificar «Resina · Pieza 26»…" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Planificar «Endodoncia»…" })).toBeTruthy()
+})
+
 it("el día de una sesión se compara en la zona de la clínica, no en la del navegador", () => {
   // Las 10 p. m. del 17 nov en Lima ya son el 18 en UTC: es el mismo día de la clínica.
   setOrgLocale("es-PE", "America/Lima")

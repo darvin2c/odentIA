@@ -444,7 +444,7 @@ function noRoute(
   }
   // Un número de prueba guardado como su WhatsApp tampoco recibe nada: se dice eso, no lo de la
   // plantilla (verificación de la entrega 9: decía «WhatsApp aún no aprueba el mensaje»).
-  if (identity && isFictionalPhone(`+${identity.externalUserId.replace(/\D/g, "")}`)) {
+  if (fictionalIdentity(identity)) {
     return {
       cause: "sin_destino",
       detail: facts.rawEmail
@@ -518,11 +518,20 @@ export function chooseVia(facts: ViaFacts): { via: AutomationVia; channel: "what
   return null
 }
 
+/** Su WhatsApp es un número de prueba (`isFictionalPhone`): a ese número no le llega ningún mensaje. */
+function fictionalIdentity(identity: { externalUserId: string } | null): boolean {
+  return !!identity && isFictionalPhone(`+${identity.externalUserId.replace(/\D/g, "")}`)
+}
+
 function viaFactsOf(facts: Awaited<ReturnType<typeof routeFacts>>, spec: RouteSpec | null): ViaFacts {
   return {
     windowOpen: !!facts.windowThreadId,
     whatsapp: !!facts.identity && !!facts.whatsapp,
-    templateUsable: facts.template?.status === "aprobada" && !facts.promotion,
+    // Una plantilla abre la conversación con quien no escribió: a un número de prueba no le llega, y
+    // el presupuesto salía y quedaba «Entregado» junto a «su número es de prueba» (verificador 2 del
+    // 27 nov). Responder a quien escribió sigue siendo una vía: solo pasa con el canal simulado de
+    // desarrollo y las pruebas, donde ese número sí escribe.
+    templateUsable: facts.template?.status === "aprobada" && !facts.promotion && !fictionalIdentity(facts.identity),
     email: !!spec && !!facts.mailbox && !!facts.email,
   }
 }

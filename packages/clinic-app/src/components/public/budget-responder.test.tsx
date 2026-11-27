@@ -237,9 +237,16 @@ describe("BudgetResponder", () => {
     const resina = { ...plain.items[0]!, planItemId: "i3", optionId: "o2", title: "Resina fotocurable", toothNumber: 36, lineTotalCents: 18000 }
     const corona = { ...plain.items[0]!, planItemId: "i4", optionId: "o2", title: "Corona cerámica", toothNumber: 16, lineTotalCents: 90000 }
     const page = html({ ...base, items: [base.items[0]!, resina, corona] })
-    expect(page).toContain("Resina fotocurable · pieza 36 · Corona cerámica · pieza 16")
     expect(page).toContain('font-medium">Corona cerámica · pieza 16')
     expect(page).toContain("Endodoncia del molar 46")
     expect(page).not.toContain("Endodoncia del molar 46 · pieza 46")
+    // Verificador 2 del 27 nov: seguidas con «·», a 390 px no se veía dónde acababa una línea. Cada una
+    // va en su renglón, y un lector de pantalla las oye como una lista.
+    render(<BudgetResponder budget={{ ...base, items: [base.items[0]!, resina, corona] }} pending={false} error={null} onAnswer={() => {}} />)
+    const optionB = screen.getByRole("list", { name: "Opción B: lo que incluye" })
+    expect([...optionB.querySelectorAll('[role="listitem"]')].map((row) => row.textContent)).toEqual([
+      "Resina fotocurable · pieza 36",
+      "Corona cerámica · pieza 16",
+    ])
   })
 })
