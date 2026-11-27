@@ -166,7 +166,20 @@ export function ExchangeSheet({ order, onClose }: { order: OrderDetail; onClose:
   const [paymentId, setPaymentId] = useState("")
   const link = whatsappLink(order.customerPhone ? [order.customerPhone] : [], store.country)
   const [whatsapp, setWhatsapp] = useState(Boolean(link))
-  const dirty = useDirty({ back, reason, other, kind, takes, deliveryId, zone, address, day })
+  const dirty = useDirty({
+    back,
+    reason,
+    other,
+    kind,
+    takes,
+    deliveryId,
+    zone,
+    deliveryCost,
+    storePays,
+    address,
+    day,
+    paymentId,
+  })
 
   // La forma de entrega del pedido entregado, si sigue encendida; si no, la primera.
   useEffect(() => {
@@ -233,6 +246,10 @@ export function ExchangeSheet({ order, onClose }: { order: OrderDetail; onClose:
     ...(create.error ? fieldErrors(create.error) : (preview.data?.fields ?? {})),
   }
   const [localErrors, setLocalErrors] = useState<Record<string, string>>({})
+  // Lo que faltaba se deja de marcar en cuanto la persona lo cambia.
+  useEffect(() => {
+    if (key || why) setLocalErrors({})
+  }, [key, why])
   const shown = { ...errors, ...localErrors }
 
   const submit = () => {
