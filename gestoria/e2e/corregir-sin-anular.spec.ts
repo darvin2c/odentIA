@@ -60,6 +60,18 @@ async function call(method: string, path: string, body?: unknown): Promise<Json>
 test.describe.configure({ mode: "serial" })
 
 const setup = { plin: "", efectivo: "", reparto: "", t37: "", t38: "" }
+/** Los pedidos de este recorrido: se anulan al final, para no sumar a lo que miran los demás. */
+const made: string[] = []
+
+test.afterAll(async () => {
+  await as("rosa")
+  for (const id of made)
+    await call("POST", `/pedidos/${id}/anular`, { reason: "Fin del recorrido" })
+  // Sus medios y su reparto se apagan: los demás recorridos arman los suyos.
+  for (const id of [setup.plin, setup.efectivo])
+    await call("PATCH", `/medios-de-pago/${id}`, { isActive: false })
+  await call("PATCH", `/formas-de-entrega/${setup.reparto}`, { isActive: false })
+})
 
 test.beforeAll(async () => {
   await as("rosa")
@@ -118,6 +130,7 @@ test("Andrea cambia a la 38 sin anular, pasa a mañana y se deshace su pago", as
       paymentMethodId: setup.plin,
     })
   ).order as Json
+  made.push(order.id)
 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
@@ -199,6 +212,7 @@ test("Jorge no contestó: «No se entregó» lo vuelve a «Por salir» mañana",
       paymentMethodId: setup.efectivo,
     })
   ).order as Json
+  made.push(order.id)
   await call("POST", `/pedidos/${order.id}/salio`, {})
 
   await page.setViewportSize(PHONE)
