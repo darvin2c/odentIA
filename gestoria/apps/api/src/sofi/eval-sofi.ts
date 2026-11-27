@@ -3,7 +3,13 @@
  *
  *   pnpm --filter @gestoria/api eval:sofi [-- --casos=id1,id2] [--repeticiones=N] [--sin-juez]
  *     [--salida=ruta.json]
- *   pnpm --filter @gestoria/api eval:sofi -- --juzgar=a.json,b.json   (un solo juez, dos versiones)
+ *   pnpm --filter @gestoria/api eval:sofi -- --juzgar=a.json,b.json[,c.json…]   (un solo juez,
+ *     todas las versiones en la misma llamada)
+ *   [--juez=claude-opus-5-5] [--juez-esfuerzo=medium]   (el juez; por omisión, gpt-6-luna)
+ *   [--tope-usd=N]   (se detiene antes de pasar N dólares entre Sofi y el juez, y dice cuánto faltó)
+ *
+ * Para medir a Sofi con Claude: `GESTORIA_LLM_PROVIDER=anthropic`, `GESTORIA_ANTHROPIC_MODEL` y
+ * `GESTORIA_ANTHROPIC_EFFORT` (ver `modelo.ts`).
  *
  * Corre la Sofi de verdad (`answer`, con sus herramientas, su comprobación y las reglas de la
  * base) sobre el banco `eval/sofi.json`, escrito por el equipo (nunca datos reales), en una base
@@ -25,7 +31,7 @@
  * versiones, `--juzgar` califica las dos con el mismo juez, en la misma llamada y sin decir cuál
  * es cuál.
  *
- * Necesita `GESTORIA_OPENAI_API_KEY` (y PostgreSQL por testcontainers). Con
+ * Necesita la credencial del modelo que se mide y la del juez (y PostgreSQL por testcontainers). Con
  * `GESTORIA_LLM_MODEL=fake` corre el doble por reglas, sin juez ni gasto: sirve para ver que la
  * medición anda, no cuenta como medición.
  */
@@ -57,6 +63,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm"
 import type { LinkAdapter } from "../link-de-pago.js"
 import { sealSecret } from "../secretos.js"
 import { type ChatModel, costMicros, modelFromEnv, openAIModel, SOFI_MODEL } from "./modelo.js"
+import { CLAUDE_EFFORTS, CLAUDE_MODELS, type ClaudeEffort, claudeModel } from "./modelo-claude.js"
 import { claimsInvented, claimsPaid } from "./revisar.js"
 import { answer, SOFI_FALLBACK, SOFI_HANDOFF } from "./sofi.js"
 
@@ -95,7 +102,11 @@ interface Transcript {
   frenados: number
   fijas: number
   costoMicros: number
-  tokens: { input: number; cached: number; output: number }
+  tokens: { input: number; cached: number; output: number; written: number }
+  /** Lo que tardó cada respuesta de Sofi, en milisegundos (con sus herramientas). */
+  ms: number[]
+  /** El modelo que anotó cada respuesta («claude-haiku-5-5@low», «gpt-6-luna»). */
+  modelos: string[]
   juez?: Judged
 }
 
@@ -479,13 +490,17 @@ async function runCase(
   let frenados = 0
   let fijas = 0
   let cost = 0
-  const tokens = { input: 0, cached: 0, output: 0 }
+  const tokens = { input: 0, cached: 0, output: 0, written: 0 }
+  const ms: number[] = []
+  const modelos = new Set<string>()
   for (const m of sofi) {
     const d = m.detail as {
       tools?: { name: string; ok: boolean }[]
       frenado?: string[][]
       costo?: number | null
-      tokens?: typeof tokens
+      tokens?: Partial<typeof tokens>
+      ms?: number
+      modelo?: string | null
     }
     for (const t of d.tools ?? []) {
       tools[t.name] ??= { ok: 0, fallo: 0 }
@@ -498,6 +513,9 @@ async function runCase(
     tokens.input += d.tokens?.input ?? 0
     tokens.cached += d.tokens?.cached ?? 0
     tokens.output += d.tokens?.output ?? 0
+    tokens.written += d.tokens?.written ?? 0
+    if (typeof d.ms === "number") ms.push(d.ms)
+    if (d.modelo) modelos.add(d.modelo)
   }
 
   const graves: string[] = []
@@ -580,6 +598,8 @@ async function runCase(
     fijas,
     costoMicros: cost,
     tokens,
+    ms,
+    modelos: [...modelos],
   }
 }
 
@@ -618,7 +638,9 @@ async function judge(
   const cost = costMicros(model.name, reply.usage) ?? 0
   const judged = new Map<string, Judged>()
   try {
-    const json = JSON.parse((reply.content ?? "").replace(/^```(?:json)?|```$/g, "").trim()) as {
+    const raw = reply.content ?? ""
+    // Solo el objeto: un juez puede envolverlo en ```json o decir algo antes.
+    const json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as {
       versiones: (Judged & { etiqueta: string })[]
     }
     for (const v of json.versiones) judged.set(v.etiqueta, v)
@@ -641,6 +663,9 @@ function summary(runs: Transcript[], judgeCost: number) {
       : null
   }
   const cost = runs.reduce((a, r) => a + r.costoMicros, 0)
+  const ms = runs.flatMap((r) => r.ms ?? []).sort((a, b) => a - b)
+  const sum = (f: (t: Transcript["tokens"]) => number | undefined) =>
+    runs.reduce((a, r) => a + (f(r.tokens) ?? 0), 0)
   return {
     conversaciones: n,
     con_grave: runs.filter((r) => r.graves.length > 0).length,
@@ -663,7 +688,67 @@ function summary(runs: Transcript[], judgeCost: number) {
       por_conversacion: n ? cost / n / 1e6 : 0,
       juez: judgeCost / 1e6,
     },
+    tokens_por_conversacion: n
+      ? {
+          entrada: Math.round(sum((t) => t.input) / n),
+          de_la_cache: Math.round(sum((t) => t.cached) / n),
+          escritos_en_cache: Math.round(sum((t) => t.written) / n),
+          salida: Math.round(sum((t) => t.output) / n),
+        }
+      : null,
+    respuesta_ms: ms.length
+      ? {
+          respuestas: ms.length,
+          mediana: ms[Math.floor(ms.length / 2)],
+          p90: ms[Math.min(ms.length - 1, Math.floor(ms.length * 0.9))],
+          maximo: ms.at(-1),
+        }
+      : null,
+    modelos: [...new Set(runs.flatMap((r) => r.modelos ?? []))],
   }
+}
+
+/** El juez: gpt-6-luna con razonamiento medio, o el Claude que se pida (`--juez`). */
+function judgeFrom(env: NodeJS.ProcessEnv): ChatModel {
+  const name = String(args.juez ?? SOFI_MODEL)
+  if ((CLAUDE_MODELS as readonly string[]).includes(name)) {
+    const effort = String(args["juez-esfuerzo"] ?? "medium") as ClaudeEffort
+    if (!CLAUDE_EFFORTS.includes(effort))
+      throw new Error(`--juez-esfuerzo=${CLAUDE_EFFORTS.join("|")}`)
+    return claudeModel({
+      model: name,
+      effort,
+      timeoutMs: 120_000,
+      ...(env.GESTORIA_ANTHROPIC_API_KEY?.trim()
+        ? { apiKey: env.GESTORIA_ANTHROPIC_API_KEY.trim() }
+        : {}),
+    })
+  }
+  if (name !== SOFI_MODEL)
+    throw new Error(`--juez=${SOFI_MODEL} o uno de ${CLAUDE_MODELS.join(", ")}`)
+  const key = env.GESTORIA_OPENAI_API_KEY?.trim()
+  if (!key) throw new Error("Falta GESTORIA_OPENAI_API_KEY para el juez (o usa --juez=claude-…)")
+  return openAIModel({
+    apiKey: key,
+    model: SOFI_MODEL,
+    reasoningEffort: "medium",
+    timeoutMs: 120_000,
+  })
+}
+
+/** El tope de gasto de la corrida, en millonésimas de USD (sin tope: infinito). */
+const cap = args["tope-usd"] ? Number(args["tope-usd"]) * 1e6 : Number.POSITIVE_INFINITY
+
+/** Una permutación al azar (Fisher-Yates): el juez no sabe cuál versión es cuál. */
+function shuffled<T>(items: T[]): T[] {
+  const out = [...items]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const swap = out[i]!
+    out[i] = out[j]!
+    out[j] = swap
+  }
+  return out
 }
 
 function save(name: string, data: unknown) {
@@ -675,40 +760,52 @@ function save(name: string, data: unknown) {
 
 async function main() {
   const env = process.env
-  // Comparar dos corridas con un solo juez.
+  // Comparar varias corridas con un solo juez: todas las versiones de un caso en la misma llamada.
   if (args.juzgar) {
-    const [a, b] = String(args.juzgar).split(",")
-    if (!a || !b) throw new Error("--juzgar=a.json,b.json")
-    const key = env.GESTORIA_OPENAI_API_KEY?.trim()
-    if (!key) throw new Error("Falta GESTORIA_OPENAI_API_KEY para el juez")
-    const judgeModel = openAIModel({
-      apiKey: key,
-      model: SOFI_MODEL,
-      reasoningEffort: "medium",
-      timeoutMs: 120_000,
+    const files = String(args.juzgar).split(",").filter(Boolean)
+    if (files.length < 2) throw new Error("--juzgar=a.json,b.json[,c.json…]")
+    const judgeModel = judgeFrom(env)
+    const versions = files.map((file) => {
+      const data = JSON.parse(readFileSync(file, "utf8")) as {
+        modelo?: string
+        corridas: Transcript[]
+      }
+      return { file, modelo: data.modelo ?? file, runs: data.corridas }
     })
-    const runsA = (JSON.parse(readFileSync(a, "utf8")) as { corridas: Transcript[] }).corridas
-    const runsB = (JSON.parse(readFileSync(b, "utf8")) as { corridas: Transcript[] }).corridas
     let judgeCost = 0
-    for (const ra of runsA) {
-      const rb = runsB.find((r) => r.id === ra.id && r.repeticion === ra.repeticion)
-      if (!rb) continue
-      // Al azar cuál va primero: el juez no sabe cuál es cuál.
-      const swap = Math.random() < 0.5
-      const labels = swap ? ["2", "1"] : ["1", "2"]
-      const { judged, cost } = await judge(judgeModel, ra, [
-        { label: labels[0]!, t: ra },
-        { label: labels[1]!, t: rb },
-      ])
+    let skipped = 0
+    for (const base of versions[0]!.runs) {
+      const same = versions.map((v) =>
+        v.runs.find((r) => r.id === base.id && r.repeticion === base.repeticion),
+      )
+      if (same.some((r) => !r)) continue
+      if (judgeCost >= cap) {
+        skipped += 1
+        continue
+      }
+      const order = shuffled(same.map((t, i) => ({ t: t!, i })))
+      const { judged, cost } = await judge(
+        judgeModel,
+        base,
+        order.map((o, k) => ({ label: String(k + 1), t: o.t })),
+      )
       judgeCost += cost
-      ra.juez = judged.get(labels[0]!)
-      rb.juez = judged.get(labels[1]!)
+      order.forEach((o, k) => {
+        o.t.juez = judged.get(String(k + 1))
+      })
+      console.log(`${base.id}#${base.repeticion}: juzgado · ${(cost / 1e6).toFixed(4)} USD`)
     }
+    if (skipped) console.log(`Tope de gasto: quedaron ${skipped} casos sin juez.`)
     save("comparacion", {
-      a: summary(runsA, judgeCost / 2),
-      b: summary(runsB, judgeCost / 2),
-      corridasA: runsA,
-      corridasB: runsB,
+      juez: judgeModel.name,
+      juez_usd: judgeCost / 1e6,
+      sin_juez_por_tope: skipped,
+      versiones: versions.map((v) => ({
+        archivo: v.file,
+        modelo: v.modelo,
+        resumen: summary(v.runs, judgeCost / versions.length),
+      })),
+      corridas: Object.fromEntries(versions.map((v) => [v.modelo, v.runs])),
     })
     return
   }
@@ -722,18 +819,10 @@ async function main() {
   const model = modelFromEnv({ ...env, NODE_ENV: "development" })
   if (!model)
     throw new Error(
-      "Falta GESTORIA_OPENAI_API_KEY (o GESTORIA_LLM_MODEL=fake para probar la medición)",
+      "Falta la credencial del modelo (o GESTORIA_LLM_MODEL=fake para probar la medición)",
     )
   const fake = model.name === "fake"
-  const judgeModel =
-    fake || args["sin-juez"]
-      ? null
-      : openAIModel({
-          apiKey: env.GESTORIA_OPENAI_API_KEY!.trim(),
-          model: SOFI_MODEL,
-          reasoningEffort: "medium",
-          timeoutMs: 120_000,
-        })
+  const judgeModel = fake || args["sin-juez"] ? null : judgeFrom(env)
 
   const db = await startTestDb()
   try {
@@ -742,20 +831,35 @@ async function main() {
     await armarTienda(db.ownerDb, storeId, secretsKey)
     const runs: Transcript[] = []
     let judgeCost = 0
+    let spent = 0
+    let skipped = 0
     for (let rep = 1; rep <= reps; rep++)
       for (const item of cases) {
+        if (spent >= cap) {
+          skipped += 1
+          continue
+        }
         const t = await runCase(db.appDb, db.ownerDb, model, storeId, secretsKey, item, rep)
         if (judgeModel) {
           const { judged, cost } = await judge(judgeModel, item, [{ label: "1", t }])
           judgeCost += cost
+          spent += cost
           t.juez = judged.get("1")
         }
+        spent += t.costoMicros
         runs.push(t)
         console.log(
           `${item.id}#${rep}: ${t.graves.length ? `GRAVE ${t.graves.join(" | ")}` : "ok"} · ${(t.costoMicros / 1e6).toFixed(4)} USD`,
         )
       }
-    const result = { modelo: model.name, fake, resumen: summary(runs, judgeCost), corridas: runs }
+    if (skipped) console.log(`Tope de gasto: quedaron ${skipped} conversaciones sin correr.`)
+    const result = {
+      modelo: model.name,
+      fake,
+      sin_correr_por_tope: skipped,
+      resumen: summary(runs, judgeCost),
+      corridas: runs,
+    }
     console.log(JSON.stringify(result.resumen, null, 2))
     if (fake) console.log("Con el modelo de desarrollo: no cuenta como medición.")
     save(fake ? "sofi-fake" : "sofi", result)
