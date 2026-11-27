@@ -30,7 +30,7 @@ import {
   variantPrices,
 } from "../pedidos.js"
 import { autoUnitCents } from "../precio.js"
-import { type Balance, balancesIn } from "../saldo.js"
+import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
 import { percentsIn } from "./revisar.js"
@@ -636,13 +636,23 @@ async function receipt(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.anotar
     })
     ctx.trace.amounts.add(cents)
     ctx.trace.amounts.add(order.totalCents)
+    // Si pagó una parte (un adelanto), lo que falta sale del mismo saldo que ve el equipo.
+    const { dueCents } = await balanceIn(tx, order)
+    if (dueCents > 0) ctx.trace.amounts.add(dueCents)
     return {
       ok: true,
       pedido: pad(order.number),
       estado: stateWords({ state: "por_confirmar", paymentCollection: order.paymentCollection }),
       monto_anotado: formatMoney(cents, ctx.currency),
       total_del_pedido: formatMoney(order.totalCents, ctx.currency),
-      ...(cents !== order.totalCents ? { ojo: "El monto anotado no es el total del pedido" } : {}),
+      ...(dueCents > 0
+        ? {
+            falta_pagar: formatMoney(dueCents, ctx.currency),
+            ojo: "Pagó una parte del total: falta pagar el resto",
+          }
+        : cents !== order.totalCents
+          ? { ojo: "El monto anotado pasa del total del pedido" }
+          : {}),
     }
   })
 }
@@ -658,18 +668,22 @@ async function orders(ctx: SofiToolContext) {
       pedidos: rows.map((o) => {
         ctx.trace.amounts.add(o.totalCents)
         const balance = balances.get(o.id)
-        // Si pagó una parte: lo confirmado y lo que falta, la misma cifra que ve el equipo.
+        // Si pagó una parte: lo confirmado, lo que espera a una persona y lo que falta, las mismas
+        // cifras que ve el equipo. Lo que es 0 no se dice.
         const partial = balance && balance.dueCents > 0 && balance.dueCents < o.totalCents
+        const part: Record<string, string> = {}
         if (partial) {
           ctx.trace.amounts.add(balance.dueCents)
-          ctx.trace.amounts.add(balance.confirmedCents)
+          if (balance.confirmedCents > 0) {
+            ctx.trace.amounts.add(balance.confirmedCents)
+            part.pagado_confirmado = formatMoney(balance.confirmedCents, ctx.currency)
+          }
+          if (balance.pendingCents > 0) {
+            ctx.trace.amounts.add(balance.pendingCents)
+            part.por_confirmar = formatMoney(balance.pendingCents, ctx.currency)
+          }
+          part.falta_pagar = formatMoney(balance.dueCents, ctx.currency)
         }
-        const part = partial
-          ? {
-              pagado_confirmado: formatMoney(balance.confirmedCents, ctx.currency),
-              falta_pagar: formatMoney(balance.dueCents, ctx.currency),
-            }
-          : {}
         return {
           pedido: pad(o.number),
           estado: stateWords(o, balance),

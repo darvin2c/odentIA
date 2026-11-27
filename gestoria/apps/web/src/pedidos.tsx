@@ -1039,6 +1039,9 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
                 options={methods.map((m) => ({ value: m.id, label: m.name }))}
                 error={errors.methodId}
               />
+            ) : methods[0] ? (
+              // Con un solo medio para cobrar en la puerta, se dice con cuál queda anotado.
+              <p className="text-sm text-muted-foreground">Queda anotado con {methods[0].name}.</p>
             ) : null}
           </FieldGroup>
         ) : null}

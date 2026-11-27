@@ -58,7 +58,7 @@ import { inStore, StoreError } from "./tiendas.js"
  *   dinero ya llegó) y el stock se descuenta al salir: sin stock, no sale.
  * - El cobro va en orden: link de pago (se confirma solo), captura (la confirma una persona) y
  *   al recibir. Una captura es lo único que espera a alguien.
- * - Un pedido acepta varios pagos, cada uno con su medio y su estado (ADR 0221). Lo que falta
+ * - Un pedido acepta varios pagos, cada uno con su medio y su estado (ADR 0222). Lo que falta
  *   cobrar sale de un solo lugar (`saldo.ts`); el primer pago confirmado lo deja listo para salir
  *   y queda «Pagado» solo cuando no falta nada y todo está confirmado.
  * - «Hoy» es el de la tienda, con su hora (`hora.ts`): nunca el del servidor ni el del navegador.
@@ -1246,7 +1246,12 @@ export async function reviewPayment(
         monto: payment.amountCents,
         motivo: input.reason,
       })
-      if (order.state === "por_confirmar")
+      // También la captura del resto de un pedido que ya sale (el pago en partes); no la de un
+      // pedido anulado, ni la de un link que llegó cuando ya no se esperaba.
+      if (
+        order.state === "por_confirmar" ||
+        (payment.kind === "comprobante" && order.state !== "anulado")
+      )
         await notifyCustomer(tx, order, person.userId, currency, "pago_no_coincide")
     }
     return orderDetailIn(tx, storeId, orderId)
@@ -1595,7 +1600,8 @@ export async function receiveLinkNotice(
     const waiting = order.state === "por_pagar" || order.state === "por_confirmar"
     const matches = payment.currency === currency && payment.amountCents === order.totalCents
     const note = !waiting
-      ? `Llegó por el link cuando el pedido ${order.state === "anulado" ? "ya estaba anulado" : "ya estaba pagado"}: revisa si hay que devolverlo`
+      ? // Con el pago en partes, «ya sale» no quiere decir «ya pagó todo»: se dice solo lo cierto.
+        `Llegó por el link cuando el pedido ${order.state === "anulado" ? "ya estaba anulado" : "ya no estaba por pagar"}: revisa si hay que devolverlo`
       : !matches
         ? `El monto pagado por el link (${formatMoney(payment.amountCents, /^[A-Z]{3}$/.test(payment.currency) ? payment.currency : currency)}) no coincide con el total`
         : null

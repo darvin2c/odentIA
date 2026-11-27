@@ -697,6 +697,26 @@ describe("el pago en partes (Diana, tablero 7)", () => {
     expect(row?.paid).toBe(false)
   })
 
+  it("la captura del resto que no coincide: sigue por salir, le falta lo mismo y se le pide otra", async () => {
+    const rest = await capture(3700, { methodId: ids.yape })
+    expect(rest.json.order).toMatchObject({ state: "por_salir", paid: false })
+    expect(rest.json.order.balance).toMatchObject({ pendingCents: 3700, dueCents: 0 })
+    // Aparece en «Pago por confirmar» aunque el pedido ya salga.
+    const waiting = await call("lucia", "GET", `${base}/pedidos?filtro=por_confirmar`)
+    expect((waiting.json.orders as Json[]).some((o) => o.id === id)).toBe(true)
+    const payment = (rest.json.order.payments as Json[]).find((p) => p.status === "por_confirmar")
+    const rejected = await call(
+      "lucia",
+      "POST",
+      `${base}/pedidos/${id}/pagos/${payment?.id}/revision`,
+      { decision: "no_coincide", reason: "No llegó a la cuenta" },
+    )
+    expect(rejected.json.order).toMatchObject({ state: "por_salir", paid: false })
+    expect(rejected.json.order.balance).toMatchObject({ pendingCents: 0, dueCents: 3700 })
+    const notice = (rejected.json.order.events as Json[]).filter((e) => e.action === "aviso").at(-1)
+    expect(String(notice?.detail.texto)).toContain("No pudimos confirmar el pago")
+  })
+
   it("al entregar se cobra lo que falta, con su medio, y queda «Pagado»", async () => {
     const before = await dueInReports()
     const missing = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {})
@@ -715,11 +735,15 @@ describe("el pago en partes (Diana, tablero 7)", () => {
     })
     expect(done.json.order).toMatchObject({ state: "entregado", paid: true })
     expect(done.json.order.balance).toMatchObject({ confirmedCents: 11700, dueCents: 0 })
-    expect(done.json.order.payments.map((p: Json) => [p.methodName, p.amountCents])).toEqual([
-      ["Yape", 8000],
-      ["Efectivo", 3700],
+    // Cada pago con su medio; el que no coincidió queda en la lista, sin contar.
+    expect(
+      done.json.order.payments.map((p: Json) => [p.methodName, p.amountCents, p.status]),
+    ).toEqual([
+      ["Yape", 8000, "confirmado"],
+      ["Yape", 3700, "no_coincide"],
+      ["Efectivo", 3700, "confirmado"],
     ])
-    expect(done.json.order.payments[1]).toMatchObject({ kind: "al_recibir", note: null })
+    expect(done.json.order.payments[2]).toMatchObject({ kind: "al_recibir", note: null })
     // Reportes deja de contarlo en «Falta cobrar».
     expect(before - (await dueInReports())).toBe(3700)
   })
