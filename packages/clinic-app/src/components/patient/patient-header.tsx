@@ -49,7 +49,7 @@ import { clinicToday } from "../../lib/inventory"
 import { useOrgLocale } from "../../lib/locale"
 import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import {
-  ageFrom,
+  ageWords,
   type DeclaredHealthGroup,
   fetchPatientHealth,
   hcLabel,
@@ -813,7 +813,6 @@ export function PersonHeader({
     enabled: canClinical && Boolean(patient),
   })
   const clinicalHealth = health.data?.data ?? null
-  const age = ageFrom(person.birthDate)
   // Menor de edad según el servidor (el día de la clínica), no la hora de este equipo.
   const isMinor = person.isMinor
   const representatives = (responsibilities.data?.data ?? []).filter(
@@ -824,7 +823,7 @@ export function PersonHeader({
   const facts = [
     patient ? hcLabel(patient.patientNumber) : null,
     docLabel,
-    age ? `${age} ${Number(age) === 1 ? "año" : "años"}` : null,
+    ageWords(person.birthDate) || null,
     person.sex ? sexLabel(person.sex) : null,
   ].filter(Boolean)
   // «Nueva cita» al lado, sin ir a la Agenda. Para quien aún no es paciente crea

@@ -1116,6 +1116,20 @@ describe("alergias y lo hecho hoy por voz (issue 109)", () => {
     await enable(false)
   })
 
+  // QA del 26 nov (desarrollo, H5): «hoy le hice la primera sesión de la endodoncia en la 46», con la
+  // endodoncia indicada, quedó «Hecho hoy fuera del plan · Sin cargo» y el cierre la listó dos veces.
+  it("una sesión dicha de lo que el plan indicaba sale de ese tratamiento, aunque no diga su nombre entero", async () => {
+    await enable(true)
+    const fx = await openSession("Pulpotomía con formocresol", "tooth")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [indicated] = (await segment({ drafts: [{ kind: "plan", payload: { service: "pulpotomía con formocresol", toothNumber: 36 } }] })).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, indicated!.id))
+    const planRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, indicated!.id)))[0]!
+    const [session] = (await segment({ drafts: [{ kind: "procedimiento", payload: { service: "primera sesión de la pulpotomía", toothNumber: 36 } }] })).suggestions
+    expect(session).toMatchObject({ payload: { source: "plan", planItemId: planRow.entityId, toothNumber: 36 } })
+    await enable(false)
+  })
+
   it("lo hecho hoy sale del plan (y lo acepta al hacerlo), de los servicios o queda como acto libre; sin pieza, se pregunta", async () => {
     await enable(true)
     const fx = await openSession("Resina hecha hoy", "tooth")
@@ -1353,7 +1367,7 @@ describe("lo que encontró la tercera prueba con voz (15 nov, c3)", () => {
     const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
     const [pulpitis] = (await segment({ drafts: [{ kind: "diagnostico", payload: { diagnosisCode: "K04.02", diagnosisType: "confirmed", toothNumber: 36 }, sourceText: "pulpitis irreversible sintomática" }] })).suggestions
     // Lo decide el odontólogo: el sistema solo propone el de la lista y dice qué cambió.
-    expect(pulpitis).toMatchObject({ status: "por_revisar", note: "Entendí K04.02; la lista de la clínica tiene K04.0 («Pulpitis»). Revísalo.", payload: { diagnosisCode: "K04.0", description: "Pulpitis" } })
+    expect(pulpitis).toMatchObject({ status: "por_revisar", note: "Clío propuso K04.02; la lista de la clínica tiene K04.0 («Pulpitis»). Revísalo.", payload: { diagnosisCode: "K04.0", description: "Pulpitis" } })
     // Dicho con su código, se dice así.
     const [said] = (await segment({ drafts: [{ kind: "diagnostico", payload: { diagnosisCode: "K04.02", diagnosisType: "confirmed", toothNumber: 46 }, sourceText: "diagnóstico K04.02 en la 46" }] })).suggestions
     expect(said).toMatchObject({ status: "por_revisar", note: "Dijiste K04.02; la lista de la clínica tiene K04.0 («Pulpitis»). Revísalo." })

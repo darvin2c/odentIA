@@ -102,10 +102,13 @@ function Encounter({ beside }: { beside: boolean }) {
   )
 }
 
-function app(beside: boolean) {
+function app(beside: boolean, cached = false) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } } })
+  // La atención y la cabecera de la ficha ya cargaron su salud: el formulario la encuentra en caché.
+  if (cached) client.setQueryData(["patient-health", "p1"], { data: health })
   const root = createRootRoute({
     component: () => (
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <QueryClientProvider client={client}>
         <SideDockProvider draftGuard={Guard}>
           <Outlet />
           <SideDockSlot />
@@ -144,4 +147,14 @@ it("con «Antecedentes y última atención» al lado, «Corregir algo» la reemp
   fireEvent.click(screen.getByRole("button", { name: "Corregir algo" }))
   await formInColumn()
   await waitFor(() => expect(screen.queryByText("Solo lectura")).toBeNull())
+})
+
+// QA del 26 nov (desarrollo, H1): con la salud ya en caché (siempre en la atención y en la ficha), el efecto que abre
+// y el que cierra corrían en el mismo render: el formulario se desmontaba antes de verse.
+it("con la salud ya cargada, «Corregir algo» abre el formulario y no se cierra solo", async () => {
+  render(<RouterProvider router={app(false, true)} />)
+  fireEvent.click(await screen.findByRole("button", { name: "Corregir algo" }))
+  await formInColumn()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(screen.getByRole("button", { name: "Guardar antecedentes" })).toBeTruthy()
 })

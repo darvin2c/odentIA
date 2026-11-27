@@ -226,6 +226,22 @@ it("dice lo que tiene, lo que toma y lo que dijo del corazón", () => {
   )
 })
 
+// QA del 26 nov (desarrollo, H4): «Es hipertensa» guardado tal cual hacía decir «Tiene hipertensa.».
+it("la enfermedad dicha de quien la tiene se nombra por la enfermedad", () => {
+  const words = anesthesiaHealthWords(
+    {
+      allergies: [],
+      conditions: [{ id: "c", name: "hipertensa", status: "activa" }],
+      medications: [],
+      reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+    } as unknown as PatientHealth,
+    [],
+    [],
+    "2026-11-16",
+  )
+  expect(words).toBe("Tiene hipertensión arterial.")
+})
+
 // QA de diseño del 18 nov (H7): con tope, lo firmado dice primero lo que manda, en la misma línea.
 it("lo firmado con tope de epinefrina dice el tope primero y el máximo por peso después", () => {
   render(

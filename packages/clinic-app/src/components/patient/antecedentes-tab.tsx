@@ -690,11 +690,18 @@ export function AntecedentesTab({
     }
   }, [startEditing, canWrite, health])
 
-  // Abierto solo con el formulario: al cerrarlo no queda nada que mostrar.
+  // Abierto solo con el formulario: al cerrarlo no queda nada que mostrar. Solo después de haberse visto
+  // abierto: con la salud ya en caché, el efecto que abre y este corrían en el mismo render, con `drawerOpen`
+  // todavía en falso, y el formulario se desmontaba antes de verse (QA del 26 nov, H1).
   const closed = useRef(onClosed)
   closed.current = onClosed
+  const wasOpen = useRef(false)
   useEffect(() => {
-    if (editorOnly && startedEditing.current && !drawerOpen) closed.current?.()
+    if (drawerOpen) {
+      wasOpen.current = true
+      return
+    }
+    if (editorOnly && wasOpen.current) closed.current?.()
   }, [editorOnly, drawerOpen])
 
   async function reload(): Promise<void> {

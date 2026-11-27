@@ -479,3 +479,17 @@ describe("lo nuevo de la consulta conversada, con los nombres de la pantalla", (
     for (const faq of faqs) expect(faq.a.split(/\s+/).length, faq.id).toBeLessThanOrEqual(120)
   })
 })
+
+// QA del 26 nov (desarrollo, H9): sus tres preguntas no tenían respuesta («No estoy segura de qué preguntas»).
+describe("lo nuevo de «el sistema solo sugiere», con las palabras de quien pregunta", () => {
+  it.each([
+    ["¿Cómo quito por voz un dato de salud?", "pacientes-dictado-quitar-salud"],
+    ["como le digo a clio que el paciente no tiene diabetes", "pacientes-dictado-quitar-salud"],
+    ["Clío puso una enfermedad que no tiene, ¿cómo la quito?", "pacientes-dictado-quitar-salud"],
+    ["¿Qué pasa si anoto un signo vital fuera de lo habitual?", "pacientes-signo-fuera-de-lo-habitual"],
+    ["anoté una temperatura de 29, ¿se guarda?", "pacientes-signo-fuera-de-lo-habitual"],
+    ["por qué dice fuera de lo habitual en los signos vitales", "pacientes-signo-fuera-de-lo-habitual"],
+  ])("«%s» tiene su respuesta", (question, id) => {
+    expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
+  })
+})

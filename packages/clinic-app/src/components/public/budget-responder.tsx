@@ -69,6 +69,12 @@ function lineGuideRows(guide: PatientGuide | null | undefined): Array<[string, s
   return rows.filter((row): row is [string, string] => Boolean(row[1]))
 }
 
+/** Lo que ya se hizo o se está haciendo: no se deja para después. */
+const executed = (status: string) => status === "realizado" || status === "en_curso"
+
+/** «Opción A» en medio de una frase: «la opción A», con su letra como se llama. */
+const midLabel = (label: string) => label.charAt(0).toLocaleLowerCase("es") + label.slice(1)
+
 /**
  * «Ver y responder» (tablero 3): el presupuesto como lo ve la persona, en «Su
  * enlace» y en el portal. Cada línea se marca para aceptarla; lo que no marca
@@ -134,7 +140,10 @@ export function BudgetResponder({
   const hasSessions = lines.some((item) => item.billingMode === "session")
   // Sin elegir opción, todo queda para después: cada tratamiento una vez, sin camino elegido. Solo
   // aceptar pide elegir una (revisión de código del 26 nov), como lo responde el servidor.
-  const postponedItems = [...new Map(budget.items.filter((item) => open(item.decision)).map((item) => [item.planItemId, item])).values()]
+  // Lo que ya se hizo («realizado», «en curso») no se deja para después: queda fuera (QA del 26 nov).
+  const postponedItems = [
+    ...new Map(budget.items.filter((item) => open(item.decision) && !executed(item.itemStatus)).map((item) => [item.planItemId, item])).values(),
+  ]
   const answer = () =>
     onAnswer(
       choosing
@@ -142,7 +151,7 @@ export function BudgetResponder({
         : {
             optionId: several ? (viewedOption?.id ?? null) : null,
             decisions: lines
-              .filter((item) => open(item.decision))
+              .filter((item) => open(item.decision) && !(executed(item.itemStatus) && unchecked.has(item.planItemId)))
               .map((item) => ({
                 planItemId: item.planItemId,
                 decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado",
@@ -155,7 +164,7 @@ export function BudgetResponder({
   const label = choosing
     ? "Lo dejo para después"
     : several && !chosen && viewedOption
-      ? `Elijo la ${viewedOption.label.toLowerCase()}`
+      ? `Elijo la ${midLabel(viewedOption.label)}`
       : noneMarked
         ? "Lo dejo para después"
         : "Acepto lo marcado"

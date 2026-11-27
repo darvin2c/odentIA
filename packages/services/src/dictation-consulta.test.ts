@@ -187,6 +187,32 @@ describe("«Deshacer» vuelve un paso", () => {
   })
 })
 
+// QA del 26 nov (clínica, hallazgo 8): «Me corrijo: el dolor de la 36 dura varios minutos…» reemplazó la
+// evolución entera (con «hoy le hice una profilaxis») y el repaso al firmar volvía a proponer, marcado,
+// el «dolor con el frío que se pasa rápido» que se había corregido.
+describe("una corrección cambia solo lo que corrige y el repaso no lo vuelve a proponer", () => {
+  it("la evolución conserva lo demás, y lo corregido no vuelve en el repaso", async () => {
+    await enable(true)
+    const { fx, segment, notes } = await session()
+    const [note] = (
+      await segment({ drafts: [{ kind: "nota", payload: { evolution: "Hoy le hice una profilaxis. Refiere dolor con el frío en la 36 que se pasa rápido." } }] })
+    ).suggestions
+    const said = "Me corrijo: el dolor de la 36 dura varios minutos y le despierta de noche"
+    await segment({ drafts: [], corrections: [{ suggestionId: note!.id, changes: { evolution: "El dolor de la 36 dura varios minutos y le despierta de noche." }, said }], transcript: said })
+    expect((await notes())[0]?.payload["evolution"]).toBe("Hoy le hice una profilaxis. El dolor de la 36 dura varios minutos y le despierta de noche.")
+    // Ya confirmada, el repaso relee toda la conversación y Clío vuelve a contar lo que se corrigió.
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, note!.id))
+    const review = await segment({
+      review: true,
+      drafts: [{ kind: "nota", payload: { evolution: "Refiere dolor con el frío en la 36 que se pasa rápido." } }],
+      transcript: "Refiere dolor con el frío en la 36 que se pasa rápido. Me corrijo: el dolor de la 36 dura varios minutos y le despierta de noche.",
+    })
+    expect(review.suggestions.filter((item) => item.kind === "nota").map((item) => item.payload)).toEqual([])
+    expect((await notes()).map((item) => item.payload)).toEqual([])
+    await enable(false)
+  })
+})
+
 describe("varias consultas pendientes de antes de este cambio", () => {
   it("al confirmarlas, el tiempo no se junta con «;»: queda el último con lo de antes", async () => {
     await enable(true)

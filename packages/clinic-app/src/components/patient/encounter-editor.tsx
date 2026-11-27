@@ -100,6 +100,7 @@ import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { untilWritten } from "../../lib/write-barrier"
 import {
   ageFrom,
+  ageWords,
   type Encounter,
   type EncounterDetail,
   fetchPatientHealth,
@@ -2742,7 +2743,7 @@ export function EncounterEditor({
             <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
             <span>
               {[
-                age !== "" ? `${age} ${Number(age) === 1 ? "año" : "años"}` : null,
+                ageWords(patient.patient.birthDate) || null,
                 hcLabel(patient.patient.patientNumber),
                 // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
                 encounter.appointmentId ? "desde su cita" : null,
@@ -2781,7 +2782,7 @@ export function EncounterEditor({
           health={stripHealth.data?.data ?? null}
           displayName={patient.patient.displayName}
           shortName={shortPatientName(patient.patient)}
-          age={age !== "" ? `${age} a` : ""}
+          age={age !== "" && Number(age) >= 2 ? `${age} a` : ageWords(patient.patient.birthDate)}
           save={saveChip}
           canDictate={attending && dictation.enabled && dictation.canListen && dictationIdle(dictation)}
           onDictate={() => {

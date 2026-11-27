@@ -625,8 +625,9 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
   const allergies = items.flatMap((item) => linesOf(item, "allergyWarnings"))
   const warnings = [...allergies, ...items.flatMap((item) => linesOf(item, "prescribingWarnings"))]
   const warningWords = allergies.length ? "Aviso de alergia" : "Aviso"
-  // Lo que ya toma del mismo principio o grupo: solo informa, y al emitir queda como visto (ADR 0143).
-  const duplicates = [...new Set(items.flatMap((item) => linesOf(item, "duplicateWarnings")))]
+  // Lo que ya toma del mismo principio o grupo, y lo que avisa la receta del producto (latidIA: un niño
+  // sin peso): solo informa, como en la receta escrita, y al emitir queda como visto (ADR 0143).
+  const duplicates = [...new Set(items.flatMap((item) => [...linesOf(item, "productWarnings"), ...linesOf(item, "duplicateWarnings")]))]
   const waiting = items.filter(
     (item) => item.status !== "lista" && linesOf(item, "allergyWarnings").length + linesOf(item, "prescribingWarnings").length === 0,
   )

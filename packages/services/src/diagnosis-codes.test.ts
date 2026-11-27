@@ -275,6 +275,23 @@ it("en la CIE-10 del MINSA, la categoría sin subdivisiones se registra con su X
   ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("K02.1") })
 })
 
+// QA del 26 nov (desarrollo, H7): la pulpitis de la 36 salía «Ya diagnosticado antes» porque hubo una
+// en la 46: el código era el mismo, el sitio no.
+it("«ya diagnosticado antes» es el mismo diagnóstico en el mismo sitio", async () => {
+  await seedLists()
+  const f = await clinicalFixture()
+  await f.run((tx) => addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 46 }))
+  await closeWith(f, f.encounter.id, "S02.5")
+  const second = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Control" }))
+  const other = await f.run((tx) => addEncounterDiagnosis(tx, ...f.args, second.id, { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 36 }))
+  expect(other.previouslyDiagnosed).toBe(false)
+  const same = await f.run((tx) => addEncounterDiagnosis(tx, ...f.args, second.id, { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 46 }))
+  expect(same.previouslyDiagnosed).toBe(true)
+  // Sin sitio, como siempre: el mismo código sin sitio.
+  const general = await f.run((tx) => addEncounterDiagnosis(tx, ...f.args, second.id, { diagnosisCode: "S02.5", diagnosisType: "confirmed" }))
+  expect(general.previouslyDiagnosed).toBe(true)
+})
+
 it("«ya diagnosticado antes» lo marca el sistema solo dentro de la misma lista", async () => {
   await seedLists()
   const f = await clinicalFixture()

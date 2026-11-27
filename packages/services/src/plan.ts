@@ -2279,7 +2279,9 @@ export async function updatePlanItemPlanning(
   await audit(tx, orgId, actorUserId, "plan.item_planned", "treatment_plan_item", item.id, {
     patientId,
     planId: item.planId,
-    phase: changes.phase ?? null,
+    // La fase elegida, aunque sea la que ya tenía: guardarla con «Planificar…» es elegirla, y el Plan
+    // deja de sugerir otra (QA del 26 nov, H2; `phaseSuggestionsOf`). Mover arriba o abajo no la elige.
+    phase: phase ?? null,
     plannedSessions: changes.plannedSessions ?? null,
     move: input.move ?? null,
   })

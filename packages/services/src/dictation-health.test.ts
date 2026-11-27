@@ -147,6 +147,62 @@ describe("A5 · lo que nombra sale de su frase", () => {
   })
 })
 
+// QA clínica del 26 nov (hallazgo 1): «No tiene hipertiroidismo» dejaba el hipertiroidismo como enfermedad del paciente.
+describe("lo dicho con un «no» no se propone como suyo", () => {
+  const conditions = (names: string[]) => ({ declarante: "paciente", conditions: { state: "recorded", items: names.map((name) => ({ name })) } })
+  const names = (payload: Record<string, unknown> | null) => ((payload?.["conditions"] as { items?: Array<{ name: string }> } | undefined)?.items ?? []).map((item) => item.name)
+
+  it("«no tiene X» y «no tengo X, eso lo tiene mi esposa» van a «No lo usé» con su motivo", () => {
+    const heard = groundHealthNames(conditions(["presión alta", "hipertiroidismo"]), "Sufre de la presión alta. No tiene hipertiroidismo.")
+    expect(names(heard.payload)).toEqual(["presión alta"])
+    expect(heard.denied).toEqual(["hipertiroidismo"])
+    const spouse = groundHealthNames(conditions(["hipertiroidismo"]), "Paciente: no tengo hipertiroidismo, eso lo tiene mi esposa. Tampoco tengo asma.")
+    expect(spouse.payload).toBeNull()
+    expect(spouse.denied).toEqual(["hipertiroidismo"])
+    expect(groundHealthNames(conditions(["asma"]), "No tengo diabetes ni asma").denied).toEqual(["asma"])
+    expect(groundHealthNames(conditions(["asma"]), "Tampoco tiene asma.").denied).toEqual(["asma"])
+    expect(groundHealthNames(conditions(["diabetes"]), "No es diabética.").denied).toEqual(["diabetes"])
+  })
+
+  it("lo que se afirma, se duda o se pregunta sí se propone", () => {
+    for (const said of ["Tiene diabetes no controlada", "No sé si tiene diabetes", "No, tiene diabetes", "¿No tiene diabetes? Sí, diabetes tipo 2.", "No tiene asma pero sí diabetes"])
+      expect(groundHealthNames(conditions(["diabetes"]), said).denied).toEqual([])
+    // Lo que ya no toma se dice con un «no», y ese sí es lo dicho.
+    const stopped = groundHealthNames({ declarante: "paciente", stopped: [{ name: "losartán" }] }, "Ya no toma losartán")
+    expect(stopped.denied).toEqual([])
+    expect(stopped.payload?.["stopped"]).toBeTruthy()
+  })
+})
+
+// QA clínica del 26 nov (hallazgo 4): «tomo algo para la presión» perdía la hipertensión.
+describe("«toma algo para la presión» propone la enfermedad sin inventar la medicina", () => {
+  const names = (payload: Record<string, unknown> | null) => ((payload?.["conditions"] as { items?: Array<{ name: string }> } | undefined)?.items ?? []).map((item) => item.name)
+
+  it("de la medicina sin nombre sale «presión», y la medicina va a «No lo usé»", () => {
+    const heard = groundHealthNames({ declarante: "paciente", medications: { state: "recorded", items: [{ name: "algo para la presión" }] } }, "Tomo algo para la presión, no me acuerdo el nombre.")
+    expect(heard.unnamed).toEqual(["algo para la presión"])
+    expect(heard.payload?.["medications"]).toBeUndefined()
+    expect(names(heard.payload)).toEqual(["presión"])
+  })
+
+  it("«es hipertensa» sugiere la hipertensión arterial, como «presión» (QA del 26 nov, H4)", () => {
+    const rows = healthRows({ declarante: "paciente", conditions: { state: "recorded", items: [{ name: "hipertensa" }, { name: "diabético" }] } })
+    expect(rows.find((row) => row.key === "conditions")?.suggested).toEqual([
+      { said: "hipertensa", name: "Hipertensión arterial" },
+      { said: "diabético", name: "Diabetes mellitus" },
+    ])
+  })
+
+  it("con la medicación «No sabe» también, y no se repite si ya la dijo", () => {
+    const unknown = groundHealthNames({ declarante: "paciente", medications: { state: "unknown" } }, "Toma unas pastillas para el azúcar.")
+    expect(names(unknown.payload)).toEqual(["azúcar"])
+    const twice = groundHealthNames({ declarante: "paciente", conditions: { state: "recorded", items: [{ name: "Hipertensión arterial" }] } }, "Es hipertensa, toma algo para la presión.")
+    expect(names(twice.payload)).toEqual(["Hipertensión arterial"])
+    // Con un «no» antes, nada.
+    expect(groundHealthNames({ declarante: "paciente", medications: { state: "unknown" } }, "No toma nada para la presión.").payload?.["conditions"]).toBeUndefined()
+  })
+})
+
 describe("A6 · lo resuelto no se vuelve a proponer", () => {
   it("lo que quedó en Antecedentes se quita de una propuesta nueva", () => {
     const resolved = [{ medications: { state: "recorded", items: [{ name: "losartán" }] } }]
@@ -162,13 +218,41 @@ describe("cada dato de su salud con la frase en que se oyó", () => {
     const second = { declarante: "paciente", allergies: { state: "unknown" }, medications: { state: "recorded", items: [{ name: "losartán" }, { name: "metformina" }] } }
     const said = healthSaidOf(second, "y metformina en el almuerzo, y alergias no que yo sepa", healthSaidOf(first, "si tomo losartan para la presion"))
     const rows = withSaidPhrases(healthRows({ ...second, medications: second.medications }), said)
+    // La lista cita la oración de cada medicina: la del losartán y la de la metformina (QA clínica del 26 nov, hallazgo 7).
     expect(Object.fromEntries(rows.map((row) => [row.key, row.said]))).toEqual({
-      medications: "y metformina en el almuerzo, y alergias no que yo sepa",
+      medications: "si tomo losartan para la presion y metformina en el almuerzo, y alergias no que yo sepa",
       allergies: "y metformina en el almuerzo, y alergias no que yo sepa",
     })
     // Sin frase no se inventa una.
     expect(healthSaidOf(first, "  ", { medications: "antes" })).toEqual({ medications: "antes" })
     expect(withSaidPhrases(healthRows(first))[0]?.said).toBeUndefined()
+  })
+})
+
+// QA clínica del 26 nov (hallazgo 7): la preeclampsia citaba «Tomo sulfato ferroso…», y las
+// enfermedades dichas en tres pausas citaban solo la última.
+describe("cada dato cita la oración que lo dice", () => {
+  it("de la pausa entera, aunque Clío cite otra frase", () => {
+    const payload = {
+      declarante: "paciente",
+      medications: { state: "recorded", items: [{ name: "sulfato ferroso" }] },
+      family: { state: "recorded", items: [{ relation: "madre", name: "preeclampsia" }] },
+      personal: { embarazo: true, semanasEmbarazo: 24 },
+    }
+    const pause = "Estoy embarazada de 24 semanas. Mi mamá tuvo preeclampsia. Tomo sulfato ferroso y ácido fólico una vez al día."
+    const said = healthSaidOf(payload, "Tomo sulfato ferroso y ácido fólico una vez al día.", {}, undefined, pause)
+    const family = Object.entries(said).find(([key]) => key.startsWith("family:"))?.[1]
+    expect(family).toBe("Mi mamá tuvo preeclampsia.")
+    expect(said["personal.embarazo"]).toBe("Estoy embarazada de 24 semanas.")
+    expect(said["medications"]).toBe("Tomo sulfato ferroso y ácido fólico una vez al día.")
+  })
+
+  it("una lista cita la oración de cada uno de sus datos", () => {
+    const first = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "Diabetes" }] } }
+    const before = healthSaidOf(first, "Es diabético desde hace diez años.")
+    const now = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "Diabetes" }, { name: "presión alta" }] } }
+    const said = healthSaidOf({ declarante: "paciente", conditions: { state: "recorded", items: [{ name: "presión alta" }] } }, "Y sufre de la presión alta.", before, { was: first, now })
+    expect(said["conditions"]).toBe("Es diabético desde hace diez años. Y sufre de la presión alta.")
   })
 })
 

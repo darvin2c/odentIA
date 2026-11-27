@@ -160,6 +160,63 @@ it("dos opciones: cada una con su total, nunca sumadas; al elegir una, la otra q
   ).rejects.toMatchObject({ code: "BUDGET_DECISION_FINAL" })
 })
 
+// QA del 26 nov (clínica, hallazgo 2): con la profilaxis hecha hoy en lo común, «Lo dejo para después»
+// del enlace fallaba con «No puede retirar la aceptación de un tratamiento ejecutado».
+it("dejarlo para después, sin elegir camino, deja fuera lo que ya se hizo", async () => {
+  const { f, items } = await withItems(3)
+  const [profilaxis, resina, corona] = items as [(typeof items)[number], (typeof items)[number], (typeof items)[number]]
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [profilaxis.id, resina.id] }))
+  const two = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
+  const optionB = two.options[1]!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [resina.id], optionId: optionB.id }))
+  await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await ownerDb.update(treatmentPlanItem).set({ status: "realizado" }).where(eq(treatmentPlanItem.id, profilaxis.id))
+  // Como lo manda el enlace: sin lo ya hecho.
+  const postponed = await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      optionId: null,
+      decisions: [
+        { planItemId: resina.id, decision: "pospuesto" },
+        { planItemId: corona.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  expect(postponed.status).toBe("pospuesto")
+  const [done] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, profilaxis.id))
+  expect(done?.status).toBe("realizado")
+  expect(done?.decisionStatus).toBe("pendiente")
+})
+
+it("posponer lo ya hecho no lo cambia ni frena lo demás; rechazarlo sí avisa", async () => {
+  const { f, items } = await withItems(2)
+  const [profilaxis, resina] = items as [(typeof items)[number], (typeof items)[number]]
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [profilaxis.id, resina.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await ownerDb.update(treatmentPlanItem).set({ status: "realizado" }).where(eq(treatmentPlanItem.id, profilaxis.id))
+  await expect(
+    f.run((tx) =>
+      decideBudget(tx, ...f.args, draft.id, {
+        decisions: [
+          { planItemId: profilaxis.id, decision: "rechazado" },
+          { planItemId: resina.id, decision: "pospuesto" },
+        ],
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "ITEM_IN_EXECUTION" })
+  const postponed = await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      decisions: [
+        { planItemId: profilaxis.id, decision: "pospuesto" },
+        { planItemId: resina.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  expect(postponed.status).toBe("pospuesto")
+  const [done] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, profilaxis.id))
+  expect(done?.decisionStatus).toBe("pendiente")
+})
+
 it("las opciones solo cambian en borrador; siempre queda una y se renumeran", async () => {
   const { f, items } = await withItems(1)
   const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [items[0]!.id] }))

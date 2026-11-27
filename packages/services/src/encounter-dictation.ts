@@ -99,6 +99,7 @@ import {
   mergeHealth,
   unnamedMedicineWhy,
   vagueConditionWhy,
+  deniedHealthWhy,
   prepareHealth,
   saidInDoubt,
   selfCorrectedHealth,
@@ -139,7 +140,7 @@ import {
   withoutFormNotes,
   withoutRepeatedNotes,
 } from "./dictation-forms.js"
-import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationServiceFit, ProductDictation, ProductHooks } from "./product-hooks.js"
+import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationServiceFit, PrescribingReview, ProductDictation, ProductHooks } from "./product-hooks.js"
 import type { ProductCatalog } from "./product-catalog.js"
 import { clinicToday } from "./inventory-stock.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
@@ -489,7 +490,20 @@ const words = (text: string) => normalizeForSearch(text).split(" ").filter((word
 const NOT_SERVICE_WORDS = new Set([
   "una", "uno", "unos", "unas", "del", "las", "los", "con", "por", "para", "que", "hoy", "ahora", "nueva", "nuevo", "otra", "otro",
   "tratamiento", "procedimiento", "cambio", "cambios", "par", "pares", "caja", "cajas", "sobre", "sobres", "unidad", "unidades",
+  // La sesión de un tratamiento no dice cuál es: «la primera sesión de la endodoncia» (QA del 26 nov, H5).
+  "sesion", "sesiones", "primera", "segunda", "tercera", "cuarta", "ultima",
 ])
+
+/**
+ * ¿Lo dicho empieza por lo mismo que el nombre del tratamiento («la primera sesión de la endodoncia» y
+ * «Endodoncia posterior vital»)? La primera palabra dice qué es (`matchService`): «resina» no es
+ * «Carilla de resina». Solo para lo que el plan ya indicaba (`settleDone`).
+ */
+function sameTreatmentHead(spoken: string, title: string, lookup: ServiceWords): boolean {
+  const first = words(spoken).find((word) => !NOT_SERVICE_WORDS.has(word) && !lookup.place.has(word) && !DONE_VERB.test(word) && !NUMBER_WORD.test(word))
+  const head = words(title)[0]
+  return !!first && !!head && sameWord(first, head)
+}
 /** Lo que se hizo, no la prestación: «cambiamos», «hicimos», «le hice», «coloqué». */
 const DONE_VERB = /^(?:[a-z]{3,}(?:amos|emos|imos)|hice|hizo|puse|puso|coloque|termine|realice|cambie|cemente|aplique|saque)$/
 /** Un número dicho («la cinco cinco», «de dos caras»): dice dónde o cuánto, no cuál prestación. */
@@ -937,11 +951,12 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     const list = DIAGNOSIS_SYSTEM_INFO[diagnosisSystem].title
     if (!known) return { payload: { ...payload, diagnosisCode: code, diagnosisSystem }, status: "por_revisar", note: `El código ${code} no está en la lista ${list} de la clínica. Elige el diagnóstico.` }
     if (known.isCategory) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: `${known.code} es una categoría: elige el subcódigo más específico.` }
-    // Dicho con su código, «Dijiste»; con palabras, el código lo puso Clío: «Entendí».
+    // Dicho con su código, «Dijiste»; con palabras, el código lo puso Clío y lo dice así: «Entendí J03.90»
+    // hacía creer que se había dicho un código (QA clínica del 26 nov).
     const changed =
       normalizeDiagnosisCode(diagnosisSystem, code) === known.code
         ? null
-        : `${normalizeForSearch(draft.sourceText ?? "").includes(normalizeForSearch(code)) ? "Dijiste" : "Entendí"} ${code}; la lista de la clínica tiene ${known.code} («${known.description}»). Revísalo.`
+        : `${normalizeForSearch(draft.sourceText ?? "").includes(normalizeForSearch(code)) ? "Dijiste" : "Clío propuso"} ${code}; la lista de la clínica tiene ${known.code} («${known.description}»). Revísalo.`
     // Un nombre que contradice lo dictado («sin fístula» con la fístula dicha) queda por revisar, con
     // el hermano de la lista que calza si lo hay (prueba con voz del 15 nov, c4b, v07).
     const review = await reviewDiagnosis({ code: known.code, title: known.description }, draft.sourceText ?? "", scope.said ?? (scope.transcript ? [scope.transcript] : []), async (words) =>
@@ -1308,6 +1323,11 @@ interface PatientChecks {
    * ATC solo informa), y el embarazo y el anticoagulante que avisa `prescribingAlerts`, como al emitir.
    */
   prescribing: PrescribingSituation
+  /**
+   * Lo que revisa la receta del producto al emitir (`ProductPrescribing.review`; latidIA: un controlado
+   * frena por norma, el peso que falta a un niño avisa), con lo que tendrá la receta dictada: sin peso.
+   */
+  review: (genericName: string) => Promise<PrescribingReview>
 }
 
 /** Lo que se puede hacer hoy de un tratamiento: no está cerrado ni suspendido, y está aceptado o espera respuesta. */
@@ -1362,13 +1382,16 @@ async function patientChecks(tx: Db, orgId: string, patientId: string, encounter
       inSentBudget: Boolean(item.budgetId && sent.has(item.budgetId)),
     }
   })
-  const catalog = (await productHooks(tx, orgId)).prescribing.catalog
+  const productPrescribing = (await productHooks(tx, orgId)).prescribing
+  const catalog = productPrescribing.catalog
   return {
     allergies,
     dictatedAllergies,
     choiceBlocked: pendingChoice ? CHOICE_ALREADY_HERE : draftOptions > 1 ? CHOICE_ALREADY_IN_BUDGET : null,
     planItems,
     prescribing: await prescribingSituationOf(tx, orgId, patientId, catalog),
+    // La receta dictada se emite sin peso (`issueDictationPrescription`): se revisa así.
+    review: (genericName) => productPrescribing.review(tx, { orgId, patientId, items: [{ genericName }], weightKg: null }),
   }
 }
 
@@ -1395,7 +1418,7 @@ async function withPatient(
   checks: PatientChecks,
   scope: DictationScope,
 ): Promise<Prepared> {
-  const ready = checkAgainstPatient(kind, prepared, checks, scope)
+  const ready = await checkAgainstPatient(kind, prepared, checks, scope)
   if (kind === "cita") return settleAppointment(tx, orgId, patientId, encounterId, ready, checks)
   if (kind === "presupuesto") return previewBudget(tx, orgId, patientId, encounterId, ready, scope)
   if (kind === "material") return settleMaterial(tx, orgId, encounterId, ready)
@@ -1627,10 +1650,13 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
   const { planItemId: _item, acceptOnDo: _accept, source: _source, pending: _pending, ...base } = prepared.payload
   const said = placeOf(base)
   const spoken = String(base["service"] ?? "")
+  // Lo que el plan indicaba se reconoce por su nombre o por lo que dice qué es: una sesión dicha («la
+  // primera sesión de la endodoncia») es la del tratamiento abierto, no un acto libre fuera del plan.
   const byService = checks.planItems.filter((item) =>
     typeof base["serviceId"] === "string"
       ? item.serviceId === base["serviceId"]
-      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }], lookup).match !== null,
+      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }], lookup).match !== null ||
+        sameTreatmentHead(spoken, item.title, lookup),
   )
   const fits = byService.filter((item) => said.tooth === null || item.toothNumber === null || item.toothNumber === said.tooth)
   // Con la pieza dicha, la de esa pieza; sin pieza, solo si hay uno: entre dos resinas no se adivina.
@@ -1669,21 +1695,30 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
  * queda por revisar con el aviso de siempre (la misma regla que «Emitir
  * receta»), y una elección de caminos que no cabe en su presupuesto espera.
  */
-function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, scope: Pick<DictationScope, "medications" | "dictation" | "serviceWords">): Prepared {
+async function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, scope: Pick<DictationScope, "medications" | "dictation" | "serviceWords">): Promise<Prepared> {
   const { medications, dictation } = scope
   if (kind === "receta") {
-    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, ...rest } = prepared.payload
+    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, productWarnings: _oldProduct, ...rest } = prepared.payload
     const genericName = String(rest["genericName"] ?? "")
     // Lo que ya toma del mismo principio o grupo: solo informa, en la tarjeta (ADR 0143).
     const duplicates = duplicateWarnings([{ genericName }], checks.prescribing.taking, medications)
-    const payload = duplicates.length ? { ...rest, duplicateWarnings: duplicates } : rest
+    // Lo que revisa la receta del producto, como la escrita a mano (QA del 26 nov, hallazgo 3: a un niño
+    // de 8 años sin peso, la dictada se emitía sin el aviso). Lo que avisa informa en la tarjeta y al
+    // emitir queda como visto; lo que frena por norma (un controlado) se revisa en la receta.
+    const product = genericName.trim() ? await checks.review(genericName) : { errors: [], warnings: [] }
+    const productWarnings = product.warnings ?? []
+    const payload = {
+      ...rest,
+      ...(duplicates.length ? { duplicateWarnings: duplicates } : {}),
+      ...(productWarnings.length ? { productWarnings } : {}),
+    }
     const onFile = allergyWarnings(genericName, checks.allergies as never, medications)
     // La alergia que se acaba de dictar avisa igual, aunque aún no se confirme.
     const dictated = allergyWarnings(genericName, checks.dictatedAllergies as never, medications).filter((line) => !onFile.includes(line))
     const warnings = [...onFile, ...dictated]
     // Lo que avisa toda receta, como al emitirla (QA final de formularios, Y1): el embarazo, un AINE con
     // un anticoagulante. Sin esto la tarjeta decía «lista» y al emitir se rechazaba con el aviso.
-    const alerts = prescribingAlerts(checks.prescribing, [{ genericName }], medications.medications).warnings
+    const alerts = [...prescribingAlerts(checks.prescribing, [{ genericName }], medications.medications).warnings, ...product.errors]
     if (!warnings.length && !alerts.length) return { ...prepared, payload }
     const note = [
       onFile.length ? `Aviso de alergia: ${onFile.join(" ")}` : "",
@@ -1764,6 +1799,33 @@ const FIELD_LABEL = Object.fromEntries(
   ]),
 ) as Record<DictationKind, Record<string, string>>
 
+/**
+ * Lo que las correcciones por voz reemplazaron en la consulta de esta atención: las oraciones de cada
+ * paso de «Deshacer» que ya no dice lo que quedó. El repaso no las vuelve a proponer.
+ */
+async function replacedByVoice(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ payload: encounterDictationSuggestion.payload })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.kind, "nota"),
+      ),
+    )
+  const texts = (payload: Record<string, unknown>) => Object.values(payload).filter((value): value is string => typeof value === "string")
+  const out: string[] = []
+  for (const row of rows) {
+    const { data, meta } = splitMeta(row.payload)
+    const now = texts(data).join(" ")
+    for (let step = meta.voice; step; step = step.previous)
+      for (const sentence of texts(step.payload).flatMap(noteSentences)) if (!saysAlready(now, sentence) && !out.includes(sentence)) out.push(sentence)
+  }
+  return out
+}
+
 /** Los campos de la consulta que son una sola línea: dicho distinto, queda lo último (mesa del 20 nov 2026). */
 const NOTE_ONE_LINE = new Set(["reason", "illnessDuration"])
 
@@ -1775,6 +1837,44 @@ export const withoutLooseEnd = (text: string) => text.replace(/[\s;,]+$/u, "").t
 
 /** ¿`text` ya dice `part`, palabra por palabra? «dos meses» no dice «s meses». */
 const saysAlready = (text: string, part: string) => ` ${normalizeForSearch(text)} `.includes(` ${normalizeForSearch(part)} `)
+
+/** Las oraciones de un texto de la consulta. */
+const noteSentences = (text: string) =>
+  text
+    .split(/(?<=[.;!?\n])\s+/u)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => /[\p{L}\p{N}]/u.test(sentence))
+
+/** Palabras de cuatro letras o más que no dicen de qué habla una oración. */
+const NOTE_FILLER = new Set(["para", "como", "pero", "porque", "desde", "hace", "tiene", "esta", "este", "esto", "refiere", "presenta", "paciente", "cuando", "donde", "sobre", "entre", "tambien", "hasta", "todo", "nada", "algo", "solo", "mucho", "poco", "ahora", "luego", "despues", "antes", "corrijo", "perdon"])
+
+/** De qué habla una oración: sus palabras que distinguen, por su comienzo, y sus números («36»). */
+const noteTopic = (sentence: string) =>
+  new Set(
+    normalizeForSearch(sentence)
+      .split(" ")
+      .filter((word) => /^\d+$/.test(word) || (word.length >= 4 && !NOTE_FILLER.has(word)))
+      .map((word) => (/^\d+$/.test(word) ? word : word.slice(0, 5))),
+  )
+
+/**
+ * Lo que queda de un texto de varias oraciones al corregirlo por voz: cambia solo lo que la corrección
+ * corrige y lo demás se queda (QA del 26 nov, hallazgo 8: «me corrijo: el dolor de la 36 dura varios
+ * minutos» se llevó también «hoy le hice una profilaxis»). Se reemplazan las oraciones que hablan de lo
+ * mismo que la corrección (comparten una palabra que lo distingue o un número); si ninguna, la última,
+ * que es lo último que se dictó. Si Clío ya trae el texto entero corregido, queda ese.
+ */
+export function correctedNoteText(old: string, now: string): string {
+  const before = noteSentences(old)
+  if (before.length <= 1 || before.some((sentence) => saysAlready(now, sentence))) return now
+  const topic = noteTopic(now)
+  const touched = before.map((sentence) => [...noteTopic(sentence)].some((word) => topic.has(word)))
+  const replaced = touched.some(Boolean) ? touched : before.map((_, index) => index === before.length - 1)
+  const first = replaced.indexOf(true)
+  return before
+    .flatMap((sentence, index) => (index === first ? [now.trim()] : replaced[index] ? [] : [sentence]))
+    .join(" ")
+}
 
 /**
  * Lo nuevo de la consulta, sumado a la que ya estaba pendiente (mesa del 20 nov 2026): una pausa
@@ -2261,7 +2361,12 @@ export async function saveDictationSegment(
         const now = textOf(value)
         return !!old && !!now && !saysAlready(old, now) && (corrects || (!NOTE_ONE_LINE.has(key) && !saysAlready(now, old)))
       }
-      const real = Object.fromEntries(Object.entries(changes).filter(([key, value]) => isReal(key, value)))
+      // Lo de varias oraciones cambia solo en lo que se corrige; lo demás sigue (`correctedNoteText`).
+      const real = Object.fromEntries(
+        Object.entries(changes)
+          .filter(([key, value]) => isReal(key, value))
+          .map(([key, value]) => [key, NOTE_ONE_LINE.has(key) ? value : correctedNoteText(textOf(stored[key]), textOf(value))]),
+      )
       const extra = Object.fromEntries(Object.entries(changes).filter(([key, value]) => !isReal(key, value)))
       const merged = Object.keys(extra).length ? mergeNote(stored, extra, corrects) : null
       voiceTouched.set(row.id, new Set([...(voiceTouched.get(row.id) ?? []), ...Object.keys(changes)]))
@@ -2287,6 +2392,7 @@ export async function saveDictationSegment(
       const heard = groundHealthNames(changes, said ?? "")
       if (heard.unnamed.length && said?.trim()) droppedForms.push({ said: said.trim(), why: unnamedMedicineWhy(heard.unnamed), targets: [] })
       if (heard.vague.length && said?.trim()) droppedForms.push({ said: said.trim(), why: vagueConditionWhy(heard.vague), targets: [] })
+      if (heard.denied.length && said?.trim()) droppedForms.push({ said: said.trim(), why: deniedHealthWhy(heard.denied), targets: [] })
       if (!heard.payload) return false
       // Sin palabras de corrección no es una corrección: lo nuevo se suma, como lo de una pausa. Una
       // medicina más no reemplaza a la que ya dijo (QA del 23 nov, verificador 2: «toma algo para la
@@ -2296,7 +2402,7 @@ export async function saveDictationSegment(
       const merged = mergeHealth(data, heard.payload, fixes ? (said ?? true) : false)
       const ready = prepareHealth(merged.payload, undefined, dictation.health)
       if (!ready || JSON.stringify(ready.payload) === JSON.stringify(data)) return false
-      const saidNow = healthSaidOf(heard.payload, said, meta.said, { was: data, now: ready.payload })
+      const saidNow = healthSaidOf(heard.payload, said, meta.said, { was: data, now: ready.payload }, segment.transcript)
       if (!fixes) {
         const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
           step && { ...step, payload: mergeHealth(step.payload, heard.payload ?? {}).payload, previous: withAdded(step.previous) }
@@ -2550,9 +2656,14 @@ export async function saveDictationSegment(
     : []
   // Lo que ya cuenta una nota pendiente no se cuenta otra vez (c5: la frase que cortó la pausa); en
   // el repaso, tampoco lo de una consulta ya confirmada o descartada.
-  const pendingNotes = [...pendingNow, ...settled]
-    .filter((item) => item.kind === "nota")
-    .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
+  // En el repaso, tampoco lo que una corrección por voz reemplazó: se corrigió, no vuelve (QA del 26 nov,
+  // hallazgo 8: «dolor con el frío que se pasa rápido» volvía marcado al firmar).
+  const pendingNotes = [
+    ...[...pendingNow, ...settled]
+      .filter((item) => item.kind === "nota")
+      .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string")),
+    ...(segment.review ? await replacedByVoice(tx, orgId, patientId, encounterId) : []),
+  ]
   const { drafts, twins } = withFormTwins(
     withoutRepeatedNotes(withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], scope.formQuestions, scope.site, scope.transcript), pendingNotes, { review: !!segment.review }),
     scope.formQuestions,
@@ -2579,6 +2690,7 @@ export async function saveDictationSegment(
         droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
       if (inPhrase.unnamed.length) droppedForms.push({ said: phrase, why: unnamedMedicineWhy(inPhrase.unnamed), targets: [] })
       if (inPhrase.vague.length) droppedForms.push({ said: phrase, why: vagueConditionWhy(inPhrase.vague), targets: [] })
+      if (heard.denied.length) droppedForms.push({ said: phrase, why: deniedHealthWhy(heard.denied), targets: [] })
       if (!heard.payload) continue
       draft = { ...said, payload: heard.payload }
       // «Tomo warfarina, no, perdón, apixabán»: queda lo último, con «antes dijo warfarina» (QA del 21 nov, C2).
@@ -2785,7 +2897,7 @@ export async function saveDictationSegment(
                   ...meta,
                   voice: withAdded(meta.voice),
                   earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
-                  said: healthSaidOf(fresh, draft.sourceText, meta.said, { was: data, now: health.payload }),
+                  said: healthSaidOf(fresh, draft.sourceText, meta.said, { was: data, now: health.payload }, segment.transcript),
                 }),
               ),
               sourceText: joinSource(row.sourceText, draft.sourceText),
@@ -2805,7 +2917,7 @@ export async function saveDictationSegment(
         newHealth.payload = withMeta(health.payload, {
           ...meta,
           earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
-          said: healthSaidOf(ready.payload, draft.sourceText, meta.said, { was: data, now: health.payload }),
+          said: healthSaidOf(ready.payload, draft.sourceText, meta.said, { was: data, now: health.payload }, segment.transcript),
         })
         newHealth.sourceText = joinSource(newHealth.sourceText ?? "", draft.sourceText)
       }
@@ -2953,7 +3065,7 @@ export async function saveDictationSegment(
         ready.payload,
         stamp({
           ...(healthEarlier.has(draft) ? { earlier: healthEarlier.get(draft) } : {}),
-          ...(draft.kind === "salud" ? { said: healthSaidOf(ready.payload, draft.sourceText) } : {}),
+          ...(draft.kind === "salud" ? { said: healthSaidOf(ready.payload, draft.sourceText, {}, undefined, segment.transcript) } : {}),
         }),
       ),
       sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS),
@@ -3406,7 +3518,7 @@ async function refreshRecipes(tx: Db, orgId: string, patientId: string, encounte
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   for (const row of rows) {
     const { data, meta } = splitMeta(row.payload)
-    const ready = checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope)
+    const ready = await checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope)
     if (ready.status === row.status && ready.note === row.note) continue
     await tx
       .update(encounterDictationSuggestion)
@@ -4376,10 +4488,14 @@ export async function issueDictationPrescription(
   if (rows.length === 0) throw conflict("NO_DICTATED_PRESCRIPTION", "No hay una receta dictada por emitir")
   const waiting = rows.find((row) => row.status !== "lista")
   if (waiting) throw conflict("SUGGESTION_NEEDS_REVIEW", waiting.note ?? "Completa la receta antes de emitirla")
-  // Los duplicados que mostró la tarjeta quedan como vistos; la alergia se resuelve en el formulario.
+  // Los duplicados y los avisos de la receta del producto (el peso de un niño) que mostró la tarjeta
+  // quedan como vistos; la alergia se resuelve en el formulario.
   const shownDuplicates = rows.flatMap((row) => {
-    const lines = splitMeta(row.payload).data["duplicateWarnings"]
-    return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : []
+    const data = splitMeta(row.payload).data
+    return ["duplicateWarnings", "productWarnings"].flatMap((key) => {
+      const lines = data[key]
+      return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : []
+    })
   })
   const created = await createPrescription(tx, orgId, actorUserId, patientId, {
     encounterId,

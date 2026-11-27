@@ -257,7 +257,9 @@ export function localAnesthesiaWords(input: {
       ...epinephrineCap.conditions.map((condition) => `su ${condition}`),
       ...(epinephrineCap.pressure ? [`la presión de hoy (${epinephrineCap.pressure})`] : []),
     ])
-    cap = `Sugerencia: epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por ${why} (unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos)`
+    // Los cartuchos junto a los mg: detrás del motivo quedaban dos paréntesis seguidos («la presión de
+    // hoy (150/95) (unos 2,2 cartuchos)», QA del 26 nov, H7).
+    cap = `Sugerencia: epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg (unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos) por ${why}`
   }
   // Con cualquier anestésico: la presión de hoy dice si está controlada y si lo electivo se difiere.
   if (input.epinephrine?.takePressure)
@@ -382,8 +384,8 @@ export interface AnesthesiaAtSigning {
   /** El anestésico elegido para el cálculo («Lidocaína 2 % con epinefrina 1:100 000»). */
   anesthetic: string | null
   /**
-   * El tope de epinefrina, que manda sobre el máximo por peso: «Sugerencia: epinefrina hasta 0,04 mg por su ASA
-   * III (unos 2,2 cartuchos)». Lo firmado antes del 18 nov no lo tiene: lo lleva en `warnings`.
+   * El tope de epinefrina, que manda sobre el máximo por peso: «Sugerencia: epinefrina hasta 0,04 mg (unos 2,2
+   * cartuchos) por su ASA III». Lo firmado antes del 18 nov no lo tiene: lo lleva en `warnings`.
    */
   cap?: string | null
   /** «Máximo para 22 kg con…» o, con tope, «Máximo por peso (64 kg): 7,8»; nulo sin peso. */

@@ -593,7 +593,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return {
           id: faq.id,
           q: faq.q,
-          a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los del ojo. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. El ojo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+          a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los del ojo. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. El ojo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, sale marcado «Ya diagnosticado antes»; el tipo lo eliges igual.",
         }
       return faq
     }),
@@ -695,6 +695,9 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "pacientes-dictado-lo-que-se-dijo": () => [],
   "pacientes-dictado-terminar-escribiendo": () => [],
   "pacientes-dictado-salud": () => [],
+  "pacientes-dictado-quitar-salud": () => [],
+  // Una óptica no toma signos vitales.
+  "pacientes-signo-fuera-de-lo-habitual": () => [],
   "pacientes-dictado-no-lo-registro": () => [],
   "pacientes-dictado-llevar-a-su-salud": () => [],
   "pacientes-dictado-quien-hablo": () => [],

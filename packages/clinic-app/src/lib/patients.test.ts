@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { setOrgLocale } from "./locale"
-import { ageFrom, splitPlans, type TreatmentPlanWithStatus } from "./patients"
+import { ageFrom, ageWords, splitPlans, type TreatmentPlanWithStatus } from "./patients"
 
 const plan = (id: string, over: Partial<TreatmentPlanWithStatus>): TreatmentPlanWithStatus => ({
   plan: { id, patientId: "p", title: "Plan de tratamiento", originEncounterId: null, isLegacy: false, createdAt: "2026-11-06T15:00:00.000Z" },
@@ -59,5 +59,14 @@ describe("la edad, con el día de la clínica", () => {
     expect(ageFrom(null)).toBe("")
     expect(ageFrom("no-es-fecha")).toBe("")
     expect(ageFrom("2030-01-01")).toBe("")
+  })
+  // QA clínica del 26 nov: un niño de 18 meses salía «1 año» en la ficha y la atención.
+  it("antes de los dos años se dice en meses; después, en años", () => {
+    at("2026-11-26T15:00:00Z")
+    expect(ageWords("2025-05-10")).toBe("18 meses")
+    expect(ageWords("2024-11-26")).toBe("2 años")
+    expect(ageWords("1990-01-01")).toBe("36 años")
+    expect(ageWords(null)).toBe("")
+    expect(ageWords("2030-01-01")).toBe("")
   })
 })

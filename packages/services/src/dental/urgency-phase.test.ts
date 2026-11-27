@@ -146,3 +146,19 @@ it("la fase elegida al indicar cuenta como elegida: el Plan no sugiere cambiarla
   expect(shown.find((item) => item.id === chosen.id)?.phaseSuggestion).toBeUndefined()
   expect(shown.find((item) => item.id === other.id)?.phaseSuggestion).toContain("iría en «Urgencia»")
 })
+
+// QA del 26 nov (desarrollo, H2): «Planificar…» guardado con la misma fase no hacía desaparecer la
+// sugerencia: elegir con «Planificar…» es elegir, aunque sea la fase que ya tenía.
+it("guardar «Planificar…» con la misma fase cuenta como elegida y la sugerencia se va", async () => {
+  const f = await withDentalServices()
+  const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 })
+  await f.diagnose("K04.0", 36)
+  const suggestedOf = async () =>
+    (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))).find((item) => item.id === endo.id)?.phaseSuggestion
+  expect(await suggestedOf()).toContain("iría en «Urgencia»")
+  // Mover arriba o abajo no elige la fase.
+  await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, endo.id, { move: "up" }))
+  expect(await suggestedOf()).toContain("iría en «Urgencia»")
+  await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, endo.id, { phase: "basica" }))
+  expect(await suggestedOf()).toBeUndefined()
+})

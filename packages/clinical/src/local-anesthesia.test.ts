@@ -107,7 +107,9 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
   }
   const hta = { name: "Hipertensión esencial", diagnosisSystem: "ICD-10", diagnosisCode: "I10" }
   const fa = { name: "Fibrilación auricular", diagnosisSystem: "ICD-10", diagnosisCode: "I48" }
-  const cap = (why: string) => `Sugerencia: epinefrina hasta 0,04 mg por ${why} (unos 2,2 cartuchos)`
+  // Los cartuchos van junto a los mg: «por la presión de hoy (165/100) (unos 2,2 cartuchos)» llevaba
+  // dos paréntesis seguidos (QA del 26 nov, H7).
+  const cap = (why: string) => `Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por ${why}`
 
   // QA de diseño del 18 nov (H7): el primer número que se leía era el máximo por peso (7,8), no el tope (2,2).
   it("con tope, lo que manda va primero y el máximo por peso después, corto", () => {
@@ -118,7 +120,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       epinephrine: check({ asaClass: "III" }),
     })
     expect(words).toEqual({
-      cap: "Sugerencia: epinefrina hasta 0,04 mg por su ASA III (unos 2,2 cartuchos)",
+      cap: "Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por su ASA III",
       dose: "Máximo por peso (64 kg): 7,8 cartuchos",
       warnings: [],
     })

@@ -557,6 +557,18 @@ export function portalTotalsText(
 }
 
 /**
+ * El total de un presupuesto como se dice en una lista: con varias opciones y ninguna elegida, el de
+ * cada una («2 opciones: S/ 650.00 o S/ 150.00»), como el PDF; nunca el de la primera como si fuera el
+ * del presupuesto (QA del 26 nov, H3). Con una sola, o con una elegida, su total.
+ */
+export function portalBudgetTotalText(budget: Pick<PortalBudget, "currency" | "locale" | "totals" | "totalCents" | "options">): string {
+  const several = budget.options.length > 1
+  if (several && !budget.options.some((option) => option.decision === "elegida"))
+    return `${budget.options.length} opciones: ${budget.options.map((option) => portalTotalsText(option, budget)).join(" o ")}`
+  return portalTotalsText(budget, budget)
+}
+
+/**
  * Fecha y hora en el formato y la zona de la clínica (la de la sede, si se da),
  * nunca en los del navegador: «vence el 20 oct, 10:00» es la hora de la clínica
  * aunque el equipo o la persona estén en otra zona. Sin clínica conocida, los

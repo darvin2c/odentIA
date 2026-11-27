@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, prescription, serviceCatalog } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -8,11 +8,13 @@ import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js
 import {
   confirmDictationSuggestion,
   dictationModelLabel,
+  issueDictationPrescription,
   listDictationSuggestions,
   saveDictationSegment,
   settleDictationMedicalLeave,
 } from "../encounter-dictation.js"
 import { createMedicalLeave } from "../medical-leaves.js"
+import { setTestPatientIdentity } from "../test-patient.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { MEDICAL_DICTATION } from "./dictation.js"
 
@@ -151,7 +153,8 @@ describe("Clío médica (issue 229, entrega 10)", () => {
       })
       expect(knee?.note).toContain("No reconozco «rodilla»")
       expect(half).toMatchObject({ status: "por_revisar" })
-      expect(half?.note).toContain("presión arterial completa")
+      // Como al teclearla: se guarda la que se dijo, con su aviso (QA del 26 nov, H10).
+      expect(half?.note).toMatch(/^Aviso: falta la (?:diastólica|sistólica)\./)
       expect(diagnosis).toMatchObject({ status: "lista", payload: { diagnosisCode: "J03.9" } })
       expect(diagnosis?.payload).not.toHaveProperty("toothNumber")
       expect(plan).toMatchObject({ status: "lista", payload: { serviceId: fx.service.id } })
@@ -255,6 +258,39 @@ describe("Clío médica (issue 229, entrega 10)", () => {
       expect(items.find((item) => item.id === recipe!.id)).toMatchObject({
         payload: { duration: "5 días", quantity: 15, quantityCalculated: true },
       })
+    } finally {
+      await enable(false)
+      await setProduct("dental")
+    }
+  })
+
+  // QA del 26 nov (clínica, hallazgo 3): la receta dictada a Lucas, 8 años y sin peso, decía «Lista para
+  // emitir» y se emitía sin el aviso que sí sale en la receta escrita a mano.
+  it("la receta dictada a un niño sin peso avisa como la escrita, se emite igual y queda como visto", async () => {
+    await setProduct("medical")
+    await enable(true)
+    try {
+      const fx = await clinicalFixture()
+      const year = new Date().getUTCFullYear() - 8
+      await setTestPatientIdentity(ownerDb, fx.patient.id, { birthDate: `${year}-01-01` })
+      const [recipe] = (
+        await fx.run((tx) =>
+          saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
+            drafts: [
+              {
+                kind: "receta",
+                payload: { genericName: "amoxicilina", strength: "250 mg/5 mL", dosageForm: "suspensión", dose: "10 mL", frequency: "cada 12 horas", duration: "10 días", quantity: 1 },
+              },
+            ],
+          }),
+        )
+      ).suggestions
+      const warning = "Aviso: tiene 8 años y la receta va sin su peso. Con su peso se revisa la dosis."
+      expect(recipe?.payload["productWarnings"]).toEqual([warning])
+      expect(recipe?.status).toBe("lista")
+      const { prescriptionId } = await fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))
+      const [issued] = await ownerDb.select({ alertsSeen: prescription.alertsSeen }).from(prescription).where(eq(prescription.id, prescriptionId))
+      expect(issued?.alertsSeen).toContain(warning)
     } finally {
       await enable(false)
       await setProduct("dental")

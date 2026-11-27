@@ -76,7 +76,7 @@ import {
   type PortalPaper,
   sentenceEnd,
   formatPortalMoney,
-  portalTotalsText,
+  portalBudgetTotalText,
   listMyPortalGrantsApi,
   markPortalBudgetSeenApi,
   type PortalAppointment,
@@ -786,7 +786,7 @@ function BudgetsBlock({ sessionToken }: { sessionToken: string }) {
   const row = (budget: PortalBudget) => {
     const number = `Presupuesto N.º ${budget.budgetNumber}`
     const named = budget.title && budget.title !== number ? `${number} · ${budget.title}` : number
-    return `${named} · ${portalTotalsText(budget, budget)}`
+    return `${named} · ${portalBudgetTotalText(budget)}`
   }
   return (
     <Block title="Por decidir" count={awaiting.length}>

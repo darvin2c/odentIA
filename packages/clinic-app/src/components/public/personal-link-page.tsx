@@ -50,7 +50,7 @@ import {
   sweepDeviceDrafts,
 } from "../../lib/device-draft"
 import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
-import { portalTotalsText } from "../../lib/portal"
+import { portalBudgetTotalText } from "../../lib/portal"
 import { appWords } from "../../lib/product-words"
 import { AppointmentBlock } from "./appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "./budget-responder"
@@ -439,7 +439,7 @@ function linkItems(view: PersonalLinkView, clinician: string): PendingItem[] {
       id: budget.id,
       title: name ? `El presupuesto de ${name}` : "Tu presupuesto",
       badge: "Por responder",
-      text: `${budget.title} · ${portalTotalsText(budget, budget)}`,
+      text: `${budget.title} · ${portalBudgetTotalText(budget)}`,
       action: "Ver y responder",
       next: "Ver y responder tu presupuesto",
       at: null,

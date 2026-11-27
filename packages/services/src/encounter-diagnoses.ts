@@ -144,7 +144,7 @@ export async function recordEncounterDiagnosis(
     .orderBy(asc(encounterDiagnosis.createdAt))
     .limit(1)
   if (already) return { row: withSite(site, already), existing: true }
-  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
+  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId, columns)
   const [row] = await tx
     .insert(encounterDiagnosis)
     .values({

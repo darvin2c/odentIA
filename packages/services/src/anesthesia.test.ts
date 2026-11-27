@@ -351,7 +351,7 @@ it("la firma no limita la epinefrina a la hipertensión controlada y sí a la pr
   expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.warnings).toEqual([])
   // El tope va aparte y primero, como en la atención (QA de diseño del 18 nov, H7).
   expect(await signing({ presionSistolica: 165, presionDiastolica: 100 })).toMatchObject({
-    cap: "Sugerencia: epinefrina hasta 0,04 mg por la presión de hoy (165/100) (unos 2,2 cartuchos)",
+    cap: "Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por la presión de hoy (165/100)",
     warnings: [],
   })
   expect((await signing(null))?.warnings).toEqual([
@@ -367,6 +367,6 @@ it("la firma no limita la epinefrina a la hipertensión controlada y sí a la pr
     status: "activa",
   })
   expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.cap).toBe(
-    "Sugerencia: epinefrina hasta 0,04 mg por su fibrilación auricular (I48) (unos 2,2 cartuchos)",
+    "Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por su fibrilación auricular (I48)",
   )
 })

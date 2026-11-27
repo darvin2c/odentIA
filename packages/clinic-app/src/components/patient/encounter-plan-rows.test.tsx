@@ -429,3 +429,15 @@ describe("la fila «Hoy» es una sola fila", () => {
     await waitFor(() => expect(document.activeElement).toBe(register))
   })
 })
+
+// QA del 26 nov (clínica, hallazgo 5): la sugerencia de fase solo salía en el Plan de la ficha; en la
+// atención, donde se anota la pulpitis, no se veía.
+describe("la sugerencia de fase en la atención", () => {
+  it("se ve en su fila, como en el Plan, y la fase no cambia", async () => {
+    const suggestion = "Sugerencia: con pulpitis de la 46 iría en «Urgencia». Cámbiala con «Planificar…»."
+    state.items = [item({ id: "i-endo", title: "Endodoncia", status: "pendiente", phase: "basica", phaseSuggestion: suggestion } as Partial<PlanItem> & Pick<PlanItem, "id" | "title">)]
+    show()
+    const row = await rowOf("Endodoncia")
+    expect(within(row).getByText(suggestion)).toBeTruthy()
+  })
+})

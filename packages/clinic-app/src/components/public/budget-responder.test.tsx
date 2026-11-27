@@ -203,11 +203,30 @@ describe("BudgetResponder", () => {
     })
   })
 
+  // QA del 26 nov (clínica, hallazgo 2): con la profilaxis hecha hoy en lo común, «Lo dejo para después»
+  // fallaba con «No puede retirar la aceptación de un tratamiento ejecutado».
+  it("dejarlo para después deja fuera lo que ya se hizo", () => {
+    const onAnswer = vi.fn()
+    const base = twoOptions(false)
+    const done = { ...plain.items[0]!, planItemId: "i0", optionId: "o1", title: "Profilaxis", itemStatus: "realizado" }
+    const budget = { ...base, items: [done, { ...done, optionId: "o2" }, ...base.items] }
+    render(<BudgetResponder budget={budget} pending={false} error={null} onAnswer={onAnswer} />)
+    fireEvent.click(screen.getByRole("button", { name: "Lo dejo para después" }))
+    expect(onAnswer).toHaveBeenCalledWith({
+      optionId: null,
+      decisions: [
+        { planItemId: "i1", decision: "pospuesto" },
+        { planItemId: "i2", decision: "pospuesto" },
+      ],
+    })
+  })
+
   it("con la recomendada marcada, esa va elegida de antemano", () => {
     const page = html(twoOptions(true))
     expect(page).toContain("La recomienda tu")
     expect(page.match(/role="radio"[^>]*aria-checked="true"/g)).toHaveLength(1)
-    expect(page).toContain("Elijo la opción b")
+    // La letra de la opción como se llama: «opción B», no «opción b» (QA del 26 nov, H7).
+    expect(page).toContain("Elijo la opción B")
     expect(page).toContain("Aceptas")
   })
 })

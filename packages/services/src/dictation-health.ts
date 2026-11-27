@@ -637,23 +637,36 @@ export const vagueMedicine = (name: string) => VAGUE_MEDICINE.test(plain(name).r
 export function groundHealthNames(
   payload: Record<string, unknown>,
   said: string,
-): { payload: Record<string, unknown> | null; notHeard: string[]; unnamed: string[]; vague: string[] } {
+): { payload: Record<string, unknown> | null; notHeard: string[]; unnamed: string[]; vague: string[]; denied: string[] } {
   const out = { ...payload }
   // Lo de su familia y lo que ya no toma llegan de Clío como una lista suelta: se miran como las demás.
   for (const group of PER_ITEM) if (Array.isArray(out[group])) out[group] = { state: "recorded", items: out[group] }
   const notHeard: string[] = []
   const unnamed: string[] = []
   const vague: string[] = []
+  const denied: string[] = []
+  // «Toma algo para la presión»: la medicina no se inventa, pero el «para qué» es una enfermedad dicha
+  // con palabras de todos los días, y se propone con su sugerencia (QA clínica del 26 nov, hallazgo 4).
+  const purposes = new Set(saidPurposesOf(said))
   for (const group of LISTS) {
     const value = out[group]
     if (!isRecord(value) || value["state"] !== "recorded" || !Array.isArray(value["items"]) || !value["items"].length) continue
     const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => {
       if (group === "medications" && vagueMedicine(text(item["name"]))) {
         unnamed.push(text(item["name"]))
+        const purpose = purposeOf(text(item["name"]))
+        if (purpose) purposes.add(purpose)
         return false
       }
       if (group === "conditions" && vagueCondition(text(item["name"]))) {
         vague.push(text(item["name"]))
+        return false
+      }
+      // Lo que su frase dice con un «no» («no tiene hipertiroidismo», «no tengo asma, eso lo tiene mi
+      // esposa») no se propone como presente: va a «No lo usé» con su motivo (QA clínica del 26 nov,
+      // hallazgo 1). Lo que ya no toma sí se dice con un «no» («ya no toma losartán»): ese no se mira.
+      if (group !== "stopped" && deniedInSaid(text(item["name"]), said)) {
+        denied.push(group === "family" ? `${relationLabel(item["relation"])}: ${text(item["name"])}` : text(item["name"]))
         return false
       }
       const heard = nameHeard(text(item["name"]), said)
@@ -714,8 +727,92 @@ export function groundHealthNames(
     }
     out[group] = { ...value, detail: twin ? line : medicineLine(detail) }
   }
-  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague }
+  // La enfermedad del «para qué», si no está ya entre las propuestas ni se negó. Se guarda lo dicho
+  // («presión»); la fila sugiere la del catálogo (`everydayConditionOf`) y el profesional la elige.
+  const conditions = out["conditions"]
+  const listed = isRecord(conditions) && Array.isArray(conditions["items"]) ? (conditions["items"] as Array<Record<string, unknown>>) : []
+  const fresh = [...purposes].filter(
+    (purpose) =>
+      !listed.some((item) => (everydayConditionOf(text(item["name"])) ?? text(item["name"])) === everydayConditionOf(purpose)) &&
+      !denied.some((name) => everydayConditionOf(name) === everydayConditionOf(purpose)),
+  )
+  if (fresh.length && (!isRecord(conditions) || conditions["state"] === "recorded" || conditions["state"] === "unknown"))
+    out["conditions"] = { ...(isRecord(conditions) ? conditions : {}), state: "recorded", items: [...listed, ...fresh.map((name) => ({ name }))] }
+  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague, denied }
 }
+
+/** Lo que «No lo usé» dice de lo que se dijo con un «no» (`groundHealthNames`, `denied`). */
+export const deniedHealthWhy = (names: readonly string[]) =>
+  `«${names.join("», «")}» se dijo con un «no»: no lo propuse como suyo. Si sí lo tiene, anótalo a mano.`
+
+/** «Para la presión», «para el azúcar»: la enfermedad dicha con palabras de todos los días, como se dijo. */
+const PURPOSE = /(?:^| )(?:para|contra) (?:la |el )?(presion alta|presion|azucar alta|azucar)(?= |$)/
+
+/** Con su tilde, como se escribe: «presión», «azúcar». */
+const spokenPurpose = (said: string) => said.replace("presion", "presión").replace("azucar", "azúcar")
+
+/** El «para qué» de una medicina sin nombre, si es una enfermedad que se sugiere (`everydayConditionOf`). */
+function purposeOf(name: string): string | null {
+  const said = PURPOSE.exec(plain(name).replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " "))?.[1]
+  return said && everydayConditionOf(said) ? spokenPurpose(said) : null
+}
+
+/** Lo que toma sin decir cuál: «tomo algo para la presión», «le dan unas pastillas para el azúcar». */
+const TAKES_FOR =
+  /(?:^| )(?:toma|tomo|tomaba|usa|uso|usaba|le dan|me dan|le dieron|me dieron)((?: (?:una?|unas|unos|algo|alguna|algun|sus|mis|su|mi|pastillas?|medicinas?|medicamentos?|remedios?|tabletas?|capsulas?|cosas?|de)){0,3}) (?:para|contra) (?:la |el )?(presion alta|presion|azucar alta|azucar)(?= |$)/g
+
+/**
+ * Lo que la frase dice que toma «para la presión» o «para el azúcar» sin nombrar la medicina («tomo
+ * algo para la presión, no me acuerdo el nombre»): Clío a veces lo deja como medicación «No sabe» o
+ * no lo trae. Solo dicho de lo que toma o usa, y nunca con un «no» antes («no toma nada para la presión»).
+ */
+export function saidPurposesOf(said: string): string[] {
+  const out = new Set<string>()
+  for (const sentence of said.split(/(?<=[.!?;])\s+/u)) {
+    if (/[¿?]/u.test(sentence)) continue
+    const words = plain(sentence).replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim()
+    for (const match of words.matchAll(TAKES_FOR)) {
+      const before = words.slice(0, match.index).split(" ").slice(-3)
+      if (before.some((word) => word === "no" || word === "nunca" || word === "tampoco" || word === "ni")) continue
+      const said = match[2]
+      if (said && everydayConditionOf(said)) out.add(spokenPurpose(said))
+    }
+  }
+  return [...out]
+}
+
+/**
+ * ¿Todo lo que la frase dice de ese dato lo dice con un «no»? Con la misma lectura estricta del «no»
+ * que quitar por voz (`negatedSpan`): «no tiene hipertiroidismo», «no tengo asma ni diabetes»,
+ * «tampoco tiene asma». Basta que una vez lo diga sin «no» para que se proponga; una pregunta no cuenta.
+ */
+function deniedInSaid(name: string, said: string): boolean {
+  const words = distinctWords(name)
+  if (!said.trim() || !words.length) return false
+  const adjectives = CONDITION_ADJECTIVES.filter((item) => words.includes(item.word))
+  let mentions = 0
+  for (const sentence of said.split(/(?<=[.!?;])\s+/u)) {
+    if (/[¿?]/u.test(sentence)) continue
+    const tokens = sentenceTokens(sentence)
+    const spans = spansOf(tokens, name)
+    tokens.forEach((token, index) => {
+      if (adjectives.some((item) => item.said.test(token)) && !spans.some(([first]) => first === index)) spans.push([index, index])
+    })
+    for (const [first, last] of spans) {
+      mentions += 1
+      if (!negatedSpan(tokens, first, last)) return false
+    }
+  }
+  return mentions > 0
+}
+
+/** Las palabras de una oración como las lee el «no» (`healthNegated`, `deniedInSaid`): con sus signos aparte. */
+const sentenceTokens = (sentence: string) =>
+  plain(sentence)
+    .replace(/([,.;:!])/g, " $1 ")
+    .replace(/[^a-z0-9ñ,.;:! ]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
 
 /** Lo que «No lo usé» dice de una enfermedad que no dice cuál es (`groundHealthNames`, `vague`). */
 export const vagueConditionWhy = (names: readonly string[]) =>
@@ -875,7 +972,10 @@ export function healthNamed(payload: Record<string, unknown>, said: string): { k
 }
 
 /** Lo que puede ir entre el «no» y lo que niega: «no es diabetes», «no tiene asma», «no tiene la diabetes». Sin coma: «No, tiene diabetes» afirma. */
-const NEGATION_LEAD = new Set(["es", "era", "tiene", "tenia", "sufre", "padece", "toma", "tomaba", "usa", "la", "el", "lo", "los", "las", "de", "del"])
+const NEGATION_LEAD = new Set([
+  ...["es", "era", "soy", "tiene", "tenia", "tengo", "tuvo", "tuve", "sufre", "sufro", "padece", "padezco"],
+  ...["toma", "tomaba", "tomo", "usa", "uso", "ha", "he", "tenido", "sufrido", "la", "el", "lo", "los", "las", "de", "del"],
+])
 /** Lo que va justo antes de lo que se niega al final: «la diabetes no», «lo del asma no». Un verbo («es diabético, no») pregunta. */
 const NEGATED_AFTER = new Set(["la", "el", "lo", "los", "las", "de", "del"])
 const CLAUSE_END = /^[,.;:!]$/
@@ -909,11 +1009,7 @@ export function healthNegated(payload: Record<string, unknown>, said: string): {
   const ownWords = payload["declarante"] === "paciente"
   for (const sentence of said.split(/(?<=[.!?;])\s+/u)) {
     if (/[¿?]/u.test(sentence)) continue
-    const tokens = plain(sentence)
-      .replace(/([,.;:!])/g, " $1 ")
-      .replace(/[^a-z0-9ñ,.;:! ]+/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
+    const tokens = sentenceTokens(sentence)
     if (tokens.some((token) => NEGATION_HEDGE.test(token) || OTHER_SAID.test(token))) continue
     // El familiar de quien se habla. «Mi papá» dicho por quien acompaña es otro parentesco: no se cuenta.
     const kin = tokens.filter((token) => KIN_SAID.test(token))
@@ -963,7 +1059,9 @@ function negatedSpan(tokens: readonly string[], first: number, last: number): bo
     back -= 1
     skipped += 1
   }
-  return tokens[back] === "no"
+  // «No tiene diabetes ni asma», «tampoco tiene asma», «nunca ha tenido asma»: también niegan.
+  const start = tokens[back]
+  return start === "no" || start === "tampoco" || start === "nunca" || (start === "ni" && tokens.slice(0, back).includes("no"))
 }
 
 /** Lo de la propuesta cuyo nombre cumple `named`, dato por dato, con su clave y su nombre como se lee. */
@@ -1517,14 +1615,24 @@ export function healthSaidOf(
   phrase: string | undefined,
   before: Record<string, string> = {},
   change?: { was: Record<string, unknown>; now: Record<string, unknown> },
+  pause?: string,
 ): Record<string, string> {
   const said = phrase?.trim() ?? ""
   if (!said) return before
   const out = { ...before }
   const was = change ? healthValues(change.was) : null
   const now = change ? healthValues(change.now) : null
+  const named = healthNamesByKey(change?.now ?? payload)
   for (const key of healthKeysOf(payload)) {
     if (was && now && before[key] && was.get(key) === now.get(key)) continue
+    // La oración que nombra el dato, de su frase o de la pausa entera: Clío cita una sola frase para
+    // todo lo de una pausa y la preeclampsia citaba «Tomo sulfato ferroso…» (QA clínica del 26 nov,
+    // hallazgo 7). Una lista cita la oración de cada uno de sus datos, la última en que se dijo.
+    const cited = citedSentences(named.get(key) ?? [], [before[key] ?? "", said, pause ?? ""])
+    if (cited) {
+      out[key] = cited
+      continue
+    }
     // Lo que en la frase es de otro dato (su propia frase, dicha en otra pausa) no es de este.
     let own = said
     for (const [other, phrase] of Object.entries(before)) {
@@ -1535,6 +1643,62 @@ export function healthSaidOf(
     out[key] = own
   }
   return out
+}
+
+/** Los nombres con que se dice cada dato de una propuesta, por su clave (`healthKeysOf`): lo que se busca en lo dicho. */
+function healthNamesByKey(payload: Record<string, unknown>): Map<string, string[]> {
+  const names = new Map<string, string[]>()
+  const itemNames = (item: Record<string, unknown>) => [text(item["name"]), text(item["substance"])].filter(Boolean)
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    const items = (Array.isArray(value["items"]) ? value["items"] : []) as Array<Record<string, unknown>>
+    if (PER_ITEM.includes(group)) for (const item of items) names.set(itemKey(group, item), itemNames(item))
+    else if (DIRECTED.includes(group)) names.set(group, [text(value["detail"])].filter(Boolean))
+    else if (!INTERVIEW.includes(group)) names.set(group, items.flatMap(itemNames))
+    else
+      for (const [field, answer] of Object.entries(value))
+        // El campo dice de qué es («embarazo», «semanas embarazo»); lo escrito, lo que se dijo.
+        names.set(`${group}.${field}`, [field.replace(/([a-z])([A-Z])/g, "$1 $2").toLocaleLowerCase("es"), ...(typeof answer === "string" ? [answer] : [])])
+  }
+  return names
+}
+
+/** Las palabras de una oración, sin signos ni mayúsculas: así se compara si una contiene a otra. */
+const bareWords = (text: string) =>
+  plain(text)
+    .replace(/[^a-z0-9ñ ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+/**
+ * Las oraciones de lo dicho (`texts`, de lo más antiguo a lo último) que nombran alguno de `names`: por
+ * cada nombre, la última que lo dice; juntas en el orden en que se dijeron. Vacío si ninguna lo nombra.
+ */
+function citedSentences(names: readonly string[], texts: readonly string[]): string {
+  const sentences: string[] = []
+  for (const one of texts.flatMap((said) => said.split(/(?<=[.!?;])\s+/u))) {
+    const trimmed = one.trim()
+    const bareOne = bareWords(trimmed)
+    if (!bareOne) continue
+    // La pausa trae entera la oración de la que Clío citó un pedazo: queda la entera, una sola vez.
+    const inside = sentences.findIndex((kept) => ` ${bareWords(kept)} `.includes(` ${bareOne} `) || ` ${bareOne} `.includes(` ${bareWords(kept)} `))
+    if (inside === -1) sentences.push(trimmed)
+    else if (bareOne.length > bareWords(sentences[inside] ?? "").length) sentences[inside] = trimmed
+  }
+  const picked = new Set<number>()
+  for (const name of names) {
+    if (!distinctWords(name).length) continue
+    let last = -1
+    sentences.forEach((sentence, index) => {
+      if (nameHeard(name, sentence)) last = index
+    })
+    if (last >= 0) picked.add(last)
+  }
+  return [...picked]
+    .sort((a, b) => a - b)
+    .map((index) => sentences[index])
+    .join(" ")
 }
 
 /** Un valor en texto sin mirar el orden de sus claves: lo guardado (jsonb) vuelve con otro orden. */

@@ -290,7 +290,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         ? {
             id: faq.id,
             q: faq.q,
-            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes». Si está sana, «Sin enfermedad» ofrece con un toque «Examen médico general» (en un menor, «Control de salud del niño») o «Sin hallazgos».",
+            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, sale marcado «Ya diagnosticado antes»; el tipo lo eliges igual. Si está sana, «Sin enfermedad» ofrece con un toque «Examen médico general» (en un menor, «Control de salud del niño») o «Sin hallazgos».",
           }
         : faq,
     ),
@@ -671,6 +671,25 @@ const OWN_FAQS: Record<string, Faq[]> = {
       area: "clinica",
       needs: "clinical.write",
     },
+    // QA del 26 nov (desarrollo, H9): la explicación estaba dentro de otra respuesta y la Ayuda no la encontraba.
+    {
+      id: "examen-dictado-por-revisar",
+      q: "¿Por qué un sistema del examen dictado quedó por revisar?",
+      a: "Porque se dictó lo que encontraste sin decir si el sistema está sin alteraciones o con hallazgos: Clío lo escribe con tus palabras y no elige por ti. Su tarjeta dice «No quedó dicho si está sin alteraciones o con hallazgos. Elígelo.»: elige «Sin alteraciones» o «Con hallazgos» y confírmala, o dilo otra vez con su estado. Dicho con su estado, como «Lasègue negativo» de un sistema sin alteraciones, va listo para confirmar. Lo que no se marca queda «No examinado», nunca normal.",
+      forms: [
+        "por que el examen quedo por revisar",
+        "por que un sistema del examen quedo por revisar",
+        "el examen dictado quedo por revisar",
+        "clio no marco sin alteraciones",
+        "clio no marco sin alteraciones en el examen",
+        "clio no puso si esta normal",
+        "dicte lasegue negativo y quedo por revisar",
+        "por que me pide elegir sin alteraciones o con hallazgos",
+        "examen sin estado",
+      ],
+      area: "clinica",
+      needs: "clinical.write",
+    },
     {
       id: "emito-descanso-medico",
       q: "¿Cómo emito un descanso médico?",
@@ -730,7 +749,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-receta-avisos",
       q: "¿Por qué la receta me pide el peso o no me deja un medicamento controlado?",
-      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)», para revisar la dosis, y propone el último registrado; sin él, avisa y se emite igual. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que se desaconseja en el embarazo; un antiinflamatorio (AINE) también se avisa con un anticoagulante o desde la semana 20: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
+      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)», para revisar la dosis, y propone el último registrado; sin él, avisa y se emite igual. La receta dictada avisa lo mismo en su tarjeta, en «Para que lo tengas en cuenta», y se emite sin peso: si quieres ponerlo, «Editar» abre la receta. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que se desaconseja en el embarazo; un antiinflamatorio (AINE) también se avisa con un anticoagulante o desde la semana 20: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
       forms: ["no me deja recetar tramadol", "la receta me pide el peso", "aviso de embarazo en la receta"],
       area: "clinica",
       needs: "clinical.write",

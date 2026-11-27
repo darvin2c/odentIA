@@ -552,7 +552,7 @@ export function EncounterDiagnoses({
               {(field) => (
                 <field.Group
                   legend="Tipo de diagnóstico"
-                  description="Presuntivo mientras se confirma; definitivo cuando se confirma. Si la persona ya lo tenía, el sistema lo anota solo."
+                  description="Presuntivo mientras se confirma; definitivo cuando se confirma. Si ya lo tenía en el mismo sitio, se marca «Ya diagnosticado antes»; el tipo lo eliges igual."
                 >
                   {(control) => (
                     <ChoiceButtons

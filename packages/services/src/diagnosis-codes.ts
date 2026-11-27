@@ -830,8 +830,10 @@ function specialtyPlanItem(orgId: string, patientId: string, kinds: string[]) {
 
 /**
  * «Ya diagnosticado antes» (decisión 11): la persona ya tenía este código, en
- * la misma lista, en otra atención que no se anuló. Un código de otra lista
- * nunca cuenta, aunque nombre lo mismo.
+ * la misma lista y en el mismo sitio, en otra atención que no se anuló. Un
+ * código de otra lista nunca cuenta, aunque nombre lo mismo, y el de otro sitio
+ * tampoco: la pulpitis de la 46 no hace «ya diagnosticada» la de la 36 (QA del
+ * 26 nov, H7). Sin sitio, el mismo código sin sitio.
  */
 export async function wasDiagnosedBefore(
   tx: Db,
@@ -839,6 +841,7 @@ export async function wasDiagnosedBefore(
   patientId: string,
   diagnosis: { system: DiagnosisSystemKey; code: string },
   encounterId: string,
+  site: { siteSystem?: string | null; siteCode?: string | null } = {},
 ): Promise<boolean> {
   const [row] = await tx
     .select({ id: encounterDiagnosis.id })
@@ -856,6 +859,8 @@ export async function wasDiagnosedBefore(
         eq(encounterDiagnosis.patientId, patientId),
         eq(encounterDiagnosis.diagnosisSystem, diagnosis.system),
         eq(encounterDiagnosis.diagnosisCode, diagnosis.code),
+        site.siteSystem ? eq(encounterDiagnosis.siteSystem, site.siteSystem) : isNull(encounterDiagnosis.siteSystem),
+        site.siteCode ? eq(encounterDiagnosis.siteCode, site.siteCode) : isNull(encounterDiagnosis.siteCode),
         isNull(encounterDiagnosis.voidedAt),
         or(isNull(encounterDiagnosis.encounterId), ne(encounterDiagnosis.encounterId, encounterId)),
         or(isNull(encounter.status), ne(encounter.status, "anulada")),

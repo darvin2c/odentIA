@@ -2761,10 +2761,14 @@ export async function decideBudget(
   // La respuesta de un tratamiento en el cuerpo (`decisions[1].decision`), para decir el rechazo junto a ella.
   const decisionField = (planItemId: string) =>
     `decisions[${input.decisions.findIndex((d) => d.planItemId === planItemId)}].decision`
+  // Lo que ya se hizo o se está haciendo puede quedar sin responder, y dejarlo para después no lo
+  // cambia: posponer deja fuera lo ejecutado (QA del 26 nov: lo hecho hoy va en lo común con la
+  // decisión abierta y «Lo dejo para después» del enlace fallaba). Rechazarlo sí avisa, abajo.
+  const executed = (line: BudgetLineWithStatus) => line.itemStatus === "en_curso" || line.itemStatus === "realizado"
   for (const line of lines) {
     const next = decisions.get(line.planItemId)
     if (isOpen(line.decision)) {
-      if (!next) throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
+      if (!next && !executed(line)) throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
       continue
     }
     // Lo ya respondido no se reescribe: puede repetirse igual u omitirse.
@@ -2822,10 +2826,11 @@ export async function decideBudget(
     const message = "Ese camino ya no tiene nada por responder"
     throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { optionId: message })
   }
-  // Lo que se escribe ahora: solo lo que esperaba respuesta.
+  // Lo que se escribe ahora: solo lo que esperaba respuesta, sin lo ejecutado que se deja para después.
   const answering = new Map(
     lines
-      .filter((line) => isOpen(line.decision))
+      .filter((line) => isOpen(line.decision) && decisions.has(line.planItemId))
+      .filter((line) => !(executed(line) && decisions.get(line.planItemId) === "pospuesto"))
       .map((line) => [line.planItemId, decisions.get(line.planItemId)!] as const),
   )
   const signature = input.signature != null
@@ -2974,16 +2979,21 @@ export async function decideBudget(
   )
   const finalOf = (line: { planItemId: string; decision: string }) =>
     finals.get(line.planItemId) ?? line.decision
-  const answers = [...finals.values()]
+  // Lo ya hecho que sigue sin responder no cuenta para el estado: no es un «sí» ni un «después».
+  const answers = lines
+    .filter((line) => !(executed(line) && isOpen(finalOf(line))))
+    .map((line) => finalOf(line))
   const acceptedCount = answers.filter((d) => d === "aceptado").length
   const status: BudgetStatus =
-    acceptedCount === answers.length
-      ? "aceptado"
-      : acceptedCount > 0
-        ? "parcial"
-        : answers.some((d) => d === "pospuesto")
-          ? "pospuesto"
-          : "rechazado"
+    answers.length === 0
+      ? "pospuesto"
+      : acceptedCount === answers.length
+        ? "aceptado"
+        : acceptedCount > 0
+          ? "parcial"
+          : answers.some((d) => d === "pospuesto")
+            ? "pospuesto"
+            : "rechazado"
   const [updated] = await tx
     .update(treatmentBudget)
     .set({
