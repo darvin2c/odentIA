@@ -276,11 +276,29 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   de `apps/web` de las clínicas (lo vigila `src/lib/limites.test.ts`).
 - Existen siempre `/terminos`, `/privacidad` y `/contacto`: los enlazan los correos de la cuenta.
   El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
-- Solo dice lo que gestorIA ya hace. Sin precios hasta que el usuario defina los planes. Términos y
+- Solo dice lo que gestorIA hace; lo que todavía no existe va como «pronto» y nunca se muestra como
+  pantalla. El precio es el que definió el usuario: USD 19 al mes, que vuelven como saldo, más el
+  1 % de cada pedido que gestorIA genera sola. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
-  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda».
+  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda» cuando el usuario lo
+  decida. «Entrar» lleva al ingreso de la app.
+- Las páginas del plan están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
+  la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
+- El diseño es propio (web v5, versión clara del lienzo): `src/styles/base.css` (blanco, grises
+  neutros, naranja vivo #FE4F02 en superficies y #CF3C00 en botones y textos chicos; Geist fina con
+  la palabra clave en Instrument Serif cursiva), `inicio.css` y `paginas.css`. La cabecera es transparente sobre el héroe y blanca con desenfoque al bajar. Las
+  pantallas de la app son capturas reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras
+  y con `astro:assets`; nunca dibujadas ni recortadas. El chat del héroe va en código: es lo que ve
+  la clienta, no la app.
+- Sofi es el objeto vivo de la web: un globo de chat de vidrio naranja con un shader propio
+  (`src/scripts/sofi.ts`, three.js cargado aparte), en un solo lienzo fijo que viaja a cada
+  `[data-sofi]` (su valor es el humor): flota, da saltitos, mueve la colita al hablar y da una vuelta
+  al festejar. El chat del héroe se puede tocar y dice que sus respuestas son de muestra. El mar de
+  puntos de los rubros es WebGL puro (`src/scripts/puntos.ts`). El movimiento del Inicio es GSAP con ScrollTrigger y Lenis
+  (`src/scripts/inicio.ts`): sin JavaScript o con «reducir movimiento», la página está completa y
+  quieta (lo que se esconde para entrar depende de la clase `mueve`).
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
 
 ## Trabajo
