@@ -483,13 +483,20 @@ const app = {
     <div class="marco dupla__grilla">
       <article class="dupla__caja dupla__caja--argos oscuro" id="argos" aria-labelledby="argos-h" data-aparece>
         <p class="etiqueta">Argos, el administrador</p>
-        <h2 id="argos-h">Argos vigila tu tienda <span class="cur">mientras vendes</span></h2>
-        <p>Te dice lo que te toca hoy y deja listo el seguimiento para recuperar a las clientas que se fueron sin comprar.</p>
-        <ul class="argos__lista" aria-label="Ejemplos de lo que Argos te avisa">
-          <li class="alerta" data-alerta><span class="alerta__punto alerta__punto--a" aria-hidden="true"></span><span><b>2 pagos por confirmar</b><small>Revisa tu cuenta y confírmalos</small></span></li>
-          <li class="alerta" data-alerta><span class="alerta__punto" aria-hidden="true"></span><span><b>5 pedidos salen hoy</b><small>Todos con su pago confirmado</small></span></li>
-          <li class="alerta" data-alerta><span class="alerta__punto alerta__punto--c" aria-hidden="true"></span><span><b>Andrea no compró las sandalias</b><small>Su seguimiento está listo para hoy</small></span></li>
+        <h2 id="argos-h">Argos administra tu tienda <span class="cur">mientras vendes</span></h2>
+        <p>Vigila pedidos, pagos, stock y chats. Lo de rutina se lo encarga a Sofi y sale solo; lo delicado te lo trae a «Te toca».</p>
+        <ul class="argos__poderes" aria-label="Lo que hace Argos">
+          <li><b>Vende</b><span>Recuerda el pago, invita a volver y avisa cuando vuelve una talla</span></li>
+          <li><b>Cuida el stock</b><span>Te dice qué reponer y qué pedido espera mercadería</span></li>
+          <li><b>Conoce a tus clientas</b><span>Quién vuelve a comprar y qué se vende más</span></li>
+          <li><b>Promociones</b><span class="argos__pronto"><span class="pronto">Pronto</span> A la medida de cada clienta</span></li>
         </ul>
+        <ul class="argos__lista" aria-label="Ejemplos de lo que Argos hizo hoy">
+          <li class="alerta" data-alerta><span class="alerta__punto" aria-hidden="true"></span><span><b>Le pedí a Sofi 3 mensajes para recordar el pago</b><small>Salen solos, uno por clienta</small></span></li>
+          <li class="alerta" data-alerta><span class="alerta__punto alerta__punto--c" aria-hidden="true"></span><span><b>Reponer Zapatilla urbana blanca 38</b><small>Se acabó y 2 personas la pidieron. Cuando entre, Sofi les avisa sola.</small></span></li>
+          <li class="alerta" data-alerta><span class="alerta__punto alerta__punto--a" aria-hidden="true"></span><span><b>Te toca: confirmar un pago</b><small>Pedido 0008 de Carla Mendoza, S/ 120 por Yape (captura)</small></span></li>
+        </ul>
+        <a class="argos__mas" href="/argos">Todo lo que hace Argos</a>
         <span class="dupla__ojo" aria-hidden="true"><Fragment set:html={marca} /></span>
       </article>
       <article class="dupla__caja" id="clientas" aria-labelledby="clientas-h" data-aparece>

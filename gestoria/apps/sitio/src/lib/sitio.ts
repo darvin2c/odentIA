@@ -106,7 +106,7 @@ export const SITE_MAP = {
     },
     { label: "Catálogo", hint: "Productos, opciones y mínimo", path: "/catalogo", lista: true },
     { label: "Inventario", hint: "Stock por variante", path: "/inventario", lista: true },
-    { label: "Argos", hint: "Vigila tu tienda", path: "/argos", lista: true },
+    { label: "Argos", hint: "Vende, cuida y ordena", path: "/argos", lista: true },
   ],
   recursos: [
     { label: "Rubros", path: "/rubros", lista: true },

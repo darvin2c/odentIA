@@ -1897,3 +1897,52 @@ html:not(.mueve) .cinta__pista {
 html:not(.mueve) .cinta__pista span:nth-child(n + 13) {
   display: none;
 }
+
+/* Lo que hace Argos, en la tarjeta del Inicio. */
+.argos__poderes {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.argos__poderes li {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.argos__poderes b {
+  font-size: 16px;
+  font-weight: 500;
+  color: #fff;
+}
+.argos__poderes span {
+  font-size: 13.5px;
+  color: #b4b4ba;
+  line-height: 1.4;
+}
+.argos__pronto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.argos__pronto .pronto {
+  color: var(--naranja-claro);
+}
+.argos__mas {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  color: var(--naranja-claro);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .argos__poderes {
+    grid-template-columns: 1fr;
+  }
+}
