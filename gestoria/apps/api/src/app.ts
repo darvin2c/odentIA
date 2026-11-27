@@ -18,6 +18,7 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
+import { createExchange, exchangeInput, previewExchange } from "./cambios.js"
 import {
   addPhoto,
   catalog,
@@ -677,6 +678,17 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, rescheduleInput)
     const { id, orderId } = c.req.param()
     return c.json({ order: await reschedule(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  // Cambiar o devolver después de entregar (tablero 17): un pedido nuevo, enlazado al entregado.
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambio/calcular", async (c) => {
+    const input = await bodyOf(c, exchangeInput)
+    const { id, orderId } = c.req.param()
+    return c.json(await previewExchange(deps.appDb, c.get("person"), id, orderId, input))
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambio", async (c) => {
+    const input = await bodyOf(c, exchangeInput)
+    const { id, orderId } = c.req.param()
+    return c.json(await createExchange(deps.appDb, c.get("person"), id, orderId, input), 201)
   })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)

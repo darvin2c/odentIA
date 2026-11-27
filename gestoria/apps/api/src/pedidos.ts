@@ -17,13 +17,14 @@ import {
   productVariant,
   saleOrder,
   saleOrderLine,
+  saleOrderReturn,
   store,
   storeDeliveryMethod,
   storeEvent,
   storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, asc, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 import { agentName, SOFI_ACTOR } from "./agente.js"
 import { imageType } from "./catalogo.js"
@@ -44,7 +45,7 @@ import {
 } from "./precio.js"
 import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
 import { openSecret, sealSecret } from "./secretos.js"
-import { cancelSale, heldBy, recordSale } from "./stock.js"
+import { cancelSale, heldBy, recordReturn, recordSale } from "./stock.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -71,7 +72,7 @@ import { inStore, StoreError } from "./tiendas.js"
 
 export const pad = (number: number) => String(number).padStart(4, "0")
 /** La referencia del pedido en el kardex: «Pedido 0142» (y cada cambio, «Pedido 0142 · cambio 1»). */
-const stockReference = (number: number) => `Pedido ${pad(number)}`
+export const stockReference = (number: number) => `Pedido ${pad(number)}`
 
 /**
  * Si un pedido (`o`, el alias de `sale_order` en la consulta) no tiene fuera del stock lo que dicen
@@ -233,16 +234,16 @@ export const rescheduleInput = z.object({ deliverOn: dateOnly })
 export const undoInput = z.object({ reason })
 
 /** Qué día es en la tienda (su hora, `hora.ts`). */
-async function todayIn(tx: Db, storeId: string, now = new Date()) {
+export async function todayIn(tx: Db, storeId: string, now = new Date()) {
   return (await storeClockIn(tx, storeId, now)).today
 }
 
-function uuidOr404(id: string) {
+export function uuidOr404(id: string) {
   if (!z.uuid().safeParse(id).success)
     throw new StoreError(404, "NOT_FOUND", "Ese pedido ya no está")
 }
 
-async function storeRow(tx: Db, storeId: string) {
+export async function storeRow(tx: Db, storeId: string) {
   const [row] = await tx
     .select({ name: store.name, currency: store.currency })
     .from(store)
@@ -491,7 +492,7 @@ export async function quoteOrder(
 
 /* ------------------------------------------------------------- la historia y los avisos */
 
-async function logEvent(
+export async function logEvent(
   tx: Db,
   storeId: string,
   orderId: string,
@@ -511,12 +512,15 @@ type Notice =
   | "entregado"
   | "anulado"
   | "cambiado"
+  | "cambio"
 
 /**
  * Un aviso al cliente. Queda en la historia del pedido con lo que diría; hoy no sale (B2 lo
- * enviará por la conversación del pedido, con la plantilla de Meta si pasaron 24 horas).
+ * enviará por la conversación del pedido, con la plantilla de Meta si pasaron 24 horas). Mientras
+ * WhatsApp no esté conectado, la persona puede abrirlo en el WhatsApp de su celular para enviarlo
+ * ella (decisión 4): queda que lo abrió (`abierto`), nunca que se envió.
  */
-async function notifyCustomer(
+export async function notifyCustomer(
   tx: Db,
   order: { id: string; storeId: string; number: number; totalCents: number; state?: OrderState },
   actorUserId: string | null,
@@ -528,6 +532,10 @@ async function notifyCustomer(
     /** Con un pago confirmado: cuánto pagó y cuánto falta (el pago en partes). */
     paidCents?: number
     dueCents?: number
+    /** El texto de un aviso que arma quien lo llama (el del cambio, `cambios.ts`). */
+    text?: string
+    /** La persona lo abrió en el WhatsApp de su celular para enviarlo ella. */
+    opened?: boolean
   } = {},
 ) {
   const n = pad(order.number)
@@ -548,16 +556,29 @@ async function notifyCustomer(
     cambiado: extra.dueCents
       ? `Cambiamos tu pedido ${n}. Nuevo total: ${total}. Falta pagar ${formatMoney(extra.dueCents, currency)}.`
       : `Cambiamos tu pedido ${n}. Nuevo total: ${total}.`,
+    cambio: extra.text ?? `Tu cambio quedó anotado en el pedido ${n}.`,
   }
   await logEvent(tx, order.storeId, order.id, actorUserId, "aviso", {
     tipo: kind,
     texto: text[kind],
     enviado: false,
     motivo: NOT_SENT,
+    ...(extra.opened ? { abierto: true } : {}),
   })
+  return text[kind]
 }
 
 /* ---------------------------------------------------------------------- armar un pedido */
+
+/** El número del pedido nuevo: sigue al último de la tienda; dos pedidos a la vez esperan su turno. */
+export async function nextNumber(tx: Db, storeId: string): Promise<number> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}`}))`)
+  const [last] = await tx
+    .select({ number: sql<number>`coalesce(max(${saleOrder.number}), 0)` })
+    .from(saleOrder)
+    .where(eq(saleOrder.storeId, storeId))
+  return Number(last?.number ?? 0) + 1
+}
 
 /**
  * Arma un pedido dentro de la transacción de la tienda. Es la operación que llamará la
@@ -607,13 +628,7 @@ export async function createOrderIn(
     throw new StoreError(400, "VALIDATION_ERROR", "Escribe el nombre de la clienta", {
       customerName: "Escribe el nombre de la clienta",
     })
-  // El número sigue al último de la tienda; dos pedidos a la vez esperan su turno.
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}`}))`)
-  const [last] = await tx
-    .select({ number: sql<number>`coalesce(max(${saleOrder.number}), 0)` })
-    .from(saleOrder)
-    .where(eq(saleOrder.storeId, storeId))
-  const number = Number(last?.number ?? 0) + 1
+  const number = await nextNumber(tx, storeId)
   const [order] = await tx
     .insert(saleOrder)
     .values({
@@ -747,6 +762,10 @@ export async function listOrders(
         createdAt: saleOrder.createdAt,
         test: saleOrder.test,
         bySofi: sql<boolean>`${saleOrder.createdBy} = ${SOFI_ACTOR}`,
+        /** «Cambio del 0147»: el número del pedido entregado del que sale (tablero 17). */
+        exchangeOf: sql<
+          string | null
+        >`(select lpad(e.number::text, 4, '0') from sale_order e where e.id = ${saleOrder.exchangeOfId})`,
       })
       .from(saleOrder)
       .where(where)
@@ -832,7 +851,42 @@ export async function listOrders(
   })
 }
 
-async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
+/**
+ * Lo que todavía puede volver de un pedido entregado (tablero 17): cada variante de sus líneas,
+ * menos lo que ya vuelve en sus cambios que no se anularon. Una variante va una sola vez en un
+ * pedido, así que la variante dice la línea.
+ */
+export async function returnableIn(
+  tx: Db,
+  storeId: string,
+  orderId: string,
+  lines: { variantId: string; quantity: number }[],
+): Promise<{ variantId: string; quantity: number }[]> {
+  const back = await tx
+    .select({
+      variantId: saleOrderReturn.variantId,
+      quantity: sql<number>`sum(${saleOrderReturn.quantity})::int`,
+    })
+    .from(saleOrderReturn)
+    .innerJoin(saleOrder, eq(saleOrder.id, saleOrderReturn.orderId))
+    .where(
+      and(
+        eq(saleOrderReturn.storeId, storeId),
+        eq(saleOrder.exchangeOfId, orderId),
+        ne(saleOrder.state, "anulado"),
+      ),
+    )
+    .groupBy(saleOrderReturn.variantId)
+  const used = new Map(back.map((row) => [row.variantId, Number(row.quantity)]))
+  return lines
+    .map((line) => ({
+      variantId: line.variantId,
+      quantity: line.quantity - (used.get(line.variantId) ?? 0),
+    }))
+    .filter((line) => line.quantity > 0)
+}
+
+export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
   const [order] = await tx
     .select()
     .from(saleOrder)
@@ -942,9 +996,50 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     ).length > 0
   const balance = await balanceIn(tx, order)
   const now = Date.now()
+  // Cambios y devoluciones (tablero 17): de qué pedido sale este, los que salieron de este, lo que
+  // vuelve y, si está entregado, lo que todavía puede volver.
+  const [from] = order.exchangeOfId
+    ? await tx
+        .select({ id: saleOrder.id, number: saleOrder.number })
+        .from(saleOrder)
+        .where(eq(saleOrder.id, order.exchangeOfId))
+    : []
+  const exchanges = await tx
+    .select({ id: saleOrder.id, number: saleOrder.number, state: saleOrder.state })
+    .from(saleOrder)
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.exchangeOfId, order.id)))
+    .orderBy(asc(saleOrder.number))
+  const returns = order.exchangeOfId
+    ? await tx
+        .select({
+          variantId: saleOrderReturn.variantId,
+          productName: saleOrderReturn.productName,
+          variantName: saleOrderReturn.variantName,
+          sku: saleOrderReturn.sku,
+          quantity: saleOrderReturn.quantity,
+          unitCents: saleOrderReturn.unitCents,
+          reason: saleOrderReturn.reason,
+          returnedAt: saleOrderReturn.returnedAt,
+        })
+        .from(saleOrderReturn)
+        .where(eq(saleOrderReturn.orderId, order.id))
+        .orderBy(asc(saleOrderReturn.position))
+    : []
+  const returnable =
+    order.state === "entregado" && !order.test
+      ? await returnableIn(tx, storeId, order.id, lines)
+      : []
   return {
     ...rest,
     number: pad(order.number),
+    /** «Cambio del 0147»: el pedido entregado del que sale. */
+    exchangeOf: from ? { id: from.id, number: pad(from.number) } : null,
+    /** «Cambio en el 0171»: los cambios que salieron de este pedido. */
+    exchanges: exchanges.map((e) => ({ ...e, number: pad(e.number) })),
+    /** Lo que vuelve en este cambio, con su motivo y cuándo llegó. */
+    returns,
+    /** Lo que todavía puede volver de este pedido entregado, por variante. */
+    returnable,
     /** Lo armó Sofi en la conversación. */
     bySofi: order.createdBy === SOFI_ACTOR,
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
@@ -1016,7 +1111,7 @@ export async function sellable(appDb: Db, person: Person, storeId: string, now =
 
 /* --------------------------------------------------------------- cobrar y entregar */
 
-async function lockOrder(tx: Db, storeId: string, orderId: string) {
+export async function lockOrder(tx: Db, storeId: string, orderId: string) {
   uuidOr404(orderId)
   const [order] = await tx
     .select()
@@ -1027,9 +1122,9 @@ async function lockOrder(tx: Db, storeId: string, orderId: string) {
   return order
 }
 
-type OrderRow = typeof saleOrder.$inferSelect
+export type OrderRow = typeof saleOrder.$inferSelect
 
-function stateError(order: OrderRow): StoreError {
+export function stateError(order: OrderRow): StoreError {
   const now: Record<OrderState, string> = {
     por_pagar: "está por pagar",
     por_confirmar: "tiene un pago por confirmar",
@@ -1063,7 +1158,7 @@ async function saleLines(tx: Db, orderId: string) {
  * Descuenta el stock del pedido en el kardex. Al confirmar un pago, si no alcanza, no frena: el
  * dinero ya llegó; queda «falta stock» y se descuenta al salir. Devuelve si se descontó.
  */
-async function trySale(tx: Db, order: OrderRow, actor: string): Promise<boolean> {
+export async function trySale(tx: Db, order: OrderRow, actor: string): Promise<boolean> {
   // Un pedido de prueba (de «Probar a Sofi») no mueve el stock.
   if (order.test) return true
   const lines = await saleLines(tx, order.id)
@@ -1436,6 +1531,34 @@ export async function markShipped(
 }
 
 /**
+ * Al entregar un cambio, lo que vuelve llega a la tienda (tablero 17): entra al stock como
+ * «devolución», con su motivo y la referencia del cambio, y queda la hora en que volvió. Devuelve lo
+ * que volvió, como se lee («Sandalia beige 38»). Un pedido que no es cambio no tiene nada que volver.
+ */
+async function takeBack(tx: Db, order: OrderRow, actor: string): Promise<string[]> {
+  if (!order.exchangeOfId) return []
+  const back = await tx
+    .select()
+    .from(saleOrderReturn)
+    .where(and(eq(saleOrderReturn.orderId, order.id), isNull(saleOrderReturn.returnedAt)))
+    .orderBy(asc(saleOrderReturn.position))
+  if (back.length === 0) return []
+  if (!order.test)
+    await recordReturn(
+      tx,
+      order.storeId,
+      actor,
+      stockReference(order.number),
+      back.map((r) => ({ variantId: r.variantId, quantity: r.quantity, reason: r.reason })),
+    )
+  await tx
+    .update(saleOrderReturn)
+    .set({ returnedAt: new Date() })
+    .where(and(eq(saleOrderReturn.orderId, order.id), isNull(saleOrderReturn.returnedAt)))
+  return back.map(lineName)
+}
+
+/**
  * «Entregado» (o «Entregado y cobrado» si falta cobrar: queda quién cobró, cuánto y con qué). Si
  * pagó una parte antes, en la puerta se cobra lo que falta. Cualquier paso completa los anteriores
  * (tableros 6 y 7): si nadie marcó «Salió», queda también «Salió», con la misma hora. Un recojo en
@@ -1481,6 +1604,7 @@ export async function markDelivered(
       })
     }
     await mustSale(tx, order, person.userId)
+    const back = await takeBack(tx, order, person.userId)
     await setState(tx, order, "entregado")
     if (order.state === "por_salir" && order.deliveryType !== "OnSitePickup")
       await logEvent(tx, storeId, orderId, person.userId, "salio", { completado: true })
@@ -1489,6 +1613,7 @@ export async function markDelivered(
         ? { cobrado: collected.cents, medio: collected.methodName, moneda: currency }
         : {}),
       ...(collected?.short ? { porRevisar: collected.short } : {}),
+      ...(back.length > 0 ? { volvio: back } : {}),
     })
     await notifyCustomer(tx, order, person.userId, currency, "entregado")
     return orderDetailIn(tx, storeId, orderId)
@@ -1618,6 +1743,13 @@ export async function changeOrderIn(
 ) {
   const order = await lockOrder(tx, storeId, orderId)
   if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
+  // Un cambio descuenta lo que vuelve del pedido entregado: se arma otra vez desde ese pedido.
+  if (order.exchangeOfId)
+    throw new StoreError(
+      409,
+      "EXCHANGE",
+      `El pedido ${pad(order.number)} es un cambio: para corregirlo, anúlalo y crea otro desde el pedido entregado.`,
+    )
   const { currency } = await storeRow(tx, storeId)
   const today = await todayIn(tx, storeId, now)
   // Un día nuevo no puede ser uno que ya pasó; el que ya tenía se queda aunque haya pasado.

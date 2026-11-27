@@ -169,6 +169,20 @@
       "when": 1795786516332,
       "tag": "0023_reglas_tu_marca",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795789278459,
+      "tag": "0024_cambios_y_devoluciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795789299780,
+      "tag": "0025_reglas_cambios_y_devoluciones",
+      "breakpoints": true
     }
   ]
 }

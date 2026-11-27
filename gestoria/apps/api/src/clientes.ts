@@ -11,7 +11,7 @@ import {
   saleOrderLine,
   store,
 } from "@gestoria/db"
-import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { balancesIn, unpaidBalance } from "./saldo.js"
@@ -301,8 +301,10 @@ async function summariesOf(
       (select array_agg(distinct o.channel) from sale_order o join groups g on g.id = o.customer_id
         where g.root = r.id and o.test = false and o.state <> 'anulado'
           and o.channel <> 'otro') as channels,
+      -- Un cambio o una devolución no es otra compra (tablero 17).
       (select count(*) from sale_order o join groups g on g.id = o.customer_id
-        where g.root = r.id and o.test = false and o.state <> 'anulado') as purchases,
+        where g.root = r.id and o.test = false and o.state <> 'anulado'
+          and o.exchange_of_id is null) as purchases,
       last.created_at as last_at, last.delivery_zone as last_zone, last.id as last_order,
       nullif(last.address, '') as last_address,
       (select min(g.created_at) from groups g where g.root = r.id) as since,
@@ -321,6 +323,7 @@ async function summariesOf(
       select o.id, o.created_at, o.delivery_zone, o.address from sale_order o
       join groups g on g.id = o.customer_id
       where g.root = r.id and o.test = false and o.state <> 'anulado'
+        and o.exchange_of_id is null
       order by o.created_at desc limit 1
     ) last on true
     order by last.created_at desc nulls last, r.created_at desc
@@ -469,6 +472,7 @@ export async function customerDetail(
         deliveryZone: saleOrder.deliveryZone,
         deliveryMethodId: saleOrder.deliveryMethodId,
         paymentMethodId: saleOrder.paymentMethodId,
+        exchangeOfId: saleOrder.exchangeOfId,
         createdAt: saleOrder.createdAt,
       })
       .from(saleOrder)
@@ -493,6 +497,8 @@ export async function customerDetail(
           inArray(saleOrder.customerId, ids),
           ne(saleOrder.state, "anulado"),
           eq(saleOrder.test, false),
+          // Un cambio o una devolución no es otra compra (tablero 17).
+          isNull(saleOrder.exchangeOfId),
         ),
       )
     const lines = orders.length
@@ -608,7 +614,8 @@ export async function customerDetail(
       addresses.push({ address: o.address, deliveryName: o.deliveryName, zone: o.deliveryZone })
       if (addresses.length === 5) break
     }
-    const last = orders[0]
+    // «Repetir pedido» repite su última compra, no un cambio.
+    const last = orders.find((o) => !o.exchangeOfId)
     // Las de esta ficha, sin el tope de la lista de toda la tienda.
     const similar = similarPairs(
       await membersOf(tx, storeId),
@@ -1024,6 +1031,8 @@ export async function conversationCustomerOrdersIn(
         members.length
           ? or(eq(saleOrder.conversationId, conversationId), inArray(saleOrder.customerId, members))
           : eq(saleOrder.conversationId, conversationId),
+        // Un cambio o una devolución no es otra compra (tablero 17).
+        isNull(saleOrder.exchangeOfId),
       ),
     )
     .orderBy(asc(saleOrder.createdAt))

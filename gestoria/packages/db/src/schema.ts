@@ -621,8 +621,17 @@ export const productVariant = pgTable(
   ],
 )
 
-/** Lo que mueve el stock (decisión 3): una entrada, una venta, su anulación o un ajuste a mano. */
-export const STOCK_MOVEMENT_KINDS = ["entrada", "venta", "anulacion", "ajuste"] as const
+/**
+ * Lo que mueve el stock (decisión 3): una entrada, una venta, su anulación, un ajuste a mano o una
+ * devolución (lo que vuelve de un pedido entregado con un cambio, con su motivo; tablero 17).
+ */
+export const STOCK_MOVEMENT_KINDS = [
+  "entrada",
+  "venta",
+  "anulacion",
+  "ajuste",
+  "devolucion",
+] as const
 export type StockMovementKind = (typeof STOCK_MOVEMENT_KINDS)[number]
 
 /**
@@ -644,9 +653,9 @@ export const stockMovement = pgTable(
     balance: integer("balance").notNull().default(0),
     /** En una entrada, lo que costó cada unidad (opcional): con él se avisa si el mínimo queda cerca. */
     unitCostCents: integer("unit_cost_cents"),
-    /** En un ajuste, el motivo escrito; en una entrada, una nota opcional. */
+    /** En un ajuste o una devolución, el motivo; en una entrada, una nota opcional. */
     reason: text("reason"),
-    /** En una venta o su anulación, el pedido (B4). */
+    /** En una venta, su anulación o una devolución, el pedido (B4). */
     reference: text("reference"),
     actorUserId: text("actor_user_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -655,11 +664,11 @@ export const stockMovement = pgTable(
     check("stock_movement_kind_check", inList("kind", STOCK_MOVEMENT_KINDS)),
     check(
       "stock_movement_sign_check",
-      sql`case ${table.kind} when 'entrada' then ${table.quantity} > 0 when 'anulacion' then ${table.quantity} > 0 when 'venta' then ${table.quantity} < 0 else ${table.quantity} <> 0 end`,
+      sql`case ${table.kind} when 'entrada' then ${table.quantity} > 0 when 'anulacion' then ${table.quantity} > 0 when 'devolucion' then ${table.quantity} > 0 when 'venta' then ${table.quantity} < 0 else ${table.quantity} <> 0 end`,
     ),
     check(
       "stock_movement_reason_check",
-      sql`(${table.kind} <> 'ajuste' or char_length(btrim(coalesce(${table.reason}, ''))) >= 3) and (${table.reason} is null or char_length(${table.reason}) <= 300)`,
+      sql`(${table.kind} not in ('ajuste','devolucion') or char_length(btrim(coalesce(${table.reason}, ''))) >= 3) and (${table.reason} is null or char_length(${table.reason}) <= 300)`,
     ),
     check(
       "stock_movement_cost_check",
@@ -667,7 +676,7 @@ export const stockMovement = pgTable(
     ),
     check(
       "stock_movement_reference_check",
-      sql`(${table.kind} in ('venta','anulacion')) = (${table.reference} is not null) and (${table.reference} is null or char_length(${table.reference}) between 1 and 80)`,
+      sql`(${table.kind} in ('venta','anulacion','devolucion')) = (${table.reference} is not null) and (${table.reference} is null or char_length(${table.reference}) between 1 and 80)`,
     ),
     check("stock_movement_balance_check", sql`${table.balance} >= 0`),
     foreignKey({
@@ -843,6 +852,17 @@ export const saleOrder = pgTable(
     /** Un precio negociado vale 24 horas: si no paga antes, vence. Nulo sin negociar. */
     priceExpiresAt: timestamp("price_expires_at", { withTimezone: true }),
     deliverOn: date("deliver_on"),
+    /**
+     * Un cambio o una devolución después de entregar (tablero 17, decisión 7): el pedido entregado
+     * del que sale. Ese pedido no se toca; este lleva lo que se lleva (sus líneas), lo que vuelve
+     * (`sale_order_return`), su entrega y su cobro.
+     */
+    exchangeOfId: uuid("exchange_of_id"),
+    /**
+     * Lo que vale lo que vuelve, a lo que se pagó: se descuenta del total. Un total bajo cero es lo
+     * que la tienda devuelve (el saldo lo dice como «sobra» hasta que se anota la devolución).
+     */
+    returnCreditCents: integer("return_credit_cents").notNull().default(0),
     /** El número de envío de la agencia, si lo hay. */
     tracking: text("tracking"),
     /** El link de pago vigente: su dirección, su referencia en el proveedor y cuándo vence. */
@@ -870,7 +890,12 @@ export const saleOrder = pgTable(
     check("sale_order_payment_collection_check", inList("payment_collection", PAYMENT_COLLECTIONS)),
     check(
       "sale_order_amounts_check",
-      sql`${table.deliveryCents} between 0 and ${table.deliveryListCents} and ${table.subtotalCents} >= 0 and ${table.discountCents} >= 0 and ${table.giftCents} >= 0 and ${table.totalCents} = ${table.subtotalCents} + ${table.deliveryCents} and ${table.marginUsedCents} between 0 and ${table.marginCents}`,
+      sql`${table.deliveryCents} between 0 and ${table.deliveryListCents} and ${table.subtotalCents} >= 0 and ${table.discountCents} >= 0 and ${table.giftCents} >= 0 and ${table.totalCents} = ${table.subtotalCents} + ${table.deliveryCents} - ${table.returnCreditCents} and ${table.marginUsedCents} between 0 and ${table.marginCents}`,
+    ),
+    // Solo un cambio descuenta lo que vuelve, y nunca sale de sí mismo.
+    check(
+      "sale_order_exchange_check",
+      sql`${table.returnCreditCents} >= 0 and (${table.exchangeOfId} is not null or ${table.returnCreditCents} = 0) and (${table.exchangeOfId} is null or ${table.exchangeOfId} <> ${table.id})`,
     ),
     check(
       "sale_order_cancel_check",
@@ -902,6 +927,13 @@ export const saleOrder = pgTable(
       foreignColumns: [customer.storeId, customer.id],
     }),
     index("sale_order_customer_idx").on(table.customerId, table.createdAt),
+    // El pedido entregado del que sale un cambio, de la misma tienda (tablero 17).
+    foreignKey({
+      name: "sale_order_exchange_fkey",
+      columns: [table.storeId, table.exchangeOfId],
+      foreignColumns: [table.storeId, table.id],
+    }),
+    index("sale_order_exchange_idx").on(table.exchangeOfId),
   ],
 )
 
@@ -947,6 +979,55 @@ export const saleOrderLine = pgTable(
     }),
     index("sale_order_line_order_idx").on(table.orderId, table.position),
     index("sale_order_line_variant_idx").on(table.variantId),
+  ],
+)
+
+/**
+ * Lo que vuelve en un cambio o una devolución (tablero 17): una variante del pedido entregado, con
+ * cuánto vuelve, a cuánto se pagó cada una (lo que se descuenta) y por qué. Entra al stock como
+ * «devolución» cuando llega a la tienda: al marcar «Entregado» el cambio (`returned_at`).
+ */
+export const saleOrderReturn = pgTable(
+  "sale_order_return",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** El pedido del cambio (el nuevo), no el entregado. */
+    orderId: uuid("order_id").notNull(),
+    position: smallint("position").notNull(),
+    productId: uuid("product_id").notNull(),
+    variantId: uuid("variant_id").notNull(),
+    productName: text("product_name").notNull(),
+    variantName: text("variant_name").notNull(),
+    sku: text("sku").notNull(),
+    quantity: integer("quantity").notNull(),
+    /** Lo que pagó por cada una en el pedido entregado (0 si fue de regalo). */
+    unitCents: integer("unit_cents").notNull(),
+    /** Por qué vuelve: «Le quedó chica», «Llegó fallado» u otro motivo escrito. */
+    reason: text("reason").notNull(),
+    /** Cuándo volvió a la tienda; nulo mientras no llega. */
+    returnedAt: timestamp("returned_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("sale_order_return_quantity_check", sql`${table.quantity} between 1 and 1000`),
+    check("sale_order_return_price_check", sql`${table.unitCents} >= 0`),
+    check(
+      "sale_order_return_reason_check",
+      sql`char_length(btrim(${table.reason})) between 3 and 120`,
+    ),
+    foreignKey({
+      name: "sale_order_return_order_fkey",
+      columns: [table.storeId, table.orderId],
+      foreignColumns: [saleOrder.storeId, saleOrder.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "sale_order_return_variant_fkey",
+      columns: [table.storeId, table.variantId],
+      foreignColumns: [productVariant.storeId, productVariant.id],
+    }),
+    // Cada variante vuelve en una sola línea del cambio (como en el pedido).
+    uniqueIndex("sale_order_return_variant_uidx").on(table.orderId, table.variantId),
+    index("sale_order_return_variant_idx").on(table.variantId),
   ],
 )
 
@@ -1063,6 +1144,8 @@ export const ORDER_EVENT_ACTIONS = [
   "no_entregado",
   "reprogramado",
   "pago_deshecho",
+  // Cambios y devoluciones (entrega 8, tablero 17): en el pedido entregado, el cambio que salió de él.
+  "cambio",
 ] as const
 export type OrderEventAction = (typeof ORDER_EVENT_ACTIONS)[number]
 

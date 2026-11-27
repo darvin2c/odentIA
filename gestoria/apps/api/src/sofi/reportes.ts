@@ -79,14 +79,17 @@ export async function storeReport(
         where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
           and o.conversation_id is not null
         group by o.conversation_id having count(*) >= 2) t`)
-    // De dónde vienen las ventas (el anuncio de cada conversación llega con B2).
+    // De dónde vienen las ventas (el anuncio de cada conversación llega con B2). Un cambio no es
+    // otro pedido, pero su diferencia sí cuenta: lo devuelto resta (tablero 17).
     const channels = await tx.execute<{ channel: string; orders: string; cents: string }>(sql`
-      select o.channel, count(*) as orders, coalesce(sum(o.total_cents), 0) as cents
+      select o.channel, count(*) filter (where o.exchange_of_id is null) as orders,
+        coalesce(sum(o.total_cents), 0) as cents
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_at >= ${since}
       group by o.channel order by 3 desc`)
-    // Lo más vendido (por el kardex) y lo que se acaba, con cuánto alcanza al ritmo del periodo.
+    // Lo más vendido (por el kardex: lo que salió menos lo que volvió, anulado o devuelto) y lo
+    // que se acaba, con cuánto alcanza al ritmo del periodo.
     const products = await tx.execute<{
       product_id: string
       name: string
@@ -99,7 +102,8 @@ export async function storeReport(
           where v2.product_id = p.id and m.kind = 'venta' and m.created_at >= ${since}), 0)
         - coalesce((select sum(m.quantity) from stock_movement m
           join product_variant v3 on v3.id = m.variant_id
-          where v3.product_id = p.id and m.kind = 'anulacion' and m.created_at >= ${since}), 0) as sold,
+          where v3.product_id = p.id and m.kind in ('anulacion', 'devolucion')
+            and m.created_at >= ${since}), 0) as sold,
         coalesce(sum(v.stock) filter (where v.removed_at is null), 0) as stock
       from product p left join product_variant v on v.product_id = p.id
       where p.store_id = ${storeId}
