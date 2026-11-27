@@ -62,7 +62,15 @@ export interface WaitingTask {
 export interface WaitingBudgets {
   total: number
   oldestPresentedAt: string | null
-  items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
+  items: Array<{
+    id: string
+    patientId: string
+    patientName: string
+    title: string
+    presentedAt: string | null
+    /** «No llegó por WhatsApp · enviado el 27 nov»: no le llegó; nulo si sí o si aún puede llegar. */
+    notReached?: string | null
+  }>
 }
 /** Los grupos de «Te espera»: los decide el servidor con la escala de siempre. */
 export type WaitingBand = "ahora" | "hoy" | "sin_apuro"

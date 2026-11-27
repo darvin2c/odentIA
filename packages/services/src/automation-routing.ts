@@ -356,6 +356,15 @@ async function routeFacts(
     }
   }
   const email = person?.email?.trim().toLowerCase()
+  // Su WhatsApp guardado sin la forma de un celular de su país (de antes de la regla, o de otra vía
+  // que no la mira): Meta no le entrega nada, así que no se le escribe con un mensaje aprobado
+  // (pedido del 27 nov). Si escribió desde ese número, responderle sigue siendo una vía.
+  const identityDigits = identity?.externalUserId.replace(/\D/g, "") ?? ""
+  const numberProblem = identity ? whatsappNumberProblem(`+${identityDigits}`, await findOrgCountry(tx, orgId)) : null
+  // «Su WhatsApp (+5199215437) no puede ser un número real: revisa que sea un celular de 9 dígitos».
+  const identityProblem = numberProblem
+    ? `su WhatsApp (+${identityDigits}) no puede ser un número real: ${numberProblem.slice(numberProblem.indexOf(": ") + 2).replace(/\.$/, "")}`
+    : null
   // Con un teléfono en su ficha, sin WhatsApp ni correo, se dice por qué ese
   // teléfono no sirve; solo se averigua cuando no hay por dónde escribirle.
   const phoneDigits = person?.phone?.replace(/\D/g, "") ?? ""
@@ -383,6 +392,7 @@ async function routeFacts(
   }
   return {
     identity: identity ?? null,
+    identityProblem,
     noWhatsapp,
     phoneWithoutWhatsApp,
     whatsapp: whatsapp ?? null,
@@ -450,6 +460,15 @@ function noRoute(
       detail: facts.rawEmail
         ? "Su número es de prueba (a ese número no le llega ningún mensaje)"
         : PHONE_WITHOUT_WHATSAPP_DETAIL.numero_de_prueba,
+    }
+  }
+  // Su WhatsApp no tiene la forma de un celular de su país: se dice cómo corregirlo, no lo de la plantilla.
+  if (facts.identityProblem) {
+    return {
+      cause: "sin_destino",
+      detail: facts.rawEmail
+        ? `${facts.identityProblem.charAt(0).toUpperCase()}${facts.identityProblem.slice(1)}`
+        : `No tiene correo registrado y ${facts.identityProblem}`,
     }
   }
   if (!identity && !facts.rawEmail) {
@@ -531,7 +550,9 @@ function viaFactsOf(facts: Awaited<ReturnType<typeof routeFacts>>, spec: RouteSp
     // el presupuesto salía y quedaba «Entregado» junto a «su número es de prueba» (verificador 2 del
     // 27 nov). Responder a quien escribió sigue siendo una vía: solo pasa con el canal simulado de
     // desarrollo y las pruebas, donde ese número sí escribe.
-    templateUsable: facts.template?.status === "aprobada" && !facts.promotion && !fictionalIdentity(facts.identity),
+    // Lo mismo con un número que no puede ser un WhatsApp (`whatsappNumberProblem`, pedido del 27 nov).
+    templateUsable:
+      facts.template?.status === "aprobada" && !facts.promotion && !fictionalIdentity(facts.identity) && !facts.identityProblem,
     email: !!spec && !!facts.mailbox && !!facts.email,
   }
 }

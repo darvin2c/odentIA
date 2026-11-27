@@ -308,5 +308,11 @@ export const auditEvent = pgTable(
       table.entityId,
       table.createdAt.desc(),
     ),
+    // Los envíos de un papel (el presupuesto, la receta): si le llegó se lee de ellos en cada
+    // lista de presupuestos y en «Te espera». Solo esas acciones, para que el índice
+    // sea chico y no pese en cada escritura del registro.
+    index("audit_event_sent_document_idx")
+      .on(table.organizationId, sql`(${table.metadata}->>'documentId')`, table.createdAt)
+      .where(sql`${table.action} in ('financial_document.sent', 'health_document.sent')`),
   ],
 )

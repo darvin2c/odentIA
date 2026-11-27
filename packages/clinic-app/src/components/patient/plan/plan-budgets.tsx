@@ -50,10 +50,13 @@ import {
   budgetNumberLabel,
   budgetOptionApi,
   budgetPdfUrl,
+  budgetDeliveryLine,
+  budgetStateWithDelivery,
   cancelBudgetApi,
   createBudgetApi,
   deliverBudgetApi,
   fetchBudgets,
+  markBudgetHandedApi,
   optionLines,
   PLAN_QUERY_KEYS,
   removeBudgetItemsApi,
@@ -548,7 +551,24 @@ function BudgetCard({
   const stateLine = accepted
     ? (budgetAnswerLine(budget, (cents, currency) => money(cents, currency)) ??
       `${budget.stateText} · ${acceptedWords(budget, budget.currency, money)}`)
-    : budget.stateText
+    : budgetStateWithDelivery(budget)
+  // Lo enviado dice si le llegó, con lo que dice su mensaje; lo que no le llegó, por qué y qué hacer
+  // (pedido del 27 nov). Lo entregado en mano ya dice su fecha arriba.
+  const deliveryLine = budgetDeliveryLine(budget)
+  const notReached = budget.status === "presentado" && budget.delivery?.reached === false
+  const [handing, setHanding] = useState(false)
+  const markHanded = async () => {
+    if (handing) return
+    setHanding(true)
+    setActionError(null)
+    try {
+      await runWrite(() => markBudgetHandedApi(patientId, budget.id))
+    } catch (err) {
+      setActionError(submitErrorMessage(err))
+    } finally {
+      setHanding(false)
+    }
+  }
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
 
   // La acción principal según el estado (tablero 3, «Un solo nombre para cada estado»).
@@ -581,7 +601,7 @@ function BudgetCard({
         <div className="flex min-w-0 flex-1 basis-full flex-col gap-1 sm:basis-0">
           <span className="font-medium">{summary}</span>
           <span className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={budgetStatusTone(budget.status)}>{stateLine}</Badge>
+            <Badge variant={notReached ? "destructive" : budgetStatusTone(budget.status)}>{stateLine}</Badge>
             {expiredText ? <span className="text-xs font-medium">{expiredText}</span> : null}
             {budget.createdBy && own ? (
               <span className="text-xs text-muted-foreground">
@@ -594,6 +614,22 @@ function BudgetCard({
               </span>
             ) : null}
           </span>
+          {deliveryLine ? (
+            <span className={`text-xs ${deliveryLine.notReached ? "text-destructive" : "text-muted-foreground"}`}>
+              {deliveryLine.text}
+            </span>
+          ) : null}
+          {notReached && maySend ? (
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto justify-start p-0 text-xs"
+              disabled={handing}
+              onClick={() => void markHanded()}
+            >
+              Ya se lo di en mano
+            </Button>
+          ) : null}
           {own ? null : (
             <span className="text-xs text-muted-foreground">
               Lo preparó {preparedBy}: solo quien lo preparó cambia precios o lo envía.
