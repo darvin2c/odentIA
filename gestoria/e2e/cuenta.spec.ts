@@ -54,7 +54,8 @@ test("desde la tienda: cambiar la contraseña y activar los dos pasos sin salir 
   )
   await page.getByRole("menuitem", { name: "Cambiar contraseña" }).click()
 
-  // Mi perfil en gestorIA, con el cajón de la contraseña abierto y el camino de vuelta.
+  // Mi perfil en gestorIA, con la contraseña abierta al lado (como en las clínicas: en la columna
+  // lateral si la ventana es ancha, en un cajón si no) y el camino de vuelta.
   await expect(page).toHaveURL(/\/cuenta\?/)
   const drawer = surface(page, "Cambiar contraseña")
   await expect(drawer).toBeVisible()
