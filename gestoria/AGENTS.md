@@ -225,6 +225,20 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   administración. Cada persona ve solo sus preguntas y respuestas (`helpView`, ADR 0221); «Plan y
   pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de `plan`.
 
+## Los avisos al celular (entrega 5 del lienzo «gestorIA como odentIA»; ADR 0229)
+
+- gestorIA se instala desde el navegador (`public/manifest.webmanifest`, íconos en `public/pwa/`)
+  y avisa por push web con la app cerrada. Lo del navegador es lo común (`device-push` de
+  `@odentia/ui-patterns`); el service worker (`public/sw.js`) no tiene `fetch`: no guarda datos.
+- El celular es de la persona (`push_device`): se activa una vez y le llega lo de todas sus
+  tiendas. Lo que elige es por tienda y vale en todos sus celulares (`push_choice`).
+- Qué le llega a cada rol sale de `permisos.ts` (`PUSH_KIND_INFO` de `apps/api/src/avisos.ts`),
+  mirado al enviar. Un tipo nuevo suma su fuente y su permiso ahí, y su respuesta en la Ayuda.
+- No es otra bandeja: avisa lo nuevo de los pedidos (`order_event`, cursor por persona y tienda) y
+  de los chats que esperan, y abre la pantalla que lo resuelve. Se anota antes de enviar y nunca
+  se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan.
+- La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda.
+
 ## La web pública (B8)
 
 - `gestoria24.com` es `apps/sitio`: Astro armado una vez al publicar, solo archivos en el Worker

@@ -290,6 +290,7 @@ describe("los permisos de cada rol (decisión 7)", () => {
       "pagos.confirmar",
       "entregas",
       "ayuda.pedir",
+      "avisos.recibir",
     ])
     expect((await call("lucia", "GET", `/api/tiendas/${storeId}/equipo`)).status).toBe(200)
     expect(

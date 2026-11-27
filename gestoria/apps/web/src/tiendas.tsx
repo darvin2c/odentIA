@@ -86,7 +86,8 @@ import {
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
-import { CONFIG_PATH, configGroupsFor } from "./lib/configuracion"
+import { device } from "./lib/avisos"
+import { configGroupsFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
 import { AskForHelpSheet } from "./pedir-ayuda"
@@ -96,8 +97,12 @@ export function useMe() {
   return useQuery({ queryKey: ["yo"], queryFn: () => api<Me>("/api/yo") })
 }
 
-/** Cierra la sesión de la cuenta en este navegador. La entrada sigue recordando quién era. */
+/**
+ * Cierra la sesión de la cuenta en este navegador. La entrada sigue recordando quién era. Antes,
+ * este celular deja de recibir los avisos de quien sale (tablero 15); nunca frena el cierre.
+ */
 async function signOut() {
+  await device.forgetOnSignOut()
   forgetToken()
   await authClient.signOut().catch(() => undefined)
   window.location.assign("/login")
@@ -731,13 +736,15 @@ function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
 }
 
 /**
- * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas, hoy,
- * ninguno: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
+ * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas ve solo sus
+ * avisos al celular: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
  */
 function storeFooter(store: MyStore): AppShellNavItem[] {
+  // Abre el primer apartado que ve: a Ventas, sus avisos al celular, no «Datos de la tienda».
+  const first = configGroupsFor(store)[0]?.items[0]
   return [
-    ...(configGroupsFor(store).length > 0
-      ? [{ label: "Configuración", to: `/tiendas/${store.id}${CONFIG_PATH}`, icon: Settings }]
+    ...(first
+      ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
       : []),
     { label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp },
   ]

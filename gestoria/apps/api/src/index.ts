@@ -2,6 +2,7 @@ import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
 import { deliverOutbox, purgeOutbox, refreshStates, reviewStoreTeams } from "./acuerdo.js"
 import { createApp } from "./app.js"
+import { runPushRound, webPushSender } from "./avisos.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
@@ -39,6 +40,7 @@ const app = createApp({
   link,
   model,
   contract,
+  vapidPublicKey: env.GESTORIA_VAPID_PUBLIC_KEY,
 })
 serve({ fetch: app.fetch, port: env.GESTORIA_PORT }, (info) => {
   console.log(`gestoria-api: escuchando en el puerto ${info.port}`)
@@ -110,3 +112,25 @@ else
   console.warn(
     "gestoria-api: sin GESTORIA_CONTRACT_SECRET no se avisa ni se pregunta nada a la administración.",
   )
+
+// Los avisos al celular (tablero 15): cada 20 segundos, en un solo servidor a la vez, anota lo que
+// toca y lo envía. Sin las tres claves VAPID no se ofrecen ni se envía nada.
+if (env.GESTORIA_VAPID_PUBLIC_KEY && env.GESTORIA_VAPID_PRIVATE_KEY && env.GESTORIA_VAPID_SUBJECT) {
+  const sender = webPushSender({
+    publicKey: env.GESTORIA_VAPID_PUBLIC_KEY,
+    privateKey: env.GESTORIA_VAPID_PRIVATE_KEY,
+    subject: env.GESTORIA_VAPID_SUBJECT,
+  })
+  const pushRound = async () => {
+    try {
+      const run = await withSessionLock(ownerDb, "gestoria_avisos", () =>
+        runPushRound(ownerDb, sender),
+      )
+      if (run?.uncertain)
+        console.warn(`gestoria-api: ${run.uncertain} aviso(s) al celular quedaron en duda`)
+    } catch (error) {
+      console.error("gestoria-api: los avisos al celular fallaron", error)
+    }
+  }
+  setInterval(() => void pushRound(), 20_000).unref()
+} else console.warn("gestoria-api: sin las claves VAPID, los avisos al celular no se envían.")

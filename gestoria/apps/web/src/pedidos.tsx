@@ -41,6 +41,7 @@ import {
   UserRound,
 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { InstallCard } from "./avisos"
 import { type DeliveryStep, DeliveryStepDialog, targetOf } from "./entregas"
 import { api } from "./lib/api"
 import {
@@ -155,6 +156,9 @@ export function OrdersPage() {
           onClick: () => setAdding(true),
         }}
       />
+      {/* Instalar y activar los avisos al celular (tablero 15). Pedidos es hoy la entrada de la
+          tienda: cuando llegue Inicio, la tarjeta pasa allí. */}
+      <InstallCard />
       <ViewTabs
         label="Qué pedidos ver"
         value={filter}

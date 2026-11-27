@@ -11,6 +11,7 @@ import {
 import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
+import { seedDemoPushChoices } from "./semilla-avisos.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
@@ -30,8 +31,9 @@ import { receiveSupportRequest } from "./soporte.js"
  * demostraciones: nunca corre en producción ni en las pruebas. Cada entrega de gestorIA le suma
  * lo suyo (B2 sus conversaciones, B3 su configuración y su catálogo en `semilla-catalogo.ts`,
  * B4 sus pedidos, B5 Sofi y Argos en `semilla-sofi.ts`, Clientes en `semilla-clientes.ts` y
- * «Tu marca» en `semilla-marca.ts`). Inicio muestra su «Te toca» con eso mismo; para sus primeros
- * pasos, la demo suma una tienda que recién empieza, Tortas Carmen (`semilla-primeros-pasos.ts`).
+ * «Tu marca» en `semilla-marca.ts` y lo que cada persona elige recibir en el celular en
+ * `semilla-avisos.ts`). Inicio muestra su «Te toca» con eso mismo; para sus primeros pasos, la
+ * demo suma una tienda que recién empieza, Tortas Carmen (`semilla-primeros-pasos.ts`).
  *
  * Las personas del equipo son copias de cuentas de ejemplo: no existen en la cuenta, así que no
  * se puede entrar con ellas. Para entrar a la tienda, `GESTORIA_SEMILLA_CORREO` deja una
@@ -105,6 +107,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoCorrections(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCustomers(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoPushChoices(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSetupDone(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoNewStore(tx as unknown as Db)

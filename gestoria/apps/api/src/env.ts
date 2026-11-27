@@ -54,6 +54,21 @@ const schema = z.object({
   GESTORIA_OPENAI_API_KEY: z.string().trim().default(""),
   /** Solo si no es la API pública de OpenAI. */
   GESTORIA_OPENAI_BASE_URL: z.string().trim().default(""),
+  /**
+   * Los avisos al celular (push web, RFC 8292): el par de claves VAPID de gestorIA, propio (no el
+   * de las clínicas), y a quién escribir si un servicio de push tiene un problema (`mailto:` o
+   * `https:`). Vacías: los avisos al celular no se ofrecen y no se envía nada.
+   */
+  GESTORIA_VAPID_PUBLIC_KEY: z.string().trim().default(""),
+  GESTORIA_VAPID_PRIVATE_KEY: z.string().trim().default(""),
+  GESTORIA_VAPID_SUBJECT: z
+    .string()
+    .trim()
+    .default("")
+    .refine(
+      (value) => value === "" || /^(mailto:|https:\/\/)/.test(value),
+      "Es mailto: o https://",
+    ),
 })
 
 export type Env = z.infer<typeof schema>

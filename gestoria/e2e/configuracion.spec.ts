@@ -9,7 +9,7 @@ import { ACCOUNT, STORE_ID, type Who } from "./entorno"
  * - El menú lleva lo diario y, al pie, Configuración y Ayuda. Configuración tiene sus grupos.
  * - Datos de la tienda: la «Hora de la tienda» se cambia y se vuelve a la de Lima.
  * - Tu marca: un nombre reservado se dice en su campo; el color elegido pinta la app al guardar.
- * - Ventas no ve Configuración, y si abre una dirección suya se le dice.
+ * - Ventas ve en Configuración solo sus avisos al celular, y si abre otra dirección se le dice.
  * Cada pantalla en escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`.
  */
 
@@ -58,6 +58,7 @@ test("el menú del día lleva Configuración al pie, con sus grupos", async ({ p
     "Sofi",
     "Medios de pago",
     "Formas de entrega y zonas",
+    "Avisos al celular",
     "Plan y pagos",
   ])
     await expect(sections.getByRole("link", { name })).toBeVisible()
@@ -132,13 +133,17 @@ test("Tu marca: el link reservado se dice en su campo y el color pinta la app", 
   await expect(page.getByText("Tu marca quedó guardada").first()).toBeVisible()
 })
 
-test("Ventas no ve Configuración ni lo que no puede tocar", async ({ page }) => {
+test("Ventas ve en Configuración solo sus avisos al celular", async ({ page }) => {
   await as("lucia")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
   await expect(page.getByRole("navigation", { name: "Principal" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Configuración" })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Ayuda" })).toBeVisible()
+  // Configuración le abre lo único suyo, sin pasar por «Datos de la tienda».
+  await page.getByRole("link", { name: "Configuración" }).click()
+  await expect(page).toHaveURL(/\/configuracion\/avisos$/)
+  const sections = page.getByRole("navigation", { name: "Configuración" })
+  await expect(sections.getByRole("link")).toHaveText(["Avisos al celular"])
   await page.goto(`${BASE}/configuracion/sofi`)
   await expect(page.getByText("Esto lo ajusta quien configura la tienda")).toBeVisible()
   await expect(page.getByRole("button", { name: /Probar|Escribir/ })).toHaveCount(0)

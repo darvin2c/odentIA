@@ -1792,3 +1792,86 @@ export const storeSetup = pgTable(
     }).onDelete("cascade"),
   ],
 )
+
+/**
+ * Los avisos al celular (lienzo «gestorIA como odentIA», tablero 15): de qué avisa gestorIA con la
+ * app cerrada. Cada uno lo recibe quien puede resolverlo (`permisos.ts` de la API) y abre la
+ * pantalla que lo resuelve.
+ *
+ * - `pagos`: un pago por confirmar (una captura, o un link que no coincide).
+ * - `chats`: un chat que Sofi pasó a una persona.
+ * - `no_entregado`: una entrega que volvió sin entregarse.
+ * - `sofi_pedido`: un pedido que armó Sofi.
+ * - `dinero`: lo de dinero de toda la tienda (un pago por link que entró).
+ */
+export const PUSH_KINDS = ["pagos", "chats", "no_entregado", "sofi_pedido", "dinero"] as const
+export type PushKind = (typeof PUSH_KINDS)[number]
+
+/**
+ * Un celular (o una compu) que recibe los avisos de una persona: su suscripción del navegador
+ * (push web, RFC 8030 y 8291). Es de la persona, no de una tienda: la app es un solo origen, así
+ * que cada celular se activa una vez y le llega lo de todas sus tiendas. La dirección es única:
+ * un navegador recibe los de una sola persona.
+ */
+export const pushDevice = pgTable(
+  "push_device",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    /** Las claves del navegador para cifrar cada aviso (RFC 8291), en base64url. */
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    /** Cuándo salió «Listo» a este celular, para que se vea que funciona. Lo anota el sistema. */
+    welcomedAt: timestamp("welcomed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("push_device_endpoint_key").on(table.endpoint),
+    check(
+      "push_device_keys_check",
+      sql`char_length(${table.endpoint}) between 10 and 1000 and char_length(${table.p256dh}) between 1 and 200 and char_length(${table.auth}) between 1 and 100`,
+    ),
+    foreignKey({
+      name: "push_device_user_id_fkey",
+      columns: [table.userId],
+      foreignColumns: [accountCopy.userId],
+    }).onDelete("cascade"),
+    index("push_device_user_idx").on(table.userId, table.createdAt),
+  ],
+)
+
+/**
+ * Qué le llega a cada persona de cada tienda: lo que eligió en Configuración › Avisos al
+ * celular, que vale en todos sus celulares, y hasta dónde ya miró el sistema para no avisar dos
+ * veces lo mismo. Va unido a su lugar en el equipo: quien deja la tienda deja de recibirlos.
+ */
+export const pushChoice = pgTable(
+  "push_choice",
+  {
+    storeId: uuid("store_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** Lo que eligió, entre lo que su rol puede resolver. Nulo: lo de su rol por omisión. */
+    kinds: text("kinds").array().$type<PushKind[]>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Lo escribe el sistema, antes de enviar: el último paso de los pedidos (`order_event.seq`)
+     * ya mirado y los chats que ya esperaban. Nulos: todavía no miró; la primera vez no avisa lo
+     * que ya estaba.
+     */
+    lastEventSeq: bigint("last_event_seq", { mode: "number" }),
+    chatsSeen: uuid("chats_seen").array(),
+  },
+  (table) => [
+    primaryKey({ name: "push_choice_pkey", columns: [table.storeId, table.userId] }),
+    check(
+      "push_choice_kinds_check",
+      sql`${table.kinds} is null or ${table.kinds} <@ ${sql.raw(`array[${PUSH_KINDS.map((kind) => `'${kind}'`).join(",")}]::text[]`)}`,
+    ),
+    foreignKey({
+      name: "push_choice_member_fkey",
+      columns: [table.storeId, table.userId],
+      foreignColumns: [storeMember.storeId, storeMember.userId],
+    }).onDelete("cascade"),
+  ],
+)

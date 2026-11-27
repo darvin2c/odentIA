@@ -19,6 +19,9 @@ import type { StoreRole } from "@gestoria/db"
  * marcar «Recibí» el efectivo de cada repartidor (entrega 3 del mismo lienzo): solo Dueño y
  * Administrador, como Reportes, porque son los totales de dinero de la tienda. «entregas» es
  * Despachos: salir, entregar, «No se entregó», «Pasar a…», el repartidor y la agencia.
+ * «avisos.recibir» es recibir en el celular los avisos de lo que su rol resuelve y elegir cuáles
+ * (tablero 15): todo el equipo; qué avisos le llegan sale de los demás permisos (`avisos.ts`).
+ * Soporte no es del equipo: no.
  */
 export const STORE_PERMISSIONS = [
   "tienda.ver",
@@ -34,6 +37,7 @@ export const STORE_PERMISSIONS = [
   "entregas",
   "ayuda.pedir",
   "caja",
+  "avisos.recibir",
 ] as const
 export type StorePermission = (typeof STORE_PERMISSIONS)[number]
 
@@ -45,6 +49,7 @@ const SALES: readonly StorePermission[] = [
   "pagos.confirmar",
   "entregas",
   "ayuda.pedir",
+  "avisos.recibir",
 ]
 
 /**

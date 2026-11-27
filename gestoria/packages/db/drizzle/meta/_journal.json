@@ -197,6 +197,20 @@
       "when": 1795800852918,
       "tag": "0027_reglas_despachos_y_caja",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1795802158332,
+      "tag": "0028_avisos_al_celular",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795802171622,
+      "tag": "0029_reglas_avisos_al_celular",
+      "breakpoints": true
     }
   ]
 }

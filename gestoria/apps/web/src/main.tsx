@@ -18,6 +18,7 @@ import {
 } from "@tanstack/react-router"
 import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
+import { DeviceNoticesPage } from "./avisos"
 import { HelpPage } from "./ayuda"
 import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
@@ -34,6 +35,7 @@ import {
 } from "./entrada"
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
+import { startInstalledApp } from "./lib/avisos"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
 import { FILTERS, type OrderFilter } from "./lib/pedidos"
 import { BrandPage } from "./marca"
@@ -218,6 +220,11 @@ const storeChildren = [
   }),
   createRoute({
     getParentRoute: () => storeRoute,
+    path: "/configuracion/avisos",
+    component: inConfig(DeviceNoticesPage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
     path: "/configuracion/plan",
     component: inConfig(PlanPage),
   }),
@@ -321,6 +328,10 @@ const router = createRouter({
   routeTree,
   defaultErrorComponent: RouteError,
 })
+
+// La app instalable (tablero 15): el service worker muestra los avisos y, con la app abierta, al
+// tocar uno le pasa la pantalla al router, que respeta lo que se está escribiendo.
+startInstalledApp((href) => void router.navigate({ href }))
 
 // Si la sesión de la cuenta vence a mitad, cualquier pantalla manda a entrar. Si a soporte se le
 // terminó el acceso (o la tienda todavía no responde), la tienda se vuelve a mirar: deja de salir
