@@ -92,6 +92,14 @@ export const store = pgTable(
      * promociones (ADR 0222). La aplicación comprueba que exista; aquí, solo su forma.
      */
     timeZone: text("time_zone").notNull().default("America/Lima"),
+    /**
+     * «Tu marca» (lienzo «gestorIA como odentIA», tablero 10): el nombre que ve el cliente, si no
+     * es el de la tienda, y el color de marca (seis cifras hexadecimales en minúsculas; de él se
+     * calcula todo lo demás al mostrarlo, ADR 0162). Nulos: el nombre de la tienda y el color de
+     * gestorIA. El logo y la portada van en `store_image`; el nombre del link, en `store_link`.
+     */
+    publicName: text("public_name"),
+    brandColor: text("brand_color"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -99,6 +107,14 @@ export const store = pgTable(
     check("store_name_check", sql`char_length(btrim(${table.name})) between 1 and 80`),
     check("store_currency_check", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check("store_country_check", sql`${table.country} is null or ${table.country} ~ '^[A-Z]{2}$'`),
+    check(
+      "store_public_name_check",
+      sql`${table.publicName} is null or char_length(btrim(${table.publicName})) between 1 and 80`,
+    ),
+    check(
+      "store_brand_color_check",
+      sql`${table.brandColor} is null or ${table.brandColor} ~ '^#[0-9a-f]{6}$'`,
+    ),
     check(
       "store_time_zone_check",
       sql`char_length(${table.timeZone}) <= 64 and ${table.timeZone} ~ '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$'`,
@@ -213,8 +229,10 @@ export const STORE_EVENT_ACTIONS = [
   "soporte.entro",
   // Soporte terminó su mirada con «Salir» (ADR 0219).
   "soporte.salio",
-  // Los datos de la tienda: su hora (ADR 0222).
+  // Los datos de la tienda: su nombre, su país y su hora (ADR 0222).
   "configuracion.tienda",
+  // «Tu marca»: el nombre que ve el cliente, el color, el logo, la portada y el nombre del link.
+  "configuracion.marca",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 
@@ -461,6 +479,66 @@ export type PhotoType = (typeof PHOTO_TYPES)[number]
 /** Lo más que pesa una foto (la pantalla la achica antes de subirla) y cuántas lleva un producto. */
 export const MAX_PHOTO_BYTES = 1_500_000
 export const MAX_PRODUCT_PHOTOS = 8
+
+/** Las imágenes de «Tu marca»: el logo y la foto de portada, una de cada una por tienda. */
+export const STORE_IMAGE_KINDS = ["logo", "portada"] as const
+export type StoreImageKind = (typeof STORE_IMAGE_KINDS)[number]
+
+export const storeImage = pgTable(
+  "store_image",
+  {
+    storeId: uuid("store_id").notNull(),
+    kind: text("kind").$type<StoreImageKind>().notNull(),
+    contentType: text("content_type").$type<PhotoType>().notNull(),
+    content: bytea("content").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: "store_image_pkey", columns: [table.storeId, table.kind] }),
+    check("store_image_kind_check", inList("kind", STORE_IMAGE_KINDS)),
+    check("store_image_type_check", inList("content_type", PHOTO_TYPES)),
+    check(
+      "store_image_size_check",
+      sql`octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+    ),
+    foreignKey({
+      name: "store_image_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * El nombre del link de la tienda (`calzadosrosa.gestoria24.com`, tableros 10 y 21): uno vigente
+ * por tienda. El que se cambia se queda con ella (`current` falso): nadie más lo toma y el
+ * catálogo lo llevará al nuevo. La clave es el nombre: dos tiendas nunca tienen el mismo, aunque
+ * cada una vea solo los suyos. Qué nombres valen (los reservados) lo decide la API; aquí, su forma:
+ * letras sin tilde, números y guiones sueltos, de 3 a 63 (lo que cabe en un nombre de dominio).
+ */
+export const storeLink = pgTable(
+  "store_link",
+  {
+    name: text("name").primaryKey(),
+    storeId: uuid("store_id").notNull(),
+    current: boolean("current").notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "store_link_name_check",
+      sql`${table.name} ~ '^[a-z0-9](-?[a-z0-9]){2,62}$' and char_length(${table.name}) <= 63`,
+    ),
+    foreignKey({
+      name: "store_link_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    uniqueIndex("store_link_current_uidx").on(table.storeId).where(sql`${table.current}`),
+  ],
+)
 
 export const productPhoto = pgTable(
   "product_photo",

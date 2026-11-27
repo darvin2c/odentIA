@@ -13,7 +13,9 @@ import {
   enterStore,
   store,
   storeEvent,
+  storeImage,
   storeInvitation,
+  storeLink,
   storeMember,
   withPerson,
 } from "./index.js"
@@ -204,6 +206,77 @@ describe("las reglas de cada tienda", () => {
         tx.update(contractState).set({ state: { found: false } }),
       ),
     ).rejects.toThrow()
+  })
+
+  it("«Tu marca»: cada tienda cambia solo la suya, el nombre del link no se repite y el agente no la toca", async () => {
+    const inCalzados = async <T>(
+      fn: (tx: Db) => Promise<T>,
+      who: { userId: string; email: string } = rosa,
+    ) =>
+      withPerson(db.appDb, who, async (tx) => {
+        await enterStore(tx, calzados)
+        return fn(tx)
+      })
+    await inCalzados((tx) =>
+      tx.update(store).set({ publicName: "Rosa Calzados", brandColor: "#be185d" }),
+    )
+    await inCalzados((tx) =>
+      tx.insert(storeImage).values({
+        storeId: calzados,
+        kind: "logo",
+        contentType: "image/png",
+        content: Buffer.from([1, 2, 3]),
+        updatedBy: rosa.userId,
+      }),
+    )
+    await inCalzados((tx) =>
+      tx
+        .insert(storeLink)
+        .values({ name: "calzadosrosa", storeId: calzados, createdBy: rosa.userId }),
+    )
+    // La moneda no se cambia, y un color que no es un color tampoco.
+    await expect(inCalzados((tx) => tx.update(store).set({ currency: "USD" }))).rejects.toThrow()
+    await expect(inCalzados((tx) => tx.update(store).set({ brandColor: "rosa" }))).rejects.toThrow()
+    // Otra tienda no ve ni usa lo de Calzados: su nombre del link ya está tomado.
+    const fromOther = await withPerson(db.appDb, mario, async (tx) => {
+      await enterStore(tx, otra)
+      return {
+        images: await tx.select({ kind: storeImage.kind }).from(storeImage),
+        links: await tx.select({ name: storeLink.name }).from(storeLink),
+      }
+    })
+    expect(fromOther).toEqual({ images: [], links: [] })
+    await expect(
+      withPerson(db.appDb, mario, async (tx) => {
+        await enterStore(tx, otra)
+        await tx
+          .insert(storeLink)
+          .values({ name: "calzadosrosa", storeId: otra, createdBy: mario.userId })
+      }),
+    ).rejects.toThrow()
+    // Dos vigentes en la misma tienda, no.
+    await expect(
+      inCalzados((tx) =>
+        tx
+          .insert(storeLink)
+          .values({ name: "rosa-dos", storeId: calzados, createdBy: rosa.userId }),
+      ),
+    ).rejects.toThrow()
+    // Sofi no cambia la tienda ni su marca.
+    const sofi = { userId: "agente:sofi", email: "" }
+    await inCalzados(async (tx) => {
+      const changed = await tx
+        .update(store)
+        .set({ brandColor: "#000000" })
+        .returning({ id: store.id })
+      expect(changed).toEqual([])
+      const removed = await tx.delete(storeImage).returning({ kind: storeImage.kind })
+      expect(removed).toEqual([])
+    }, sofi)
+    const [after] = await inCalzados((tx) =>
+      tx.select({ brandColor: store.brandColor }).from(store),
+    )
+    expect(after?.brandColor).toBe("#be185d")
   })
 
   it("sin persona, la aplicación no ve nada", async () => {
