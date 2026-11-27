@@ -6,7 +6,8 @@ import { ACCOUNT, STORE_ID, type Who } from "./entorno"
 /**
  * El menú del día y Configuración en un navegador (lienzo «gestorIA como odentIA», tableros 4 y
  * 10), contra su servidor y su base de verdad:
- * - El menú lleva lo diario y, al pie, Configuración y Ayuda. Configuración tiene sus grupos.
+ * - El menú lleva lo diario y, al pie, Configuración; la Ayuda está en la cabecera. Configuración
+ *   tiene sus grupos.
  * - Datos de la tienda: la «Hora de la tienda» se cambia y se vuelve a la de Lima.
  * - Tu marca: un nombre reservado se dice en su campo; el color elegido pinta la app al guardar.
  * - Ventas ve en Configuración solo sus avisos al celular, y si abre otra dirección se le dice.
@@ -138,7 +139,9 @@ test("Ventas ve en Configuración solo sus avisos al celular", async ({ page }) 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
   await expect(page.getByRole("navigation", { name: "Principal" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Ayuda" })).toBeVisible()
+  // La Ayuda es el botón de la cabecera, no un enlace del menú.
+  await expect(page.getByRole("button", { name: "Ayuda", exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Ayuda" })).toHaveCount(0)
   // Configuración le abre lo único suyo, sin pasar por «Datos de la tienda».
   await page.getByRole("link", { name: "Configuración" }).click()
   await expect(page).toHaveURL(/\/configuracion\/avisos$/)

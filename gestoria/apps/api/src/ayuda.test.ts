@@ -5,8 +5,21 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { type HelpAskAnswer, helpAskQuestion } from "@odentia/contract"
 import { describe, expect, it } from "vitest"
-import { HELP_GUIDE, HELP_SCREENS, helpGuideFor, whoCan } from "./ayuda.js"
+import {
+  HELP_GUIDE,
+  HELP_SCREENS,
+  HELP_WORDS,
+  helpAnswerFor,
+  helpReplyOf,
+  helpReplyWithoutAriadna,
+  helpScreenOf,
+  helpScreenView,
+  helpTopics,
+  storePath,
+  whoCan,
+} from "./ayuda.js"
 import { ROLE_NAMES, ROLE_PERMISSIONS } from "./permisos.js"
 
 const faqs = HELP_GUIDE.flatMap((group) => group.faqs)
@@ -63,59 +76,210 @@ describe("la guía", () => {
           expect(source.includes(quoted as string), `${faq.id}: «${quoted}»`).toBe(true)
   })
 
-  it("lleva a pantallas que existen, y la Ayuda también existe", () => {
+  it("lleva a pantallas que existen", () => {
     const routes = readFileSync(
       fileURLToPath(new URL("../../web/src/main.tsx", import.meta.url)),
       "utf8",
     )
-    for (const screen of [...Object.values(HELP_SCREENS).map((one) => one.path), "/ayuda"])
+    for (const screen of Object.values(HELP_SCREENS).map((one) => one.path))
       expect(routes.includes(`path: "${screen}"`), screen).toBe(true)
+    // La Ayuda es el panel de la cabecera: ya no tiene página.
+    expect(routes.includes('path: "/ayuda"')).toBe(false)
+  })
+
+  it("viaja entera a Ariadna como el acuerdo la pide: un tema por pantalla, con sus preguntas", () => {
+    const guide = helpTopics()
+    expect(() =>
+      helpAskQuestion.parse({
+        question: "¿Cómo subo un producto?",
+        screen: "/",
+        previous: null,
+        guide,
+      }),
+    ).not.toThrow()
+    expect(guide.map((topic) => topic.id)).toEqual(Object.keys(HELP_SCREENS))
+    expect(guide.flatMap((topic) => topic.faqs)).toHaveLength(faqs.length)
+    expect(guide.find((topic) => topic.id === "marca")).toMatchObject({
+      path: "/configuracion/marca",
+      title: "Tu marca",
+      parent: "Configuración",
+    })
+    expect(guide.find((topic) => topic.id === "pedidos")?.parent).toBeNull()
+    // Los párrafos van unidos, tal cual.
+    const pasarA = guide.flatMap((topic) => topic.faqs).find((faq) => faq.id === "pasar-a")
+    expect(pasarA?.a).toBe(faqs.find((faq) => faq.id === "pasar-a")?.a.join("\n\n"))
   })
 })
 
-describe("la guía para cada rol", () => {
-  const find = (seat: Parameters<typeof helpGuideFor>[0], id: string) =>
-    helpGuideFor(seat)
-      .flatMap((group) => group.faqs)
-      .find((faq) => faq.id === id)
+const STORE = "6a1d6b52-6f73-4a5c-9b3a-5c0a1d0e2401"
 
-  it("Ventas ve todas las preguntas, sabe qué no puede y no va a lo que no abre", () => {
-    expect(helpGuideFor("sales").flatMap((group) => group.faqs)).toHaveLength(faqs.length)
-    expect(find("sales", "pago-por-confirmar")).toMatchObject({
-      you: true,
-      who: "Dueño, Administrador y Ventas",
-      whoCount: 3,
-      screen: { label: "Pedidos", path: "/pedidos" },
+describe("la pantalla donde está", () => {
+  it("es la de la ruta dentro de la tienda, la más precisa", () => {
+    expect(storePath(`/tiendas/${STORE}/pedidos?pedido=p-1`, STORE)).toBe("/pedidos")
+    expect(storePath(`/tiendas/${STORE}`, STORE)).toBe("/")
+    expect(helpScreenOf("/")).toBe("inicio")
+    expect(helpScreenOf("/catalogo/prod-1")).toBe("catalogo")
+    expect(helpScreenOf("/configuracion")).toBe("datos")
+    expect(helpScreenOf("/configuracion/marca")).toBe("marca")
+    expect(helpScreenOf("/clientes")).toBeNull()
+  })
+
+  it("sugiere hasta tres preguntas de esa pantalla que su rol puede hacer", () => {
+    const owner = helpScreenView("owner", "/pedidos")
+    expect(owner.title).toBe("Pedidos")
+    expect(owner.suggestions).toHaveLength(3)
+    // A Ventas no se le sugiere lo que no puede hacer, aunque abra la pantalla.
+    expect(helpScreenView("sales", "/catalogo")).toEqual({ title: "Catálogo", suggestions: [] })
+    expect(helpScreenView("sales", "/")).toEqual({
+      title: "Inicio",
+      suggestions: ["¿Qué me toca hacer hoy?"],
+    })
+    // Soporte solo mira: nada de pedidos que hacer.
+    expect(helpScreenView("support", "/pedidos").suggestions).toEqual([])
+    expect(helpScreenView("owner", "/clientes")).toEqual({ title: null, suggestions: [] })
+  })
+})
+
+describe("cada respuesta para el rol de quien pregunta", () => {
+  it("Ventas sabe qué no puede, a quién pedírselo, y no va a lo que no abre", () => {
+    expect(helpAnswerFor("sales", STORE, "faq:pago-por-confirmar")).toEqual({
+      topicId: "pedidos",
+      where: "Pedidos",
+      text: faqs.find((faq) => faq.id === "pago-por-confirmar")?.a.join("\n\n"),
+      path: `/tiendas/${STORE}/pedidos`,
+      restriction: null,
     })
     // El stock lo cambian Dueño y Administrador; el catálogo sí lo puede abrir.
-    expect(find("sales", "cambiar-stock")).toMatchObject({
-      you: false,
-      who: "Dueño y Administrador",
-      screen: { path: "/catalogo" },
+    expect(helpAnswerFor("sales", STORE, "faq:cambiar-stock")).toMatchObject({
+      path: `/tiendas/${STORE}/catalogo`,
+      restriction:
+        "Con tu rol (Ventas) no se puede: pídeselo a quien sí puede. Lo pueden hacer: Dueño y Administrador.",
     })
-    expect(find("sales", "reportes")).toMatchObject({ you: false, screen: null })
-    expect(find("sales", "plan")).toMatchObject({
-      you: false,
-      who: "Dueño",
-      whoCount: 1,
-      screen: null,
+    expect(helpAnswerFor("sales", STORE, "faq:reportes")).toMatchObject({ path: null })
+    expect(helpAnswerFor("sales", STORE, "faq:plan")).toMatchObject({
+      path: null,
+      restriction:
+        "Con tu rol (Ventas) no se puede: pídeselo a quien sí puede. Lo puede hacer: Dueño.",
     })
+    expect(helpAnswerFor("sales", STORE, "faq:te-toca")?.path).toBe(`/tiendas/${STORE}`)
   })
 
   it("el Dueño puede todo y va a todo; el Administrador, todo menos el plan", () => {
-    for (const faq of helpGuideFor("owner").flatMap((group) => group.faqs)) {
-      expect(faq.you, faq.id).toBe(true)
-      expect(faq.screen, faq.id).not.toBeNull()
+    for (const faq of faqs) {
+      const answer = helpAnswerFor("owner", STORE, `faq:${faq.id}`)
+      expect(answer?.restriction, faq.id).toBeNull()
+      expect(answer?.path, faq.id).not.toBeNull()
     }
-    expect(find("admin", "plan")).toMatchObject({ you: false, screen: null })
-    expect(find("admin", "cambiar-stock")).toMatchObject({ you: true })
+    expect(helpAnswerFor("admin", STORE, "faq:plan")).toMatchObject({ path: null })
+    expect(helpAnswerFor("admin", STORE, "faq:cambiar-stock")?.restriction).toBeNull()
   })
 
-  it("soporte, que solo mira, no va a los pedidos", () => {
-    expect(find("support", "anotar-pedido")).toMatchObject({ you: false, screen: null })
-    expect(find("support", "agregar-producto")).toMatchObject({
-      you: false,
-      screen: { path: "/catalogo" },
+  it("soporte, que solo mira, no va a los pedidos y sabe que no puede", () => {
+    expect(helpAnswerFor("support", STORE, "faq:anotar-pedido")).toMatchObject({
+      path: null,
+      restriction: expect.stringContaining("Con tu rol (Soporte de gestorIA) no se puede"),
     })
+    expect(helpAnswerFor("support", STORE, "faq:agregar-producto")).toMatchObject({
+      path: `/tiendas/${STORE}/catalogo`,
+    })
+  })
+
+  it("lo que no es de la guía no se responde", () => {
+    expect(helpAnswerFor("owner", STORE, "faq:no-existe")).toBeNull()
+    expect(helpAnswerFor("owner", STORE, "tema:clientes")).toBeNull()
+    expect(helpAnswerFor("owner", STORE, "tema:toString")).toBeNull()
+  })
+})
+
+describe("lo que respondió Ariadna, hecho texto", () => {
+  const ASK = "0c6f7f4e-4d1b-4f43-9f4f-0b8a9b1f3a11"
+  const answer = (parts: Partial<HelpAskAnswer>): HelpAskAnswer => ({
+    askId: ASK,
+    via: "jev",
+    verdict: "ninguna",
+    shown: [],
+    offered: [],
+    written: null,
+    ...parts,
+  })
+
+  it("seguro: cada respuesta con su pantalla, y la redactada si vino", () => {
+    const reply = helpReplyOf(
+      answer({
+        verdict: "seguro",
+        shown: ["faq:cambiar-stock", "tema:pedidos"],
+        written: "Unido.",
+      }),
+      "sales",
+      STORE,
+    )
+    expect(reply).toMatchObject({
+      askId: ASK,
+      kind: "guia",
+      written: "Unido.",
+      argos: false,
+      basedOn: "La guía de gestorIA: Catálogo y Pedidos.",
+    })
+    expect(reply.answers.map((one) => [one.where, one.path])).toEqual([
+      ["Catálogo", `/tiendas/${STORE}/catalogo`],
+      ["Pedidos", `/tiendas/${STORE}/pedidos`],
+    ])
+    expect(reply.answers[0]?.restriction).toContain("Lo pueden hacer: Dueño y Administrador.")
+    expect(reply.answers[1]?.text).toBe(HELP_SCREENS.pedidos.purpose)
+  })
+
+  it("seguro con ids que no son de la guía no inventa: no está", () => {
+    expect(
+      helpReplyOf(answer({ verdict: "seguro", shown: ["faq:otra"] }), "owner", STORE),
+    ).toMatchObject({ kind: "nada", say: HELP_WORDS.notInGuide, answers: [] })
+  })
+
+  it("duda: las preguntas para elegir, tal cual", () => {
+    const reply = helpReplyOf(
+      answer({ verdict: "duda", offered: ["faq:link-de-pago", "tema:pagos"] }),
+      "owner",
+      STORE,
+    )
+    expect(reply).toMatchObject({ kind: "duda", say: HELP_WORDS.doubt })
+    expect(reply.choices).toEqual([
+      { question: "¿Cómo le mando un link de pago?", where: "Pedidos" },
+      { question: "¿Para qué sirve Medios de pago?", where: "Medios de pago" },
+    ])
+  })
+
+  it("ninguna: no está en la guía", () => {
+    expect(helpReplyOf(answer({}), "owner", STORE)).toMatchObject({
+      kind: "nada",
+      say: HELP_WORDS.notInGuide,
+    })
+  })
+
+  it("datos: a Reportes si su rol lo ve; si no, a quién pedírselo", () => {
+    expect(helpReplyOf(answer({ verdict: "datos" }), "admin", STORE)).toMatchObject({
+      kind: "datos",
+      argos: false,
+      answers: [{ where: "Reportes", path: `/tiendas/${STORE}/reportes` }],
+    })
+    const sales = helpReplyOf(answer({ verdict: "datos" }), "sales", STORE)
+    expect(sales).toMatchObject({ kind: "datos", argos: false, answers: [] })
+    expect(sales.say).toContain("Pídeselo a quien ve Reportes: Dueño y Administrador.")
+  })
+
+  it("sin Ariadna, solo una pregunta exacta de la guía; lo demás no se inventa", () => {
+    const exact = helpReplyWithoutAriadna(
+      "como subo un producto con tallas y stock",
+      "owner",
+      STORE,
+      "local-1",
+    )
+    expect(exact).toMatchObject({
+      askId: "local-1",
+      kind: "guia",
+      written: null,
+      answers: [{ where: "Catálogo", path: `/tiendas/${STORE}/catalogo` }],
+    })
+    expect(
+      helpReplyWithoutAriadna("¿Cómo subo un producto?", "owner", STORE, "local-2"),
+    ).toMatchObject({ kind: "nada", say: "Ahora no puedo buscar bien en la guía.", answers: [] })
   })
 })

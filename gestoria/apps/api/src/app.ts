@@ -7,13 +7,18 @@ import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
 import {
+  askAriadna,
   askForHelp,
   askSupport,
   type ContractConfig,
+  helpAskInput,
+  helpCases,
+  helpFeedbackInput,
   helpRequestInput,
-  helpView,
+  helpScreen,
   planReceiptInput,
   planView,
+  sendHelpFeedback,
   sendReceipt,
   supportInput,
 } from "./acuerdo.js"
@@ -943,16 +948,44 @@ export function createApp(deps: AppDeps) {
     return c.body(null, 204)
   })
 
-  // La Ayuda (entrega 7, tablero 19): la guía para el rol de quien la abre y sus preguntas, y
-  // «Pedir ayuda» para todo el equipo.
-  app.get("/api/tiendas/:id/ayuda", async (c) =>
-    c.json(await helpView(deps.appDb, contract, c.get("person"), c.req.param("id"))),
+  // La Ayuda (ADR 0227): el panel común de todas las apps pide aquí la pantalla, le pregunta a
+  // Ariadna con la guía de gestorIA, dice si le sirvió y escribe a soporte. «Tus casos con
+  // soporte» es de quien puede escribirle (`ayuda.pedir`).
+  app.get("/api/tiendas/:id/ayuda/screen", async (c) =>
+    c.json({
+      data: await helpScreen(
+        deps.appDb,
+        c.get("person"),
+        c.req.param("id"),
+        (c.req.query("path") ?? "/").slice(0, 300),
+      ),
+    }),
   )
-  app.post("/api/tiendas/:id/ayuda", async (c) => {
+  app.post("/api/tiendas/:id/ayuda/ask", async (c) => {
+    const input = await bodyOf(c, helpAskInput)
+    return c.json({
+      data: await askAriadna(deps.appDb, contract, c.get("person"), c.req.param("id"), input),
+    })
+  })
+  app.post("/api/tiendas/:id/ayuda/ask/:askId/feedback", async (c) => {
+    const { id, askId } = c.req.param()
+    const { helpful } = await bodyOf(c, helpFeedbackInput)
+    await sendHelpFeedback(deps.appDb, contract, c.get("person"), id, askId, { helpful })
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/ayuda/ask/:askId/none", async (c) => {
+    const { id, askId } = c.req.param()
+    await sendHelpFeedback(deps.appDb, contract, c.get("person"), id, askId, { noneFits: true })
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/ayuda/requests", async (c) => {
     const input = await bodyOf(c, helpRequestInput)
     await askForHelp(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
     return c.body(null, 204)
   })
+  app.get("/api/tiendas/:id/ayuda/casos", async (c) =>
+    c.json(await helpCases(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
 
   // Soporte de gestorIA (ADR 0214): el Dueño o un Administrador lo deja entrar, o no, y lo saca.
   app.post("/api/tiendas/:id/soporte/:accessId/aceptar", async (c) => {
