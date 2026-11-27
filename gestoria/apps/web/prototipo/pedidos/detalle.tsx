@@ -28,7 +28,7 @@ import {
 import { Fragment, useState } from "react"
 import { foto } from "../datos"
 import { href, ir, useRuta } from "../ruta"
-import { AccionDrawer, empacar } from "./acciones"
+import { AccionDrawer } from "./acciones"
 import {
   type Accion,
   type Actor,
@@ -48,10 +48,14 @@ import {
   type Paso,
   type Pedido,
   tocaDe,
+  todoElChat,
   trasPagar,
   tresHorasAntes,
   usePedido,
+  usePedidos,
 } from "./modelo"
+import { saldoAFavor, vueltaSigue } from "./vuelta"
+import { SimularVuelta, unToque, VueltaBloque } from "./vuelta-ui"
 
 export const ACTOR: Record<Actor, { label: string; Icon: typeof Bot; tono: string }> = {
   sofi: { label: "Sofi", Icon: Sparkles, tono: "bg-primary-soft text-primary-soft-foreground" },
@@ -105,10 +109,11 @@ export function queSigue(p: Pedido): { texto: string; persona: boolean } {
             persona: false,
           }
     case "entregado":
+      if (p.vuelta) return { texto: vueltaSigue(p) ?? "entregado.", persona: false }
       return {
         texto: p.cambioEn
           ? `entregado. Tiene un cambio en el pedido ${p.cambioEn}.`
-          : "entregado. Si pide un cambio con stock y al mismo precio, Sofi lo arma sola.",
+          : "entregado. Si pide un cambio o una devolución, Sofi lo atiende según tu política.",
         persona: false,
       }
     case "anulado":
@@ -135,7 +140,7 @@ export function acciones(p: Pedido): { principal?: [Accion, string]; otras: [Acc
   if (["pagado", "preparando", "por_salir"].includes(p.paso) && p.entrega.tipo === "moto")
     otras.push(["asignar", "Cambiar repartidor"])
   if (p.paso === "en_camino") otras.push(["cobrar", "Marcar entregado"], ["no_entregado", "No se entregó"])
-  if (p.paso === "entregado" && !p.cambioEn) otras.push(["cambio", "Cambio o devolución"])
+  if (p.paso === "entregado" && !p.cambioEn && !p.vuelta) otras.push(["cambio", "Cambio o devolución"])
   if (noSalio) otras.push(["anular", "Anular…"])
   return { principal, otras: otras.filter(([a]) => a !== principal?.[0]) }
 }
@@ -506,6 +511,7 @@ function EntregaB({ p }: { p: Pedido }) {
 }
 
 function Clienta({ p }: { p: Pedido }) {
+  const saldo = saldoAFavor(usePedidos(useRuta().rubro), p.clienta)
   return (
     <Bloque
       title="La clienta"
@@ -521,6 +527,12 @@ function Clienta({ p }: { p: Pedido }) {
         <span className="text-muted-foreground">
           {p.telefono} · escribe por {CANAL[p.canal]}
         </span>
+        {saldo ? (
+          <span className="mt-1.5 rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px]">
+            <b>{money(saldo)} a su favor.</b> Es suyo y se usa solo en su próxima compra: Sofi se lo
+            recuerda al venderle. Sale en su ficha y en Caja.
+          </span>
+        ) : null}
       </div>
     </Bloque>
   )
@@ -581,7 +593,23 @@ function Punto({ actor, futuro, Icon }: { actor: Actor; futuro?: boolean; Icon?:
 }
 
 /** La foto que acompaña al paso: la captura del Yape o el voucher del POS. */
-function Adjunto({ k, p }: { k: "captura" | "voucher"; p: Pedido }) {
+function Adjunto({ k, p }: { k: "captura" | "voucher" | "recojo" | "falla"; p: Pedido }) {
+  if (k === "recojo" || k === "falla")
+    return (
+      <span className="mt-1 flex w-52 items-center gap-2.5 rounded-xl border bg-muted/40 p-2">
+        {p.vuelta?.vuelven[0]?.foto ? (
+          <img src={foto(p.vuelta.vuelven[0].foto)} alt="" className="size-10 shrink-0 rounded-lg object-cover" />
+        ) : (
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card">
+            <Camera className="size-4 text-muted-foreground" aria-hidden />
+          </span>
+        )}
+        <span className="flex min-w-0 flex-col text-xs">
+          <b className="font-medium">{k === "recojo" ? "Foto al recoger" : "Foto de la falla"}</b>
+          <span className="text-muted-foreground">{k === "recojo" ? "Cómo estaba el producto" : "La mandó por WhatsApp"}</span>
+        </span>
+      </span>
+    )
   const g =
     k === "captura"
       ? p.pagos.find((x) => x.captura)
@@ -648,7 +676,7 @@ function Seguimiento({ p, onChat }: { p: Pedido; onChat: () => void }) {
           {p.eventos.length} cosas pasaron · {p.avisos.length}{" "}
           {p.avisos.length === 1 ? "aviso" : "avisos"} a {n}
         </span>
-        {p.chat.length ? (
+        {todoElChat(p).length ? (
           <Button size="sm" variant="outline" className="ml-auto" onClick={onChat}>
             <MessageCircle aria-hidden />
             Ver toda la conversación
@@ -750,7 +778,8 @@ function Seguimiento({ p, onChat }: { p: Pedido; onChat: () => void }) {
 }
 
 function Chat({ p }: { p: Pedido }) {
-  if (!p.chat.length)
+  const chat = todoElChat(p)
+  if (!chat.length)
     return (
       <p className="rounded-xl border p-4 text-sm text-muted-foreground">
         {p.origen.k === "catalogo"
@@ -762,7 +791,7 @@ function Chat({ p }: { p: Pedido }) {
     )
   return (
     <div className="flex flex-col gap-2 rounded-xl bg-muted/50 p-3">
-      {p.chat.map((m, i) => (
+      {chat.map((m, i) => (
         <div
           key={i}
           className={cn(
@@ -985,7 +1014,9 @@ export function PedidoPage({ pid }: { pid: string }) {
     )
   const k = cuentas(p)
   const { otras } = acciones(p)
-  const hacer = (a: Accion) => (a === "empacar" ? empacar(rubro, p) : setAccion({ a }))
+  const hacer = (a: Accion) => {
+    if (!unToque(rubro, p, a)) setAccion({ a })
+  }
   const ICON: Partial<Record<Accion, typeof Bot>> = {
     cambiar: PencilLine,
     pasar: CalendarClock,
@@ -998,6 +1029,7 @@ export function PedidoPage({ pid }: { pid: string }) {
   // El pedido es lo principal: el carrito, el saldo y la entrega van a la izquierda.
   const pedido = (
     <>
+      <VueltaBloque p={p} />
       <Carrito p={p} />
       {p.paso !== "anulado" ? (
         <Saldo p={p} onAccion={(a, pago) => setAccion({ a, pago })} />
@@ -1072,6 +1104,7 @@ export function PedidoPage({ pid }: { pid: string }) {
           {seguimiento}
           {extras}
           <Simular p={p} />
+          <SimularVuelta p={p} />
         </div>
       ) : (
         // A la derecha, el seguimiento y los extras, con más ancho que una columna lateral.
@@ -1079,6 +1112,7 @@ export function PedidoPage({ pid }: { pid: string }) {
           <div className="flex min-w-0 flex-col gap-4">
             {pedido}
             <Simular p={p} />
+            <SimularVuelta p={p} />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
             {seguimiento}

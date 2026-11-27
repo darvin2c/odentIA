@@ -41,6 +41,7 @@ import { InicioPage } from "./pedidos/inicio"
 import { PedidosPage } from "./pedidos/lista"
 import { reiniciarPedidos, teToca, usePedidos } from "./pedidos/modelo"
 import { RepartoPage } from "./pedidos/reparto"
+import { PoliticaPage } from "./pedidos/vuelta-ui"
 
 const HashLink: ShellLinkComponent = ({ to, className, children, title, onClick }) => (
   <a href={href(to)} className={className} title={title} onClick={onClick}>
@@ -240,6 +241,7 @@ export function App() {
   if (p === "/inicio") page = <InicioPage />
   else if (p === "/pedidos") page = <PedidosPage />
   else if (p === "/pedidos/como-avanza") page = <ComoAvanzaPage />
+  else if (p === "/pedidos/politica") page = <PoliticaPage key={ruta.rubro} />
   else if (pedidoId) page = <PedidoPage key={`${ruta.rubro}-${pedidoId}`} pid={pedidoId} />
   else if (p === "/clienta") page = <ClientaPage />
   else if (p === "/reparto") page = <RepartoPage />

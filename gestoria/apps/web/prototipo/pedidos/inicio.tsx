@@ -5,7 +5,8 @@ import { useState } from "react"
 import { RUBROS } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { useTienda } from "../tienda"
-import { AccionDrawer, empacar } from "./acciones"
+import { AccionDrawer } from "./acciones"
+import { unToque } from "./vuelta-ui"
 import { TeTocaPedidos } from "./lista"
 import { type Accion, cuentas, money, type Pedido, teToca, usePedidos } from "./modelo"
 import { ConRouter } from "./router"
@@ -113,7 +114,7 @@ function Inicio() {
         {toca ? (
           <>
             <b>{toca === 1 ? "Una cosa te necesita." : `${toca} cosas te necesitan.`}</b> Lo demás
-            lo mueven solos Sofi, gestorIA, la pasarela y los repartidores. A ti solo te queda empacar, confirmar capturas de Yape o Plin y los casos raros.
+            lo mueven solos Sofi, gestorIA, la pasarela y los repartidores. A ti solo te queda empacar, confirmar capturas de Yape o Plin, aprobar los cambios y devoluciones que deja listos Sofi, revisar lo que vuelve y los casos raros.
           </>
         ) : (
           "Nada te espera. Todo avanza solo."
@@ -122,7 +123,9 @@ function Inicio() {
       <TeTocaPedidos
         list={all}
         onAbrir={(id) => ir(`/pedidos/${id}`)}
-        onAccion={(p, a) => (a === "empacar" ? empacar(rubro, p) : setAccion({ p, a }))}
+        onAccion={(p, a) => {
+          if (!unToque(rubro, p, a)) setAccion({ p, a })
+        }}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {owner ? (

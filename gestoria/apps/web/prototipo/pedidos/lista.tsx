@@ -17,6 +17,7 @@ import {
   Megaphone,
   Plus,
   Route,
+  ScrollText,
   Sparkles,
   Store,
   UserRound,
@@ -26,7 +27,8 @@ import { useEffect, useMemo, useState } from "react"
 import { foto } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { useTienda } from "../tienda"
-import { AccionDrawer, Anotar, empacar } from "./acciones"
+import { AccionDrawer, Anotar } from "./acciones"
+import { LoQueAprende, unToque } from "./vuelta-ui"
 import {
   type Accion,
   CANAL,
@@ -50,6 +52,7 @@ type Vista =
   | "en_camino"
   | "entregados"
   | "anulados"
+  | "vueltas"
   | "todos"
 const VISTAS: Record<Vista, { label: string; pasos: Paso[] | null }> = {
   abiertos: {
@@ -61,6 +64,7 @@ const VISTAS: Record<Vista, { label: string; pasos: Paso[] | null }> = {
   en_camino: { label: "En camino", pasos: ["en_camino"] },
   entregados: { label: "Entregados", pasos: ["entregado"] },
   anulados: { label: "Anulados", pasos: ["anulado"] },
+  vueltas: { label: "Cambios y devoluciones", pasos: null },
   todos: { label: "Todos", pasos: null },
 }
 
@@ -139,6 +143,27 @@ function Foto({ p }: { p: Pedido }) {
   )
 }
 
+/** El estado del pedido y, si algo vuelve, el de su cambio o devolución. */
+function EstadoBadge({ p }: { p: Pedido }) {
+  const v = p.vuelta
+  if (!v || v.estado === "cerrado" || v.estado === "rechazado")
+    return <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
+  const t = v.tipo === "cambio" ? "Cambio" : "Devolución"
+  const e =
+    v.estado === "solicitado"
+      ? "por aprobar"
+      : v.estado === "recibido"
+        ? "por revisar"
+        : v.estado === "revisado"
+          ? "por devolver"
+          : "en vuelta"
+  return (
+    <Badge variant="warning">
+      {t} {e}
+    </Badge>
+  )
+}
+
 function Cobro({ p }: { p: Pedido }) {
   const k = cuentas(p)
   if (p.paso === "anulado") return <span className="text-muted-foreground">—</span>
@@ -191,7 +216,9 @@ function Lista() {
   const [anotar, setAnotar] = useState(false)
   const [accion, setAccion] = useState<{ p: Pedido; a: Accion } | null>(null)
   const abrir = (id: string) => ir(`/pedidos/${id}`)
-  const hacer = (p: Pedido, a: Accion) => (a === "empacar" ? empacar(rubro, p) : setAccion({ p, a }))
+  const hacer = (p: Pedido, a: Accion) => {
+    if (!unToque(rubro, p, a)) setAccion({ p, a })
+  }
 
   const busca = (get("q") ?? "").toLowerCase()
   const fDia = get("dia")
@@ -209,7 +236,11 @@ function Lista() {
       (!fOrigen || p.origen.k === fOrigen),
   )
   const enVista = (v: Vista) =>
-    filtrados.filter((p) => !VISTAS[v].pasos || VISTAS[v].pasos!.includes(p.paso))
+    filtrados.filter((p) =>
+      v === "vueltas"
+        ? !!p.vuelta || !!p.cambioDe
+        : !VISTAS[v].pasos || VISTAS[v].pasos!.includes(p.paso),
+    )
   // La tabla recibe la misma lista mientras no cambie nada: una lista nueva en cada render la
   // vuelve a medir sin fin.
   // biome-ignore lint/correctness/useExhaustiveDependencies: depende de lo que filtra
@@ -289,7 +320,7 @@ function Lista() {
                   </span>
                   <span className="truncate text-xs font-normal text-muted-foreground">{lleva}</span>
                   <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
+                    <EstadoBadge p={p} />
                     {tocaDe(p) ? <Badge variant="warning">Te toca</Badge> : null}
                     <span className="text-sm font-normal">
                       <Cobro p={p} />
@@ -321,7 +352,7 @@ function Lista() {
           const p = row.original
           return (
             <span className="flex flex-wrap items-center gap-1.5">
-              <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
+              <EstadoBadge p={p} />
               {tocaDe(p) ? <Badge variant="warning">Te toca</Badge> : null}
             </span>
           )
@@ -395,6 +426,11 @@ function Lista() {
         }}
         menu={[
           {
+            label: "Política de cambios y devoluciones",
+            icon: <ScrollText aria-hidden />,
+            onSelect: () => ir("/pedidos/politica"),
+          },
+          {
             label: "Ver lo que ve la clienta",
             icon: <Route aria-hidden />,
             onSelect: () => ir("/clienta", { extra: "p=0165" }),
@@ -461,6 +497,7 @@ function Lista() {
           searchLabel="Buscar en pedidos"
           searchPlaceholder="Nombre, número o teléfono"
         />
+        {vista === "vueltas" ? <LoQueAprende list={all} /> : null}
         <DataTable table={table} onRowClick={(p) => abrir(p.id)} />
         {!filas.length ? (
           <p className="py-6 text-center text-sm text-muted-foreground">

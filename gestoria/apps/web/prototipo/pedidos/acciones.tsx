@@ -5,6 +5,7 @@ import { CircleAlert, Link2, MessageCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { DISTRITOS, foto, RUBROS } from "../datos"
 import { useRuta } from "../ruta"
+import { ExcepcionDrawer, RevisarDrawer } from "./vuelta-ui"
 import {
   type Accion,
   agregar,
@@ -1327,6 +1328,10 @@ export function AccionDrawer({
       return <Anular p={p} onClose={onClose} />
     case "link":
       return <MandarLink p={p} onClose={onClose} />
+    case "revisar":
+      return <RevisarDrawer p={p} onClose={onClose} />
+    case "excepcion":
+      return <ExcepcionDrawer p={p} onClose={onClose} />
     case "deshacer":
       return pagoId ? <Deshacer p={p} pagoId={pagoId} onClose={onClose} /> : null
     default:
