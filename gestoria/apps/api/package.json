@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.14.0",
     "@gestoria/db": "workspace:*",
     "@hono/node-server": "2.1.1",
     "@odentia/contract": "workspace:*",

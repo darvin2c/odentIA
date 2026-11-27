@@ -9,9 +9,20 @@
  *   rechazada o una petición inválida no.
  * - La caché del proveedor es automática: el mensaje de sistema fijo va primero y sin cambios
  *   entre llamadas, así OpenAI lo lee de su caché (a 0,1× de la entrada).
+ * - Claude va aparte (`modelo-claude.ts`, con el SDK oficial) y se elige con
+ *   `GESTORIA_LLM_PROVIDER=anthropic`; OpenAI sigue por omisión.
  * - Las pruebas usan un modelo controlado (`scriptedModel`); el de desarrollo (`fake`) responde
  *   por reglas sin red. Ninguno cuenta como medición.
  */
+
+import {
+  CLAUDE_DEFAULT_EFFORT,
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_EFFORTS,
+  CLAUDE_MODELS,
+  type ClaudeEffort,
+  claudeModel,
+} from "./modelo-claude.js"
 
 export interface ToolCall {
   id: string
@@ -21,7 +32,17 @@ export interface ToolCall {
 
 export type ChatMessage =
   | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
+  | {
+      role: "assistant"
+      content: string | null
+      tool_calls?: ToolCall[]
+      /**
+       * La respuesta tal como la dio el proveedor (`ModelReply.raw`), para devolvérsela igual en
+       * el paso siguiente: Claude pide su razonamiento intacto entre herramientas. Solo la lee el
+       * adaptador que la produjo; los demás la ignoran.
+       */
+      raw?: unknown
+    }
   | { role: "tool"; content: string; tool_call_id: string }
 
 export interface ToolDef {
@@ -30,15 +51,21 @@ export interface ToolDef {
 }
 
 export interface Usage {
+  /** Toda la entrada, contando la leída de la caché y la escrita en ella. */
   input: number
+  /** La entrada leída de la caché. */
   cached: number
   output: number
+  /** La entrada escrita en la caché (Claude la cobra a 1,25×; OpenAI no la informa). */
+  written?: number
 }
 
 export interface ModelReply {
   content: string | null
   toolCalls: ToolCall[]
   usage: Usage
+  /** Lo que el proveedor pide recibir de vuelta tal cual (ver `ChatMessage.raw`). */
+  raw?: unknown
 }
 
 export interface ChatRequest {
@@ -72,23 +99,48 @@ export const SOFI_MODEL = "gpt-6-luna"
 /**
  * Precio de lista en USD por millón de tokens. gpt-6-luna: el de `AI_PRICES` de las clínicas
  * (`packages/agent/src/ai-usage.ts`, leído de la página de precios de OpenAI el 2026-10-17).
+ * Claude: la tabla de modelos de Anthropic (2026-11-03), con la caché escrita a 1,25× de la
+ * entrada (vida de 5 minutos) y la leída a 0,1× en Haiku y 0,05× en Sonnet y Opus. Haiku 5.5
+ * cuesta 0,50 / 2,50 pasados los 100 000 tokens de entrada; Sofi nunca llega ahí (lee 30
+ * mensajes), así que aquí va el precio corto.
  */
-const PRICES: Record<string, { input: number; cached: number; output: number }> = {
-  "gpt-6-luna": { input: 0.1, cached: 0.01, output: 0.5 },
-}
+const PRICES: Record<string, { input: number; cached: number; written?: number; output: number }> =
+  {
+    "gpt-6-luna": { input: 0.1, cached: 0.01, output: 0.5 },
+    "claude-haiku-5-5": { input: 0.1, cached: 0.01, written: 0.125, output: 0.5 },
+    "claude-sonnet-5-5": { input: 2, cached: 0.1, written: 2.5, output: 10 },
+    "claude-opus-5-5": { input: 4, cached: 0.2, written: 5, output: 20 },
+  }
+
+/**
+ * El nombre con que se busca el precio: el adaptador de Claude se llama «claude-…@low», con el
+ * esfuerzo, para que cada respuesta anote cómo se pidió; el precio no depende del esfuerzo.
+ */
+const priceName = (model: string) => model.split("@")[0]!
 
 /** Lo que costó una llamada, en millonésimas de USD; null si no se conoce el precio. */
 export function costMicros(model: string, usage: Usage): number | null {
-  const price = PRICES[model]
+  const price = PRICES[priceName(model)]
   if (!price) return null
-  const fresh = Math.max(0, usage.input - usage.cached)
+  const written = usage.written ?? 0
+  const fresh = Math.max(0, usage.input - usage.cached - written)
   const usd =
-    (fresh * price.input + usage.cached * price.cached + usage.output * price.output) / 1e6
+    (fresh * price.input +
+      usage.cached * price.cached +
+      written * (price.written ?? price.input) +
+      usage.output * price.output) /
+    1e6
   return Math.round(usd * 1_000_000)
 }
 
 export function addUsage(a: Usage, b: Usage): Usage {
-  return { input: a.input + b.input, cached: a.cached + b.cached, output: a.output + b.output }
+  const written = (a.written ?? 0) + (b.written ?? 0)
+  return {
+    input: a.input + b.input,
+    cached: a.cached + b.cached,
+    output: a.output + b.output,
+    ...(written ? { written } : {}),
+  }
 }
 
 export const NO_USAGE: Usage = { input: 0, cached: 0, output: 0 }
@@ -125,7 +177,10 @@ export function openAIModel(options: OpenAIOptions): ChatModel {
       },
       body: JSON.stringify({
         model,
-        messages: request.messages,
+        // `raw` es de otro proveedor: OpenAI no lo recibe.
+        messages: request.messages.map((m) =>
+          m.role === "assistant" && "raw" in m ? { ...m, raw: undefined } : m,
+        ),
         ...(request.tools?.length
           ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto" }
           : {}),
@@ -261,12 +316,21 @@ export interface ModelEnv {
   GESTORIA_LLM_MODEL?: string
   GESTORIA_OPENAI_API_KEY?: string
   GESTORIA_OPENAI_BASE_URL?: string
+  /** «openai» (por omisión, como en producción) o «anthropic». */
+  GESTORIA_LLM_PROVIDER?: string
+  GESTORIA_ANTHROPIC_API_KEY?: string
+  GESTORIA_ANTHROPIC_MODEL?: string
+  GESTORIA_ANTHROPIC_EFFORT?: string
   NODE_ENV?: string
 }
 
 /**
  * El modelo según el entorno. Sin clave (y sin `fake`), null: Sofi no responde y la pantalla lo
  * dice. En producción no arranca con `fake`: le respondería a una tienda de verdad por reglas.
+ *
+ * Con `GESTORIA_LLM_PROVIDER=anthropic`, Claude (`modelo-claude.ts`): el modelo y el esfuerzo de
+ * `GESTORIA_ANTHROPIC_MODEL` y `GESTORIA_ANTHROPIC_EFFORT`. En producción pide su clave; en
+ * desarrollo, sin ella, el SDK toma la credencial de `ant auth login`.
  */
 export function modelFromEnv(env: ModelEnv): ChatModel | null {
   const name = env.GESTORIA_LLM_MODEL?.trim() || SOFI_MODEL
@@ -275,6 +339,22 @@ export function modelFromEnv(env: ModelEnv): ChatModel | null {
       throw new Error("gestoria-api: GESTORIA_LLM_MODEL=fake no se usa en producción")
     return fakeModel()
   }
+  const provider = env.GESTORIA_LLM_PROVIDER?.trim() || "openai"
+  if (provider === "anthropic") {
+    const model = env.GESTORIA_ANTHROPIC_MODEL?.trim() || CLAUDE_DEFAULT_MODEL
+    if (!(CLAUDE_MODELS as readonly string[]).includes(model))
+      throw new Error(
+        `gestoria-api: GESTORIA_ANTHROPIC_MODEL no es uno de ${CLAUDE_MODELS.join(", ")}`,
+      )
+    const effort = env.GESTORIA_ANTHROPIC_EFFORT?.trim() || CLAUDE_DEFAULT_EFFORT
+    if (!CLAUDE_EFFORTS.includes(effort as ClaudeEffort))
+      throw new Error(`gestoria-api: GESTORIA_ANTHROPIC_EFFORT es ${CLAUDE_EFFORTS.join(", ")}`)
+    const apiKey = env.GESTORIA_ANTHROPIC_API_KEY?.trim()
+    if (!apiKey && env.NODE_ENV === "production") return null
+    return claudeModel({ model, effort: effort as ClaudeEffort, ...(apiKey ? { apiKey } : {}) })
+  }
+  if (provider !== "openai")
+    throw new Error("gestoria-api: GESTORIA_LLM_PROVIDER es «openai» o «anthropic»")
   const apiKey = env.GESTORIA_OPENAI_API_KEY?.trim()
   if (!apiKey) return null
   return openAIModel({

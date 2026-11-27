@@ -55,6 +55,15 @@ const schema = z.object({
   /** Solo si no es la API pública de OpenAI. */
   GESTORIA_OPENAI_BASE_URL: z.string().trim().default(""),
   /**
+   * Quién escribe por Sofi: «openai» (por omisión) o «anthropic» (Claude, `sofi/modelo-claude.ts`).
+   * Con Claude: el modelo (`claude-haiku-5-5` por omisión, `claude-sonnet-5-5` u
+   * `claude-opus-5-5`), el esfuerzo (`low` por omisión) y la clave, que en producción se pide.
+   */
+  GESTORIA_LLM_PROVIDER: z.enum(["", "openai", "anthropic"]).default(""),
+  GESTORIA_ANTHROPIC_API_KEY: z.string().trim().default(""),
+  GESTORIA_ANTHROPIC_MODEL: z.string().trim().default(""),
+  GESTORIA_ANTHROPIC_EFFORT: z.string().trim().default(""),
+  /**
    * Los avisos al celular (push web, RFC 8292): el par de claves VAPID de gestorIA, propio (no el
    * de las clínicas), y a quién escribir si un servicio de push tiene un problema (`mailto:` o
    * `https:`). Vacías: los avisos al celular no se ofrecen y no se envía nada.

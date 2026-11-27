@@ -524,7 +524,12 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
         })
         usage = addUsage(usage, reply.usage)
         if (reply.toolCalls.length > 0) {
-          messages.push({ role: "assistant", content: reply.content, tool_calls: reply.toolCalls })
+          messages.push({
+            role: "assistant",
+            content: reply.content,
+            tool_calls: reply.toolCalls,
+            ...(reply.raw !== undefined ? { raw: reply.raw } : {}),
+          })
           for (const call of reply.toolCalls)
             messages.push({
               role: "tool",
@@ -554,7 +559,11 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
           failure = "La comprobación frenó la respuesta dos veces"
           break
         }
-        messages.push({ role: "assistant", content: draft })
+        messages.push({
+          role: "assistant",
+          content: draft,
+          ...(reply.raw !== undefined ? { raw: reply.raw } : {}),
+        })
         messages.push({
           role: "user",
           content: `[Comprobación de la tienda, no del cliente] Tu respuesta no puede salir así: ${found.join(" ")} Escríbela de nuevo para el cliente.`,
