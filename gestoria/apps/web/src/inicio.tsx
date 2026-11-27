@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, Circle, Clock3, MinusCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
+import { InstallCard } from "./avisos"
 import { SimilarQueue } from "./clientes"
 import { api } from "./lib/api"
 import { fromWhom } from "./lib/caja"
@@ -36,6 +37,8 @@ import { StoreHeader, useMe, useStoreContext } from "./tiendas"
  *   apartado y vuelve («Volver a Inicio»). Nada obliga.
  * - Las cuatro cifras del día; Ventas ve las suyas, sin los totales de dinero.
  * - «Te toca», ahora, hoy y sin apuro: cada línea con el único botón que la resuelve.
+ * - La tarjeta para instalar gestorIA y activar los avisos en este celular (`InstallCard`), que va
+ *   en la entrada de la tienda (lienzo «gestorIA · Configuración, de nuevo», tablero 11).
  *
  * «Sale hoy» abre Despachos, que cuenta lo mismo. El efectivo por recibir es una línea de «Te toca»
  * que lleva a Caja. Lo de la Bandeja (los chats que esperan) se suma cuando llegue su pantalla: hoy
@@ -67,6 +70,8 @@ export function HomePage() {
         title={`${greeting(store.timeZone)}${name ? `, ${name}` : ""}`}
         subtitle={longDay(today)}
       />
+      {/* Instalar gestorIA y activar los avisos en este celular (tablero 11): en la entrada. */}
+      <InstallCard />
       {home.isPending ? <LoadingState message="Cargando lo de hoy…" /> : null}
       {home.isError ? <ErrorState error={home.error} onRetry={() => void home.refetch()} /> : null}
       {data?.setup ? <FirstSteps setup={data.setup} /> : null}
