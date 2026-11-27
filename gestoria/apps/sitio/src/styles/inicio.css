@@ -1,0 +1,524 @@
+/*
+ * El Inicio (web v3): solo lo que va dentro de las imágenes y lo que el sistema de tasteskill no trae.
+ * Cada pantalla es una captura real de la app, entera: se ajusta a su marco (contain), nunca se
+ * recorta ni se redibuja.
+ */
+
+/* Una captura de la app: con las esquinas y la sombra suave de una pantalla, sin marco de aparato. */
+.pantalla {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--p-ink) 10%, transparent),
+    0 18px 40px -18px color-mix(in oklab, var(--p-ink) 35%, transparent);
+  background: #fff;
+}
+
+.pantalla--celular {
+  border-radius: 22px;
+}
+
+/* El héroe: el celular entero sobre el suelo claro, centrado en su marco. */
+.pantalla-marco {
+  display: grid;
+  place-items: center;
+  padding: var(--s-6);
+  /* el único campo grande de la marca: el naranja de gestorIA detrás del celular */
+  background:
+    radial-gradient(120% 80% at 80% 10%, #e8702a 0%, transparent 60%),
+    linear-gradient(165deg, #d9530c 0%, #cc4604 55%, #a63802 100%);
+}
+
+.pantalla-marco picture {
+  display: contents;
+}
+
+.pantalla-marco .pantalla {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+@media (min-width: 640px) {
+  .pantalla-marco {
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 639px) {
+  .pantalla-marco {
+    padding: var(--s-4);
+  }
+
+  .pantalla-marco .pantalla {
+    width: 100%;
+    height: auto;
+    border-radius: var(--r-md);
+  }
+}
+
+/* La venta paso a paso (pinned-chapters): cada paso muestra su pantalla entera en el marco. */
+#venta .mo-pc__visual--lit {
+  aspect-ratio: auto;
+}
+
+#venta .mo-pc__visual--lit picture {
+  display: contents;
+}
+
+#venta .mo-pc__visual > .pantalla,
+#venta .mo-pc__visual .pantalla {
+  width: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  aspect-ratio: auto;
+}
+
+#venta.is-live .mo-pc__visuals {
+  aspect-ratio: auto;
+  height: calc(100svh - var(--nav) - var(--s-9));
+  max-height: none;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+#venta.is-live .mo-pc__visual {
+  padding: var(--s-6);
+}
+
+#venta.is-live .mo-pc__visual .pantalla {
+  height: 100%;
+}
+
+#venta.is-live .mo-pc__visual:not(:has(.pantalla--celular)) .pantalla {
+  height: auto;
+  width: 100%;
+}
+
+/* Las filas en reposo (tableta, pantalla baja, menos movimiento): la pantalla a la derecha. */
+@media (min-width: 640px) {
+  #venta:not(.is-live) .mo-pc__visual--lit {
+    padding: var(--s-4);
+    height: min(44svh, 420px);
+    border-radius: var(--r-md);
+  }
+
+  #venta:not(.is-live) .mo-pc__visual .pantalla {
+    height: 100%;
+    max-height: none;
+  }
+
+  #venta:not(.is-live) .mo-pc__visual:not(:has(.pantalla--celular)) .pantalla {
+    height: auto;
+  }
+}
+
+/* El celular: el texto del paso a la izquierda y su pantalla entera a la derecha. */
+@media (max-width: 639px) {
+  #venta .mo-pc__step {
+    grid-template-columns: minmax(0, 1fr) 132px;
+    column-gap: var(--s-3);
+    align-items: start;
+  }
+
+  #venta .mo-pc__step h3,
+  #venta .mo-pc__step p {
+    grid-column: 1;
+  }
+
+  #venta .mo-pc__step .mo-pc__visual {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    margin: 0;
+    padding: 0;
+    background: none;
+  }
+
+  #venta .mo-pc__visual .pantalla {
+    width: 132px;
+    height: auto;
+    max-height: none;
+    border-radius: 12px;
+  }
+}
+
+/* Pedidos: la pantalla entera a lo ancho, bajo su título. */
+.section-head--app {
+  align-items: start;
+}
+
+.section-head--app h2 {
+  margin: 0;
+}
+
+.muted-lead {
+  margin: 0;
+  font-size: var(--t-lead);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.muted-lead .link {
+  display: inline-block;
+  margin-top: var(--s-3);
+}
+
+.app-shot {
+  margin-top: var(--s-7);
+}
+
+.app-shot picture,
+.app-shot .pantalla {
+  display: block;
+  width: 100%;
+}
+
+@media (max-width: 639px) {
+  .app-shot {
+    margin-top: var(--s-6);
+  }
+}
+
+/* Las columnas de texto de los splits. */
+.split__text {
+  display: grid;
+  align-content: start;
+  gap: var(--s-4);
+}
+
+.split__text h2,
+.split__text p {
+  margin: 0;
+}
+
+/* La ficha de la clienta: entera sobre el suelo claro. */
+.split__shot {
+  --ratio: 0px;
+  display: grid;
+  place-items: center;
+  padding: var(--s-6);
+}
+
+.split__shot picture {
+  display: contents;
+}
+
+.split__shot .pantalla {
+  width: 100%;
+}
+
+@media (max-width: 1023px) {
+  .split__shot {
+    margin-top: var(--s-6);
+  }
+}
+
+@media (max-width: 639px) {
+  .split__shot {
+    padding: var(--s-5);
+  }
+}
+
+/* El precio. */
+.plan .price {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-stat);
+  line-height: 1.1;
+}
+
+.plan .price span {
+  font-family: var(--font-text);
+  font-size: var(--t-body);
+  color: var(--muted);
+}
+
+.plan p {
+  margin: 0;
+}
+
+.plan__btn {
+  margin-top: auto;
+}
+
+/* Los canales: sus logos reales, grandes y en sus colores. */
+.canales {
+  --ratio: 0px;
+  display: grid;
+  place-items: center;
+  padding: var(--s-8) var(--s-6);
+  min-height: 100%;
+}
+
+.canales__list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s-7);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canales__list li {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-3);
+  font-size: var(--t-body);
+  font-weight: 500;
+}
+
+.canales__list img {
+  width: 96px;
+  height: 96px;
+}
+
+@media (max-width: 1023px) {
+  .canales {
+    margin-top: var(--s-6);
+  }
+}
+
+@media (max-width: 639px) {
+  .canales {
+    padding: var(--s-6) var(--s-4);
+  }
+
+  .canales__list {
+    gap: var(--s-5);
+  }
+
+  .canales__list img {
+    width: 64px;
+    height: 64px;
+  }
+}
+
+/* La regla de las entregas: la frase grande sobre la banda suave. */
+.statement .t-label {
+  margin: 0 0 var(--s-5);
+  color: var(--muted);
+}
+
+/* La regla de las entregas: el pedido con su pago por confirmar, entero, al lado de la frase. */
+.entrega__shot {
+  --ratio: 0px;
+  display: grid;
+  place-items: center;
+  padding: var(--s-6);
+}
+
+.entrega__shot .pantalla {
+  width: auto;
+  max-height: calc(100svh - var(--nav) - var(--padt) - var(--padb) - var(--s-8));
+}
+
+@media (max-width: 1023px) {
+  .entrega__shot {
+    margin-top: var(--s-6);
+  }
+}
+
+@media (max-width: 639px) {
+  .entrega__shot .pantalla {
+    width: 220px;
+    max-height: none;
+  }
+}
+
+/* Los rubros: ejemplos sueltos, y el último abierto a lo que venda cada tienda. */
+.rubros__list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s-2);
+  margin: var(--s-7) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rubros__list li {
+  padding: var(--s-2) var(--s-4);
+  border-radius: 999px;
+  background: var(--ground-surface);
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.rubros__list .rubros__mas {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.canales {
+  align-content: center;
+  min-height: min(560px, calc(100svh - var(--nav) - var(--padt) - var(--padb)));
+}
+
+.entrega__nota {
+  margin: var(--s-6) 0 0;
+  max-width: 44ch;
+  font-size: var(--t-lead);
+  line-height: 1.5;
+}
+
+.plan__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.plan__head h3 {
+  margin: 0;
+}
+
+.plan__mark svg {
+  display: block;
+  width: 44px;
+  height: 44px;
+}
+
+/* El celular: cada parte en su pantalla. Lo que se corta aquí ya lo dice el resto de la parte. */
+@media (max-width: 639px) {
+  .solo-amplio {
+    display: none;
+  }
+
+  #venta .mo-pc__step {
+    grid-template-rows: auto 1fr;
+    align-content: start;
+  }
+
+  .split__shot,
+  .canales {
+    min-height: 0;
+  }
+
+  .canales {
+    padding: var(--s-5) var(--s-4);
+  }
+
+  .rubros__list {
+    margin-top: var(--s-5);
+  }
+
+  .rubros__list li {
+    padding: 6px var(--s-3);
+  }
+}
+
+@media (max-width: 639px) {
+  .split__shot {
+    margin-top: var(--s-5);
+    padding: var(--s-4);
+  }
+
+  .split__shot .pantalla {
+    width: 220px;
+  }
+
+  .plan .plan__list {
+    gap: 6px;
+    margin-top: var(--s-4);
+    padding-top: var(--s-4);
+  }
+}
+
+@media (max-width: 639px) {
+  #preguntas .faq > .faq__item {
+    padding: var(--s-3) 0;
+  }
+}
+
+/* La venta en reposo en el celular: dos pantallas justas, para que la parte siguiente no asome. */
+@media (max-width: 639px) {
+  main > #venta[data-moment]:not(.is-live) {
+    min-height: calc(2 * 100lvh);
+  }
+}
+
+@media (max-width: 639px) {
+  #venta:not(.is-live) .mo-pc__text {
+    min-height: calc(2 * 100lvh - var(--padt) - var(--padb) - var(--bar));
+    grid-template-rows: auto 1fr;
+  }
+
+  #venta:not(.is-live) .mo-pc__steps {
+    align-content: space-between;
+  }
+}
+
+/* La tableta en reposo: la venta en dos pantallas justas, con pantallas más bajas. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  main > #venta[data-moment]:not(.is-live) {
+    min-height: calc(2 * 100svh);
+  }
+
+  #venta:not(.is-live) .mo-pc__visual--lit {
+    height: min(30svh, 320px);
+  }
+}
+
+/* Desde 1024: la ficha de la clienta llena su columna. */
+@media (min-width: 1024px) {
+  .split__shot {
+    min-height: min(600px, calc(100svh - var(--nav) - var(--padt) - var(--padb)));
+  }
+}
+
+/* La tableta: el plan a lo ancho, la venta repartida en sus dos pantallas y el pedido más bajo. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .grid > .card.span-6.plan:not(:has(> .panel)) {
+    grid-column: 1 / -1;
+    margin-top: var(--s-6);
+  }
+
+  #preguntas .faq > .faq__item {
+    padding: var(--s-6) 0;
+  }
+
+  #venta:not(.is-live) .mo-pc__text {
+    min-height: calc(2 * 100svh - var(--padt) - var(--padb) - var(--bar));
+    grid-template-rows: auto 1fr;
+  }
+
+  #venta:not(.is-live) .mo-pc__steps {
+    align-content: space-between;
+  }
+
+  .entrega__shot .pantalla {
+    max-height: 360px;
+  }
+}
+
+/* El celular: los logos y los rubros de borde a borde de la columna. */
+@media (max-width: 639px) {
+  .canales {
+    padding-inline: 0;
+  }
+
+  .canales__list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: 0;
+  }
+
+  .rubros__list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .rubros__list li {
+    text-align: center;
+  }
+}
