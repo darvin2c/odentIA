@@ -11,6 +11,8 @@ import {
   contractState,
   type Db,
   enterStore,
+  pushChoice,
+  pushDevice,
   store,
   storeEvent,
   storeImage,
@@ -277,6 +279,74 @@ describe("las reglas de cada tienda", () => {
       tx.select({ brandColor: store.brandColor }).from(store),
     )
     expect(after?.brandColor).toBe("#be185d")
+  })
+
+  it("los avisos al celular: cada persona ve y cambia solo sus celulares y lo que elige, sin el sistema", async () => {
+    const device = (userId: string, endpoint: string) => ({
+      userId,
+      endpoint,
+      p256dh: "clave",
+      auth: "secreto",
+    })
+    await withPerson(db.appDb, rosa, (tx) =>
+      tx.insert(pushDevice).values(device(rosa.userId, "https://fcm.googleapis.com/fcm/send/rosa")),
+    )
+    // A nombre de otra persona, o ya con el «Listo» anotado: no.
+    await expect(
+      withPerson(db.appDb, rosa, (tx) =>
+        tx.insert(pushDevice).values(device(mario.userId, "https://fcm.googleapis.com/fcm/send/x")),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      withPerson(db.appDb, rosa, (tx) =>
+        tx.insert(pushDevice).values({
+          ...device(rosa.userId, "https://fcm.googleapis.com/fcm/send/y"),
+          welcomedAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow()
+    const seenByMario = await withPerson(db.appDb, mario, (tx) =>
+      tx.select({ id: pushDevice.id }).from(pushDevice),
+    )
+    expect(seenByMario).toEqual([])
+    const removedByMario = await withPerson(db.appDb, mario, (tx) =>
+      tx.delete(pushDevice).returning({ id: pushDevice.id }),
+    )
+    expect(removedByMario).toEqual([])
+
+    // Lo que elige: solo en su tienda, sin anotar hasta dónde miró el sistema.
+    const inCalzados = { ...rosa, storeId: calzados }
+    await withPerson(db.appDb, inCalzados, (tx) =>
+      tx.insert(pushChoice).values({ storeId: calzados, userId: rosa.userId, kinds: ["pagos"] }),
+    )
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) => tx.update(pushChoice).set({ lastEventSeq: 99 })),
+    ).rejects.toThrow()
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) =>
+        tx.insert(pushChoice).values({ storeId: calzados, userId: lucia.userId, kinds: [] }),
+      ),
+    ).rejects.toThrow()
+    // Lo que no es un aviso, no.
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) =>
+        tx
+          .update(pushChoice)
+          .set({ kinds: ["otro"] as unknown as ["pagos"] })
+          .where(sql`true`),
+      ),
+    ).rejects.toThrow()
+    const fromOther = await withPerson(db.appDb, { ...mario, storeId: otra }, (tx) =>
+      tx.select().from(pushChoice),
+    )
+    expect(fromOther).toEqual([])
+    // Sofi no ve ni toca nada de esto.
+    const sofi = { userId: "agente:sofi", email: "", storeId: calzados }
+    const bySofi = await withPerson(db.appDb, sofi, async (tx) => ({
+      devices: await tx.select().from(pushDevice),
+      choices: await tx.select().from(pushChoice),
+    }))
+    expect(bySofi).toEqual({ devices: [], choices: [] })
   })
 
   it("sin persona, la aplicación no ve nada", async () => {
