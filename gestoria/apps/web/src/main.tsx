@@ -33,6 +33,7 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
+import { TeamPage } from "./equipo"
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { startInstalledApp } from "./lib/avisos"
@@ -45,7 +46,7 @@ import { PlanPage } from "./plan"
 import { ProductPage } from "./producto"
 import { ReportsPage } from "./reportes"
 import { SofiPage } from "./sofi"
-import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
+import { InvitationPage, NewStorePage, StoreLayout, StoresPage } from "./tiendas"
 
 // El tema que eligió la persona en «Apariencia» (el mismo de las clínicas), o el de su equipo.
 // Dentro de la tienda lo lleva el menú de la persona; aquí vale también para la entrada.

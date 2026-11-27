@@ -16,6 +16,7 @@ import { seedDemoExchanges } from "./semilla-cambios.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
+import { seedDemoTeam } from "./semilla-equipo.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import {
@@ -111,6 +112,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoExchanges(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPushChoices(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoTeam(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSetupDone(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoNewStore(tx as unknown as Db)
     // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta).
