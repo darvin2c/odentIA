@@ -24,6 +24,19 @@ export {
   AgentSurface,
   type AgentSurfaceProps,
 } from "./agent-mark.js"
+export {
+  AiQuestion,
+  type AiQuestionProps,
+  AiSuggestion,
+  AiSuggestionBar,
+  type AiSuggestionBarProps,
+  AiSuggestionChips,
+  type AiSuggestionChipsProps,
+  AiSuggestionMark,
+  type AiSuggestionMarkProps,
+  type AiSuggestionProps,
+  aiSuggestedClass,
+} from "./ai-suggestion.js"
 export { AppShell, isNavItemActive, useIconSidebarWhileMounted } from "./app-shell.js"
 export {
   FlowDiagram,
