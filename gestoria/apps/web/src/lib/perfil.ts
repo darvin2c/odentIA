@@ -41,7 +41,8 @@ export interface ProfileFact {
   at: string
   byName: string | null
   /** Otros valores que también dijo: está «Por confirmar» hasta que una persona elige. */
-  alternatives: string[]
+  /** Las otras posibilidades: como se leen y como se guardan (lo que se envía al elegir una). */
+  alternatives: { value: string; raw: string }[]
   history: FactStep[]
 }
 
@@ -238,26 +239,6 @@ export function birthdayProblem(day: string, month: string): string | null {
 /** Día y mes → «--MM-DD», como se envía. */
 export function birthdayValue(day: string, month: string): string {
   return `--${month.padStart(2, "0")}-${day.padStart(2, "0")}`
-}
-
-/**
- * Lo que se envía al elegir una alternativa de «Por confirmar». El servidor las manda como se
- * leen («WhatsApp», «12 de marzo»); se guardan como en «Corregir» («whatsapp», «--03-12»).
- */
-export function alternativeValue(key: CustomerFactKey, text: string): string {
-  const shown = text.trim()
-  if (key === "canal")
-    return (
-      (Object.keys(PROFILE_CHANNELS) as ProfileChannel[]).find(
-        (c) => PROFILE_CHANNELS[c].toLowerCase() === shown.toLowerCase(),
-      ) ?? shown
-    )
-  if (key === "cumpleanos") {
-    const match = /^(\d{1,2}) de (\p{L}+)$/u.exec(shown)
-    const month = match ? MONTHS.indexOf(match[2]?.toLowerCase() as (typeof MONTHS)[number]) : -1
-    if (match && month >= 0) return birthdayValue(match[1] as string, String(month + 1))
-  }
-  return shown
 }
 
 /**

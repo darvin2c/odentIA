@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  alternativeValue,
   birthdayParts,
   birthdayProblem,
   birthdayValue,
@@ -97,11 +96,6 @@ describe("el cumpleaños, sin año", () => {
     expect(birthdayProblem("29", "2")).toBeNull()
   })
 
-  it("una alternativa se envía como se guarda", () => {
-    expect(alternativeValue("cumpleanos", "12 de marzo")).toBe("--03-12")
-    expect(alternativeValue("canal", "Instagram")).toBe("instagram")
-    expect(alternativeValue("medida", " 38 ")).toBe("38")
-  })
 })
 
 describe("cuándo se le puede escribir", () => {

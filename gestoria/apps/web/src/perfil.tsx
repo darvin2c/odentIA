@@ -25,7 +25,6 @@ import { z } from "zod"
 import { api } from "./lib/api"
 import { CUSTOMER_KEY, type CustomerDetail } from "./lib/clientes"
 import {
-  alternativeValue,
   birthdayParts,
   birthdayProblem,
   birthdayValue,
@@ -259,26 +258,26 @@ function FactRow({
               {canCorrect
                 ? fact.alternatives.map((option) => (
                     <SubmitButton
-                      key={option}
+                      key={option.raw}
                       size="xs"
                       variant="outline"
                       pending={
                         pick.isPending &&
-                        pick.variables?.value === alternativeValue(factKey, option)
+                        pick.variables?.value === option.raw
                       }
                       disabled={pick.isPending}
                       onClick={() =>
                         pick.mutate(
-                          { key: factKey, value: alternativeValue(factKey, option) },
+                          { key: factKey, value: option.raw },
                           // Los botones se van con la duda: el foco queda en «Corregir».
                           { onSuccess: () => correctButton.current?.focus() },
                         )
                       }
                     >
-                      {option}
+                      {option.value}
                     </SubmitButton>
                   ))
-                : fact.alternatives.join(" · ")}
+                : fact.alternatives.map((option) => option.value).join(" · ")}
             </span>
           ) : null}
           {pick.isError ? (
