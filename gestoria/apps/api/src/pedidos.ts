@@ -904,14 +904,7 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     )
     .orderBy(productPhoto.productId, asc(productPhoto.position))
   const photoBy = new Map(photos.map((p) => [p.productId, p.id]))
-  const {
-    storeId: _s,
-    linkRef: _r,
-    paymentMethodId: _p,
-    deliveryMethodId: _d,
-    conversationId: _c,
-    ...rest
-  } = order
+  const { storeId: _s, linkRef: _r, paymentMethodId: _p, conversationId: _c, ...rest } = order
   // El link solo se ofrece a un pedido por pagar.
   const linkConnected =
     order.state === "por_pagar" &&
@@ -1671,6 +1664,14 @@ export async function changeOrderIn(
     },
     currency,
   )
+  // Un precio acordado que venció se vuelve a acordar con «Cambiar», aunque sea el mismo.
+  if (
+    changes.length === 0 &&
+    q.negotiated &&
+    order.priceExpiresAt &&
+    order.priceExpiresAt.getTime() <= now.getTime()
+  )
+    changes.push("el precio acordado vale 24 horas más")
   if (changes.length === 0) throw new StoreError(409, "NO_CHANGE", "No cambiaste nada del pedido")
   // El link vigente era por el total de antes: ya no vale y se crea otro.
   const linkGone = order.linkUrl !== null && q.totalCents !== order.totalCents
@@ -2019,7 +2020,7 @@ export async function createPaymentLinkWith(
       throw new StoreError(
         409,
         "PRICE_EXPIRED",
-        "El precio acordado venció (vale 24 horas). Si sigue en pie, anula el pedido y anótalo de nuevo.",
+        "El precio acordado venció (vale 24 horas). Si sigue en pie, usa «Cambiar» para volver a acordarlo.",
       )
     const [connection] = await tx
       .select()
