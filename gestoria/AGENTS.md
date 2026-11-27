@@ -57,7 +57,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `costos.ver`: la API no se lo devuelve a Ventas.
 - Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
 
-## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0223)
+## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
 - El menú del día lleva solo pantallas que existen (Pedidos y, en «Gestión», Catálogo y Reportes);
   al pie, Configuración y Ayuda. Una pantalla nueva entra en su lugar del tablero 4, no antes.
@@ -93,6 +93,24 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
+
+## Las clientas (entrega 4)
+
+- La clienta es la persona (ADR 0223): una ficha (`customer`) por clienta, y cada pedido lleva la
+  suya desde `createOrderIn` (`customerForOrderIn` de `apps/api/src/clientes.ts`): la elegida al
+  anotarlo, la de los pedidos anteriores del mismo chat o una nueva. Nunca se busca ni se une por
+  el teléfono o el nombre: eso solo sugiere «¿Es la misma clienta?», que no frena ninguna venta.
+  Los pedidos de «Probar a Sofi» y los de antes de Clientes no tienen ficha.
+- Unir, separar y «son distintas» los decide una persona que atiende (`ventas.atender`). Unir deja
+  la ficha más nueva dentro de la más antigua (`merged_into`), sin mover ni borrar nada; «Separar»
+  la deja sola, con las que se le unieron antes. Lo decidido va a `customer_event` y no se vuelve a
+  preguntar. Un pedido no cambia de ficha. Sofi abre fichas, pero no las cambia ni anota
+  decisiones (`0019_reglas_clientas.sql`).
+- Lo que debe una clienta («Debe» en la lista y en la ficha) no se calcula en Clientes: es la suma
+  del saldo de cada pedido (`order_balance`), en `summariesOf` de `clientes.ts`.
+- «Escribirle» lee cada teléfono en E.164 con lo común (`toE164` de `@odentia/ui-patterns`): el
+  que trae su código vale siempre; el anotado sin él, como del país de la tienda. Sin país, no se
+  adivina.
 
 ## Sofi y Argos (B5)
 

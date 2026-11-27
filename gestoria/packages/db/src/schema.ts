@@ -806,6 +806,12 @@ export const saleOrder = pgTable(
     channel: text("channel").$type<OrderChannel>().notNull(),
     /** La conversación de la que salió (B2); nulo si se anotó a mano. */
     conversationId: uuid("conversation_id"),
+    /**
+     * La ficha de la clienta (entrega 4, tablero 8). Nula en los pedidos de antes de Clientes, que
+     * no se unen solos por el teléfono, y en los de «Probar a Sofi». El nombre y el teléfono de
+     * abajo son la copia de lo que se acordó: corregir la ficha no los cambia.
+     */
+    customerId: uuid("customer_id"),
     customerName: text("customer_name").notNull(),
     customerPhone: text("customer_phone"),
     address: text("address").notNull().default(""),
@@ -889,6 +895,13 @@ export const saleOrder = pgTable(
     }),
     index("sale_order_conversation_idx").on(table.conversationId),
     index("sale_order_state_idx").on(table.storeId, table.state, table.createdAt),
+    // La ficha de la misma tienda (entrega 4).
+    foreignKey({
+      name: "sale_order_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }),
+    index("sale_order_customer_idx").on(table.customerId, table.createdAt),
   ],
 )
 
@@ -1100,6 +1113,110 @@ export const storePaymentLink = pgTable(
       columns: [table.storeId],
       foreignColumns: [store.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/*
+ * Las clientas (entrega 4 de «gestorIA como odentIA», tablero 8): cada clienta es una ficha con
+ * sus compras. La clienta es la persona: un pedido se suma a su ficha y nunca se abre otra a
+ * sabiendas. Que dos fichas sean la misma lo decide una persona («¿Es la misma clienta?»), nunca
+ * el teléfono ni el nombre: la base guarda lo que decidió y quién (ADR 0223).
+ */
+
+/**
+ * Una clienta de la tienda: su nombre y su teléfono, como los anotó el equipo o los dio en el
+ * chat, y «Lo que sabemos», una nota del equipo que la clienta no ve.
+ *
+ * Cuando una persona dice que dos fichas son la misma, la más nueva queda dentro de la más
+ * antigua (`merged_into`): nada se mueve ni se borra, y «Separar» la deja sola otra vez. Una
+ * ficha solo queda dentro de otra que no está dentro de una tercera (lo cuida la regla de la
+ * base), así la clienta se lee de un solo paso.
+ */
+export const customer = pgTable(
+  "customer",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    name: text("name").notNull(),
+    /** Tal como se escribió («+51 987 654 321»). */
+    phone: text("phone"),
+    /** Solo sus dígitos: para buscarla y para sugerir «¿Es la misma clienta?»; nunca une solo. */
+    phoneDigits: text("phone_digits").generatedAlwaysAs(
+      sql`nullif(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), '')`,
+    ),
+    /** «Lo que sabemos»: la nota del equipo, con quién la escribió y cuándo. */
+    note: text("note").notNull().default(""),
+    noteBy: text("note_by"),
+    noteAt: timestamp("note_at", { withTimezone: true }),
+    /** La ficha dentro de la que quedó porque una persona dijo que es la misma clienta. */
+    mergedInto: uuid("merged_into"),
+    /** Quién la abrió: una persona al anotar un pedido, o Sofi al armarlo en el chat. */
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "customer_texts_check",
+      sql`char_length(btrim(${table.name})) between 1 and 120 and (${table.phone} is null or char_length(${table.phone}) between 1 and 30) and char_length(${table.note}) <= 1000`,
+    ),
+    check("customer_note_check", sql`(${table.noteAt} is null) = (${table.noteBy} is null)`),
+    check(
+      "customer_merged_check",
+      sql`${table.mergedInto} is null or ${table.mergedInto} <> ${table.id}`,
+    ),
+    foreignKey({
+      name: "customer_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("customer_store_id_key").on(table.storeId, table.id),
+    foreignKey({
+      name: "customer_merged_into_fkey",
+      columns: [table.storeId, table.mergedInto],
+      foreignColumns: [table.storeId, table.id],
+    }),
+    index("customer_merged_idx").on(table.storeId, table.mergedInto),
+    index("customer_phone_idx").on(table.storeId, table.phoneDigits),
+    index("customer_name_idx").on(table.storeId, sql`lower(${table.name})`),
+  ],
+)
+
+/**
+ * Lo que una persona decidió sobre dos fichas (tablero 8): que son la misma («unida»: la otra
+ * quedó dentro de esta), que ya no («separada») o que son dos clientas («distintas»). Con esto la
+ * ficha cuenta su historia y «¿Es la misma clienta?» no vuelve a preguntar lo ya contestado.
+ */
+export const CUSTOMER_EVENT_ACTIONS = ["unida", "separada", "distintas"] as const
+export type CustomerEventAction = (typeof CUSTOMER_EVENT_ACTIONS)[number]
+
+export const customerEvent = pgTable(
+  "customer_event",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** La ficha que queda (unida), de la que salió la otra (separada) o una de las dos (distintas). */
+    customerId: uuid("customer_id").notNull(),
+    otherId: uuid("other_id").notNull(),
+    action: text("action").$type<CustomerEventAction>().notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("customer_event_action_check", inList("action", CUSTOMER_EVENT_ACTIONS)),
+    check("customer_event_pair_check", sql`${table.customerId} <> ${table.otherId}`),
+    foreignKey({
+      name: "customer_event_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "customer_event_other_fkey",
+      columns: [table.storeId, table.otherId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    index("customer_event_customer_idx").on(table.storeId, table.customerId, table.createdAt),
+    index("customer_event_other_idx").on(table.storeId, table.otherId),
   ],
 )
 

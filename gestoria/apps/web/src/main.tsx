@@ -20,6 +20,7 @@ import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { HelpPage } from "./ayuda"
 import { CatalogPage } from "./catalogo"
+import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
 import { ConfigFrame, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import {
@@ -115,8 +116,8 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: el menú del día (los pedidos, el catálogo y su producto, Reportes),
-// y al pie Configuración y la Ayuda.
+// La tienda y sus secciones: el menú del día (los pedidos, las clientas, el catálogo y su
+// producto, Reportes), y al pie Configuración y la Ayuda.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
@@ -140,6 +141,14 @@ const moved = (from: string, to: string) =>
     },
   })
 
+// Clientes (entrega 4): la lista y, al lado, la ficha abierta. «?q=…» es lo que se busca.
+const customersRoute = createRoute({
+  getParentRoute: () => storeRoute,
+  path: "/clientes",
+  validateSearch: (s: Record<string, unknown>): { q?: string } =>
+    typeof s.q === "string" && s.q ? { q: s.q } : {},
+  component: CustomersLayout,
+})
 const storeChildren = [
   createRoute({
     getParentRoute: () => storeRoute,
@@ -156,6 +165,14 @@ const storeChildren = [
       typeof s.pedido === "string" ? { pedido: s.pedido } : {},
     component: OrdersPage,
   }),
+  customersRoute.addChildren([
+    createRoute({ getParentRoute: () => customersRoute, path: "/", component: CustomersIndex }),
+    createRoute({
+      getParentRoute: () => customersRoute,
+      path: "/$customerId",
+      component: CustomerPage,
+    }),
+  ]),
   createRoute({ getParentRoute: () => storeRoute, path: "/reportes", component: ReportsPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
   createRoute({

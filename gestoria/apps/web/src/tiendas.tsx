@@ -673,11 +673,16 @@ export function useStoreContext() {
  */
 function storeSections(store: MyStore): AppShellNavEntry[] {
   const id = store.id
-  // Soporte de gestorIA solo mira: sin pedidos ni conversaciones (`ventas.atender`).
+  // Soporte de gestorIA solo mira: sin pedidos, clientas ni conversaciones (`ventas.atender`).
   const attends = store.permissions.includes("ventas.atender")
   return [
-    // Clientes va aquí, después de Pedidos, cuando llegue su pantalla.
-    ...(attends ? [{ label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText }] : []),
+    ...(attends
+      ? [
+          { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
+          // Del día a día (entrega 4): cada clienta con sus compras, para todo el equipo que atiende.
+          { label: "Clientes", to: `/tiendas/${id}/clientes`, icon: UserRound },
+        ]
+      : []),
     {
       label: "Gestión",
       children: [
@@ -718,8 +723,11 @@ export function StoreLayout() {
   if (me.isPending) return <Opening message="Abriendo tu tienda…" />
   if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
   if (!store) return <NotYours me={me.data} id={id} />
-  // Quien solo mira (soporte) entra por el catálogo: los pedidos no son suyos.
-  if (!store.permissions.includes("ventas.atender") && pathname.endsWith("/pedidos"))
+  // Quien solo mira (soporte) entra por el catálogo: los pedidos y las clientas no son suyos.
+  if (
+    !store.permissions.includes("ventas.atender") &&
+    (pathname.endsWith("/pedidos") || pathname.includes("/clientes"))
+  )
     return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
   // El color de «Tu marca» pinta la app de todo el equipo, como el de cada clínica (los tonos para
   // que se lea salen de la misma cuenta). Sin color, el naranja de gestorIA.

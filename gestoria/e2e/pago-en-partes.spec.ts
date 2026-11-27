@@ -40,6 +40,15 @@ async function as(who: Who) {
 type Json = Record<string, any>
 
 /** Lo que la tienda ya tiene armado (sus medios, su reparto, su producto), por la API. */
+/** «S/ 37» como lo dice la pantalla: sin decimales cuando no los tiene. */
+const soles = (cents: number) =>
+  new Intl.NumberFormat("es-PE", {
+    style: "currency",
+    currency: "PEN",
+    maximumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+  }).format(cents / 100)
+
 async function call(method: string, path: string, body?: unknown): Promise<Json> {
   const { token } = (await (await fetch(`${ACCOUNT}/api/auth/token`)).json()) as { token: string }
   const response = await fetch(`${API}${path}`, {
@@ -83,7 +92,8 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
   ).method.id as string
   const product = (
     await call("POST", "/productos", {
-      name: "Zapatilla urbana",
+      // Otro nombre que el de Clientes: los recorridos comparten la tienda.
+      name: "Zapatilla de lona",
       listPriceCents: 12900,
       minPriceCents: 10000,
       options: [{ name: "Talla", values: ["39"] }],
@@ -91,6 +101,8 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
   ).product.id as string
   const variant = (await call("GET", `/productos/${product}`)).product.variants[0].id as string
   await call("POST", `/variantes/${variant}/movimientos`, { kind: "entrada", quantity: 3 })
+  // Lo que ya faltaba cobrar en la tienda (otros recorridos dejan pedidos por pagar).
+  const dueBefore = (await call("GET", "/reportes")).pending.due.cents as number
   // Zapatilla a S/ 107 (negociada) + envío S/ 10 = S/ 117.
   const order = (
     await call("POST", "/pedidos", {
@@ -147,7 +159,7 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/reportes`)
   const due = page.locator("div").filter({ has: page.getByText("Falta cobrar", { exact: true }) })
-  await expect(due.getByText("S/ 37", { exact: true }).first()).toBeVisible()
+  await expect(due.getByText(soles(dueBefore + 3700), { exact: true }).first()).toBeVisible()
   await shot(page, "pago-en-partes-reportes-escritorio")
 
   // Al entregar se cobra lo que falta, ya escrito, con su medio.

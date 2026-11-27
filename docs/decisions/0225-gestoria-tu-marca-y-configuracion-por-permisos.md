@@ -1,4 +1,4 @@
-# 0223 · gestorIA arma «Tu marca» con la cuenta común del color, y Configuración se ve por permisos
+# 0225 · gestorIA arma «Tu marca» con la cuenta común del color, y Configuración se ve por permisos
 
 Fecha: 2026-11-27 · Estado: aceptada · Entrega 3a del lienzo «gestorIA como odentIA» (tableros 4,
 10 y 21; sobre ADR 0162, 0203 y 0222)
@@ -53,5 +53,5 @@ logo, su color, su portada y el nombre de su link, y el color de las clínicas v
 - `shared/packages/ui/src/lib/brand-color.ts`, `packages/clinical/src/brand-color.ts`.
 - `gestoria/apps/api/src/marca.ts`, `gestoria/apps/web/src/marca.tsx`,
   `gestoria/apps/web/src/lib/configuracion.ts`.
-- `gestoria/packages/db/drizzle/0018_tu_marca_y_los_datos_de_la_tienda.sql` y
-  `0019_reglas_tu_marca.sql`.
+- `gestoria/packages/db/drizzle/0022_tu_marca_y_los_datos_de_la_tienda.sql` y
+  `0023_reglas_tu_marca.sql`.
