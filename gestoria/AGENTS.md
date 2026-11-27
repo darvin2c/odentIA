@@ -205,9 +205,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Las páginas del plan (web v3) están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
   la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
 - El diseño es el de tasteskill 2.5.1: sus archivos van tal cual en `public/assets/` (no se editan;
-  su puerta los compara) y lo propio, en `src/styles/`. Las pantallas del producto son capturas
+  su puerta los compara) y lo propio, en `src/styles/`. Las pantallas de la app son capturas
   reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras y con `astro:assets`; nunca
-  dibujadas ni recortadas.
+  dibujadas ni recortadas. El chat de WhatsApp del Inicio va en código: es lo que ve la clienta,
+  no la app. El movimiento del Inicio (GSAP con ScrollTrigger, Lenis y three.js, en `src/scripts/`)
+  cuenta la venta; con «reducir movimiento» nada se fija ni se mueve.
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
 
 ## Trabajo
