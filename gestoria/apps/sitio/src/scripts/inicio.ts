@@ -6,6 +6,7 @@
 // y Sofi se dibuja quieta en su lugar.
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
+import { CHAT_VIVO } from "../lib/venta"
 import { reduceMovimiento, scrollSuave } from "./sitio"
 import type { Humor, Sofi } from "./sofi"
 
@@ -20,20 +21,6 @@ const $$ = <T extends Element = HTMLElement>(s: string, raiz: ParentNode = docum
 const centro = (el: Element) => {
   const r = el.getBoundingClientRect()
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
-}
-
-/** La demo del héroe cabe en su caja: se achica con `zoom` (diseñada en 720 px de ancho). */
-function ajustarDemo() {
-  const caja = $("[data-demo-caja]")
-  if (!caja) return
-  const medir = () => {
-    // En el celular la demo es solo el chat: mide 400 px de ancho (inicio.css).
-    const base = window.innerWidth < 640 ? 400 : 720
-    const k = Math.min(1, caja.clientWidth / base)
-    caja.style.setProperty("--k", k.toFixed(4))
-  }
-  medir()
-  new ResizeObserver(medir).observe(caja)
 }
 
 /** Las líneas del mapa «Sofi conoce tu tienda», de cada fuente a Sofi y de Sofi a lo que hace. */
@@ -99,13 +86,79 @@ function trazarMapa(): SVGPathElement[] {
   return $$<SVGPathElement>("path.trazo", svg)
 }
 
-function heroe(sofi: Sofi | null) {
-  const demo = $("[data-demo]")
-  const chat = $('[data-chat="heroe"]')
-  const pausa = $<HTMLButtonElement>("[data-pausa]")
-  if (!demo || !chat) return
+/** El chat del héroe: la visitante toca una pregunta y Sofi contesta con la respuesta de muestra. */
+function chatVivo(sofi: Sofi, quieta: boolean) {
+  const caja = $("[data-chat-vivo]")
+  const lista = $("[data-chat-lista]")
+  const escribe = $("[data-escribe]")
+  const estado = $("[data-chat-estado]")
+  const sofiEl = $("[data-sofi-chat]")
+  if (!caja || !lista || !escribe) return
+  for (const li of $$("[data-sin-js]", lista)) li.remove()
+  const chips = $$<HTMLButtonElement>("[data-pregunta]", caja)
+  let ocupada = false
+  let minuto = 42
+  const sumar = (de: "ella" | "sofi", texto: string) => {
+    const li = document.createElement("li")
+    li.className = `msj msj--${de}`
+    const quien = document.createElement("span")
+    quien.className = "sr"
+    quien.textContent = de === "ella" ? "Tú:" : "Sofi:"
+    const hora = document.createElement("span")
+    hora.className = "msj__hora"
+    hora.setAttribute("aria-hidden", "true")
+    hora.textContent = `9:${minuto}`
+    li.append(quien, texto, hora)
+    lista.insertBefore(li, escribe)
+    if (!quieta)
+      gsap.from(li, { opacity: 0, y: 14, scale: 0.94, duration: 0.5, ease: "back.out(1.6)" })
+    // Se ven los últimos mensajes: los de arriba se van.
+    const msjs = $$(".msj", lista)
+    for (const m of msjs.slice(0, Math.max(0, msjs.length - 6))) m.remove()
+    if (!quieta) sofi.mirar(centro(li))
+    return li
+  }
+  const preguntar = (i: number) => {
+    const p = CHAT_VIVO[i]
+    if (!p || ocupada) return
+    ocupada = true
+    for (const c of chips) {
+      c.disabled = true
+      c.classList.remove("es-sugerida")
+    }
+    sumar("ella", p.q)
+    escribe.classList.add("esta")
+    if (estado) estado.textContent = "escribiendo…"
+    if (sofiEl) sofi.humor(sofiEl, "atenta")
+    sofi.hablar()
+    window.setTimeout(
+      () => {
+        escribe.classList.remove("esta")
+        if (estado) estado.textContent = "en línea"
+        sumar("sofi", p.a)
+        if (sofiEl) sofi.humor(sofiEl, p.humor)
+        if (p.humor === "feliz") sofi.festejar()
+        minuto++
+        ocupada = false
+        for (const c of chips) c.disabled = false
+        chips[(i + 1) % chips.length]?.classList.add("es-sugerida")
+        window.setTimeout(() => sofi.mirar(null), 1200)
+      },
+      quieta ? 300 : 1300,
+    )
+  }
+  for (const c of chips) c.addEventListener("click", () => preguntar(Number(c.dataset.pregunta)))
+  chips[0]?.classList.add("es-sugerida")
+  $("[data-reiniciar]", caja)?.addEventListener("click", () => {
+    for (const m of $$(".msj", lista).slice(1)) m.remove()
+    minuto = 42
+    if (sofiEl) sofi.humor(sofiEl, "atenta")
+    for (const c of chips) c.classList.remove("es-sugerida")
+    chips[0]?.classList.add("es-sugerida")
+  })
+}
 
-  // Entrada.
+function heroe() {
   const t0 = gsap.timeline({ defaults: { ease: "expo.out" } })
   t0.from(
     ".heroe__h .linea > span",
@@ -113,177 +166,91 @@ function heroe(sofi: Sofi | null) {
     0.1,
   )
     .from("[data-entra]", { y: 24, opacity: 0, duration: 1.2, stagger: 0.08 }, 0.35)
-    .from(demo, { y: 80, rotateX: 18, rotateY: -16, opacity: 0, duration: 1.8 }, 0.2)
-    .from(".demo__ventana", { x: 60, opacity: 0, duration: 1.5 }, 0.55)
-    .from(".demo__dock", { y: 30, opacity: 0, duration: 1.2 }, 0.9)
-
-  // La conversación en bucle.
-  const msjs = $$(".msj", chat)
-  const avisos = $$("[data-aviso]", demo)
-  const escribe = $("[data-escribe]", chat)
-  const estado = $("[data-cel-estado]", demo)
-  const nuevo = $("[data-demo-nuevo]", demo)
-  const insignias = $$("[data-insignia]", demo)
-  let enVista = true
-  const mirar = (el: Element) => {
-    if (!enVista || !sofi) return
-    sofi.mirar(centro(el))
-    gsap.delayedCall(1.1, () => sofi.mirar(null))
-  }
-  const ver = (el: Element | null | undefined) => {
-    if (!el) return
-    gsap.fromTo(
-      el,
-      { opacity: 0, y: 14, scale: 0.94 },
-      { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "back.out(1.6)", display: "" },
-    )
-    mirar(el)
-  }
-  const escribiendo = (si: boolean) => {
-    escribe?.classList.toggle("esta", si)
-    if (estado) estado.textContent = si ? "escribiendo…" : "en línea"
-  }
-  const reiniciar = () => {
-    gsap.set(msjs, { display: "none", opacity: 0 })
-    gsap.set(avisos, { opacity: 0, x: -16, scale: 0.9 })
-    gsap.set(nuevo, { opacity: 0, y: -16, scale: 0.96 })
-    insignias.forEach((b, i) => {
-      b.textContent = String([2, 1, 1][i])
-    })
-    escribiendo(false)
-  }
-  const sumar = (i: number) => {
-    const b = insignias[i]
-    if (!b) return
-    b.textContent = String(Number(b.textContent) + 1)
-    gsap.fromTo(b, { scale: 1.6 }, { scale: 1, duration: 0.5, ease: "back.out(3)" })
-  }
-  const aviso = (i: number) => {
-    const a = avisos.find((x) => x.dataset.aviso === String(i))
-    if (a) gsap.to(a, { opacity: 1, x: 0, scale: 1, duration: 0.6, ease: "back.out(1.8)" })
-  }
-  reiniciar()
-  const tl = gsap.timeline({ repeat: -1, delay: 1.2 })
-  let t = 0.2
-  msjs.forEach((m, i) => {
-    const deSofi = m.classList.contains("msj--sofi")
-    if (deSofi) {
-      tl.call(() => escribiendo(true), [], t)
-      t += 1.3
-      tl.call(
-        () => {
-          escribiendo(false)
-          ver(m)
-          aviso(i)
-        },
-        [],
-        t,
-      )
-      if (i === msjs.length - 1)
-        tl.call(
-          () => {
-            if (nuevo)
-              gsap.to(nuevo, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: "expo.out" })
-            if (enVista) sofi?.festejar()
-          },
-          [],
-          t + 0.5,
-        )
-      t += 1.5
-    } else {
-      tl.call(
-        () => {
-          ver(m)
-          sumar(i % 3)
-        },
-        [],
-        t,
-      )
-      t += 0.9
-    }
-  })
-  t += 4.5
-  tl.to([...msjs, ...avisos, nuevo], { opacity: 0, duration: 0.5, stagger: 0.02 }, t)
-  tl.call(reiniciar, [], t + 0.9)
-  tl.set({}, {}, t + 1.2)
-
-  let pausadoPorPersona = false
-  pausa?.addEventListener("click", () => {
-    pausadoPorPersona = !pausadoPorPersona
-    pausa.setAttribute("aria-pressed", String(pausadoPorPersona))
-    const txt = $("[data-pausa-texto]", pausa)
-    if (txt)
-      txt.textContent = pausadoPorPersona ? "Seguir la conversación" : "Pausar la conversación"
-    if (pausadoPorPersona) tl.pause()
-    else tl.resume()
-  })
-  ScrollTrigger.create({
-    trigger: ".heroe",
-    start: "top bottom",
-    end: "bottom top",
-    onToggle: (st) => {
-      enVista = st.isActive
-      if (st.isActive && !pausadoPorPersona) tl.resume()
-      else tl.pause()
-    },
-  })
-
-  // Con el puntero (en computadora), la demo se inclina un poco hacia él: tiene profundidad.
-  if (matchMedia("(hover: hover) and (pointer: fine)").matches) {
-    const caja = $("[data-demo-caja]")
-    const rx = gsap.quickTo(demo, "rotationX", { duration: 1.2, ease: "power3" })
-    const ry = gsap.quickTo(demo, "rotationY", { duration: 1.2, ease: "power3" })
-    $(".heroe")?.addEventListener("pointermove", (e) => {
-      if (!caja) return
-      const r = caja.getBoundingClientRect()
-      const x = (e.clientX - (r.left + r.width / 2)) / window.innerWidth
-      const y = (e.clientY - (r.top + r.height / 2)) / window.innerHeight
-      ry(x * 10)
-      rx(-y * 8)
-    })
-  }
-
-  // Al bajar: el texto sube y se apaga, la demo se inclina hacia atrás y la hoja blanca la tapa.
-  gsap.to("[data-heroe-texto]", {
-    yPercent: -18,
-    opacity: 0.2,
-    ease: "none",
-    scrollTrigger: { trigger: ".heroe", start: "top top", end: "bottom top", scrub: true },
-  })
-  gsap.to("[data-demo-caja]", {
-    rotateX: 16,
-    scale: 0.9,
-    y: 60,
-    ease: "none",
-    scrollTrigger: { trigger: ".heroe", start: "top top", end: "bottom top", scrub: true },
-  })
-  gsap.to(".heroe__luz--a", {
-    yPercent: 30,
-    ease: "none",
-    scrollTrigger: { trigger: ".heroe", start: "top top", end: "bottom top", scrub: true },
-  })
+    .from(".chat__tarjeta", { scale: 0.85, opacity: 0, rotate: -4, duration: 1.6 }, 0.2)
+    .from(".chat__cel", { y: 80, rotateX: 16, rotateY: -12, opacity: 0, duration: 1.8 }, 0.3)
+    .from(".chat__panel", { y: 30, opacity: 0, duration: 1.2 }, 0.8)
+  // Al bajar, el texto sube y se apaga un poco y la tarjeta naranja se queda atrás.
+  const st = { trigger: ".heroe", start: "top top", end: "bottom top", scrub: true }
+  gsap.to("[data-heroe-texto]", { yPercent: -14, opacity: 0.35, ease: "none", scrollTrigger: st })
+  gsap.to(".chat__tarjeta", { yPercent: 12, rotate: 3, ease: "none", scrollTrigger: st })
+  gsap.to(".heroe__luz", { yPercent: 30, ease: "none", scrollTrigger: st })
 }
 
-function antes() {
-  for (const item of $$("[data-antes]")) {
-    const tl = gsap.timeline({ scrollTrigger: { trigger: item, start: "top 85%" } })
-    tl.from(item, {
-      y: 40,
-      opacity: 0,
-      duration: 1,
-      ease: "expo.out",
-      delay: Number(item.dataset.antes) * 0.12,
-    })
-      .from($(".antes__tacha", item), { scaleX: 0, duration: 0.6, ease: "power3.inOut" }, "-=0.5")
-      .from($(".antes__viejo", item), { color: "#1d1512", duration: 0.6 }, "<")
-      .from($(".antes__flecha", item), { x: -10, opacity: 0, duration: 0.4 }, "-=0.2")
-      .from(
-        $(".antes__nuevo", item),
-        { y: 18, opacity: 0, filter: "blur(6px)", duration: 0.8, ease: "expo.out" },
-        "-=0.2",
-      )
-      .from($(".antes__barra i", item), { scaleX: 0, duration: 1.2, ease: "expo.out" }, "-=0.6")
+/** Sofi trabajando: los pasos se completan uno por uno y los números cuentan hacia arriba. */
+function trabajo(sofi: Sofi) {
+  const caja = $("[data-trabajo]")
+  if (!caja) return
+  const pasos = $$("[data-tpaso]", caja)
+  const sofiEl = $(".trabajo__ancla", caja)
+  const marcar = (i: number, cual: "pensando" | "listo" | "esperando") => {
+    const p = pasos[i]
+    if (!p) return
+    p.classList.toggle("es-pensando", cual === "pensando")
+    p.classList.toggle("es-esperando", cual === "esperando")
+    const e = $("[data-testado]", p)
+    if (e)
+      e.textContent =
+        cual === "pensando" ? "Pensando" : cual === "esperando" ? "Esperando" : "Listo"
   }
+  for (const i of pasos.keys()) marcar(i, "esperando")
+  const tl = gsap.timeline({ scrollTrigger: { trigger: caja, start: "top 70%" } })
+  tl.from([...caja.children], { y: 50, opacity: 0, duration: 1.1, stagger: 0.12, ease: "expo.out" })
+  for (const [i, p] of pasos.entries()) {
+    tl.call(() => {
+      marcar(i, "pensando")
+      sofi.mirar(centro(p))
+      sofi.hablar()
+      if (sofiEl) sofi.humor(sofiEl, i === 2 ? "decidida" : "atenta")
+    })
+    tl.call(() => marcar(i, "listo"), [], "+=0.9")
+  }
+  tl.call(() => {
+    if (sofiEl) sofi.humor(sofiEl, "feliz")
+    sofi.festejar()
+    sofi.mirar(null)
+  })
+  for (const b of $$("[data-cifra]", caja)) {
+    const fin = Number(b.dataset.cifra)
+    const n = { v: 0 }
+    gsap.to(n, {
+      v: fin,
+      duration: 1.6,
+      ease: "power3.out",
+      scrollTrigger: { trigger: caja, start: "top 70%" },
+      onUpdate: () => {
+        b.textContent = String(Math.round(n.v))
+      },
+    })
+  }
+}
+
+/** «Sofi hace, tú decides»: las dos cajas llegan de los costados y el puente se dibuja. */
+function decides() {
+  const g = $("[data-decides]")
+  if (!g) return
+  const cajas = $$(".decides__caja", g)
+  const apilado = matchMedia("(max-width: 860px)").matches
+  const desde = (x: number) => ({
+    x: apilado ? 0 : x,
+    y: apilado ? 40 : 0,
+    opacity: 0,
+    duration: 1.1,
+    ease: "expo.out",
+  })
+  gsap
+    .timeline({ scrollTrigger: { trigger: g, start: "top 72%" } })
+    .from(cajas[0] ?? [], desde(-60))
+    .from(
+      "[data-puente]",
+      { [apilado ? "scaleY" : "scaleX"]: 0, duration: 0.8, ease: "power2.inOut" },
+      "-=0.5",
+    )
+    .from(cajas[1] ?? [], desde(60), "-=0.3")
+    .from(
+      $$(".lista-ok li", g),
+      { x: -12, opacity: 0, duration: 0.5, stagger: 0.05, ease: "expo.out" },
+      "-=0.9",
+    )
 }
 
 function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
@@ -399,6 +366,7 @@ function venta(sofi: Sofi | null) {
   const punto = $("[data-regla-punto]", escena)
   const ruta = $<SVGPathElement>("[data-ruta]", escena)
   const avances = pasos.map((p) => $(".paso__avance i", p))
+  const ahora = $("[data-ahora]", escena)
 
   // El celular cabe en el alto que queda (en el celular, entre el título y el paso).
   const ajustar = () => {
@@ -432,6 +400,8 @@ function venta(sofi: Sofi | null) {
     actual = n
     for (const [i, p] of pasos.entries()) p.classList.toggle("activo", i === n)
     const paso = pasos[n]
+    if (ahora && paso)
+      ahora.textContent = `${String(n + 1).padStart(2, "0")} · ${$("h3", paso)?.textContent ?? ""}`
     const hasta = Number(paso?.dataset.hasta ?? 0)
     // Los mensajes: entran los nuevos, se van los que sobran al volver.
     msjs.forEach((m, i) => {
@@ -486,7 +456,7 @@ function venta(sofi: Sofi | null) {
 
   mostrar(0)
   const largo = () => (window.innerWidth >= 1024 ? 4.2 : 4.6) * window.innerHeight
-  ScrollTrigger.create({
+  const fijo = ScrollTrigger.create({
     trigger: pin,
     start: "top top",
     end: () => `+=${largo()}`,
@@ -504,6 +474,16 @@ function venta(sofi: Sofi | null) {
       })
     },
   })
+  // «Verlo en el teléfono» lleva el scroll al medio de ese capítulo.
+  for (const b of $$<HTMLButtonElement>("[data-ir-paso]", seccion)) {
+    b.addEventListener("click", () => {
+      const i = Number(b.dataset.irPaso)
+      const y = fijo.start + ((i + 0.5) / pasos.length) * (fijo.end - fijo.start)
+      const lenis = scrollSuave()
+      if (lenis) lenis.scrollTo(y, { duration: 1.2 })
+      else window.scrollTo({ top: y })
+    })
+  }
   // El celular entra con un leve giro.
   gsap.from(".venta__cel", {
     rotateY: -14,
@@ -557,44 +537,31 @@ function argos() {
     duration: 1,
     stagger: 0.18,
     ease: "expo.out",
-    scrollTrigger: { trigger: ".argos__lista", start: "top 80%" },
+    scrollTrigger: { trigger: ".argos__lista", start: "top 85%" },
   })
-  gsap.from("[data-radar]", {
-    scale: 0.7,
-    opacity: 0,
-    rotate: -30,
-    duration: 1.6,
-    ease: "expo.out",
-    scrollTrigger: { trigger: "[data-radar]", start: "top 85%" },
-  })
-}
-
-function clientas() {
-  const v = $("[data-vitrina]")
-  if (!v) return
   gsap.fromTo(
-    $(".ventana", v),
-    { rotateX: 24, scale: 0.88, y: 40 },
+    "[data-vitrina]",
+    { rotateX: 18, y: 40, scale: 0.94 },
     {
       rotateX: 0,
-      scale: 1,
       y: 0,
+      scale: 1,
       ease: "none",
-      scrollTrigger: { trigger: v, start: "top 95%", end: "top 30%", scrub: 0.6 },
+      scrollTrigger: { trigger: "[data-vitrina]", start: "top 98%", end: "top 45%", scrub: 0.6 },
     },
   )
-  gsap.from($$(".vitrina__nota", v), {
-    y: 30,
-    opacity: 0,
-    scale: 0.8,
-    duration: 0.9,
-    stagger: 0.2,
-    ease: "back.out(1.8)",
-    scrollTrigger: { trigger: v, start: "top 45%" },
-  })
 }
 
 function rubros() {
+  gsap.from(".rubro", {
+    y: 60,
+    opacity: 0,
+    rotate: (i: number) => (i % 2 ? 3 : -3),
+    duration: 1.1,
+    stagger: 0.1,
+    ease: "expo.out",
+    scrollTrigger: { trigger: "[data-rubros-tarjetas]", start: "top 82%" },
+  })
   const cintas = $$("[data-cinta]")
   const tweens = cintas.map((c) => {
     const pista = $(".cinta__pista", c)
@@ -635,11 +602,10 @@ function rubros() {
 function precio() {
   const plan = $("[data-plan]")
   const cifra = $("[data-cuenta]")
-  const anillo = $("[data-anillo]")
   if (!plan || !cifra) return
   const n = { v: 0 }
   const tl = gsap.timeline({ scrollTrigger: { trigger: plan, start: "top 75%" } })
-  tl.from(plan, { y: 60, rotateX: 10, opacity: 0, duration: 1.3, ease: "expo.out" })
+  tl.from(plan, { y: 60, scale: 0.96, opacity: 0, duration: 1.3, ease: "expo.out" })
     .to(
       n,
       {
@@ -650,7 +616,6 @@ function precio() {
       },
       "-=0.9",
     )
-    .from(anillo, { strokeDashoffset: 113.1, duration: 1.6, ease: "power2.inOut" }, "-=1.1")
     .from(
       $$(".plan__lista li", plan),
       { x: -14, opacity: 0, duration: 0.6, stagger: 0.06, ease: "expo.out" },
@@ -669,7 +634,6 @@ function cierre() {
 }
 
 export function iniciarInicio() {
-  ajustarDemo()
   const quieta = reduceMovimiento()
   const lineas = trazarMapa()
   // three.js pesa: Sofi se carga aparte, sin frenar lo demás. Mientras llega, lo que se le pide
@@ -680,22 +644,26 @@ export function iniciarInicio() {
     mirar: (p) => real?.mirar(p),
     festejar: () => real?.festejar(),
     tocar: () => real?.tocar(),
+    hablar: () => real?.hablar(),
   }
   import("./sofi").then((m) => {
     real = m.crearSofi(quieta)
   })
+  chatVivo(sofi, quieta)
+  const puntos = $<HTMLCanvasElement>("[data-puntos]")
+  if (puntos) import("./puntos").then((m) => m.marDePuntos(puntos, quieta))
   if (quieta) return
 
   const lenis = scrollSuave()
   if (lenis) lenis.on("scroll", ScrollTrigger.update)
 
-  heroe(sofi)
-  antes()
+  heroe()
+  trabajo(sofi)
   mapa(sofi, lineas)
   venta(sofi)
   cobro(sofi)
+  decides()
   argos()
-  clientas()
   rubros()
   precio()
   cierre()

@@ -1,6 +1,7 @@
 ---
-// El héroe de las páginas del producto (web v5): migas, etiqueta, título en dos tonos, bajada, los
-// botones y Sofi en grande a un lado, con el humor que le toca a la página.
+// El héroe de las páginas del producto (web v5, versión clara): migas, etiqueta, título con su
+// palabra clave en cursiva, bajada, los botones y, a un lado, Sofi en grande con el humor de la
+// página o lo que la página ponga en la ranura `visual` (una pantalla real de la app).
 import { cta } from "../lib/sitio"
 
 interface Props {
@@ -12,10 +13,11 @@ interface Props {
   segundo?: { href: string; label: string }
 }
 const { etiqueta, titulo, acento, bajada, humor = "atenta", segundo } = Astro.props
+const conVisual = Astro.slots.has("visual")
 ---
 <section class="p-heroe" aria-labelledby="p-h">
   <div class="marco p-heroe__marco">
-    <div>
+    <div class="p-heroe__texto">
       <nav class="migas" aria-label="Migas de pan">
         <ol>
           <li><a href="/">Inicio</a></li>
@@ -23,13 +25,17 @@ const { etiqueta, titulo, acento, bajada, humor = "atenta", segundo } = Astro.pr
         </ol>
       </nav>
       <p class="etiqueta">{etiqueta}</p>
-      <h1 id="p-h">{titulo} <span class="acento">{acento}</span></h1>
+      <h1 id="p-h">{titulo} <span class="cur">{acento}</span></h1>
       <p class="bajada">{bajada}</p>
       <div class="fila-botones">
         <a class="boton" href={cta.href}>{cta.label}</a>
         {segundo && <a class="boton boton--fantasma" href={segundo.href}>{segundo.label}</a>}
       </div>
     </div>
-    <span class="p-heroe__sofi" data-sofi={humor} data-sofi-escala="0.5" aria-hidden="true"></span>
+    {conVisual ? (
+      <div class="p-heroe__visual"><slot name="visual" /></div>
+    ) : (
+      <span class="p-heroe__sofi" data-sofi={humor} data-sofi-escala="0.5" aria-hidden="true"></span>
+    )}
   </div>
 </section>

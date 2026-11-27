@@ -204,14 +204,17 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   decida. «Entrar» lleva al ingreso de la app.
 - Las páginas del plan están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
   la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
-- El diseño es propio (web v5): `src/styles/base.css` (Geist, tinta cálida y #CC4604), `inicio.css` y
-  `paginas.css`. La cabecera es transparente sobre el héroe y blanca con desenfoque al bajar. Las
+- El diseño es propio (web v5, versión clara del lienzo): `src/styles/base.css` (blanco, grises
+  neutros, naranja vivo #FE4F02 en superficies y #CF3C00 en botones y textos chicos; Geist fina con
+  la palabra clave en Instrument Serif cursiva), `inicio.css` y `paginas.css`. La cabecera es transparente sobre el héroe y blanca con desenfoque al bajar. Las
   pantallas de la app son capturas reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras
   y con `astro:assets`; nunca dibujadas ni recortadas. El chat del héroe va en código: es lo que ve
   la clienta, no la app.
 - Sofi es el objeto vivo de la web: un globo de chat de vidrio naranja con un shader propio
   (`src/scripts/sofi.ts`, three.js cargado aparte), en un solo lienzo fijo que viaja a cada
-  `[data-sofi]` (su valor es el humor). El movimiento del Inicio es GSAP con ScrollTrigger y Lenis
+  `[data-sofi]` (su valor es el humor): flota, da saltitos, mueve la colita al hablar y da una vuelta
+  al festejar. El chat del héroe se puede tocar y dice que sus respuestas son de muestra. El mar de
+  puntos de los rubros es WebGL puro (`src/scripts/puntos.ts`). El movimiento del Inicio es GSAP con ScrollTrigger y Lenis
   (`src/scripts/inicio.ts`): sin JavaScript o con «reducir movimiento», la página está completa y
   quieta (lo que se esconde para entrar depende de la clase `mueve`).
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).

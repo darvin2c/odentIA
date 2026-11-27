@@ -1,5 +1,6 @@
 // Las direcciones de la web de gestorIA, la llamada a la acción y el mapa de sus páginas (lienzo B8;
-// el plan de páginas de la v2, entregado por partes: la v5 arma Sofi, Rubros, Precios y Preguntas).
+// el plan de páginas de la v2, entregado por partes: la v5 arma las del producto, Cómo funciona,
+// Rubros, Precios y Preguntas; Guías, Integraciones, Comparar y Repartidores quedan para después).
 
 /** El dominio de gestorIA: la web en la raíz y la app en `app.` (ADR 0203). */
 export const DOMAIN = "gestoria24.com"
@@ -89,31 +90,28 @@ export const SITE_MAP = {
       label: "Cobros",
       hint: "El pago de cada pedido",
       path: "/cobros",
-      lista: false,
-      hoy: "/#cobro",
+      lista: true,
     },
     {
       label: "Entregas",
       hint: "Solo con el pago confirmado",
       path: "/entregas",
-      lista: false,
-      hoy: "/#entrega",
+      lista: true,
     },
     {
       label: "Clientes",
       hint: "La ficha de cada clienta",
       path: "/clientes",
-      lista: false,
-      hoy: "/#clientas",
+      lista: true,
     },
-    { label: "Catálogo", hint: "Tu vitrina con tu marca", path: "/catalogo", lista: false },
-    { label: "Inventario", hint: "Stock por variante", path: "/inventario", lista: false },
-    { label: "Argos", hint: "Vigila tu tienda", path: "/argos", lista: false, hoy: "/#argos" },
+    { label: "Catálogo", hint: "Productos, opciones y mínimo", path: "/catalogo", lista: true },
+    { label: "Inventario", hint: "Stock por variante", path: "/inventario", lista: true },
+    { label: "Argos", hint: "Vigila tu tienda", path: "/argos", lista: true },
   ],
   recursos: [
     { label: "Rubros", path: "/rubros", lista: true },
     { label: "Preguntas", path: "/preguntas", lista: true },
-    { label: "Cómo funciona", path: "/como-funciona", lista: false },
+    { label: "Cómo funciona", path: "/como-funciona", lista: true },
     { label: "Guías", path: "/guias", lista: false },
     { label: "Integraciones", path: "/integraciones", lista: false },
     { label: "Comparar", path: "/comparar", lista: false },
@@ -132,7 +130,12 @@ export const SITE_MAP = {
 /** Las palabras de la cabecera; «Producto» abre su menú con las páginas del producto. */
 export const mainNav: NavLink[] = [
   { href: "/#venta", label: "Producto" },
-  ...linksOf([SITE_MAP.recursos[0], SITE_MAP.empresa[0], SITE_MAP.recursos[1]]),
+  ...linksOf([
+    SITE_MAP.recursos[2],
+    SITE_MAP.recursos[0],
+    SITE_MAP.empresa[0],
+    SITE_MAP.recursos[1],
+  ]),
 ]
 
 /** El pie de todas las páginas: los grupos del mapa que hoy tienen enlaces. */

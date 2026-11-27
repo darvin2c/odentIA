@@ -1,33 +1,39 @@
-/* La base de la web de gestorIA (v5): tokens, tipografía, botones, cabecera y pie. Una sola familia
-   (Geist, con Geist Mono para etiquetas), tinta cálida, papel blanco y el naranja de la marca. */
+/* La base de la web de gestorIA (v5): tokens, tipografía, botones, cabecera y pie. Geist fina en
+   los títulos, Instrument Serif cursiva para la palabra clave y Geist Mono en etiquetas. */
 
 :root {
-  --tinta: #140d0a;
-  --tinta-2: #1e1512;
-  --tinta-3: #2a201c;
-  --tinta-linea: rgba(255, 240, 230, 0.1);
+  /* Versión clara (aprobada en el lienzo, 27 nov): blanco, grises neutros y naranja vivo
+     (#FE4F02) en superficies grandes, Sofi y títulos grandes; #CF3C00 en botones y textos chicos,
+     que con letra blanca tiene el contraste de WCAG AA. */
+  --tinta: #111113;
+  --tinta-2: #1b1b1e;
+  --tinta-3: #26262a;
+  --tinta-linea: rgba(255, 255, 255, 0.12);
   --papel: #ffffff;
-  --papel-2: #fbf7f4;
-  --durazno: #fff1e8;
-  --durazno-2: #fde3d2;
-  --texto: #1d1512;
-  --texto-2: #5e504a;
-  --texto-3: #7a6b63;
-  --linea: rgba(29, 21, 18, 0.1);
-  --linea-2: rgba(29, 21, 18, 0.16);
-  --naranja: #cc4604;
-  --naranja-hover: #b33d03;
-  --naranja-claro: #ff7a2f;
-  --naranja-hondo: #a83a03;
+  --papel-2: #f6f6f7;
+  --durazno: #fff1ea;
+  --durazno-2: #ffe3d6;
+  --texto: #111113;
+  --texto-2: #55555c;
+  --texto-3: #75757c;
+  --linea: rgba(17, 17, 19, 0.1);
+  --linea-2: rgba(17, 17, 19, 0.16);
+  --naranja: #cf3c00;
+  --naranja-hover: #b33400;
+  --naranja-vivo: #fe4f02;
+  --naranja-claro: #ff7a3d;
+  --naranja-hondo: #c93a00;
   --verde: #0e8a4f;
   --verde-claro: #dcf6e7;
-  /* El degradado de los títulos: sobre fondo claro empieza en un naranja con contraste (≥ 3:1 en
-     títulos grandes); sobre fondo oscuro, en el durazno claro. */
-  --degradado: linear-gradient(100deg, #e85a10 0%, #cc4604 55%, #a83a03 100%);
-  --degradado-oscuro: linear-gradient(100deg, #ffb27a 0%, #ff7a2f 38%, #e2560f 70%, #cc4604 100%);
-  --sombra-1: 0 1px 2px rgba(29, 21, 18, 0.06), 0 2px 8px rgba(29, 21, 18, 0.05);
-  --sombra-2: 0 2px 4px rgba(29, 21, 18, 0.04), 0 12px 32px -8px rgba(29, 21, 18, 0.14);
-  --sombra-3: 0 4px 10px rgba(20, 13, 10, 0.08), 0 30px 70px -20px rgba(20, 13, 10, 0.35);
+  --degradado: linear-gradient(100deg, #fe4f02 0%, #e64503 60%, #cf3c00 100%);
+  --degradado-oscuro: linear-gradient(100deg, #ffb27f 0%, #ff7a3d 45%, #fe4f02 100%);
+  --naranja-card:
+    radial-gradient(55% 45% at 72% 22%, #ffb27f 0%, rgba(0, 0, 0, 0) 70%),
+    radial-gradient(60% 50% at 25% 100%, #c93a00 0%, rgba(0, 0, 0, 0) 70%), #fe4f02;
+  --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --sombra-1: 0 1px 2px rgba(17, 17, 19, 0.05), 0 2px 8px rgba(17, 17, 19, 0.04);
+  --sombra-2: 0 2px 4px rgba(17, 17, 19, 0.04), 0 20px 50px -30px rgba(17, 17, 19, 0.28);
+  --sombra-3: 0 4px 10px rgba(17, 17, 19, 0.06), 0 40px 80px -40px rgba(17, 17, 19, 0.4);
   --radio: 14px;
   --radio-g: 28px;
   --ancho: 1240px;
@@ -111,7 +117,7 @@ ol {
 h1,
 h2,
 h3 {
-  font-weight: 580;
+  font-weight: 400;
   letter-spacing: -0.035em;
   line-height: 1.04;
   text-wrap: balance;
@@ -138,7 +144,7 @@ button {
 }
 
 ::selection {
-  background: #ffd2b5;
+  background: #ffd9c7;
   color: var(--tinta);
 }
 
@@ -197,7 +203,22 @@ button {
 }
 
 .titulo-2 {
-  font-size: clamp(34px, 4.6vw, 58px);
+  font-size: clamp(36px, 4.6vw, 60px);
+  font-weight: 300;
+  letter-spacing: -0.045em;
+}
+/* La palabra clave del título, en serif cursiva naranja. */
+.cur {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--naranja-vivo);
+}
+.heroe .cur,
+.pie .cur,
+.oscuro .cur {
+  color: var(--naranja-claro);
 }
 .titulo-3 {
   font-size: clamp(26px, 2.8vw, 36px);
@@ -269,8 +290,8 @@ button {
     transform 0.3s var(--suave);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 1px 2px rgba(120, 35, 0, 0.3),
-    0 8px 22px -8px rgba(204, 70, 4, 0.7);
+    0 1px 2px rgba(120, 35, 0, 0.25),
+    0 10px 26px -10px rgba(254, 79, 2, 0.75);
 }
 .boton::after {
   /* Un brillo que cruza el botón al pasar el puntero. */
@@ -313,7 +334,7 @@ button {
     0 10px 30px -10px rgba(0, 0, 0, 0.5);
 }
 .boton--blanco:hover {
-  background: #fff3eb;
+  background: #fff1ea;
 }
 .boton--fantasma {
   --b-fondo: transparent;
@@ -414,7 +435,7 @@ button {
 .cabecera__enlace:hover,
 .cabecera__item:focus-within > .cabecera__enlace {
   opacity: 1;
-  background: rgba(127, 110, 100, 0.12);
+  background: rgba(17, 17, 19, 0.06);
 }
 .cabecera__enlace svg {
   width: 12px;
@@ -647,7 +668,7 @@ button {
 }
 .pie__marca p {
   margin-top: 14px;
-  color: #a89a91;
+  color: #a1a1a8;
   font-size: 14.5px;
   max-width: 22em;
 }
@@ -665,9 +686,9 @@ button {
 }
 .pie__grupo a {
   font-size: 14.5px;
-  color: #b9aba2;
+  color: #b4b4ba;
   text-decoration: underline;
-  text-decoration-color: rgba(185, 171, 162, 0.4);
+  text-decoration-color: rgba(180, 180, 186, 0.4);
   text-underline-offset: 3px;
   transition: color 0.2s;
 }
@@ -682,7 +703,7 @@ button {
   justify-content: space-between;
   padding: 22px 0 32px;
   border-top: 1px solid var(--tinta-linea);
-  color: #8f8079;
+  color: #8a8a91;
   font-size: 13.5px;
 }
 .pie__legal nav {
@@ -730,8 +751,8 @@ button {
     radial-gradient(circle at 38% 44%, #2a0d02 0 4.5%, transparent 5%),
     radial-gradient(circle at 62% 44%, #2a0d02 0 4.5%, transparent 5%),
     radial-gradient(circle at 35% 28%, #ffe2cc 0 10%, transparent 30%),
-    radial-gradient(circle at 50% 60%, #ff9a52, #cc4604 70%, #8a2a02);
-  box-shadow: 0 20px 50px -10px rgba(204, 70, 4, 0.55);
+    radial-gradient(circle at 50% 60%, #ffb27f, #fe4f02 70%, #c23a05);
+  box-shadow: 0 20px 50px -10px rgba(254, 79, 2, 0.5);
 }
 
 .cabeza {
@@ -855,7 +876,7 @@ button {
   right: -200px;
   top: -300px;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(226, 86, 15, 0.42), transparent);
+  background: radial-gradient(closest-side, rgba(254, 79, 2, 0.4), transparent);
 }
 .cierre__marco {
   display: grid;
@@ -872,7 +893,7 @@ button {
 .cierre__texto p {
   margin-top: 22px;
   max-width: 28em;
-  color: #cdbdb2;
+  color: #c8c8cc;
   font-size: clamp(17px, 1.4vw, 20px);
 }
 .cierre__juego {
@@ -890,7 +911,7 @@ button {
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #9a8a80;
+  color: #85858c;
 }
 html:not(.mueve) .cierre__pista {
   display: none;
@@ -908,11 +929,32 @@ html:not(.mueve) .cierre__pista {
   position: absolute;
   inset: -2px;
   background-image:
-    linear-gradient(rgba(255, 220, 200, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 220, 200, 0.06) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
   background-size: 56px 56px;
   -webkit-mask-image: radial-gradient(ellipse 80% 70% at 60% 40%, #000 20%, transparent 75%);
   mask-image: radial-gradient(ellipse 80% 70% at 60% 40%, #000 20%, transparent 75%);
+}
+
+/* Una lista con visto bueno naranja. */
+.lista-ok {
+  display: grid;
+  gap: 12px;
+}
+.lista-ok li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.lista-ok li::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 12px;
+  margin: 4px 8px 0 6px;
+  border-right: 2px solid var(--naranja-vivo);
+  border-bottom: 2px solid var(--naranja-vivo);
+  transform: rotate(45deg);
 }
 
 /* Reducir movimiento: nada se desliza ni se transforma por sí solo. */

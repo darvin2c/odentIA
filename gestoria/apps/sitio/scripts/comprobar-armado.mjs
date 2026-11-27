@@ -12,6 +12,13 @@ const fallos = []
 const PAGINAS = [
   "index.html",
   "sofi.html",
+  "como-funciona.html",
+  "cobros.html",
+  "entregas.html",
+  "clientes.html",
+  "catalogo.html",
+  "inventario.html",
+  "argos.html",
   "rubros.html",
   "precios.html",
   "preguntas.html",

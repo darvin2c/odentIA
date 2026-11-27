@@ -58,3 +58,29 @@ export const DESPUES: readonly Mensaje[] = [
   },
   { de: "clienta", texto: "¡Sí, súmalas!", hora: "9:53" },
 ]
+
+/** Una pregunta del chat que se puede tocar en el héroe (web v5) y la respuesta de muestra de Sofi. */
+export type PreguntaChat = { q: string; a: string; humor: "atenta" | "decidida" | "feliz" }
+
+/** Respuestas de muestra de Calzados Rosa: la web dice que son un ejemplo. */
+export const CHAT_VIVO: readonly PreguntaChat[] = [
+  {
+    q: "¿La tienen en 38?",
+    a: MENSAJES[1]?.texto.replace(/^¡Hola! Soy Sofi, de Calzados Rosa\. /, "") ?? "",
+    humor: "atenta",
+  },
+  { q: "¿Me la dejas en 110?", a: MENSAJES[3]?.texto ?? "", humor: "decidida" },
+  {
+    q: "¿Cómo pago?",
+    a: "Por Yape, Plin o transferencia. Me mandas la captura y una persona del equipo la confirma. Con el pago confirmado, tu pedido sale.",
+    humor: "atenta",
+  },
+  {
+    q: "¡Ya, va!",
+    a: "¡Listo! Te anoté el pedido 0018: Zapatilla urbana blanca 38, reparto a Surco gratis. Total S/ 120. Puedes pagar por Yape y me mandas la captura.",
+    humor: "feliz",
+  },
+]
+
+/** El saludo con que abre el chat del héroe. */
+export const SALUDO = "¡Hola! Soy Sofi, de Calzados Rosa. ¿Qué estás buscando?"

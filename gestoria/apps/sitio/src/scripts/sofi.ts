@@ -43,6 +43,7 @@ uniform float uTiempo;
 uniform float uOnda;
 uniform vec2 uAplasta;   // x: ancho, y: alto (el resorte)
 uniform vec3 uEstira;    // dirección y cuánto se estira al volar (z)
+uniform float uColita;   // cuánto mueve la colita (cuando habla)
 varying vec3 vObj;
 varying vec3 vNormal;
 varying vec3 vVista;
@@ -54,7 +55,8 @@ vec3 forma(vec3 p) {
   // El cuerpo del globo: más ancho que alto y aplanado de frente, como una almohada.
   q *= vec3(1.16, 0.93, 0.74);
   // La colita: crece donde la normal apunta abajo a la izquierda.
-  vec3 c = normalize(COLA);
+  float meneo = sin(uTiempo * 11.0) * 0.32 * uColita;
+  vec3 c = normalize(COLA + vec3(meneo, -meneo * 0.4, meneo * 0.6));
   float d = dot(p, c);
   float k = smoothstep(0.76, 1.0, d);
   q += c * k * k * k * 0.62;
@@ -243,6 +245,8 @@ export type Sofi = {
   festejar(): void
   /** Un toque: se aplasta y rebota. */
   tocar(): void
+  /** Mueve la colita un rato, como cuando escribe. */
+  hablar(): void
 }
 
 function hayWebGL(): boolean {
@@ -292,14 +296,15 @@ export function crearSofi(quieta: boolean): Sofi | null {
     uOnda: { value: quieta ? 0 : 1 },
     uAplasta: { value: new Vector2(1, 1) },
     uEstira: { value: new Vector3(1, 0, 0) },
+    uColita: { value: 0 },
     uMira: { value: new Vector2(0, 0) },
     uParpadeo: { value: 1 },
     uFeliz: { value: 0 },
     uDecidida: { value: 0 },
     uBrillo: { value: 0 },
-    uCuerpo: { value: new Color("#f05a12") },
-    uHondo: { value: new Color("#9c3206") },
-    uClaro: { value: new Color("#ffc59a") },
+    uCuerpo: { value: new Color("#ff5a12") },
+    uHondo: { value: new Color("#c23a05") },
+    uClaro: { value: new Color("#ffc795") },
   }
   const material = new ShaderMaterial({
     vertexShader: vertex,
@@ -364,6 +369,12 @@ export function crearSofi(quieta: boolean): Sofi | null {
   let foco: { x: number; y: number } | null = null
   const rot = { x: 0, y: 0 }
   let proximoParpadeo = 1.5
+  // Cada tanto da un saltito: se aplasta, sube y rebota.
+  let proximoSalto = 3.5
+  let salto = 0
+  // La colita se mueve mientras habla; al festejar da una vuelta.
+  let colita = 0
+  let giro = 0
   let parpadeo = 0
 
   if (!quieta) {
@@ -533,16 +544,31 @@ export function crearSofi(quieta: boolean): Sofi | null {
       }
       parpadeo = Math.max(0, parpadeo - dt * 7.5)
       uniforms.uParpadeo.value = 1 - Math.sin(parpadeo * Math.PI)
+      proximoSalto -= dt
+      if (proximoSalto <= 0 && salto === 0) {
+        salto = 1
+        aplasta.v -= 2.6
+        proximoSalto = 5 + Math.random() * 4
+      }
+      if (salto > 0) salto = Math.max(0, salto - dt * 1.7)
+      colita = Math.max(0, colita - dt * 0.7)
+      if (giro > 0) giro = Math.max(0, giro - dt * 1.4)
     }
 
     uniforms.uTiempo.value = quieta ? 1.2 : ahora / 1000
+    uniforms.uColita.value = Math.min(1, colita)
     uniforms.uFeliz.value = animo.feliz
     uniforms.uDecidida.value = animo.decidida
     uniforms.uBrillo.value = animo.brillo
 
-    malla.position.set(pos.x - ancho / 2, alto / 2 - pos.y, 0)
+    // El saltito: una parábola que empieza después del aplastón.
+    const subida = salto > 0 && salto < 0.82 ? Math.sin((salto / 0.82) * Math.PI) : 0
+    if (salto > 0 && salto < 0.06) aplasta.v -= 1.2
+    malla.position.set(pos.x - ancho / 2, alto / 2 - pos.y + subida * radio * 0.28, 0)
     malla.scale.setScalar(radio)
-    malla.rotation.set(rot.x, rot.y, quieta ? 0 : Math.sin(ahora / 1700) * 0.05)
+    // Se mece, y al festejar da una vuelta entera (con frenada suave).
+    const vuelta = giro > 0 ? (1 - (1 - (1 - giro)) ** 3) * Math.PI * 2 : 0
+    malla.rotation.set(rot.x, rot.y + vuelta, quieta ? 0 : Math.sin(ahora / 1500) * 0.09)
     aura.position.set(malla.position.x, malla.position.y - radio * 0.1, -400)
     aura.scale.setScalar(radio * 4.2)
     auraU.uFuerza.value = 0.28 + animo.brillo * 0.5 + animo.feliz * 0.08
@@ -559,10 +585,16 @@ export function crearSofi(quieta: boolean): Sofi | null {
     mirar(punto) {
       foco = punto
     },
+    hablar() {
+      if (quieta) return
+      colita = 1.6
+    },
     festejar() {
       if (quieta) return
       animo.brillo = 1
       aplasta.v += 3.4
+      giro = 1
+      salto = 1
     },
     tocar() {
       if (quieta) return

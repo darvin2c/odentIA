@@ -1,0 +1,53 @@
+---
+// Argos (web v5): el administrador de gestorIA. No usa modelo: «Te toca» y los seguimientos son
+// cálculos y textos fijos; lo que pide una persona sigue siendo de la tienda.
+import isotipo from "../assets/isotipo.svg?raw"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+
+const marca = isotipo
+  .replace(/ role="[^"]*"/, "")
+  .replace(/ aria-label="[^"]*"/, "")
+  .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
+const alertas = [
+  { t: "2 pagos por confirmar", d: "Revisa tu cuenta y confírmalos", c: "#ffc247" },
+  { t: "5 pedidos salen hoy", d: "Todos con su pago confirmado", c: "#3ddc84" },
+  { t: "Andrea no compró las sandalias", d: "Su seguimiento está listo para hoy", c: "#fe4f02" },
+]
+---
+<Base
+  title="Argos: el administrador que vigila tu tienda"
+  description="Argos revisa pedidos, pagos y chats, te dice lo que te toca hoy y deja listo el seguimiento para recuperar a las clientas que no compraron."
+>
+  <PaginaHeroe
+    etiqueta="Argos"
+    titulo="Argos vigila tu tienda"
+    acento="mientras vendes"
+    bajada="Es el administrador de gestorIA: revisa pedidos, pagos y chats, te dice lo que te toca hoy y deja listo el seguimiento para recuperar a las clientas que se fueron sin comprar."
+  >
+    <div class="p-radar" slot="visual" aria-hidden="true">
+      <span class="p-radar__barrido"></span>
+      <span class="p-radar__ojo"><Fragment set:html={marca} /></span>
+    </div>
+  </PaginaHeroe>
+  <section class="p-bloques" aria-labelledby="toca-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Lo que te toca hoy</p>
+        <h2 id="toca-h" class="titulo-2">Abres la app <span class="cur">y ya sabes qué hacer</span></h2>
+        <p class="bajada">Argos ordena lo pendiente para que nada se quede sin atender.</p>
+      </div>
+      <ul class="p-alertas" aria-label="Ejemplos de lo que Argos te avisa">
+        {alertas.map((a) => (
+          <li class="p-alerta" data-aparece><i style={`background:${a.c}`}></i><span><b>{a.t}</b><small>{a.d}</small></span></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-label="Cómo trabaja Argos">
+    <div class="marco p-bloques__lista">
+      <div class="p-bloque" data-aparece><h3>Recupera a quien no compró</h3><p>Si una clienta preguntó y se fue, Argos deja listo su seguimiento, con lo que buscaba.</p></div>
+      <div class="p-bloque" data-aparece><h3>Tú decides</h3><p>Argos te avisa y propone. Lo que pide una persona, como confirmar un pago, sigue siendo tuyo.</p></div>
+    </div>
+  </section>
+</Base>

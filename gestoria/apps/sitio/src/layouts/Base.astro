@@ -4,6 +4,7 @@
 // es propio (src/styles/base.css): Geist, tinta cálida y el naranja de la marca (#CC4604).
 import "@fontsource-variable/geist"
 import "@fontsource-variable/geist-mono"
+import "@fontsource/instrument-serif/latin-400-italic.css"
 import Footer from "../components/Footer.astro"
 import Header from "../components/Header.astro"
 import { SITE_URL } from "../lib/sitio"
@@ -60,11 +61,12 @@ const data = isHome ? [site, ...ld] : ld
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="gestorIA: Sofi vende por chat para tu tienda." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content={tono === "oscuro" ? "#140d0a" : "#ffffff"} />
+    <meta name="theme-color" content={tono === "oscuro" ? "#111113" : "#ffffff"} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
-    {/* Con JavaScript y sin «reducir movimiento», lo que entra al bajar empieza escondido. */}
+    {/* `js`: hay JavaScript (el chat del héroe se puede tocar). `mueve`: además, sin «reducir movimiento», lo que entra al bajar empieza escondido. */}
     <script is:inline>
+      document.documentElement.classList.add("js")
       if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("mueve")
     </script>
     {data.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
