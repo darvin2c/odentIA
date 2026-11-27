@@ -10,7 +10,7 @@ import {
   storePaymentMethod,
   storePaymentQr,
 } from "@gestoria/db"
-import { and, eq, sql } from "drizzle-orm"
+import { and, count, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { imageType } from "./catalogo.js"
 import { cciBank, cciDigits, cciProblem, cciText } from "./cci.js"
@@ -177,7 +177,7 @@ export interface PaymentValues {
 }
 
 /** Lo que Sofi envía para pagar, armado con los datos de cada forma. */
-export function detailsOf(values: Omit<PaymentValues, "details" | "name"> & { note: string }) {
+export function detailsOf(values: Omit<PaymentValues, "details" | "name">): string {
   if ((values.kind === "yape" || values.kind === "plin") && values.phone && values.holder)
     return `${KIND_RULES[values.kind].name} al ${phoneText(values.phone)} a nombre de ${values.holder}`
   if (values.kind === "transferencia" && values.bankCode && values.accountNumber && values.holder)
@@ -189,7 +189,7 @@ export function detailsOf(values: Omit<PaymentValues, "details" | "name"> & { no
     ]
       .filter(Boolean)
       .join(" · ")
-  return values.note
+  return ""
 }
 
 /**
@@ -213,7 +213,7 @@ export const paymentInput = z
       case "yape":
       case "plin": {
         const values = { ...empty, ...KIND_RULES[input.kind], ...input }
-        return { ...values, details: detailsOf({ ...values, note: "" }) }
+        return { ...values, details: detailsOf(values) }
       }
       case "transferencia": {
         const bank = bankOf(input.bankCode)
@@ -224,7 +224,7 @@ export const paymentInput = z
           name: `Transferencia ${bank?.short ?? ""}`.trim(),
           cci: input.cci || null,
         }
-        return { ...values, details: detailsOf({ ...values, note: "" }) }
+        return { ...values, details: detailsOf(values) }
       }
       case "efectivo":
       case "pos":
@@ -293,11 +293,11 @@ export async function createPayment(
   input: PaymentValues,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const rows = await tx
-      .select({ id: storePaymentMethod.id })
+    const [methods] = await tx
+      .select({ n: count() })
       .from(storePaymentMethod)
       .where(eq(storePaymentMethod.storeId, storeId))
-    if (rows.length >= MAX_METHODS)
+    if (Number(methods?.n ?? 0) >= MAX_METHODS)
       throw new StoreError(
         409,
         "TOO_MANY",

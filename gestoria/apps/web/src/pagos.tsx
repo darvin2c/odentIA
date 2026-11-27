@@ -28,20 +28,17 @@ import {
   type DeliveryType,
   money,
   moneyInput,
-  type PaymentMethod,
   readMoney,
 } from "./lib/tienda"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
- * Configuración › Cobros y › Entregas (lienzo B, tablero 6; «gestorIA como
- * odentIA», tablero 10): con qué le pagan a la tienda y cómo llega el pedido. Igual que «Medios de
- * pago» de odentIA: un nombre libre y un tipo de una lista estándar. Lo que se apaga, Sofi deja de
- * ofrecerlo. Los cambia quien tiene `configuracion`; soporte los mira sin cambiarlos.
+ * Configuración › Entregas (lienzo B, tablero 6; «gestorIA como odentIA», tablero 10): cómo llega
+ * el pedido, con un tipo de una lista estándar. Lo que se apaga, Sofi deja de ofrecerlo. Los
+ * cambia quien tiene `configuracion`; soporte los mira sin cambiarlos. Cobros está en `cobros.tsx`.
  */
 
 interface Lists {
-  payments: PaymentMethod[]
   deliveries: DeliveryMethod[]
   slots: Slot[]
 }

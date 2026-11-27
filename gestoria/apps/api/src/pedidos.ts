@@ -35,7 +35,13 @@ import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
 import { storeClockIn } from "./hora.js"
 import type { LinkAdapters, LinkApp } from "./link-de-pago.js"
-import { chargesOrders, linkStateIn, receiveTrialPayment, trialOf } from "./pasarela.js"
+import {
+  chargesOrders,
+  linkStateIn,
+  linkTokenIn,
+  receiveTrialPayment,
+  trialOf,
+} from "./pasarela.js"
 import { can } from "./permisos.js"
 import {
   autoUnitCents,
@@ -2529,7 +2535,7 @@ export async function createPaymentLinkWith(
       connection,
       name,
       currency,
-      token: openSecret(deps.secretsKey, storeId, connection.accessTokenEnc),
+      token: openSecret(deps.secretsKey, storeId, await linkTokenIn(tx, storeId)),
     }
   })
   if ("url" in prepared) return { url: prepared.url }

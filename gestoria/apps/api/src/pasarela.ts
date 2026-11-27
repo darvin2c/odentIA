@@ -42,8 +42,17 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest()
 
 /** Cómo está la pasarela: si se puede usar, en qué modo, y la fila con sus credenciales. */
 export async function linkStateIn(tx: Db, storeId: string, now = new Date()) {
+  // Sin las credenciales cifradas: esto se lee en cada pedido y en cada turno de Sofi.
   const [row] = await tx
-    .select()
+    .select({
+      provider: storePaymentLink.provider,
+      mode: storePaymentLink.mode,
+      revokedAt: storePaymentLink.revokedAt,
+      expiresAt: storePaymentLink.expiresAt,
+      accountLabel: storePaymentLink.accountLabel,
+      connectedBy: storePaymentLink.connectedBy,
+      connectedAt: storePaymentLink.connectedAt,
+    })
     .from(storePaymentLink)
     .where(eq(storePaymentLink.storeId, storeId))
   if (!row) return null
@@ -53,6 +62,16 @@ export async function linkStateIn(tx: Db, storeId: string, now = new Date()) {
       ? "vencida"
       : "conectada"
   return { row, state, usable: state === "conectada", mode: row.mode }
+}
+
+/** El token cifrado de la pasarela, solo donde se usa (crear un link). */
+export async function linkTokenIn(tx: Db, storeId: string): Promise<string> {
+  const [row] = await tx
+    .select({ token: storePaymentLink.accessTokenEnc })
+    .from(storePaymentLink)
+    .where(eq(storePaymentLink.storeId, storeId))
+  if (!row) throw new StoreError(409, "LINK_NOT_CONNECTED", "Primero conecta Mercado Pago.")
+  return row.token
 }
 
 /** Se cobran pedidos por link: conectada, al día y cobrando de verdad. */
@@ -368,7 +387,7 @@ export async function createTrialLink(
       provider: link.row.provider,
       name,
       currency,
-      token: openSecret(key, storeId, link.row.accessTokenEnc),
+      token: openSecret(key, storeId, await linkTokenIn(tx, storeId)),
     }
   })
   const id = randomUUID()
@@ -448,6 +467,9 @@ export async function receiveTrialPayment(
 
 /* -------------------------------------------------- el aviso de Mercado Pago y la renovación */
 
+/** Cada cuenta de Mercado Pago se mira a lo más una vez por minuto: un aviso inventado no la gasta. */
+const connectSeen = new Map<string, number>()
+
 const connectNotice = z.object({
   type: z.literal("mp-connect"),
   action: z.string(),
@@ -459,9 +481,6 @@ const connectNotice = z.object({
  * que dice: se pregunta a Mercado Pago con el token de cada tienda de esa cuenta, y solo si ya no
  * lo reconoce queda «sin permiso». Siempre responde lo mismo: el aviso no cuenta qué tiendas hay.
  */
-/** Cada cuenta de Mercado Pago se mira a lo más una vez por minuto: un aviso inventado no la gasta. */
-const connectSeen = new Map<string, number>()
-
 export async function receiveConnectNotice(
   ownerDb: Db,
   body: string,

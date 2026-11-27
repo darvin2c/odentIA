@@ -280,8 +280,10 @@ function ActiveSwitch({
         body: { isActive },
       }),
     onSuccess: async (_, isActive) => {
-      await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
-      await queryClient.invalidateQueries({ queryKey: LINK_KEY(storeId) })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) }),
+        queryClient.invalidateQueries({ queryKey: LINK_KEY(storeId) }),
+      ])
       toast.success(
         isActive ? `${method.name}: encendido` : `${method.name}: apagado, Sofi ya no lo ofrece`,
       )
@@ -323,11 +325,11 @@ function LinkCard({
   const status = useQuery({
     queryKey: LINK_KEY(storeId),
     queryFn: () => api<LinkStatus>(`/api/tiendas/${storeId}/link-de-pago`),
-    // Mientras espera el pago de prueba (de la última hora), mira cada 5 segundos si Mercado Pago
-    // avisó.
+    // Mientras espera el pago de prueba (de los últimos 15 minutos), mira cada 5 segundos si
+    // Mercado Pago avisó.
     refetchInterval: (query) => {
       const trial = query.state.data?.trial
-      const recent = trial && Date.now() - new Date(trial.createdAt).getTime() < 3_600_000
+      const recent = trial && Date.now() - new Date(trial.createdAt).getTime() < 15 * 60_000
       return recent && !trial.paidAt ? 5000 : false
     },
   })
@@ -478,7 +480,7 @@ function LinkCard({
               : "Quitaste el permiso de gestorIA en Mercado Pago. Los links ya no se confirman solos: vuelve a conectar o cobra a tu número."}
           </p>
         ) : test ? (
-          <TrialPanel status={data} currency={currency} />
+          <TrialPanel trial={data?.trial ?? null} currency={currency} />
         ) : data?.method && canEdit ? (
           <div className="flex items-center justify-between gap-3 rounded-lg bg-surface-muted px-3 py-2.5 text-sm">
             <span>
@@ -532,8 +534,7 @@ function LinkCard({
 }
 
 /** «Probar con S/ 1»: los pasos de la prueba, cada uno cuando de verdad pasó. */
-function TrialPanel({ status, currency }: { status: LinkStatus | undefined; currency: string }) {
-  const trial = status?.trial ?? null
+function TrialPanel({ trial, currency }: { trial: LinkStatus["trial"]; currency: string }) {
   const paid = Boolean(trial?.paidAt)
   const steps: { done: boolean; text: string }[] = [
     { done: Boolean(trial), text: "Creamos el link en tu Mercado Pago" },
@@ -552,7 +553,7 @@ function TrialPanel({ status, currency }: { status: LinkStatus | undefined; curr
         <b className="flex-1 text-sm">
           {trial ? `Link de prueba · ${money(trial.amountCents, currency)}` : "La prueba"}
         </b>
-        {paid && trial?.paidAt ? (
+        {trial?.paidAt ? (
           <Badge variant="success">Pagado solo · {when(trial.paidAt)}</Badge>
         ) : trial ? (
           <Badge variant="outline">Esperando el pago</Badge>
@@ -876,8 +877,7 @@ function PaymentForm({
                   values.phone,
                   values.holder,
                   money(14100, currency),
-                  Boolean(values.qr && values.qr !== "quitar") ||
-                    (Boolean(method?.qrAt) && values.qr !== "quitar"),
+                  values.qr !== "quitar" && Boolean(values.qr || method?.qrAt),
                 )}
               </p>
             </div>
