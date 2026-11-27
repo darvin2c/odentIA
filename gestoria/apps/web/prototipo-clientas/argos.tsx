@@ -329,7 +329,7 @@ function LoQueHizo({ d }: { d: Db }) {
       text: (
         <>
           Anotó de <b>{mariela.name}</b> su {R.field.toLowerCase()} y su cumpleaños, del chat. La
-          talla quedó por confirmar: «{mariela.datos.talla?.cita}».
+          talla quedó por confirmar: «{R.cita(R.sizes[3] ?? "", R.sizes[4] ?? "")}».
         </>
       ),
       badge: mariela.datos.talla?.dudas ? (
