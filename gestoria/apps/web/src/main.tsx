@@ -23,6 +23,7 @@ import { HelpPage } from "./ayuda"
 import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
+import { PaymentMethodsPage } from "./cobros"
 import { ConfigFrame, ConfigHomePage, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import { DispatchPage } from "./despachos"
@@ -39,7 +40,8 @@ import { startInstalledApp } from "./lib/avisos"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
 import { FILTERS, type OrderFilter } from "./lib/pedidos"
 import { BrandPage } from "./marca"
-import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
+import { MercadoPagoReturnPage } from "./mercadopago-vuelta"
+import { DeliveriesPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
 import { ProductPage } from "./producto"
@@ -308,6 +310,13 @@ const routeTree = rootRoute.addChildren([
       component: NewStorePage,
     }),
     storeRoute.addChildren(storeChildren),
+    // La vuelta de Mercado Pago al conectar la pasarela (Cobros): su dirección es fija.
+    createRoute({
+      getParentRoute: () => signedIn,
+      path: "/mercadopago/vuelta",
+      validateSearch: search,
+      component: MercadoPagoReturnPage,
+    }),
     createRoute({
       getParentRoute: () => signedIn,
       path: "/invitacion/$id",

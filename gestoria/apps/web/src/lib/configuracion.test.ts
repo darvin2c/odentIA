@@ -198,9 +198,22 @@ describe("lo que falta para vender", () => {
       "entregas",
       "sofi",
     ])
+    // En modo prueba la pasarela todavía falta: no cobra pedidos.
+    const testing = toDoItems(
+      { ...ROSA, paymentLink: { provider: "mercadopago", mode: "prueba", state: "conectada" } },
+      STORE,
+    ).find((i) => i.id === "link")
+    expect(testing).toMatchObject({ state: "falta", action: { label: "Terminar" } })
+    expect(testing?.detail).toContain("modo prueba")
+    expect(
+      configLines(
+        { ...ROSA, paymentLink: { provider: "mercadopago", mode: "prueba", state: "conectada" } },
+        STORE,
+      ).pagos,
+    ).toMatchObject({ status: "Mercado Pago en prueba", pending: true })
     const done: ConfigOverview = {
       ...ROSA,
-      paymentLink: { provider: "mercadopago" },
+      paymentLink: { provider: "mercadopago", mode: "real", state: "conectada" },
       steps: ROSA.steps.map((s) => (s.step === "sofi" ? { ...s, state: "saltado" } : s)),
     }
     const items = toDoItems(done, STORE)

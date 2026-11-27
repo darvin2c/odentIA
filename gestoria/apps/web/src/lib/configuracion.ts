@@ -191,8 +191,12 @@ export interface ConfigOverview {
   }
   catalog: { products: number; withStock: number }
   payments: { name: string; typeCode: PaymentTypeCode; collection: PaymentCollection }[]
-  /** La pasarela del link de pago: solo si está conectada y con qué. */
-  paymentLink: { provider: "mercadopago" } | null
+  /** La pasarela del link de pago: con qué, en qué modo y si sirve (sin cuenta ni llaves). */
+  paymentLink: {
+    provider: "mercadopago"
+    mode: "prueba" | "real"
+    state: "conectada" | "vencida" | "sin_permiso"
+  } | null
   deliveries: {
     name: string
     type: DeliveryType
@@ -311,17 +315,23 @@ export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">
   const byCapture = overview.payments
     .filter((p) => p.collection === "comprobante")
     .map((p) => p.name)
+  const gateway = overview.paymentLink
+  const charging = gateway?.state === "conectada" && gateway.mode === "real"
   items.push({
     id: "link",
-    state: overview.paymentLink ? "hecho" : "falta",
+    state: charging ? "hecho" : "falta",
     title: "Cobrar por link de pago",
-    detail: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}: el pago se confirma solo.`
-      : byCapture.length > 0
+    detail: !gateway
+      ? byCapture.length > 0
         ? `El pago se confirma solo. Ya cobras con ${listText(byCapture)} por captura.`
-        : "El pago se confirma solo, sin revisar capturas.",
+        : "El pago se confirma solo, sin revisar capturas."
+      : gateway.state !== "conectada"
+        ? `${PROVIDER_NAMES[gateway.provider]} ya no deja cobrar: vuelve a conectarlo.`
+        : gateway.mode === "prueba"
+          ? `${PROVIDER_NAMES[gateway.provider]} en modo prueba: prueba con S/ 1 y pasa a cobrar de verdad.`
+          : `Con ${PROVIDER_NAMES[gateway.provider]}: el pago se confirma solo.`,
     action: {
-      label: overview.paymentLink ? "Ver" : "Conectar pasarela",
+      label: charging ? "Ver" : gateway ? "Terminar" : "Conectar pasarela",
       path: SECTIONS.pagos.path,
     },
   })
@@ -436,10 +446,17 @@ export function configLines(
   lines.pagos = {
     id: "pagos",
     summary: paymentParts.length > 0 ? paymentParts.join(" · ") : "Sin medios de pago",
-    status: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
-      : "Sin pasarela",
-    pending: overview.payments.length === 0 || !overview.paymentLink,
+    status: !overview.paymentLink
+      ? "Sin pasarela"
+      : overview.paymentLink.state !== "conectada"
+        ? `${PROVIDER_NAMES[overview.paymentLink.provider]}: sin permiso`
+        : overview.paymentLink.mode === "prueba"
+          ? `${PROVIDER_NAMES[overview.paymentLink.provider]} en prueba`
+          : `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`,
+    pending:
+      overview.payments.length === 0 ||
+      overview.paymentLink?.state !== "conectada" ||
+      overview.paymentLink.mode !== "real",
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
   const ownFleet = overview.deliveries.some((d) => d.type === "DeliveryModeOwnFleet")
@@ -560,6 +577,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     text: "Cobrar por link de pago",
     section: "pagos",
     terms: ["link", "pasarela", "mercado pago", "tarjeta", "yape", "enlace"],
+  },
+  {
+    text: "Probar Mercado Pago con S/ 1",
+    section: "pagos",
+    terms: ["prueba", "probar", "modo prueba", "cobrar de verdad", "comisión"],
   },
   {
     text: "Quién confirma un pago con captura",

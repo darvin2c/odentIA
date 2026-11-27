@@ -174,6 +174,8 @@ export interface OrderDetail {
   tracking: string | null
   linkUrl: string | null
   linkConnected: boolean
+  /** La pasarela está en modo prueba: este pedido no se cobra por link (Cobros). */
+  linkTestMode: boolean
   cancelReason: string | null
   createdAt: string
   balance: Balance
