@@ -390,6 +390,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "promotion.updated": say("Cambió una promoción"),
   "promotion.ended": say("Terminó una promoción"),
   "financial_document.sent": say("Envió un documento de cobro"),
+  "budget.handed": say("Anotó que entregó el presupuesto en mano"),
   "health_document.sent": say("Envió un documento de salud a la persona"),
   // Contactos y ventas
   "contact.created": say("Creó un contacto"),

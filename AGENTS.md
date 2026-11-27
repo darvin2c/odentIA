@@ -22,6 +22,7 @@ Permitir que cada usuario complete su trabajo con facilidad mediante una experie
 
 - «Menos es más»: menos esfuerzo, ruido y decisiones innecesarias; no menos capacidad ni menos ayuda. Presentar complejidad progresivamente, sin esconder lo necesario.
 - Fluido, no prohibitivo: el sistema avisa siempre lo que pasa, donde se decide, y la persona decide; lo clínico lo decide el profesional. Un aviso no frena ni pide pasos obligatorios: la constancia de que se vio la guarda el sistema. No aplica a permisos, protección de datos ni lo que exige la ley.
+- El sistema no es médico ni odontólogo: nunca decide lo clínico ni le dice al profesional qué hacer o no hacer con el paciente; muestra el hecho y, como mucho, una «Sugerencia: …» (ADR 0221). No se escribe «no hace falta avisarle», «no es urgente», «ya no necesita control», «debe…» ni «contraindicado», tampoco en un texto que parece de mensajes o de cobro.
 - Elegir interacciones por su utilidad, no por novedad. Arrastrar y soltar solo cuando facilite la tarea y con alternativa accesible; las ayudas son oportunas y contextuales.
 - El usuario entiende qué ocurre, cómo avanzar y qué consecuencias tienen sus acciones. La conversación con el agente es una vía, no una obligación para realizar cualquier tarea.
 - Conservar contexto y borradores, distinguir pendiente de confirmado y permitir recuperación ante errores. Accesibilidad WCAG, teclado y móvil forman parte de la facilidad de uso.

@@ -1,4 +1,4 @@
-import { type Db, MAX_PHOTO_BYTES } from "@gestoria/db"
+import { type Db, MAX_PHOTO_BYTES, type PhotoType } from "@gestoria/db"
 import { APP_CONTRACT_PATHS, CONTRACT_MAX_RECEIPT_BYTES } from "@odentia/contract"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -18,6 +18,17 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
+import {
+  choicesInput,
+  deviceInput,
+  deviceState,
+  removeDevice,
+  saveChoices,
+  saveDevice,
+  storeChoices,
+  subscribeInput,
+} from "./avisos.js"
 import {
   createExchange,
   exchangeInput,
@@ -30,6 +41,7 @@ import {
   catalog,
   createProduct,
   deleteProduct,
+  imageType,
   photoContent,
   productDetail,
   productInput,
@@ -73,8 +85,10 @@ import {
   receiveAccountEvent,
   syncAccountCopy,
 } from "./cuenta.js"
+import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
+import { storeHome } from "./inicio.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
   brandInput,
@@ -89,11 +103,13 @@ import {
 } from "./marca.js"
 import {
   addReceipt,
+  assignCourier,
   cancelInput,
   cancelOrder,
   changeInput,
   changeOrder,
   connectPaymentLink,
+  courierInput,
   createOrder,
   createPaymentLink,
   deliverInput,
@@ -105,6 +121,7 @@ import {
   markMissed,
   markShipped,
   missedInput,
+  noteSentByYou,
   ORDER_FILTERS,
   type OrderFilter,
   orderDetail,
@@ -121,10 +138,15 @@ import {
   reviewInput,
   reviewPayment,
   sellable,
+  sentByYouInput,
+  setShipping,
   shipInput,
+  shippingInput,
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import { skipInput, skipStep } from "./primeros-pasos.js"
+import { setDeliverySlots, slotsInput } from "./repartidores.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
@@ -176,6 +198,8 @@ export interface AppDeps {
   model?: ChatModel | null
   /** El acuerdo con la administración (B7); sin secreto, no se envía ni se pregunta. */
   contract?: ContractConfig
+  /** La clave pública VAPID de los avisos al celular (tablero 15); sin ella no se ofrecen. */
+  vapidPublicKey?: string
 }
 
 type Env = { Variables: { person: Person } }
@@ -189,7 +213,7 @@ const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 /** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
 const MAX_LINK_NOTICES = 120
 const LINK_NOTICE_WINDOW_MS = 60_000
-const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/comprobante$/
+const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/(comprobante|entregado)$/
 /** El comprobante del plan (una foto o un PDF) va a la administración: su propio tope. */
 const PLAN_RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/plan\/comprobante$/
 /**
@@ -502,6 +526,10 @@ export function createApp(deps: AppDeps) {
   })
 
   // El catálogo (B3): productos, variantes, fotos, stock y la hoja.
+  app.patch("/api/tiendas/:id/franjas", async (c) => {
+    const input = await bodyOf(c, slotsInput)
+    return c.json(await setDeliverySlots(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
   app.get("/api/tiendas/:id/catalogo", async (c) =>
     c.json(await catalog(deps.appDb, c.get("person"), c.req.param("id"))),
   )
@@ -582,6 +610,16 @@ export function createApp(deps: AppDeps) {
     return c.json({ movement }, 201)
   })
 
+  // Inicio (tablero 5): lo que le toca a cada rol, las cifras del día y los primeros pasos de una
+  // tienda nueva (tablero 16), que se saltan con «No lo necesito».
+  app.get("/api/tiendas/:id/inicio", async (c) =>
+    c.json(await storeHome(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/primeros-pasos/saltar", async (c) => {
+    const input = await bodyOf(c, skipInput)
+    return c.json(await skipStep(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+
   // Los pedidos (B4): armar, cobrar y entregar.
   app.get("/api/tiendas/:id/pedidos", async (c) => {
     const filter = (c.req.query("filtro") ?? "abiertos") as OrderFilter
@@ -657,11 +695,37 @@ export function createApp(deps: AppDeps) {
     const { id, orderId } = c.req.param()
     return c.json({ order: await markShipped(deps.appDb, c.get("person"), id, orderId, input) })
   })
+  // «Entregado», con lo cobrado en la puerta y, si se quiere, la foto del voucher del POS (entonces
+  // llega como formulario: `datos` con lo cobrado y `voucher` con la foto).
   app.post("/api/tiendas/:id/pedidos/:orderId/entregado", async (c) => {
-    const input = await bodyOf(c, deliverInput)
     const { id, orderId } = c.req.param()
+    let input: z.infer<typeof deliverInput>
+    let voucher: { photo: Uint8Array; type: PhotoType } | null = null
+    if ((c.req.header("content-type") ?? "").startsWith("multipart/form-data")) {
+      let form: FormData
+      try {
+        form = await c.req.formData()
+      } catch {
+        throw new StoreError(400, "VALIDATION_ERROR", "Lo cobrado no se pudo leer")
+      }
+      try {
+        input = deliverInput.parse(JSON.parse(String(form.get("datos") ?? "{}")))
+      } catch (error) {
+        if (error instanceof ZodError) throw error
+        throw new StoreError(400, "VALIDATION_ERROR", "Lo cobrado no se pudo leer")
+      }
+      const file = form.get("voucher")
+      if (file instanceof File && file.size > 0) {
+        const photo = new Uint8Array(await file.arrayBuffer())
+        if (photo.length > MAX_PHOTO_BYTES)
+          throw new StoreError(400, "PHOTO_TOO_LARGE", "La foto pesa demasiado. Prueba con otra.")
+        const type = imageType(photo)
+        if (!type) throw new StoreError(400, "PHOTO_TYPE", "Sube la foto en JPG, PNG o WebP")
+        voucher = { photo, type }
+      }
+    } else input = await bodyOf(c, deliverInput)
     return c.json({
-      order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
+      order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input, voucher),
     })
   })
   // Corregir sin anular (ADR 0226): cambiar, no se entregó y pasar a otro día.
@@ -702,11 +766,36 @@ export function createApp(deps: AppDeps) {
     const { id, orderId } = c.req.param()
     return c.json({ order: await recordRefund(deps.appDb, c.get("person"), id, orderId, input) })
   })
+  // Despachos (entrega 3): quién lo lleva, la agencia y «Avisar» (enviado por usted).
+  app.post("/api/tiendas/:id/pedidos/:orderId/repartidor", async (c) => {
+    const input = await bodyOf(c, courierInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await assignCourier(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/envio", async (c) => {
+    const input = await bodyOf(c, shippingInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await setShipping(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/avisado", async (c) => {
+    const input = await bodyOf(c, sentByYouInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await noteSentByYou(deps.appDb, c.get("person"), id, orderId, input) })
+  })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)
     const { id, orderId } = c.req.param()
     return c.json({ order: await cancelOrder(deps.appDb, c.get("person"), id, orderId, input) })
   })
+
+  // Despachos (entrega 3): las entregas de un día y lo que el menú cuenta.
+  app.get("/api/tiendas/:id/despachos", async (c) => {
+    const day = dayQuery.parse(c.req.query("dia") || undefined)
+    return c.json(await dispatchBoard(deps.appDb, c.get("person"), c.req.param("id"), day))
+  })
+  app.get("/api/tiendas/:id/despachos/resumen", async (c) =>
+    c.json(await dispatchCount(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
 
   // Las clientas (entrega 4): la lista, la ficha, «¿Es la misma clienta?», unir y separar.
   app.get("/api/tiendas/:id/clientes", async (c) =>
@@ -805,6 +894,16 @@ export function createApp(deps: AppDeps) {
     })
   })
 
+  // Caja (entrega 3): lo cobrado del día y «Recibí» el efectivo. Solo Dueño y Administrador.
+  app.get("/api/tiendas/:id/caja", async (c) => {
+    const day = cashDay.parse(c.req.query("dia") || undefined)
+    return c.json(await cashBox(deps.appDb, c.get("person"), c.req.param("id"), day))
+  })
+  app.post("/api/tiendas/:id/caja/recibi", async (c) => {
+    const input = await bodyOf(c, receiveInput)
+    return c.json(await receiveCash(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+
   // Reportes y Argos (B5): solo Dueño y Administrador.
   app.get("/api/tiendas/:id/reportes", async (c) => {
     const period = reportPeriod.parse(c.req.query("periodo") ?? undefined)
@@ -879,6 +978,36 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/soporte/salir", async (c) => {
     await leaveSupport(deps.appDb, c.get("person"), c.req.param("id"))
     return c.body(null, 204)
+  })
+
+  // Los avisos al celular (tablero 15): la clave con que el navegador se suscribe y cada celular,
+  // que es de la persona (le llega lo de todas sus tiendas). Qué le llega sale de su rol al enviar.
+  app.get("/api/avisos/clave", (c) => c.json({ publicKey: deps.vapidPublicKey || null }))
+  app.post("/api/avisos/celular", async (c) => {
+    if (!deps.vapidPublicKey)
+      return c.json(
+        errorBody(c, "UNAVAILABLE", "Los avisos al celular todavía no están disponibles"),
+        503,
+      )
+    const input = await bodyOf(c, subscribeInput)
+    return c.json(await saveDevice(deps.appDb, deps.ownerDb, c.get("person"), input))
+  })
+  // ¿Este celular recibe hoy mis avisos? Otra persona pudo activarlos después en el mismo navegador.
+  app.post("/api/avisos/celular/estado", async (c) => {
+    const input = await bodyOf(c, deviceInput)
+    return c.json(await deviceState(deps.appDb, c.get("person"), input))
+  })
+  app.delete("/api/avisos/celular", async (c) => {
+    const input = await bodyOf(c, deviceInput)
+    return c.json(await removeDevice(deps.appDb, c.get("person"), input))
+  })
+  // Configuración › Avisos al celular: qué le llega de esta tienda, entre lo que su rol resuelve.
+  app.get("/api/tiendas/:id/avisos", async (c) =>
+    c.json(await storeChoices(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/avisos", async (c) => {
+    const input = await bodyOf(c, choicesInput)
+    return c.json(await saveChoices(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
 
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))

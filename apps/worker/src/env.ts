@@ -146,6 +146,11 @@ const envSchema = z.object({
   /** `live` envía de verdad; `mock` simula. Vacía: `mock`, salvo en producción, donde es obligatoria. */
   CHANNEL_SENDER_MODE: z.preprocess((value) => (value === "" ? undefined : value), z.enum(["mock", "live"]).optional()),
   /**
+   * Solo con `mock` (desarrollo): el acuse que da el WhatsApp simulado al «enviar»,
+   * para probar «Entregado», «Leído» y «No llegó». Vacía o `sent`: sin acuse.
+   */
+  CHANNEL_MOCK_STATUS: z.preprocess((value) => (value === "" ? undefined : value), z.enum(["sent", "delivered", "read", "failed"]).optional()),
+  /**
    * Cuenta de odentIA para el modelo del agente, uno solo (ADR 0052). Sin la
    * clave, el agente deriva y lo avisa.
    * `LLM_MODEL=fake`: modelo determinista de desarrollo y pruebas (otro valor no tiene efecto).
@@ -207,6 +212,9 @@ const envSchema = z.object({
   if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
   const sender = senderModeStartProblem(data)
   if (sender) ctx.addIssue({ code: "custom", path: ["CHANNEL_SENDER_MODE"], message: sender })
+  // Un acuse simulado en producción haría pasar por entregado lo que nadie entregó.
+  if (data.NODE_ENV === "production" && data.CHANNEL_MOCK_STATUS && data.CHANNEL_MOCK_STATUS !== "sent")
+    ctx.addIssue({ code: "custom", path: ["CHANNEL_MOCK_STATUS"], message: "CHANNEL_MOCK_STATUS es solo de desarrollo: en producción el acuse lo da el proveedor" })
   if (data.NODE_ENV === "production" && data.ADMIN_META_GRAPH_URL)
     ctx.addIssue({ code: "custom", path: ["ADMIN_META_GRAPH_URL"], message: "ADMIN_META_GRAPH_URL es solo de pruebas: en producción los canales de la administración hablan con Meta" })
 })

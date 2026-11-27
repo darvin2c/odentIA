@@ -1,6 +1,6 @@
 {
-  "id": "0c000960-d982-42c2-afd9-2e63c3081927",
-  "prevId": "0d7a9930-8dd5-49fc-b58b-21e5c21f6d6d",
+  "id": "6b073e4b-40de-4ecd-9f0d-a8f870ab5af8",
+  "prevId": "03cedff8-7b82-48b8-abf8-0e9f6d491405",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1281,7 +1281,7 @@
       "checkConstraints": {
         "order_event_action_check": {
           "name": "order_event_action_check",
-          "value": "action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho','cambio')"
+          "value": "action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho')"
         }
       },
       "isRLSEnabled": false
@@ -2467,19 +2467,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "exchange_of_id": {
-          "name": "exchange_of_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "return_credit_cents": {
-          "name": "return_credit_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "tracking": {
           "name": "tracking",
           "type": "text",
@@ -2601,21 +2588,6 @@
           "with": {},
           "method": "btree",
           "concurrently": false
-        },
-        "sale_order_exchange_idx": {
-          "name": "sale_order_exchange_idx",
-          "columns": [
-            {
-              "expression": "exchange_of_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
         }
       },
       "foreignKeys": {
@@ -2655,21 +2627,6 @@
             "customer_id"
           ],
           "tableTo": "customer",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "sale_order_exchange_fkey": {
-          "name": "sale_order_exchange_fkey",
-          "tableFrom": "sale_order",
-          "columnsFrom": [
-            "store_id",
-            "exchange_of_id"
-          ],
-          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
@@ -2721,11 +2678,7 @@
         },
         "sale_order_amounts_check": {
           "name": "sale_order_amounts_check",
-          "value": "\"sale_order\".\"delivery_cents\" between 0 and \"sale_order\".\"delivery_list_cents\" and \"sale_order\".\"subtotal_cents\" >= 0 and \"sale_order\".\"discount_cents\" >= 0 and \"sale_order\".\"gift_cents\" >= 0 and \"sale_order\".\"total_cents\" = \"sale_order\".\"subtotal_cents\" + \"sale_order\".\"delivery_cents\" - \"sale_order\".\"return_credit_cents\" and \"sale_order\".\"margin_used_cents\" between 0 and \"sale_order\".\"margin_cents\""
-        },
-        "sale_order_exchange_check": {
-          "name": "sale_order_exchange_check",
-          "value": "\"sale_order\".\"return_credit_cents\" >= 0 and (\"sale_order\".\"exchange_of_id\" is not null or \"sale_order\".\"return_credit_cents\" = 0) and (\"sale_order\".\"exchange_of_id\" is null or \"sale_order\".\"exchange_of_id\" <> \"sale_order\".\"id\")"
+          "value": "\"sale_order\".\"delivery_cents\" between 0 and \"sale_order\".\"delivery_list_cents\" and \"sale_order\".\"subtotal_cents\" >= 0 and \"sale_order\".\"discount_cents\" >= 0 and \"sale_order\".\"gift_cents\" >= 0 and \"sale_order\".\"total_cents\" = \"sale_order\".\"subtotal_cents\" + \"sale_order\".\"delivery_cents\" and \"sale_order\".\"margin_used_cents\" between 0 and \"sale_order\".\"margin_cents\""
         },
         "sale_order_cancel_check": {
           "name": "sale_order_cancel_check",
@@ -2920,179 +2873,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.sale_order_return": {
-      "name": "sale_order_return",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "order_id": {
-          "name": "order_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "position": {
-          "name": "position",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "variant_id": {
-          "name": "variant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product_name": {
-          "name": "product_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "variant_name": {
-          "name": "variant_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sku": {
-          "name": "sku",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quantity": {
-          "name": "quantity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "unit_cents": {
-          "name": "unit_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "returned_at": {
-          "name": "returned_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "sale_order_return_variant_uidx": {
-          "name": "sale_order_return_variant_uidx",
-          "columns": [
-            {
-              "expression": "order_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "variant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "sale_order_return_variant_idx": {
-          "name": "sale_order_return_variant_idx",
-          "columns": [
-            {
-              "expression": "variant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "sale_order_return_order_fkey": {
-          "name": "sale_order_return_order_fkey",
-          "tableFrom": "sale_order_return",
-          "columnsFrom": [
-            "store_id",
-            "order_id"
-          ],
-          "tableTo": "sale_order",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "sale_order_return_variant_fkey": {
-          "name": "sale_order_return_variant_fkey",
-          "tableFrom": "sale_order_return",
-          "columnsFrom": [
-            "store_id",
-            "variant_id"
-          ],
-          "tableTo": "product_variant",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "sale_order_return_quantity_check": {
-          "name": "sale_order_return_quantity_check",
-          "value": "\"sale_order_return\".\"quantity\" between 1 and 1000"
-        },
-        "sale_order_return_price_check": {
-          "name": "sale_order_return_price_check",
-          "value": "\"sale_order_return\".\"unit_cents\" >= 0"
-        },
-        "sale_order_return_reason_check": {
-          "name": "sale_order_return_reason_check",
-          "value": "char_length(btrim(\"sale_order_return\".\"reason\")) between 3 and 120"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.stock_movement": {
       "name": "stock_movement",
       "schema": "",
@@ -3247,15 +3027,15 @@
       "checkConstraints": {
         "stock_movement_kind_check": {
           "name": "stock_movement_kind_check",
-          "value": "kind IN ('entrada','venta','anulacion','ajuste','devolucion')"
+          "value": "kind IN ('entrada','venta','anulacion','ajuste')"
         },
         "stock_movement_sign_check": {
           "name": "stock_movement_sign_check",
-          "value": "case \"stock_movement\".\"kind\" when 'entrada' then \"stock_movement\".\"quantity\" > 0 when 'anulacion' then \"stock_movement\".\"quantity\" > 0 when 'devolucion' then \"stock_movement\".\"quantity\" > 0 when 'venta' then \"stock_movement\".\"quantity\" < 0 else \"stock_movement\".\"quantity\" <> 0 end"
+          "value": "case \"stock_movement\".\"kind\" when 'entrada' then \"stock_movement\".\"quantity\" > 0 when 'anulacion' then \"stock_movement\".\"quantity\" > 0 when 'venta' then \"stock_movement\".\"quantity\" < 0 else \"stock_movement\".\"quantity\" <> 0 end"
         },
         "stock_movement_reason_check": {
           "name": "stock_movement_reason_check",
-          "value": "(\"stock_movement\".\"kind\" not in ('ajuste','devolucion') or char_length(btrim(coalesce(\"stock_movement\".\"reason\", ''))) >= 3) and (\"stock_movement\".\"reason\" is null or char_length(\"stock_movement\".\"reason\") <= 300)"
+          "value": "(\"stock_movement\".\"kind\" <> 'ajuste' or char_length(btrim(coalesce(\"stock_movement\".\"reason\", ''))) >= 3) and (\"stock_movement\".\"reason\" is null or char_length(\"stock_movement\".\"reason\") <= 300)"
         },
         "stock_movement_cost_check": {
           "name": "stock_movement_cost_check",
@@ -3263,7 +3043,7 @@
         },
         "stock_movement_reference_check": {
           "name": "stock_movement_reference_check",
-          "value": "(\"stock_movement\".\"kind\" in ('venta','anulacion','devolucion')) = (\"stock_movement\".\"reference\" is not null) and (\"stock_movement\".\"reference\" is null or char_length(\"stock_movement\".\"reference\") between 1 and 80)"
+          "value": "(\"stock_movement\".\"kind\" in ('venta','anulacion')) = (\"stock_movement\".\"reference\" is not null) and (\"stock_movement\".\"reference\" is null or char_length(\"stock_movement\".\"reference\") between 1 and 80)"
         },
         "stock_movement_balance_check": {
           "name": "stock_movement_balance_check",
@@ -4515,6 +4295,70 @@
         "store_payment_method_details_check": {
           "name": "store_payment_method_details_check",
           "value": "char_length(\"store_payment_method\".\"details\") <= 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_setup": {
+      "name": "store_setup",
+      "schema": "",
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "store_setup_store_id_fkey": {
+          "name": "store_setup_store_id_fkey",
+          "tableFrom": "store_setup",
+          "columnsFrom": [
+            "store_id"
+          ],
+          "tableTo": "store",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "store_setup_skipped_check": {
+          "name": "store_setup_skipped_check",
+          "value": "skipped <@ ARRAY['datos','catalogo','pagos','entregas','chats','sofi','equipo']::text[]"
         }
       },
       "isRLSEnabled": false

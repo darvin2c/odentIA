@@ -291,6 +291,7 @@ describe("los permisos de cada rol (decisión 7)", () => {
       "pagos.confirmar",
       "entregas",
       "ayuda.pedir",
+      "avisos.recibir",
     ])
     expect((await call("lucia", "GET", `/api/tiendas/${storeId}/equipo`)).status).toBe(200)
     expect(
@@ -368,6 +369,65 @@ describe("los permisos de cada rol (decisión 7)", () => {
         "equipo.rol:u-mario",
       ]),
     )
+  })
+})
+
+describe("Inicio y los primeros pasos (tableros 5 y 16)", () => {
+  const steps = (json: Record<string, unknown>) =>
+    Object.fromEntries(
+      ((json.setup as { steps: { step: string; state: string }[] }).steps ?? []).map((s) => [
+        s.step,
+        s.state,
+      ]),
+    )
+
+  it("el Dueño ve las cifras del día y su tienda casi lista; Ventas, lo suyo sin totales", async () => {
+    const rosa = await call("rosa", "GET", `/api/tiendas/${storeId}/inicio`)
+    expect(rosa.status).toBe(200)
+    expect(rosa.json.figures).toEqual({
+      collected: { cents: 0, payments: 0 },
+      toConfirm: { payments: 0, cents: 0 },
+      due: { orders: 0, cents: 0 },
+      leaves: { orders: 0, missed: 0 },
+    })
+    expect(rosa.json.toDo).toEqual([])
+    expect(rosa.json.waiting).toEqual({ chats: [] })
+    // Sin país, sin catálogo, sin medios ni entregas; el equipo ya está (Mario y Lucía).
+    expect(steps(rosa.json)).toEqual({
+      datos: "falta",
+      catalogo: "falta",
+      pagos: "falta",
+      entregas: "falta",
+      chats: "pronto",
+      sofi: "falta",
+      equipo: "hecho",
+    })
+
+    const lucia = await call("lucia", "GET", `/api/tiendas/${storeId}/inicio`)
+    expect(lucia.status).toBe(200)
+    expect(lucia.json.figures).toMatchObject({
+      collected: null,
+      toConfirm: { payments: 0, cents: null },
+      due: null,
+    })
+    expect(lucia.json.setup).toBeNull()
+    expect((await call("ajena", "GET", `/api/tiendas/${storeId}/inicio`)).status).toBe(404)
+  })
+
+  it("se salta solo lo que no aplica, y lo salta quien configura", async () => {
+    const skip = (who: Who, step: string) =>
+      call(who, "POST", `/api/tiendas/${storeId}/primeros-pasos/saltar`, { step })
+    expect((await skip("lucia", "sofi")).status).toBe(403)
+    expect((await skip("rosa", "pagos")).status).toBe(400)
+    expect((await skip("rosa", "otro")).status).toBe(400)
+    expect((await skip("mario", "sofi")).status).toBe(200)
+    expect((await skip("rosa", "sofi")).status).toBe(200)
+    const home = await call("rosa", "GET", `/api/tiendas/${storeId}/inicio`)
+    expect(steps(home.json)).toMatchObject({ sofi: "saltado", pagos: "falta" })
+    const [saved] = await db.ownerDb.execute<{ skipped: string[]; updated_by: string }>(
+      sql`select skipped, updated_by from store_setup where store_id = ${storeId}`,
+    )
+    expect(saved).toEqual({ skipped: ["sofi"], updated_by: "u-rosa" })
   })
 })
 
@@ -711,9 +771,15 @@ describe("la tienda de ejemplo", () => {
     const body = (await me.json()) as {
       invitations: { id: string; storeName: string; role: string }[]
     }
-    expect(body.invitations).toEqual([
-      expect.objectContaining({ storeName: "Calzados Rosa", role: "owner" }),
-    ])
+    // Y Tortas Carmen, que recién empieza: para ver sus primeros pasos (tablero 16).
+    expect(body.invitations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ storeName: "Calzados Rosa", role: "owner" }),
+        expect.objectContaining({ storeName: "Tortas Carmen", role: "owner" }),
+      ]),
+    )
+    expect(body.invitations).toHaveLength(2)
+    const rosaInvitation = body.invitations.find((i) => i.storeName === "Calzados Rosa")
     // Clientes (entrega 4): dos Mariela Ríos por mirar, y Andrea Castillo ya unida por una persona.
     const fichas = await db.ownerDb
       .select({ name: customer.name, mergedInto: customer.mergedInto })
@@ -772,12 +838,25 @@ describe("la tienda de ejemplo", () => {
         method,
         headers: { authorization: `Bearer ${token}` },
       })
-    expect(
-      (await asYo("POST", `/api/invitaciones/${body.invitations[0]?.id}/aceptar`)).status,
-    ).toBe(200)
+    expect((await asYo("POST", `/api/invitaciones/${rosaInvitation?.id}/aceptar`)).status).toBe(200)
     await seedDemoStore(db.ownerDb, "yo@ejemplo.test")
-    const again = (await (await asYo("GET", "/api/yo")).json()) as { invitations: unknown[] }
-    expect(again.invitations).toEqual([])
+    const again = (await (await asYo("GET", "/api/yo")).json()) as {
+      invitations: { storeName: string }[]
+    }
+    expect(again.invitations.map((i) => i.storeName)).toEqual(["Tortas Carmen"])
+    // Inicio (tablero 5): Jorge volvió sin entregar y dos Mariela Ríos esperan que alguien compare.
+    // Calzados Rosa ya tiene todo lo de una tienda que vende: no ve los primeros pasos.
+    const home = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/inicio`)).json()) as {
+      toDo: { kind: string; customer?: string }[]
+      setup: unknown
+    }
+    expect(home.toDo).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "no_entregado", customer: "Jorge Paredes" }),
+        expect.objectContaining({ kind: "misma" }),
+      ]),
+    )
+    expect(home.setup).toBeNull()
     const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {
       questions: { question: string; replies: unknown[] }[]
     }

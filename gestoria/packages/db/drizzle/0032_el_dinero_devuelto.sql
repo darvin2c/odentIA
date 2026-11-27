@@ -19,7 +19,7 @@ ALTER TABLE "order_event" DROP CONSTRAINT "order_event_action_check";--> stateme
 ALTER TABLE "order_refund" ADD CONSTRAINT "order_refund_order_fkey" FOREIGN KEY ("store_id","order_id") REFERENCES "public"."sale_order"("store_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "order_refund_order_idx" ON "order_refund" USING btree ("order_id","created_at");--> statement-breakpoint
 CREATE INDEX "order_refund_store_idx" ON "order_refund" USING btree ("store_id","created_at");--> statement-breakpoint
-ALTER TABLE "order_event" ADD CONSTRAINT "order_event_action_check" CHECK (action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho','cambio','dinero_devuelto'));--> statement-breakpoint
+ALTER TABLE "order_event" ADD CONSTRAINT "order_event_action_check" CHECK (action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho','repartidor','envio','cambio','dinero_devuelto'));--> statement-breakpoint
 -- Lo pagado es lo confirmado menos lo devuelto. Falta cobrar = total − pagado − por confirmar, nunca
 -- menos de 0 y 0 si se anuló. «Pagado»: no debe nada y todo lo que entró está confirmado. Lo pagado
 -- que pasa del total sobra: un pago doble o lo que la tienda devuelve de un cambio (un total bajo

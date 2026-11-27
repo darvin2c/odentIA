@@ -1116,7 +1116,21 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "arma-envia-presupuesto",
         q: "¿Cómo se arma y se envía el presupuesto?",
-        a: "Lo que indicas en la atención se suma solo al presupuesto por enviar de la persona y queda armado al firmarla; el cierre te pregunta «¿Enviárselo ahora?». En su Plan, «Revisar y enviar» muestra lo que encontraron, lo que se propone, hasta cuándo vale y cómo se explica cada tratamiento (la explicación sale de cada servicio y se puede cambiar solo para este paciente), con «Ver el PDF» antes de enviar. «Enviar por WhatsApp» (o por correo, si no tiene WhatsApp) dice antes a quién le llega. Si nadie lo envía, al día siguiente aparece en «Te espera» de recepción. Recepción lo envía y anota la respuesta, pero no cambia precios.",
+        a: "Lo que indicas en la atención se suma solo al presupuesto por enviar de la persona y queda armado al firmarla; el cierre te pregunta «¿Enviárselo ahora?». En su Plan, «Revisar y enviar» muestra lo que encontraron, lo que se propone, hasta cuándo vale y cómo se explica cada tratamiento (la explicación sale de cada servicio y se puede cambiar solo para este paciente), con «Ver el PDF» antes de enviar. «Enviar por WhatsApp» (o por correo, si no tiene WhatsApp) dice antes a quién le llega; si su número no puede ser un WhatsApp, no sale por ahí y el botón dice por qué. Después, el presupuesto dice si le llegó. Si nadie lo envía, al día siguiente aparece en «Te espera» de recepción. Recepción lo envía y anota la respuesta, pero no cambia precios.",
+        area: "plan",
+      },
+      {
+        id: "presupuesto-enviado-entregado-no-llego",
+        q: "¿Qué quiere decir «Enviado», «Entregado» y «No llegó» en el presupuesto?",
+        a: "Es lo que pasó con el mensaje. «Enviado» por WhatsApp: salió y WhatsApp todavía no confirma que le llegó. «Entregado» (o «Leído»): WhatsApp lo confirmó. «No llegó»: WhatsApp lo rechazó, con el motivo (por ejemplo, que su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica) y una sugerencia: revisar su número y volver a enviarlo desde su presupuesto. Mientras tanto, su Plan y «Qué sigue» dicen «No le llegó». Si se lo entregaste impreso, «Ya se lo di en mano» lo anota y desde ahí cuenta como entregado. Por correo no hay confirmación: dice «Enviado» por correo. Lo impreso o mostrado en la atención dice «Entregado» con su fecha.",
+        forms: [
+          "no le llego el presupuesto",
+          "dice no llego",
+          "whatsapp no entrego el presupuesto",
+          "presupuesto enviado pero no entregado",
+          "numero sin whatsapp presupuesto",
+          "como se si le llego el presupuesto",
+        ],
         area: "plan",
       },
       {
@@ -1181,7 +1195,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quiere-decir-cada-estado-presupuesto",
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo piensa»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después lo que eligió, lo que aceptó y lo que aún piensa, con lo que suma cada parte (por ejemplo, la opción A, S/ 950 aceptados y la corona, S/ 900, que lo piensa). «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». En la Historia, en Documentos y al anotar su respuesta, el presupuesto de varias opciones dice la que eligió («Eligió la opción A»), sin importes, y cada tratamiento dice su respuesta. Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención; si se envió, dice «Enviado · espera respuesta» mientras WhatsApp no confirma que le llegó y «No le llegó» si lo rechazó. «Lo piensa»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después lo que eligió, lo que aceptó y lo que aún piensa, con lo que suma cada parte (por ejemplo, la opción A, S/ 950 aceptados y la corona, S/ 900, que lo piensa). «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». En la Historia, en Documentos y al anotar su respuesta, el presupuesto de varias opciones dice la que eligió («Eligió la opción A»), sin importes, y cada tratamiento dice su respuesta. Son las mismas palabras en toda la aplicación.",
         area: "plan",
       },
       {

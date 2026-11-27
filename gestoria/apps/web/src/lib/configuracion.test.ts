@@ -10,6 +10,7 @@ const SALES = [
   "pagos.confirmar",
   "entregas",
   "ayuda.pedir",
+  "avisos.recibir",
 ]
 const ADMIN = [...SALES, "equipo.gestionar", "configuracion", "costos.ver", "reportes.ver"]
 const OWNER = [...ADMIN, "plan"]
@@ -26,6 +27,7 @@ describe("qué ve cada rol en Configuración", () => {
       "Sofi",
       "Medios de pago",
       "Formas de entrega y zonas",
+      "Avisos al celular",
       "Plan y pagos",
     ])
     expect(labels({ role: "admin", permissions: ADMIN })).not.toContain("Plan y pagos")
@@ -33,11 +35,12 @@ describe("qué ve cada rol en Configuración", () => {
       "La tienda",
       "Ventas",
       "Entregas",
+      "Para ti",
     ])
   })
 
-  it("Ventas no ve lo que no puede tocar", () => {
-    expect(configGroupsFor({ role: "sales", permissions: SALES })).toEqual([])
+  it("Ventas no ve lo que no puede tocar: solo sus avisos al celular", () => {
+    expect(labels({ role: "sales", permissions: SALES })).toEqual(["Avisos al celular"])
   })
 
   it("soporte mira la tienda, su equipo y lo que cobra y entrega, sin Sofi ni el plan", () => {
@@ -55,6 +58,7 @@ describe("qué ve cada rol en Configuración", () => {
   it("cada apartado se encuentra por su ruta exacta", () => {
     expect(configSectionOf("/configuracion")?.label).toBe("Datos de la tienda")
     expect(configSectionOf("/configuracion/marca")?.label).toBe("Tu marca")
+    expect(configSectionOf("/configuracion/avisos")?.label).toBe("Avisos al celular")
     expect(configSectionOf("/configuracion/otro")).toBeNull()
   })
 })

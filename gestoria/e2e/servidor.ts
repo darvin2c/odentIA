@@ -11,7 +11,7 @@
  * (la actual es `CLAVE`; la nueva no se guarda) y activar los dos pasos con el código
  * `CODIGO_TOTP`. `GET /__cuenta` dice lo que pidió la pantalla. Sin la red: ningún proveedor real.
  */
-import { randomUUID } from "node:crypto"
+import { createECDH, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
 import { accountCopy, conversation, conversationMessage, storeMember } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
@@ -110,6 +110,9 @@ const app = createApp({
     apiURL: `http://127.0.0.1:${API_PORT}`,
   },
   contract,
+  // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
+  // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
+  vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
 })
 
 /** Un pedido de la administración, firmado como lo firmaría ella. */

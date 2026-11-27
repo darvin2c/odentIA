@@ -918,6 +918,9 @@ importers:
       tsx:
         specifier: 4.23.13
         version: 4.23.13
+      web-push:
+        specifier: 3.6.7
+        version: 3.6.7
       zod:
         specifier: 4.6.2
         version: 4.6.2
@@ -925,6 +928,9 @@ importers:
       '@types/node':
         specifier: 22.20.2
         version: 22.20.2
+      '@types/web-push':
+        specifier: 3.6.4
+        version: 3.6.4
       typescript:
         specifier: 7.0.2
         version: 7.0.2

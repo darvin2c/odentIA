@@ -173,29 +173,71 @@
     {
       "idx": 24,
       "version": "7",
-      "when": 1795789278459,
-      "tag": "0024_cambios_y_devoluciones",
+      "when": 1795789239755,
+      "tag": "0024_los_primeros_pasos",
       "breakpoints": true
     },
     {
       "idx": 25,
       "version": "7",
-      "when": 1795789299780,
-      "tag": "0025_reglas_cambios_y_devoluciones",
+      "when": 1795789246658,
+      "tag": "0025_reglas_primeros_pasos",
       "breakpoints": true
     },
     {
       "idx": 26,
       "version": "7",
-      "when": 1795789931547,
-      "tag": "0026_el_dinero_devuelto",
+      "when": 1795800840290,
+      "tag": "0026_despachos_y_caja",
       "breakpoints": true
     },
     {
       "idx": 27,
       "version": "7",
-      "when": 1795789949397,
-      "tag": "0027_reglas_dinero_devuelto",
+      "when": 1795800852918,
+      "tag": "0027_reglas_despachos_y_caja",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1795802158332,
+      "tag": "0028_avisos_al_celular",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795802171622,
+      "tag": "0029_reglas_avisos_al_celular",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795805389900,
+      "tag": "0030_cambios_y_devoluciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795805399283,
+      "tag": "0031_reglas_cambios_y_devoluciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795805408231,
+      "tag": "0032_el_dinero_devuelto",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795805419993,
+      "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
     }
   ]

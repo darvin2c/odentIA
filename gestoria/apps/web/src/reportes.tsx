@@ -11,8 +11,8 @@ import { money } from "./lib/tienda"
 import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
- * «Reportes» (lienzo B, tablero 13): cómo va la tienda y lo que hizo y le toca a Argos. Solo
- * Dueño y Administrador. Cada cifra sale de un cálculo fijo del servidor sobre los pedidos, los
+ * «Reportes» (lienzo B, tablero 13): cómo va la tienda y lo que hizo Argos; lo que le toca al
+ * equipo está en Inicio («Te toca»). Solo Dueño y Administrador. Cada cifra sale de un cálculo fijo del servidor sobre los pedidos, los
  * pagos, el kardex y las conversaciones; los pedidos de prueba no cuentan.
  */
 
@@ -214,10 +214,14 @@ function Argos() {
         <AgentMark />
         <div className="flex flex-col gap-0.5">
           <h2 id="argos" className="text-lg font-bold">
-            Argos · lo que hizo y lo que te toca
+            Argos · lo que hizo
           </h2>
           <p className="text-sm text-muted-foreground">
-            Lo de rutina se lo encarga a Sofi sin preguntar. A ti solo te trae lo delicado.
+            Lo de rutina se lo encarga a Sofi sin preguntar. Lo delicado te lo trae a{" "}
+            <Link className="underline" to="/tiendas/$id" params={{ id: store.id }}>
+              Inicio
+            </Link>
+            , en «Te toca».
           </p>
         </div>
       </div>
@@ -226,52 +230,6 @@ function Argos() {
       ) : null}
       {b ? (
         <>
-          <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold">Te toca</h3>
-            {b.toDo.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nada te toca por ahora.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {b.toDo.map((item, i) => (
-                  <li
-                    key={`${item.kind}-${item.orderId ?? item.conversationId ?? i}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2.5"
-                  >
-                    <div className="flex min-w-0 flex-col">
-                      <span className="font-semibold">{item.title}</span>
-                      <span className="text-sm text-muted-foreground">
-                        {item.detail}
-                        {item.at ? ` · ${when(item.at)}` : ""}
-                      </span>
-                    </div>
-                    {item.orderId ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        render={
-                          <Link
-                            to="/tiendas/$id/pedidos"
-                            params={{ id: store.id }}
-                            search={{ pedido: item.orderId }}
-                          />
-                        }
-                      >
-                        Abrir el pedido
-                      </Button>
-                    ) : item.kind === "reponer" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        render={<Link to="/tiendas/$id/catalogo" params={{ id: store.id }} />}
-                      >
-                        Registrar una entrada
-                      </Button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold">Hecho esta semana</h3>
             {b.done.length === 0 ? (

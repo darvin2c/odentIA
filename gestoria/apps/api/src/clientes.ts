@@ -191,6 +191,27 @@ async function answeredPairs(tx: Db, storeId: string) {
   return rows
 }
 
+/**
+ * Cuántas parejas de fichas podrían ser la misma clienta y la primera por mirar (la más nueva),
+ * con sus nombres: el aviso de Clientes y la línea de Inicio cuentan lo mismo.
+ */
+export async function similarIn(tx: Db, storeId: string) {
+  const members = await membersOf(tx, storeId)
+  const pairs = similarPairs(members, await answeredPairs(tx, storeId), Number.POSITIVE_INFINITY)
+  const nameOf = new Map(members.map((m) => [m.id, m.name]))
+  const first = pairs[0]
+  return {
+    count: pairs.length,
+    first: first
+      ? {
+          reason: first.reason,
+          a: { id: first.a, name: nameOf.get(first.a) ?? "" },
+          b: { id: first.b, name: nameOf.get(first.b) ?? "" },
+        }
+      : null,
+  }
+}
+
 /* ------------------------------------------------------------------------ las fichas */
 
 type CustomerRow = typeof customer.$inferSelect
@@ -385,13 +406,7 @@ export async function listCustomers(appDb: Db, person: Person, storeId: string, 
       limit: MAX_LISTED + 1,
     })
     // Sin buscar, también cuántas podrían ser la misma clienta (el aviso de la lista).
-    const similar = query
-      ? null
-      : similarPairs(
-          await membersOf(tx, storeId),
-          await answeredPairs(tx, storeId),
-          Number.POSITIVE_INFINITY,
-        ).length
+    const similar = query ? null : (await similarIn(tx, storeId)).count
     return {
       customers: found.slice(0, MAX_LISTED),
       similar,

@@ -245,3 +245,60 @@ it("con la opción elegida y algo que lo piensa, anuncia «Eligió la opción A�
   await waitFor(() => expect(screen.getByText(/Quedará como «Eligió la opción A»/)).toBeTruthy())
   expect(screen.queryByText(/Aceptó 1 de 2/)).toBeNull()
 })
+
+it("lo enviado que WhatsApp no entregó dice «No le llegó», nunca «entregado el…» (pedido del 27 nov)", async () => {
+  const client = new QueryClient()
+  const budget: BudgetWithTotals = {
+    ...budgetOf(false),
+    status: "presentado",
+    presentedAt: "2026-11-27T15:00:00.000Z",
+    stateText: "Entregado · espera respuesta",
+    choiceText: "Entregado · espera respuesta",
+    delivery: {
+      state: "no_llego",
+      channel: "whatsapp",
+      at: "2026-11-27T15:00:00.000Z",
+      text: "No llegó por WhatsApp · enviado el 27 nov",
+      problem: "Su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica.",
+      reached: false,
+      label: "No le llegó",
+    },
+  }
+  // En el Plan, el cajón dice arriba en qué está (con `direct` no lleva esa línea).
+  render(
+    <QueryClientProvider client={client}>
+      <BudgetResponse patientId="p-paola" budget={budget} money={money} formatDay={(iso) => iso.slice(0, 10)} onClose={() => {}} />
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText("No le llegó por WhatsApp · enviado el 27 nov")).toBeTruthy()
+  // Sin palabras repetidas: antes decía «No le llegó · no llegó por WhatsApp…».
+  expect(screen.queryByText(/llegó.*llegó/)).toBeNull()
+  expect(screen.queryByText(/entregado el/i)).toBeNull()
+})
+
+it("lo enviado sin acuse dice «Espera respuesta · enviado…», sin repetir «Enviado»", async () => {
+  const client = new QueryClient()
+  const budget: BudgetWithTotals = {
+    ...budgetOf(false),
+    status: "presentado",
+    presentedAt: "2026-11-27T15:00:00.000Z",
+    stateText: "Entregado · espera respuesta",
+    choiceText: "Entregado · espera respuesta",
+    delivery: {
+      state: "enviado",
+      channel: "whatsapp",
+      at: "2026-11-27T15:00:00.000Z",
+      text: "Enviado por WhatsApp el 27 nov",
+      problem: null,
+      reached: true,
+      label: "Enviado · espera respuesta",
+    },
+  }
+  render(
+    <QueryClientProvider client={client}>
+      <BudgetResponse patientId="p-paola" budget={budget} money={money} formatDay={(iso) => iso.slice(0, 10)} onClose={() => {}} />
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText("Espera respuesta · enviado por WhatsApp el 27 nov")).toBeTruthy()
+  expect(screen.queryByText(/enviado.*enviado/i)).toBeNull()
+})

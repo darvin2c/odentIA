@@ -59,7 +59,7 @@ async function call(method: string, path: string, body?: unknown): Promise<any> 
   return text ? JSON.parse(text) : {}
 }
 
-/** Lo que la tienda necesita para vender, y los dos pedidos de Mariela Ríos. */
+/** Lo que la tienda necesita para vender y los dos pedidos de Mariela Ríos; da el número que sigue. */
 async function prepare() {
   await call("GET", "/api/yo")
   const store = `/api/tiendas/${STORE_ID}`
@@ -101,11 +101,13 @@ async function prepare() {
     })
   // Por Instagram, sin teléfono; después por WhatsApp, con el teléfono como lo anota el equipo.
   await order({ channel: "instagram", lines: [{ variantId: of("blanca"), quantity: 1 }] })
-  await order({
+  const last = await order({
     channel: "whatsapp",
     customerPhone: "987 654 321",
     lines: [{ variantId: of("negra"), quantity: 1 }],
   })
+  // El número del pedido que sigue: los recorridos comparten la tienda y otros ya anotaron los suyos.
+  return String(Number(last.order.number) + 1).padStart(4, "0")
 }
 
 test.describe.configure({ mode: "serial" })
@@ -114,7 +116,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   page,
 }) => {
   await as("rosa")
-  await prepare()
+  const next = await prepare()
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/clientes`)
 
@@ -206,7 +208,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await shot(page, "clientes-repetir-telefono")
   await page.setViewportSize(DESKTOP)
   await repeat.getByRole("button", { name: "Anotar pedido" }).click()
-  await expect(page.getByText("Pedido 0003 anotado")).toBeVisible()
+  await expect(page.getByText(`Pedido ${next} anotado`)).toBeVisible()
   await expect(page).toHaveURL(/\/pedidos\?pedido=/)
   await page.getByRole("link", { name: "Ver su ficha" }).click()
   await expect(card.getByText("3 compras", { exact: true })).toBeVisible()

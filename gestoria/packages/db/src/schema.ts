@@ -71,6 +71,15 @@ export const accountCopy = pgTable(
   ],
 )
 
+/** Una franja de entrega: de `start` a `end`, en minutos desde las 00:00 de la tienda. */
+export interface DeliverySlot {
+  start: number
+  end: number
+}
+
+/** Lo más que una tienda configura: tres o cuatro es lo de una tienda real (tablero 6). */
+export const MAX_DELIVERY_SLOTS = 8
+
 /**
  * Una tienda (decisión 8: una persona puede tener o atender varias y elige al entrar). Vende
  * en una sola moneda, la que elige al crearla (decisión 9), con su código ISO 4217.
@@ -100,6 +109,12 @@ export const store = pgTable(
      */
     publicName: text("public_name"),
     brandColor: text("brand_color"),
+    /**
+     * Las franjas de entrega (Despachos, tablero 6): opcionales, hasta `MAX_DELIVERY_SLOTS`, cada
+     * una con su hora de inicio y de fin en minutos desde las 00:00 de la tienda («9–13 h» es
+     * 540–780). Un pedido sin franja sale igual. El pedido copia la suya: cambiarlas no lo toca.
+     */
+    deliverySlots: jsonb("delivery_slots").$type<DeliverySlot[]>().notNull().default([]),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -114,6 +129,10 @@ export const store = pgTable(
     check(
       "store_brand_color_check",
       sql`${table.brandColor} is null or ${table.brandColor} ~ '^#[0-9a-f]{6}$'`,
+    ),
+    check(
+      "store_delivery_slots_check",
+      sql`jsonb_typeof(${table.deliverySlots}) = 'array' and jsonb_array_length(${table.deliverySlots}) <= ${sql.raw(String(MAX_DELIVERY_SLOTS))}`,
     ),
     check(
       "store_time_zone_check",
@@ -781,6 +800,53 @@ export const productLink = pgTable(
 )
 
 /*
+ * Despachos (entrega 3 del lienzo «gestorIA como odentIA», tableros 6, 17, 23 y 24): qué sale,
+ * cuándo y quién lo lleva, y el efectivo que cobró cada repartidor hasta que la tienda lo recibe.
+ */
+
+/**
+ * Quien lleva los pedidos de la tienda: una persona del equipo (`user_id`) o un nombre externo
+ * sencillo («Kevin»). Es de la tienda y no se borra: lo que llevó y lo que cobró siguen con su
+ * nombre. Cuando llegue gestorIA Reparto, el repartidor externo que acepte su invitación queda
+ * enlazado a su cuenta en este mismo `user_id`, sin cambiar sus pedidos ni su efectivo (ADR 0228).
+ */
+export const storeCourier = pgTable(
+  "store_courier",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** Como lo ve la tienda; con `user_id`, el de su cuenta al elegirlo. */
+    name: text("name").notNull(),
+    /** Su cuenta: la de una persona del equipo y, más adelante, la del repartidor que se unió. */
+    userId: text("user_id"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("store_courier_name_check", sql`char_length(btrim(${table.name})) between 1 and 80`),
+    foreignKey({
+      name: "store_courier_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "store_courier_user_fkey",
+      columns: [table.userId],
+      foreignColumns: [accountCopy.userId],
+    }),
+    unique("store_courier_store_id_key").on(table.storeId, table.id),
+    // Una cuenta es un solo repartidor en cada tienda; un nombre externo, también.
+    uniqueIndex("store_courier_user_uidx")
+      .on(table.storeId, table.userId)
+      .where(sql`user_id is not null`),
+    uniqueIndex("store_courier_name_uidx")
+      .on(table.storeId, sql`lower(btrim(${table.name}))`)
+      .where(sql`user_id is null`),
+  ],
+)
+
+/*
  * Los pedidos (paso B4 del lienzo B, tableros 2, 5 y 14): lo que se vendió, cómo se cobra y
  * cómo se entrega. Un pedido guarda una copia de lo que se acordó (nombres, precios, la forma
  * de entrega y el medio de pago): lo que cambie después en la configuración no lo toca.
@@ -853,6 +919,16 @@ export const saleOrder = pgTable(
     priceExpiresAt: timestamp("price_expires_at", { withTimezone: true }),
     deliverOn: date("deliver_on"),
     /**
+     * La franja del día en que sale (Despachos), copiada de las de la tienda: de `slot_start` a
+     * `slot_end`, en minutos desde las 00:00 de la tienda. Nulas: «Sin franja», sale igual.
+     */
+    slotStart: smallint("slot_start"),
+    slotEnd: smallint("slot_end"),
+    /** Quién lo lleva; nulo mientras nadie lo tiene asignado o si se recoge en la tienda. */
+    courierId: uuid("courier_id"),
+    /** Por agencia (tablero 17): con cuál va («Shalom», «Olva», «Marvisur» u otra escrita). */
+    agency: text("agency"),
+    /**
      * Un cambio o una devolución después de entregar (tablero 17, decisión 7): el pedido entregado
      * del que sale. Ese pedido no se toca; este lleva lo que se lleva (sus líneas), lo que vuelve
      * (`sale_order_return`), su entrega y su cobro.
@@ -863,7 +939,7 @@ export const saleOrder = pgTable(
      * que la tienda devuelve (el saldo lo dice como «sobra» hasta que se anota la devolución).
      */
     returnCreditCents: integer("return_credit_cents").notNull().default(0),
-    /** El número de envío de la agencia, si lo hay. */
+    /** El número de envío de la agencia, si lo hay: se puede anotar después de salir. */
     tracking: text("tracking"),
     /** El link de pago vigente: su dirección, su referencia en el proveedor y cuándo vence. */
     linkUrl: text("link_url"),
@@ -905,6 +981,21 @@ export const saleOrder = pgTable(
       "sale_order_tracking_check",
       sql`${table.tracking} is null or char_length(${table.tracking}) between 1 and 80`,
     ),
+    check(
+      "sale_order_slot_check",
+      sql`(${table.slotStart} is null) = (${table.slotEnd} is null) and (${table.slotStart} is null or (${table.slotStart} >= 0 and ${table.slotStart} < ${table.slotEnd} and ${table.slotEnd} <= 1440))`,
+    ),
+    check(
+      "sale_order_agency_check",
+      sql`${table.agency} is null or char_length(btrim(${table.agency})) between 1 and 60`,
+    ),
+    // El repartidor, de la misma tienda.
+    foreignKey({
+      name: "sale_order_courier_fkey",
+      columns: [table.storeId, table.courierId],
+      foreignColumns: [storeCourier.storeId, storeCourier.id],
+    }),
+    index("sale_order_deliver_on_idx").on(table.storeId, table.deliverOn),
     foreignKey({
       name: "sale_order_store_id_fkey",
       columns: [table.storeId],
@@ -1064,6 +1155,11 @@ export const orderPayment = pgTable(
     photo: bytea("photo"),
     /** Por qué no coincide, o lo que anotó el sistema. */
     note: text("note"),
+    /**
+     * Lo cobrado en la puerta queda a nombre de quien llevó el pedido, no de quien tocó el botón
+     * (tablero 6): su efectivo es el que entrega en Caja. Nulo si no lo llevaba nadie (un recojo).
+     */
+    courierId: uuid("courier_id"),
     /** Quién lo anotó; nulo si llegó del proveedor del link. */
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1096,6 +1192,11 @@ export const orderPayment = pgTable(
       foreignColumns: [saleOrder.storeId, saleOrder.id],
     }).onDelete("cascade"),
     unique("order_payment_store_id_key").on(table.storeId, table.id),
+    foreignKey({
+      name: "order_payment_courier_fkey",
+      columns: [table.storeId, table.courierId],
+      foreignColumns: [storeCourier.storeId, storeCourier.id],
+    }),
     uniqueIndex("order_payment_provider_uidx")
       .on(table.storeId, table.provider, table.providerRef)
       .where(sql`provider_ref is not null`),
@@ -1138,6 +1239,74 @@ export const orderRefund = pgTable(
 )
 
 /**
+ * «Recibí» en Caja (tableros 6 y 23): una persona de la tienda recibe el efectivo que cobró un
+ * repartidor (o el que se cobró en la tienda, sin repartidor). Queda lo que debía entregar, lo
+ * que recibió y, si no cuadra, por qué. Solo se agrega: no se corrige ni se borra.
+ */
+export const cashHandover = pgTable(
+  "cash_handover",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** De quién lo recibe; nulo: lo cobrado en la tienda, sin repartidor. */
+    courierId: uuid("courier_id"),
+    /** La suma de lo que cobró en efectivo: los pagos de `cash_handover_payment`. */
+    expectedCents: integer("expected_cents").notNull(),
+    receivedCents: integer("received_cents").notNull(),
+    /** Por qué no cuadra; obligatorio si lo recibido no es lo esperado. */
+    note: text("note"),
+    receivedBy: text("received_by").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "cash_handover_amounts_check",
+      sql`${table.expectedCents} > 0 and ${table.receivedCents} >= 0`,
+    ),
+    check(
+      "cash_handover_note_check",
+      sql`(${table.note} is null or char_length(btrim(${table.note})) between 3 and 300) and (${table.receivedCents} = ${table.expectedCents} or ${table.note} is not null)`,
+    ),
+    foreignKey({
+      name: "cash_handover_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "cash_handover_courier_fkey",
+      columns: [table.storeId, table.courierId],
+      foreignColumns: [storeCourier.storeId, storeCourier.id],
+    }),
+    unique("cash_handover_store_id_key").on(table.storeId, table.id),
+    index("cash_handover_store_idx").on(table.storeId, table.receivedAt),
+  ],
+)
+
+/** Qué pagos en efectivo entraron en cada «Recibí»: cada uno, una sola vez. */
+export const cashHandoverPayment = pgTable(
+  "cash_handover_payment",
+  {
+    storeId: uuid("store_id").notNull(),
+    handoverId: uuid("handover_id").notNull(),
+    paymentId: uuid("payment_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.paymentId] }),
+    foreignKey({
+      name: "cash_handover_payment_handover_fkey",
+      columns: [table.storeId, table.handoverId],
+      foreignColumns: [cashHandover.storeId, cashHandover.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "cash_handover_payment_payment_fkey",
+      columns: [table.storeId, table.paymentId],
+      foreignColumns: [orderPayment.storeId, orderPayment.id],
+    }).onDelete("cascade"),
+    index("cash_handover_payment_handover_idx").on(table.handoverId),
+  ],
+)
+
+/**
  * El saldo de cada pedido (ADR 0222), calculado en un solo lugar: esta vista, que leen el pedido,
  * las listas, Reportes, Argos y Sofi. Lo pagado es lo confirmado menos lo devuelto
  * (`order_refund`). Falta cobrar = total − pagado − por confirmar (nunca menos de 0, y 0 si se
@@ -1145,7 +1314,7 @@ export const orderRefund = pgTable(
  * pago doble, o lo que la tienda devuelve de un cambio o una devolución (tablero 17). La vista
  * corre con los permisos de quien la lee (`security_invoker`): cada tienda ve solo lo suyo, con
  * las reglas de sus tablas. Se crea a mano en `0016_el_saldo_y_el_pago_en_partes.sql` y suma lo
- * devuelto en `0026_el_dinero_devuelto.sql`.
+ * devuelto en `0032_el_dinero_devuelto.sql`.
  */
 export const orderBalance = pgView("order_balance", {
   orderId: uuid("order_id").notNull(),
@@ -1182,6 +1351,9 @@ export const ORDER_EVENT_ACTIONS = [
   "no_entregado",
   "reprogramado",
   "pago_deshecho",
+  // Despachos (entrega 3): quién lo lleva, y con qué agencia y número de envío.
+  "repartidor",
+  "envio",
   // Cambios y devoluciones (entrega 8, tablero 17): en el pedido entregado, el cambio que salió de él;
   // y el dinero que la tienda devolvió de lo que sobra.
   "cambio",
@@ -1700,5 +1872,129 @@ export const storeSupportAccess = pgTable(
     }).onDelete("cascade"),
     index("store_support_access_store_idx").on(table.storeId, table.createdAt),
     index("store_support_access_staff_idx").on(table.staffUserId, table.expiresAt),
+  ],
+)
+
+/**
+ * Los primeros pasos de una tienda nueva (lienzo «gestorIA como odentIA», tablero 16; ADR 0227):
+ * «Tu tienda está casi lista», en Inicio. Cada paso se marca solo con lo que ya está guardado en
+ * su apartado: aquí va solo lo que no se ve en otra tabla, los pasos que la tienda saltó porque no
+ * le aplican («No lo necesito») y cuándo quedó lista, para que la lista no vuelva.
+ */
+export const SETUP_STEPS = [
+  "datos",
+  "catalogo",
+  "pagos",
+  "entregas",
+  "chats",
+  "sofi",
+  "equipo",
+] as const
+export type SetupStep = (typeof SETUP_STEPS)[number]
+
+export const storeSetup = pgTable(
+  "store_setup",
+  {
+    storeId: uuid("store_id").primaryKey(),
+    skipped: text("skipped").array().$type<SetupStep[]>().notNull().default(sql`'{}'::text[]`),
+    /** Con todos los pasos hechos o saltados: desde entonces, la lista no vuelve. */
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Quién saltó el último paso; nulo si lo anotó el sistema (al quedar lista). */
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "store_setup_skipped_check",
+      sql.raw(`skipped <@ ARRAY[${SETUP_STEPS.map((step) => `'${step}'`).join(",")}]::text[]`),
+    ),
+    foreignKey({
+      name: "store_setup_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * Los avisos al celular (lienzo «gestorIA como odentIA», tablero 15): de qué avisa gestorIA con la
+ * app cerrada. Cada uno lo recibe quien puede resolverlo (`permisos.ts` de la API) y abre la
+ * pantalla que lo resuelve.
+ *
+ * - `pagos`: un pago por confirmar (una captura, o un link que no coincide).
+ * - `chats`: un chat que Sofi pasó a una persona.
+ * - `no_entregado`: una entrega que volvió sin entregarse.
+ * - `sofi_pedido`: un pedido que armó Sofi.
+ * - `dinero`: lo de dinero de toda la tienda (un pago por link que entró).
+ */
+export const PUSH_KINDS = ["pagos", "chats", "no_entregado", "sofi_pedido", "dinero"] as const
+export type PushKind = (typeof PUSH_KINDS)[number]
+
+/**
+ * Un celular (o una compu) que recibe los avisos de una persona: su suscripción del navegador
+ * (push web, RFC 8030 y 8291). Es de la persona, no de una tienda: la app es un solo origen, así
+ * que cada celular se activa una vez y le llega lo de todas sus tiendas. La dirección es única:
+ * un navegador recibe los de una sola persona.
+ */
+export const pushDevice = pgTable(
+  "push_device",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    /** Las claves del navegador para cifrar cada aviso (RFC 8291), en base64url. */
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    /** Cuándo salió «Listo» a este celular, para que se vea que funciona. Lo anota el sistema. */
+    welcomedAt: timestamp("welcomed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("push_device_endpoint_key").on(table.endpoint),
+    check(
+      "push_device_keys_check",
+      sql`char_length(${table.endpoint}) between 10 and 1000 and char_length(${table.p256dh}) between 1 and 200 and char_length(${table.auth}) between 1 and 100`,
+    ),
+    foreignKey({
+      name: "push_device_user_id_fkey",
+      columns: [table.userId],
+      foreignColumns: [accountCopy.userId],
+    }).onDelete("cascade"),
+    index("push_device_user_idx").on(table.userId, table.createdAt),
+  ],
+)
+
+/**
+ * Qué le llega a cada persona de cada tienda: lo que eligió en Configuración › Avisos al
+ * celular, que vale en todos sus celulares, y hasta dónde ya miró el sistema para no avisar dos
+ * veces lo mismo. Va unido a su lugar en el equipo: quien deja la tienda deja de recibirlos.
+ */
+export const pushChoice = pgTable(
+  "push_choice",
+  {
+    storeId: uuid("store_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** Lo que eligió, entre lo que su rol puede resolver. Nulo: lo de su rol por omisión. */
+    kinds: text("kinds").array().$type<PushKind[]>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Lo escribe el sistema, antes de enviar: el último paso de los pedidos (`order_event.seq`)
+     * ya mirado y los chats que ya esperaban. Nulos: todavía no miró; la primera vez no avisa lo
+     * que ya estaba.
+     */
+    lastEventSeq: bigint("last_event_seq", { mode: "number" }),
+    chatsSeen: uuid("chats_seen").array(),
+  },
+  (table) => [
+    primaryKey({ name: "push_choice_pkey", columns: [table.storeId, table.userId] }),
+    check(
+      "push_choice_kinds_check",
+      sql`${table.kinds} is null or ${table.kinds} <@ ${sql.raw(`array[${PUSH_KINDS.map((kind) => `'${kind}'`).join(",")}]::text[]`)}`,
+    ),
+    foreignKey({
+      name: "push_choice_member_fkey",
+      columns: [table.storeId, table.userId],
+      foreignColumns: [storeMember.storeId, storeMember.userId],
+    }).onDelete("cascade"),
   ],
 )

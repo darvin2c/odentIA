@@ -77,7 +77,7 @@ Escribir el plan y pasar cada elemento por dos preguntas: qué problema real res
 
 Preferir lo mínimo que reutiliza lo existente. Nada obligatorio que trabe firmar, atender o cobrar: lo opcional va como aviso. Lo legal no frena el diseño; queda anotado como pendiente.
 
-Lo que se encontró de paso y nadie pidió queda como pendiente en el PR; no se mezcla con lo pedido.
+Lo que se encontró de paso y nadie pidió queda como pendiente en el PR; no se mezcla con lo pedido. Nada que toque lo clínico entra sin que el usuario lo pida.
 
 Todo lo pedido cabe en un PR. Si resulta demasiado, se recorta aquí, no se reparte: lo que sale queda como pendiente y se dice en la parada de la mesa o del lienzo, para que el usuario lo sepa antes de programar. Lo que toca dinero o firmas va en el mismo PR, en sus propios commits, y el PR lo nombra para que la revisión lo mire primero.
 
@@ -121,6 +121,7 @@ Quien escribió el código no ve lo que dio por hecho.
 - `simplify` sobre el cambio.
 - `code-review` en nivel `high`, o un subagente nuevo que reciba el diff sin tus conclusiones.
 - `security-review` si toca permisos, RLS, tokens, enlaces públicos o archivos subidos.
+- Buscar en el diff todo texto que decida lo clínico o le diga al profesional qué hacer con el paciente («no hace falta avisarle», «no es urgente», «debe…») y cambiarlo por el hecho y, como mucho, «Sugerencia: …» (`AGENTS.md`, ADR 0221). Va en el brief de cada subagente que escribe o revisa.
 
 Corregir lo real y repetir las pruebas de lo que cambió. Lo que se decide no corregir va al PR con su motivo.
 

@@ -59,8 +59,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
-- El menú del día lleva solo pantallas que existen (Pedidos y, en «Gestión», Catálogo y Reportes);
-  al pie, Configuración y Ayuda. Una pantalla nueva entra en su lugar del tablero 4, no antes.
+- El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en
+  «Gestión», Catálogo, Caja y Reportes); al pie, Configuración y Ayuda. Una pantalla nueva entra en
+  su lugar del tablero 4, no antes.
 - Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`: cada apartado
   lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
   quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo. Sus nombres y
@@ -69,6 +70,20 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
   los bloquea `linkNameProblem`.
+
+## Inicio y los primeros pasos (entregas 3 y 6 del lienzo «gestorIA como odentIA»; ADR 0227)
+
+- gestorIA abre en Inicio, primero en el menú, para quien atiende (`ventas.atender`); soporte entra
+  por el catálogo. Sus cifras salen de las mismas funciones que Reportes (`collectedSinceIn`,
+  `pendingNowIn` de `sofi/reportes.ts`), sobre el saldo único: Inicio no recalcula nada. Los
+  montos del día son de `reportes.ver`; no se crea un permiso para ellos.
+- «Te toca» (`apps/api/src/inicio.ts`) vive solo en Inicio: cada línea, para quien puede
+  resolverla, con su único botón y la operación de siempre (el pedido con su captura, «Pasar a…»,
+  «Comparar»). Una línea que depende de una pantalla que no existe va en `waiting` y no se dibuja.
+- Los primeros pasos (`primeros-pasos.ts`) se marcan con lo guardado en cada apartado, nunca a
+  mano; `store_setup` guarda solo lo saltado y cuándo quedó lista, y la lista no vuelve. Se saltan
+  solo los pasos que no aplican a toda tienda (`SKIPPABLE_STEPS`). Los ve quien tiene
+  `configuracion`.
 
 ## Los pedidos (B4)
 
@@ -104,12 +119,35 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 
-## Cambios y devoluciones (entrega 8; ADR 0227)
+## Despachos y Caja (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0228)
+
+- Despachos (`apps/api/src/despachos.ts`) es una vista: cada botón es la operación del pedido de
+  `pedidos.ts`, la misma de Pedidos (`apps/web/src/entregas.tsx` las usa en las dos pantallas).
+  «No se entregó» es la última novedad de entrega del pedido, nunca una columna aparte. «Pasar a…»
+  es la única forma de mover una entrega: sin arrastrar.
+- La franja y el repartidor son opcionales: un pedido sin ellos sale igual. La franja es una copia
+  en el pedido (de `store.delivery_slots`); el repartidor es de la tienda (`store_courier`, del
+  equipo o un nombre externo, listo para enlazarse a gestorIA Reparto) y no se borra.
+- Sin pago confirmado no se entrega: «Entregado» con saldo anota en ese paso todo lo que falta, y un
+  pago por confirmar se confirma antes, en la misma ventana (la revisión del pedido). Lo cobrado en
+  la puerta queda a nombre del repartidor del pedido (`order_payment.courier_id`). Sofi no asigna
+  repartidor, franja ni agencia: la base lo frena al anotar y al cambiar (`0027`).
+- Lo que suma Caja de las entregas del día usa el mismo filtro que las filas de Despachos
+  (`onBoard`), y «Sale hoy» de Inicio, que abre Despachos, el de lo que sale hoy (`dueOn`): una
+  cifra nueva de entregas no arma su propia consulta.
+- Caja (`apps/api/src/caja.ts`, `caja`: Dueño y Administrador) recibe el efectivo con «Recibí», que
+  solo se agrega y toma cada pago una vez. Lo cobrado es la misma consulta de Reportes e Inicio
+  (`collectedBetween`) y lo que falta cobrar, el saldo de las filas de Despachos: ninguna pantalla
+  lo recalcula. El efectivo por recibir (`cashToReceiveIn`) es también una línea de «Te toca», solo
+  para quien ve Caja.
+- «Avisar» abre el WhatsApp del celular con el texto y queda «enviado por usted»: nunca entregado.
+
+## Cambios y devoluciones (entrega 8; ADR 0230)
 
 - El entregado no se toca: el cambio es otro pedido (`exchange_of_id`, `createExchangeIn` de
   `apps/api/src/cambios.ts`), con lo que se lleva en sus líneas y lo que vuelve en
   `sale_order_return`. Lo que vuelve vale lo que se pagó y se descuenta del total; un total bajo
-  cero es lo que la tienda devuelve. Lo arma una persona: Sofi no (`0025_reglas_cambios_y_devoluciones.sql`).
+  cero es lo que la tienda devuelve. Lo arma una persona: Sofi no (`0031_reglas_cambios_y_devoluciones.sql`).
 - Lo que vuelve entra al kardex como «devolución», con su motivo y la referencia del cambio, al
   marcar «Entregado» el cambio (`recordReturn` de `stock.ts`); nunca antes. No vuelve dos veces lo
   mismo, salvo que el cambio se anule. Un cambio no se «Cambia».
@@ -201,6 +239,20 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   administración. Cada persona ve solo sus preguntas y respuestas (`helpView`, ADR 0221); «Plan y
   pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de `plan`.
 
+## Los avisos al celular (entrega 5 del lienzo «gestorIA como odentIA»; ADR 0229)
+
+- gestorIA se instala desde el navegador (`public/manifest.webmanifest`, íconos en `public/pwa/`)
+  y avisa por push web con la app cerrada. Lo del navegador es lo común (`device-push` de
+  `@odentia/ui-patterns`); el service worker (`public/sw.js`) no tiene `fetch`: no guarda datos.
+- El celular es de la persona (`push_device`): se activa una vez y le llega lo de todas sus
+  tiendas. Lo que elige es por tienda y vale en todos sus celulares (`push_choice`).
+- Qué le llega a cada rol sale de `permisos.ts` (`PUSH_KIND_INFO` de `apps/api/src/avisos.ts`),
+  mirado al enviar. Un tipo nuevo suma su fuente y su permiso ahí, y su respuesta en la Ayuda.
+- No es otra bandeja: avisa lo nuevo de los pedidos (`order_event`, cursor por persona y tienda) y
+  de los chats que esperan, y abre la pantalla que lo resuelve. Se anota antes de enviar y nunca
+  se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan.
+- La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda.
+
 ## La web pública (B8)
 
 - `gestoria24.com` es `apps/sitio`: Astro armado una vez al publicar, solo archivos en el Worker
@@ -221,8 +273,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   auditor y diseño UX; nunca clínica (`.claude/skills/odentia-qa/references/mesa.md`, «Quién entra»).
   Su recorrido base: subir un producto con tallas y stock, venderlo en «Probar a Sofi», anotar un
   pedido, cobrarlo con captura y entregarlo.
-- La tienda de ejemplo es Calzados Rosa (`apps/api/src/semilla.ts`, `seed:dev`): cada entrega le
-  suma lo suyo. Nunca se importa en pruebas ni corre en producción.
+- La tienda de ejemplo es Calzados Rosa (`apps/api/src/semilla.ts`, `seed:dev`), con Tortas Carmen
+  para los primeros pasos de una tienda que empieza: cada entrega le suma lo suyo. Nunca se importa
+  en pruebas ni corre en producción.
 - Local: `gestoria/infra/dev/.env` (desde `.env.example`), `pnpm --filter @gestoria/db migrate`,
   `pnpm --filter @gestoria/api local` y `pnpm --filter @gestoria/web local` (la web pública: `pnpm --filter @gestoria/sitio local`). La entrada necesita la
   API de las clínicas con `GESTORIA_DOMAIN`. No corren con el `pnpm dev` de la raíz.

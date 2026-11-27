@@ -25,6 +25,7 @@ import {
   removeBudgetItems,
   removeBudgetOption,
   reviseBudget,
+  markBudgetHanded,
   sendBudget,
   updateBudgetDraft,
   updateBudgetPresentation,
@@ -478,6 +479,17 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
           },
           { storage: deps.storage, secretsKey: deps.secretsKey },
         ),
+      ),
+    )
+  })
+
+  // «Ya se lo di en mano»: lo que no le llegó por mensaje se le entregó impreso (queda su traza).
+  app.post("/:id/budgets/:budgetId/handed", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.send")) return forbid(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markBudgetHanded(tx, orgId, { userId, memberRole }, { patientId: c.req.param("id"), budgetId: c.req.param("budgetId") }),
       ),
     )
   })

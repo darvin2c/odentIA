@@ -13,6 +13,8 @@ export const PEOPLE = {
   ana: { id: "e2e-ana", email: "ana@soporte.test", name: "Ana de Soporte" },
   /** Atiende la tienda con el rol de Ventas. */
   lucia: { id: "e2e-lucia", email: "lucia@calzados.test", name: "Lucía Torres" },
+  /** Todavía sin tienda: crea la suya en el recorrido de los primeros pasos. */
+  carmen: { id: "e2e-carmen", email: "carmen@tortas.test", name: "Carmen Huanca" },
 } as const
 export type Who = keyof typeof PEOPLE
 

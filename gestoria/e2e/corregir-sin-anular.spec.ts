@@ -174,11 +174,14 @@ test("Andrea cambia a la 38 sin anular, pasa a mañana y se deshace su pago", as
   await page.setViewportSize(PHONE)
   await sheet.getByRole("button", { name: "Pasar a…" }).click()
   const move = page.getByRole("alertdialog")
-  await move.getByRole("button", { name: "Mañana" }).click()
-  await expect(move.getByRole("button", { name: "Mañana" })).toHaveAttribute("aria-pressed", "true")
+  await move.getByRole("button", { name: "Mañana", exact: true }).click()
+  await expect(move.getByRole("button", { name: "Mañana", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
   await noSideScroll(page)
   await shot(page, "corregir-pasar-a-telefono")
-  await move.getByRole("button", { name: "Pasar a ese día" }).click()
+  await move.getByRole("button", { name: "Pasar a mañana" }).click()
   await expect(move).toHaveCount(0)
   await expect(sheet.getByText("Lo pasó a otro día")).toBeVisible()
 

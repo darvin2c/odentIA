@@ -15,8 +15,11 @@ import { can, ROLE_NAMES, type StorePermission, type StoreSeat } from "./permiso
 
 /** Las pantallas de la tienda a las que lleva una respuesta: su ruta y lo que hace falta para abrirla. */
 export const HELP_SCREENS = {
+  inicio: { label: "Inicio", path: "/", opens: "ventas.atender" },
+  despachos: { label: "Despachos", path: "/despachos", opens: "entregas" },
   pedidos: { label: "Pedidos", path: "/pedidos", opens: "ventas.atender" },
   catalogo: { label: "Catálogo", path: "/catalogo", opens: "catalogo.ver" },
+  caja: { label: "Caja", path: "/caja", opens: "caja" },
   reportes: { label: "Reportes", path: "/reportes", opens: "reportes.ver" },
   // Configuración, al pie del menú: cada apartado lo abre quien puede cambiarlo.
   datos: { label: "Datos de la tienda", path: "/configuracion", opens: "configuracion" },
@@ -29,6 +32,7 @@ export const HELP_SCREENS = {
     path: "/configuracion/entregas",
     opens: "configuracion",
   },
+  avisos: { label: "Avisos al celular", path: "/configuracion/avisos", opens: "avisos.recibir" },
   plan: { label: "Plan y pagos", path: "/configuracion/plan", opens: "plan" },
 } as const satisfies Record<string, { label: string; path: `/${string}`; opens: StorePermission }>
 export type HelpScreen = keyof typeof HELP_SCREENS
@@ -51,6 +55,32 @@ export interface HelpGroup {
 }
 
 export const HELP_GUIDE: readonly HelpGroup[] = [
+  {
+    id: "inicio",
+    title: "Inicio",
+    faqs: [
+      {
+        id: "te-toca",
+        q: "¿Qué me toca hacer hoy?",
+        a: [
+          "En Inicio, «Te toca»: lo que hay que hacer ahora, hoy y sin apuro, cada línea con su botón. Un pago por confirmar se abre con «Ver y confirmar», que muestra la captura junto al pedido; un pedido que no se entregó se mueve con «Pasar a…»; dos fichas que quizá son la misma clienta se miran con «Comparar»; un pedido pagado al que le falta stock, con «Ver pedido», y el efectivo cobrado en la puerta que nadie recibió todavía, con «Ir a Caja» (lo ve quien ve Caja).",
+          "Arriba van las cifras del día, con la hora de la tienda: «Cobrado hoy», «Por confirmar», «Falta cobrar» y «Sale hoy», que abre Despachos. Lo que está por confirmar no se suma a lo que falta cobrar. Los montos del día los ve quien puede ver Reportes; quien atiende ve lo que le toca, sin los totales.",
+        ],
+        needs: "ventas.atender",
+        screen: "inicio",
+      },
+      {
+        id: "primeros-pasos",
+        q: "Acabo de crear mi tienda, ¿qué me falta para vender?",
+        a: [
+          "En Inicio, «Tu tienda está casi lista»: los pasos para empezar, cada uno con cómo va. Cada paso abre su apartado y, con «Volver a Inicio», regresas a la lista. Se marcan solos cuando lo guardas: nadie los marca a mano.",
+          "Puedes vender sin terminarlos. Si trabajas sola o no vas a usar a Sofi, ese paso se salta con «No lo necesito». Conectar los chats dice «Muy pronto»: todavía no se puede y no cuenta. Cuando todos están hechos o saltados, la lista se va de Inicio y no vuelve.",
+        ],
+        needs: "configuracion",
+        screen: "inicio",
+      },
+    ],
+  },
   {
     id: "vender",
     title: "Vender",
@@ -105,7 +135,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "pago-por-confirmar",
         q: "¿Por qué un pedido dice «Pago por confirmar»?",
         a: [
-          "Porque llegó la captura de un pago y falta que alguien la revise. Ábrelo desde el filtro «Pago por confirmar», mira la captura y revisa la cuenta de la tienda.",
+          "Porque llegó la captura de un pago y falta que alguien la revise. Ábrelo desde Inicio con «Ver y confirmar», o desde el filtro «Pago por confirmar» de Pedidos, mira la captura y revisa la cuenta de la tienda.",
           "Si el pago está, «Confirmar pago». Si no, «No coincide» con su motivo: el pedido vuelve a «Por pagar» y el motivo queda escrito en el pedido.",
         ],
         needs: "pagos.confirmar",
@@ -134,10 +164,11 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "cobrar-al-recibir",
         q: "¿Cómo anoto lo que cobré al entregar?",
         a: [
-          "Si el pedido se paga al recibir, al llegar usa «Entregado y cobrado» y escribe cuánto cobraste. Queda con tu nombre y, si no es el total, queda anotado para revisarlo.",
+          "En Despachos, «Cobrar y entregar» (en el pedido, «Entregado y cobrado»): con qué te pagaron (efectivo o el POS de la tienda, con la foto del voucher si la tienes) y cuánto. Si pagó una parte con cada medio, «Agregar otro medio».",
+          "Sin pago confirmado no se entrega: lo cobrado tiene que ser todo lo que falta, sin el vuelto. Si pagó con Yape o Plin al número de la tienda, anota su captura en el pedido; si ya la mandó, al entregar ves la captura y «Ya me pagó: confirmar» en el mismo paso. Lo cobrado queda a nombre de quien llevó el pedido y, el efectivo, por recibir en Caja.",
         ],
         needs: "entregas",
-        screen: "pedidos",
+        screen: "despachos",
       },
       {
         id: "deshacer-pago",
@@ -203,32 +234,73 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
     title: "Entregar",
     faqs: [
       {
+        id: "despachos",
+        q: "¿Dónde veo qué sale hoy y quién lo lleva?",
+        a: [
+          "En Despachos: arriba, los días con cuántas entregas hay en cada uno; abajo, primero lo que no se entregó, con su motivo y lo que hay que cobrar, y después cada franja y «Sin franja». Filtra por repartidor; la forma de entrega va en cada fila.",
+          "Hoy trae también lo atrasado y lo que no tiene día. «Cobrar» es lo que falta cobrar del pedido: lo mismo que dicen el pedido y Caja.",
+        ],
+        needs: "entregas",
+        screen: "despachos",
+      },
+      {
         id: "salio-entregado",
         q: "¿Cómo marco que un pedido salió o llegó?",
         a: [
-          "En Pedidos, en «Para entregar hoy» o «Para entregar». En el pedido, «Salió» lo pasa a «En camino» (si va por agencia, pega su número de envío) y «Entregado» lo cierra cuando llega. Si lo recogen en la tienda, va directo a «Entregado».",
+          "En Despachos, en su fila, o en el pedido: «Salió» lo pasa a «En camino» y «Entregado» lo cierra cuando llega. Si lo recogen en la tienda, va directo a «Entregado». Lo demás está en «Más».",
           "Si nadie marcó «Salió», «Entregado» deja las dos, con la misma hora.",
         ],
         needs: "entregas",
-        screen: "pedidos",
+        screen: "despachos",
+      },
+      {
+        id: "repartidor",
+        q: "¿Cómo digo quién lleva un pedido?",
+        a: [
+          "En Despachos, en «Más», «Cambiar repartidor»: una persona del equipo o, con «Otro: escribe el nombre», alguien de fuera, que queda para la próxima vez. También se elige al pasarlo a otro día. Un pedido sin repartidor sale igual.",
+          "Lo que se cobre en la puerta queda a nombre de quien lo lleva.",
+        ],
+        needs: "entregas",
+        screen: "despachos",
+      },
+      {
+        id: "agencia",
+        q: "¿Cómo anoto un envío por agencia?",
+        a: [
+          "Al marcar «Salió», elige la agencia (Shalom, Olva Courier, Marvisur u «Otra: escribe cuál») y, si ya lo tienes, su número de envío. El número lo puedes anotar después, en «Más», «Agencia y n.º de envío».",
+          "Se cierra como entregado cuando lo recoge. Con el número, cualquiera lo sigue en la página de la agencia.",
+        ],
+        needs: "entregas",
+        screen: "despachos",
+      },
+      {
+        id: "avisar",
+        q: "¿Cómo le aviso a la clienta que su pedido sale?",
+        a: [
+          "En Despachos, «Avisar»: ves el mensaje escrito, con cuándo sale, quién lo lleva y lo que paga al recibir, y lo puedes cambiar. «Abrir WhatsApp con el aviso» abre el WhatsApp de tu celular con ese texto: lo envías tú.",
+          "En la historia del pedido queda «enviado por usted»: gestorIA no sabe si le llegó.",
+        ],
+        needs: "entregas",
+        screen: "despachos",
       },
       {
         id: "no-se-entrego",
         q: "¿Qué hago si un pedido volvió sin entregar?",
         a: [
-          "En el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo) y cuándo va. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
+          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
+          "Hasta que vuelva a salir, aparece primero en Despachos, en «No se entregó», con su motivo y lo que hay que cobrar.",
         ],
         needs: "entregas",
-        screen: "pedidos",
+        screen: "despachos",
       },
       {
         id: "pasar-a",
         q: "¿Cómo paso un pedido a otro día?",
         a: [
-          "En el pedido, «Pasar a…» y elige el día: hoy, mañana u otro. Se puede mientras no sale, y no se anula nada.",
+          "En Despachos o en el pedido, «Pasar a…»: el día (hoy, mañana u otro), la franja y quién lo lleva. Se puede mientras no sale, y no se anula nada. Es la forma de mover una entrega, también con el teclado y en el celular.",
         ],
         needs: "entregas",
-        screen: "pedidos",
+        screen: "despachos",
       },
       {
         id: "pagado-sin-stock",
@@ -295,8 +367,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "configuracion",
         q: "¿Dónde se ajusta la tienda y por qué hay quien no ve Configuración?",
         a: [
-          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega y el plan. Se ajusta una vez y lo usan las demás pantallas.",
-          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración no ve Configuración, ni el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega, tus avisos al celular y el plan. Se ajusta una vez y lo usan las demás pantallas.",
+          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración ve ahí solo sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
         ],
         needs: "configuracion",
         screen: "datos",
@@ -334,6 +406,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
           "En Configuración, en Formas de entrega y zonas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
+          "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
         screen: "entregas",
@@ -346,6 +419,17 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         ],
         needs: "configuracion",
         screen: "pagos",
+      },
+      {
+        id: "avisos-al-celular",
+        q: "¿Cómo me entero de un pago o de una entrega aunque gestorIA esté cerrada?",
+        a: [
+          "Instala gestorIA en tu celular y activa los avisos: en Pedidos, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
+          "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre lo que toca resolver, y el siguiente del mismo tipo reemplaza al anterior.",
+          "En Avisos al celular eliges qué te llega, y vale en todos tus celulares. «Apagar en este celular» los apaga solo en ese celular; al cerrar sesión también se apagan en él.",
+        ],
+        needs: "avisos.recibir",
+        screen: "avisos",
       },
       {
         id: "invitar",
@@ -367,10 +451,20 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         screen: "equipo",
       },
       {
+        id: "caja",
+        q: "¿Cómo recibo el efectivo que cobró un repartidor?",
+        a: [
+          "En Caja, en «Efectivo por recibir»: lo que cobró en efectivo cada repartidor (y lo cobrado en la tienda), pedido por pedido. Al recibirlo, «Recibí» con lo que te entregó; si no cuadra, escribe qué pasó. Queda a tu nombre, con la hora.",
+          "Caja también dice lo cobrado del día por medio, la misma cifra de Reportes, y lo que falta cobrar en las entregas del día, lo mismo que dice Despachos.",
+        ],
+        needs: "caja",
+        screen: "caja",
+      },
+      {
         id: "reportes",
         q: "¿Dónde veo cuánto vendí?",
         a: [
-          "En Reportes: lo vendido y cobrado, lo que falta cobrar, quiénes volvieron a comprar, lo más vendido y lo que se acaba, y lo que hizo Sofi. En «Te toca», Argos dice lo que queda pendiente.",
+          "En Reportes: lo vendido y cobrado, lo que falta cobrar, quiénes volvieron a comprar, lo más vendido y lo que se acaba, y lo que hicieron Sofi y Argos. Lo de hoy y lo que queda pendiente está en Inicio, en «Te toca».",
         ],
         needs: "reportes.ver",
         screen: "reportes",

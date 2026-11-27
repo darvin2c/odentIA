@@ -120,12 +120,16 @@ test.beforeAll(async () => {
     await call("POST", `/variantes/${variant}/movimientos`, { kind: "entrada", quantity: 3 })
 })
 
-/** Un pedido entregado de la 38, cobrado en la puerta: S/ 129 + envío S/ 10. */
-async function delivered(customerName: string): Promise<Json> {
+/**
+ * Un pedido entregado de la 38, cobrado en la puerta: S/ 129 + envío S/ 10. Cada clienta con su
+ * teléfono: el mismo en dos fichas le pediría a Clientes «¿Es la misma clienta?», y los recorridos
+ * comparten la tienda.
+ */
+async function delivered(customerName: string, customerPhone: string): Promise<Json> {
   const order = (
     await call("POST", "/pedidos", {
       customerName,
-      customerPhone: "+51 987 330 221",
+      customerPhone,
       channel: "whatsapp",
       address: "Av. Rivera Navarrete 501, San Isidro",
       lines: [{ variantId: setup.t38, quantity: 1 }],
@@ -142,7 +146,7 @@ test("Andrea cambia la 38 por la 39 con un pedido nuevo, sin tocar el entregado"
   page,
 }) => {
   await as("lucia")
-  const order = await delivered("Andrea Castillo")
+  const order = await delivered("Andrea Castillo", "+51 987 330 221")
 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
@@ -191,7 +195,7 @@ test("Andrea cambia la 38 por la 39 con un pedido nuevo, sin tocar el entregado"
 
 test("Fiorella devuelve la suya y la tienda anota lo que le devolvió", async ({ page }) => {
   await as("lucia")
-  const order = await delivered("Fiorella Quispe")
+  const order = await delivered("Fiorella Quispe", "+51 987 330 448")
 
   await page.setViewportSize(PHONE)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)

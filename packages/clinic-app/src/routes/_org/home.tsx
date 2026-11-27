@@ -526,6 +526,8 @@ function HomePage() {
                 <span className="font-semibold">{item.patientName}</span>
                 <span>{item.title}</span>
                 <span className="text-muted-foreground">{item.presentedAt ? `Se presentó ${daysAgo(item.presentedAt, context)}` : "Aún sin fecha de presentación"}</span>
+                {/* Lo que no le llegó: hay que reenviarlo desde su presupuesto (pedido del 27 nov). */}
+                {item.notReached ? <span className="text-destructive">{item.notReached}</span> : null}
               </span>
               {canAnswerBudgets ? (
                 <Button

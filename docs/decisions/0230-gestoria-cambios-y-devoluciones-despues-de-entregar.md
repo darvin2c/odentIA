@@ -1,4 +1,4 @@
-# 0227 · En gestorIA, un cambio o una devolución después de entregar es un pedido nuevo enlazado
+# 0230 · En gestorIA, un cambio o una devolución después de entregar es un pedido nuevo enlazado
 
 Fecha: 2026-11-27 · Estado: aceptada · Entrega 8 del lienzo «gestorIA como odentIA» (tableros 17,
 7, 12 y 24; sobre el saldo del ADR 0222 y el kardex del ADR 0226)

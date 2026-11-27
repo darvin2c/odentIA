@@ -128,7 +128,11 @@ export async function seedDemoExchanges(tx: Db, storeId: string): Promise<void> 
       deliverOn: today,
     }),
   )
-  await markDelivered(tx, lucia, storeId, back.id, { collectedCents: null, methodId: null })
+  await markDelivered(tx, lucia, storeId, back.id, {
+    collectedCents: null,
+    methodId: null,
+    payments: [],
+  })
   // Lo que sobra es lo que pagó por la zapatilla: se devuelve entero, por Yape.
   const [row] = await tx
     .select({ totalCents: saleOrder.totalCents })
