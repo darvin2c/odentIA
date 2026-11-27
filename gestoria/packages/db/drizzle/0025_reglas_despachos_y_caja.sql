@@ -6,7 +6,7 @@
 -- 1. Las franjas de la tienda las cambia quien cambia la configuración; Sofi nunca toca la tienda
 --    (`store_no_agent_change`, de `0023_reglas_tu_marca.sql`).
 -- 2. Un pedido cambia su franja, su repartidor y su agencia (el número de envío ya se concedía).
---    Sofi no asigna repartidor ni agencia.
+--    Sofi no asigna repartidor, franja ni agencia: ni al anotar el pedido ni al cambiarlo.
 -- 3. Un repartidor es de la tienda y no se borra: lo que llevó y lo que cobró siguen con su nombre.
 --    Se corrige su nombre o se deja de usar; su cuenta no se cambia aquí (la enlazará gestorIA
 --    Reparto, en su propia migración). Una persona del equipo es repartidor solo de su tienda.
@@ -17,6 +17,23 @@ GRANT UPDATE (delivery_slots) ON TABLE store TO gestoria_app;--> statement-break
 GRANT UPDATE (slot_start, slot_end, courier_id, agency) ON TABLE sale_order TO gestoria_app;--> statement-breakpoint
 CREATE POLICY sale_order_agent_dispatch ON sale_order AS RESTRICTIVE FOR INSERT TO gestoria_app
   WITH CHECK (NOT app_is_agent() OR (courier_id IS NULL AND agency IS NULL));--> statement-breakpoint
+-- Sofi sí cambia sus pedidos por pagar (anularlos, cambiarlos), pero una regla no ve lo de antes:
+-- el cambio de franja, repartidor o agencia lo frena este disparador.
+CREATE FUNCTION sale_order_agent_dispatch() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF app_is_agent() AND (
+    NEW.courier_id IS DISTINCT FROM OLD.courier_id OR NEW.agency IS DISTINCT FROM OLD.agency
+    OR NEW.slot_start IS DISTINCT FROM OLD.slot_start OR NEW.slot_end IS DISTINCT FROM OLD.slot_end
+  ) THEN
+    RAISE EXCEPTION 'el agente no asigna repartidor, franja ni agencia' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END
+$$;--> statement-breakpoint
+REVOKE ALL ON FUNCTION sale_order_agent_dispatch() FROM PUBLIC;--> statement-breakpoint
+CREATE TRIGGER sale_order_agent_dispatch BEFORE UPDATE ON sale_order
+  FOR EACH ROW EXECUTE FUNCTION sale_order_agent_dispatch();--> statement-breakpoint
 
 GRANT SELECT, INSERT ON TABLE store_courier TO gestoria_app;--> statement-breakpoint
 GRANT UPDATE (name, is_active) ON TABLE store_courier TO gestoria_app;--> statement-breakpoint

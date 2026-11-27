@@ -71,10 +71,6 @@ export const accountCopy = pgTable(
   ],
 )
 
-/**
- * Una tienda (decisión 8: una persona puede tener o atender varias y elige al entrar). Vende
- * en una sola moneda, la que elige al crearla (decisión 9), con su código ISO 4217.
- */
 /** Una franja de entrega: de `start` a `end`, en minutos desde las 00:00 de la tienda. */
 export interface DeliverySlot {
   start: number
@@ -84,6 +80,10 @@ export interface DeliverySlot {
 /** Lo más que una tienda configura: tres o cuatro es lo de una tienda real (tablero 6). */
 export const MAX_DELIVERY_SLOTS = 8
 
+/**
+ * Una tienda (decisión 8: una persona puede tener o atender varias y elige al entrar). Vende
+ * en una sola moneda, la que elige al crearla (decisión 9), con su código ISO 4217.
+ */
 export const store = pgTable(
   "store",
   {
