@@ -9,6 +9,8 @@ import { fractionDigits } from "../dinero.js"
  * - Cada porcentaje, uno de una promoción que vio o uno que escribió el cliente.
  * - Nunca dice que un pago está confirmado o recibido si ningún pedido de la conversación tiene
  *   dinero confirmado: una captura queda por confirmar (tablero 8).
+ * - Nunca dice que hizo algo que no hizo para vender (tablero 21): «hablé con la tienda», «le
+ *   pregunté al dueño», ni que separa el producto (gestorIA todavía no separa stock).
  *
  * Si algo no pasa, Sofi lo corrige una vez; si vuelve a fallar, no sale y la conversación pasa
  * a una persona (`sofi.ts`).
@@ -98,6 +100,31 @@ export function claimsPaid(text: string): boolean {
   return false
 }
 
+/** Alguien de la tienda con quien Sofi diría que habló para conseguir algo («te consigo» sí vale). */
+const PEOPLE = String.raw`(?:la\s+tienda|(?:el|la|mi)\s+(?:due[ñn][oa]|jef[ea]|encargad[oa]|gerente|equipo)|mis\s+jef[ea]s)`
+const INVENTED = [
+  new RegExp(
+    String.raw`\b(?:habl[eé]|convers[eé]|consult[eé]|coordin[eé]|negoci[eé])\s+con\s+${PEOPLE}`,
+    "iu",
+  ),
+  new RegExp(
+    String.raw`\b(?:le\s+)?pregunt[eé]\s+(?:a\s+${PEOPLE}|al\s+(?:due[ñn]o|jefe|encargado|gerente|equipo))`,
+    "iu",
+  ),
+  new RegExp(String.raw`\b${PEOPLE}\s+(?:me\s+)?(?:autoriz[oó]|aprob[oó]|acept[oó])`, "iu"),
+]
+/**
+ * Separar el producto todavía no existe: el stock baja al pagar. Mientras no se programe, Sofi no
+ * lo promete. Cuando exista, esta regla se quita.
+ */
+const HOLDS =
+  /\b(?:te\s+(?:lo|la|los|las)\s+(?:separo|reservo|guardo|aparto)|(?:queda|est[aá]|va)\s+separad[oa]s?\s+para\s+ti)/iu
+
+/** Si el texto dice que habló con alguien de la tienda o que separa el producto. */
+export function claimsInvented(text: string): boolean {
+  return [...INVENTED, HOLDS].some((pattern) => pattern.test(text))
+}
+
 export interface KnownFacts {
   currency: string
   /** Los importes que se pueden decir, en la unidad menor. */
@@ -125,6 +152,10 @@ export function checkReply(text: string, known: KnownFacts): string[] {
   if (!known.paid && claimsPaid(text))
     problems.push(
       "Ningún pago de esta conversación está confirmado: no lo des por pagado. Una captura queda por confirmar y la revisa una persona.",
+    )
+  if (claimsInvented(text))
+    problems.push(
+      "No digas que hablaste con la tienda o con alguien del equipo, ni que separas el producto: eso no pasó. Di «te consigo» y el plazo para pagar.",
     )
   if (text.length > 900) problems.push("Es muy largo: escríbelo en menos de 900 caracteres.")
   return problems
