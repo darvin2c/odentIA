@@ -1,5 +1,5 @@
 import { Badge, Button, cn } from "@odentia/ui"
-import { EmptyState } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useSearch } from "@tanstack/react-router"
 import { ChevronLeft, LifeBuoy, MessageCircleQuestion } from "lucide-react"
@@ -14,7 +14,7 @@ import {
   whoLine,
 } from "./lib/ayuda"
 import { when } from "./lib/pedidos"
-import { ErrorBlock, StoreHeader, useAskForHelp, useStoreContext } from "./tiendas"
+import { StoreHeader, useAskForHelp, useStoreContext } from "./tiendas"
 
 /**
  * La Ayuda de la tienda (entrega 7 del lienzo «gestorIA como odentIA», tablero 19): una guía por
@@ -59,7 +59,12 @@ export function HelpPage() {
         }
       />
       {help.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-      {help.isError ? <ErrorBlock error={help.error} onRetry={() => void help.refetch()} /> : null}
+      {help.isError ? (
+        <ErrorState
+          error={help.error instanceof Error ? help.error : "No se pudo cargar"}
+          onRetry={() => void help.refetch()}
+        />
+      ) : null}
       {help.data ? (
         <>
           <Guide view={help.data} onAsk={ask} />

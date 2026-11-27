@@ -1,34 +1,24 @@
-import {
-  Badge,
-  Button,
-  cn,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  Input,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  toast,
-} from "@odentia/ui"
-import { Textarea } from "@odentia/ui/components/textarea"
+import { Badge, Button, cn, Field, FieldGroup, FieldLabel, Input, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
+  DetailDrawer,
   EmptyState,
+  ErrorState,
+  FormDrawer,
+  LoadingState,
   PageNotice,
   PersonAvatar,
   SearchInput,
   SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeft, MessageCircle, Plus, Repeat, UserRound } from "lucide-react"
 import { type ReactNode, useEffect, useId, useState } from "react"
+import { z } from "zod"
 import { api } from "./lib/api"
 import {
   CUSTOMER_KEY,
@@ -50,8 +40,7 @@ import { HOME_KEY } from "./lib/inicio"
 import { STATE_TONE, stateName } from "./lib/pedidos"
 import { money } from "./lib/tienda"
 import { NewOrderSheet, type OrderDraft } from "./pedidos"
-import { FormAlert, FormSheet, fieldErrors, TextField, useDirty } from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * Clientes (entrega 4 de «gestorIA como odentIA», tablero 8): cada clienta con todos sus canales
@@ -152,11 +141,9 @@ export function CustomersLayout() {
             placeholder="Buscar por nombre o teléfono"
             isFetching={list.isFetching && !list.isPending}
           />
-          {list.isPending ? (
-            <p className="text-sm text-muted-foreground">Cargando clientes…</p>
-          ) : null}
+          {list.isPending ? <LoadingState message="Cargando clientes…" /> : null}
           {list.isError ? (
-            <ErrorBlock error={list.error} onRetry={() => void list.refetch()} />
+            <ErrorState error={list.error} onRetry={() => void list.refetch()} />
           ) : null}
           {list.data && customers.length === 0 ? (
             query ? (
@@ -263,11 +250,9 @@ export function CustomerPage() {
         <ArrowLeft className="size-4" aria-hidden />
         Clientes
       </Link>
-      {detail.isPending ? (
-        <p className="text-sm text-muted-foreground">Abriendo su ficha…</p>
-      ) : null}
+      {detail.isPending ? <LoadingState message="Abriendo su ficha…" /> : null}
       {detail.isError ? (
-        <ErrorBlock error={detail.error} onRetry={() => void detail.refetch()} />
+        <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
       ) : null}
       {detail.data ? <CustomerCard customer={detail.data} /> : null}
     </div>
@@ -533,7 +518,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
         confirmLabel="Separar"
         cancelLabel="Dejarla unida"
         pending={separate.isPending}
-        error={separate.error instanceof Error ? separate.error.message : null}
+        error={separate.isError ? submitErrorMessage(separate.error) : null}
         onConfirm={() => separating && separate.mutate(separating.id)}
         onClose={() => {
           setSeparating(null)
@@ -629,45 +614,54 @@ function CompareSheet({
     },
   })
   const pending = same.isPending || distinct.isPending
+  const failed = same.error ?? distinct.error
+  // Unir es una decisión: va en un cajón que pide responder antes de seguir, no al lado.
   return (
-    <Sheet open onOpenChange={(next) => (next || pending ? null : onClose())}>
-      <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl">
-        <SheetHeader className="pr-14">
-          <SheetTitle>¿Es la misma clienta?</SheetTitle>
-          <SheetDescription>
-            {pair.reason ? `${reasonText(pair.reason)} ` : ""}
-            {remaining > 0
-              ? `Después quedan ${remaining} por mirar.`
-              : "Mira sus compras y decide."}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-4">
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Card card={pair.a} />
-            <Card card={pair.b} />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Nunca se une sola por el nombre o el teléfono: lo dice una persona. Si es la misma,
-            queda la ficha más antigua con todas sus compras; queda quién lo dijo y cuándo, y se
-            puede separar desde la ficha. Es un aviso: no frena ninguna venta.
-          </p>
-          <FormAlert error={same.error ?? distinct.error} />
-        </div>
-        <SheetFooter className="flex-row flex-wrap justify-end border-t py-4">
+    <DetailDrawer
+      open
+      dock={false}
+      size="lg"
+      title="¿Es la misma clienta?"
+      description={`${pair.reason ? `${reasonText(pair.reason)} ` : ""}${
+        remaining > 0 ? `Después quedan ${remaining} por mirar.` : "Mira sus compras y decide."
+      }`}
+      onClose={onClose}
+      isSubmitting={pending}
+      error={failed ? submitErrorMessage(failed) : null}
+      actions={
+        <>
           <SubmitButton
             variant="outline"
+            className="min-h-11"
             pending={distinct.isPending}
             disabled={pending}
             onClick={() => distinct.mutate()}
           >
             No, son distintas
           </SubmitButton>
-          <SubmitButton pending={same.isPending} disabled={pending} onClick={() => same.mutate()}>
+          <SubmitButton
+            className="min-h-11"
+            pending={same.isPending}
+            disabled={pending}
+            onClick={() => same.mutate()}
+          >
             Sí, es la misma
           </SubmitButton>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Card card={pair.a} />
+          <Card card={pair.b} />
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Nunca se une sola por el nombre o el teléfono: lo dice una persona. Si es la misma, queda
+          la ficha más antigua con todas sus compras; queda quién lo dijo y cuándo, y se puede
+          separar desde la ficha. Es un aviso: no frena ninguna venta.
+        </p>
+      </div>
+    </DetailDrawer>
   )
 }
 
@@ -706,16 +700,9 @@ export function SimilarQueue({
   }, [done, onClose])
   if (similar.isError)
     return (
-      <Sheet open onOpenChange={(next) => (next ? null : onClose())}>
-        <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl">
-          <SheetHeader className="pr-14">
-            <SheetTitle>¿Es la misma clienta?</SheetTitle>
-          </SheetHeader>
-          <div className="px-6">
-            <ErrorBlock error={similar.error} onRetry={() => void similar.refetch()} />
-          </div>
-        </SheetContent>
-      </Sheet>
+      <DetailDrawer open dock={false} size="lg" title="¿Es la misma clienta?" onClose={onClose}>
+        <ErrorState error={similar.error} onRetry={() => void similar.refetch()} />
+      </DetailDrawer>
     )
   if (!pair) return null
   return (
@@ -780,57 +767,54 @@ function PickOtherSheet({ customer, onClose }: { customer: CustomerDetail; onClo
       />
     )
   return (
-    <Sheet open onOpenChange={(next) => (next ? null : onClose())}>
-      <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-md">
-        <SheetHeader className="pr-14">
-          <SheetTitle>¿Es la misma que otra ficha?</SheetTitle>
-          <SheetDescription>
-            Busca la otra ficha de {customer.name.split(" ")[0]}: antes de unirlas, las ves lado a
-            lado.
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 pb-4">
-          <Field>
-            <FieldLabel htmlFor={inputId}>Su nombre o su teléfono</FieldLabel>
-            <Input
-              id={inputId}
-              type="search"
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              autoFocus
-            />
-          </Field>
-          <div aria-live="polite" className="flex flex-col gap-2">
-            {results.length > 0 ? (
-              <ul className="flex flex-col divide-y overflow-hidden rounded-lg border">
-                {results.map((c) => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => setOther(c)}
-                      className="flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset"
-                    >
-                      <span className="font-medium">{c.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {[
-                          channelsText(c.channels),
-                          c.phones[0],
-                          purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : debounced.length >= 2 && found.data ? (
-              <p className="text-sm text-muted-foreground">No encontramos otra ficha con eso.</p>
-            ) : null}
-          </div>
+    <DetailDrawer
+      open
+      dock={false}
+      title="¿Es la misma que otra ficha?"
+      description={`Busca la otra ficha de ${customer.name.split(" ")[0]}: antes de unirlas, las ves lado a lado.`}
+      onClose={onClose}
+    >
+      <div className="flex flex-col gap-3">
+        <Field>
+          <FieldLabel htmlFor={inputId}>Su nombre o su teléfono</FieldLabel>
+          <Input
+            id={inputId}
+            type="search"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoFocus
+          />
+        </Field>
+        <div aria-live="polite" className="flex flex-col gap-2">
+          {results.length > 0 ? (
+            <ul className="flex flex-col divide-y overflow-hidden rounded-lg border">
+              {results.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => setOther(c)}
+                    className="flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset"
+                  >
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {[
+                        channelsText(c.channels),
+                        c.phones[0],
+                        purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : debounced.length >= 2 && found.data ? (
+            <p className="text-sm text-muted-foreground">No encontramos otra ficha con eso.</p>
+          ) : null}
         </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </DetailDrawer>
   )
 }
 
@@ -845,86 +829,67 @@ function EditCustomerSheet({
 }) {
   const { store } = useStoreContext()
   const refresh = useRefreshCustomers()
-  const noteId = useId()
-  const [name, setName] = useState(customer.name)
-  const [phone, setPhone] = useState(customer.phone ?? "")
-  const [note, setNote] = useState(customer.note)
-  const dirty = useDirty({ name, phone, note })
-  const [localErrors, setLocalErrors] = useState<Record<string, string>>({})
   const save = useMutation({
-    mutationFn: () =>
-      api(`/api/tiendas/${store.id}/clientes/${customer.id}`, {
-        method: "PATCH",
-        body: { name, phone, note },
+    mutationFn: (body: { name: string; phone: string; note: string }) =>
+      api(`/api/tiendas/${store.id}/clientes/${customer.id}`, { method: "PATCH", body }),
+  })
+  const form = useAppForm({
+    defaultValues: { name: customer.name, phone: customer.phone ?? "", note: customer.note },
+    validators: {
+      // El largo y el teléfono los revisa el servidor; aquí, que no quede sin nombre.
+      onSubmit: z.object({
+        name: z.string().trim().min(1, "Escribe su nombre"),
+        phone: z.string(),
+        note: z.string(),
       }),
-    onSuccess: async () => {
+    },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value)
       await refresh()
       toast.success("Ficha guardada")
       onClose()
     },
   })
-  const errors = { ...fieldErrors(save.error), ...localErrors }
+  const surface = useFormSurface(form)
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title="Editar la ficha"
       description="Corregir su nombre o su teléfono no cambia los pedidos ya anotados."
       onClose={onClose}
-      dirty={dirty}
-      onSubmit={() => {
-        const next: Record<string, string> = {}
-        if (!name.trim()) next.name = "Escribe su nombre"
-        setLocalErrors(next)
-        if (Object.keys(next).length === 0) save.mutate()
-      }}
-      footer={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={save.isPending}>
-            Guardar
-          </SubmitButton>
-        </>
-      }
     >
       <FieldGroup>
-        <TextField
-          label="Nombre"
-          value={name}
-          onChange={setName}
-          maxLength={120}
-          error={errors.name}
-        />
-        <TextField
-          label="Teléfono (opcional)"
-          value={phone}
-          onChange={setPhone}
-          maxLength={30}
-          placeholder="+51 987 654 321"
-          error={errors.phone}
-          help={
-            customer.country ? undefined : "Con el código del país, «Escribirle» abre su WhatsApp."
-          }
-        />
-        <Field data-invalid={errors.note ? true : undefined}>
-          <FieldLabel htmlFor={noteId}>Lo que sabemos</FieldLabel>
-          <Textarea
-            id={noteId}
-            rows={4}
-            maxLength={1000}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Talla 38. Prefiere Shalom y paga el envío en destino."
-          />
-          {errors.note ? (
-            <FieldError>{errors.note}</FieldError>
-          ) : (
-            <FieldDescription>Es del equipo: la clienta no lo ve.</FieldDescription>
+        <form.AppField name="name">
+          {(field) => <field.TextField label="Nombre" maxLength={120} />}
+        </form.AppField>
+        <form.AppField name="phone">
+          {(field) => (
+            <field.TextField
+              label="Teléfono (opcional)"
+              maxLength={30}
+              inputMode="tel"
+              placeholder="+51 987 654 321"
+              description={
+                customer.country
+                  ? undefined
+                  : "Con el código del país, «Escribirle» abre su WhatsApp."
+              }
+            />
           )}
-        </Field>
-        <FormAlert error={save.error} />
+        </form.AppField>
+        <form.AppField name="note">
+          {(field) => (
+            <field.TextareaField
+              label="Lo que sabemos"
+              rows={4}
+              maxLength={1000}
+              placeholder="Talla 38. Prefiere Shalom y paga el envío en destino."
+              description="Es del equipo: la clienta no lo ve."
+            />
+          )}
+        </form.AppField>
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
 }

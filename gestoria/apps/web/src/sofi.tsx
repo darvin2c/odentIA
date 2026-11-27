@@ -1,10 +1,20 @@
 import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
-import { Textarea } from "@odentia/ui/components/textarea"
-import { AgentMark, PageNotice, SubmitButton } from "@odentia/ui-patterns"
+import { Switch } from "@odentia/ui/components/switch"
+import {
+  AgentMark,
+  ErrorState,
+  FormChoiceField,
+  PageNotice,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageSquarePlus, SendHorizontal } from "lucide-react"
-import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react"
+import { type KeyboardEvent, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { api } from "./lib/api"
 import { STATE_TONE, stateName } from "./lib/pedidos"
 import { AGENT_STOP_WORDS } from "./lib/plan"
@@ -17,8 +27,7 @@ import type {
 } from "./lib/sofi"
 import { usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
-import { FormAlert, fieldErrors, SwitchField, TextField } from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Sofi» (lienzo B, tablero 8): lo que el dueño le deja escrito y «Probar a Sofi». Mientras no
@@ -28,6 +37,10 @@ import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
  */
 
 const SOFI_KEY = (storeId: string) => ["sofi", storeId]
+
+const messageSchema = z.object({
+  text: z.string().trim().min(1, "Escribe el mensaje, como cliente."),
+})
 
 export function SofiPage() {
   const { store } = useStoreContext()
@@ -43,7 +56,10 @@ export function SofiPage() {
       />
       {overview.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
       {overview.isError ? (
-        <ErrorBlock error={overview.error} onRetry={() => void overview.refetch()} />
+        <ErrorState
+          error={overview.error instanceof Error ? overview.error : "No se pudo cargar"}
+          onRetry={() => void overview.refetch()}
+        />
       ) : null}
       {overview.data ? (
         <>
@@ -83,29 +99,41 @@ export function SofiPage() {
 
 /* ------------------------------------------------------------- lo que pone el dueño */
 
+type SwitchName = "enabled" | "followPayment" | "followThanks" | "followRestock" | "followReturn"
+
 function Settings({ settings }: { settings: AgentSettings }) {
   const { store } = useStoreContext()
   const canEdit = store.permissions.includes("configuracion")
   const queryClient = useQueryClient()
-  const [values, setValues] = useState({
-    ...settings,
-    displayName: settings.displayName ?? "",
-  })
-  const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
-    setValues((v) => ({ ...v, [key]: value }))
   const save = useMutation({
-    mutationFn: () => api(`/api/tiendas/${store.id}/sofi`, { method: "PATCH", body: values }),
-    onSuccess: async () => {
+    mutationFn: (body: AgentSettings & { displayName: string }) =>
+      api(`/api/tiendas/${store.id}/sofi`, { method: "PATCH", body }),
+  })
+  const form = useAppForm({
+    defaultValues: { ...settings, displayName: settings.displayName ?? "" },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value)
       await queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) })
       toast.success("Guardado")
     },
   })
-  const errors = fieldErrors(save.error)
-  const knowledgeId = useId()
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    save.mutate()
-  }
+  const { onSubmit, isSubmitting, error } = useFormSurface(form)
+  const switchField = (name: SwitchName, label: (on: boolean) => string) => (
+    <form.AppField name={name}>
+      {(field) => (
+        <FormChoiceField label={label(field.state.value)}>
+          {(control) => (
+            <Switch
+              {...control.props}
+              checked={field.state.value}
+              disabled={!canEdit}
+              onCheckedChange={(next) => field.handleChange(next)}
+            />
+          )}
+        </FormChoiceField>
+      )}
+    </form.AppField>
+  )
   return (
     <section
       aria-labelledby="sofi-ajustes"
@@ -120,77 +148,58 @@ function Settings({ settings }: { settings: AgentSettings }) {
           demás.{canEdit ? "" : " Lo cambia el dueño o un administrador."}
         </p>
       </div>
-      <form onSubmit={submit} className="flex flex-col gap-4">
+      <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
         <fieldset disabled={!canEdit} className="contents">
           <FieldGroup>
-            <SwitchField
-              checked={values.enabled}
-              onChange={(next) => set("enabled", next)}
-              label={
-                values.enabled
-                  ? "Encendida: atenderá tus conversaciones"
-                  : "Apagada: tus conversaciones esperan a una persona"
-              }
-            />
-            <TextField
-              label="Cómo se presenta"
-              value={values.displayName}
-              onChange={(v) => set("displayName", v)}
-              placeholder={`Sofi, de ${store.name}`}
-              maxLength={60}
-              error={errors.displayName}
-            />
-            <div className="flex flex-col gap-2">
-              <label htmlFor={knowledgeId} className="text-sm font-medium">
-                Lo que debe saber
-              </label>
-              <Textarea
-                id={knowledgeId}
-                value={values.knowledge}
-                onChange={(e) => set("knowledge", e.target.value)}
-                maxLength={2000}
-                rows={4}
-                placeholder="Horario, cambios de talla, cómo se cuida el producto…"
-                aria-describedby={`${knowledgeId}-help`}
-              />
-              <p id={`${knowledgeId}-help`} className="text-xs text-muted-foreground">
-                Lo cuenta tal cual. Lo que no esté aquí ni en tu catálogo no lo inventa: lo pasa a
-                una persona.
-              </p>
-            </div>
+            {switchField("enabled", (on) =>
+              on
+                ? "Encendida: atenderá tus conversaciones"
+                : "Apagada: tus conversaciones esperan a una persona",
+            )}
+            <form.AppField name="displayName">
+              {(field) => (
+                <field.TextField
+                  label="Cómo se presenta"
+                  placeholder={`Sofi, de ${store.name}`}
+                  maxLength={60}
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="knowledge">
+              {(field) => (
+                <field.TextareaField
+                  label="Lo que debe saber"
+                  maxLength={2000}
+                  rows={4}
+                  placeholder="Horario, cambios de talla, cómo se cuida el producto…"
+                  description="Lo cuenta tal cual. Lo que no esté aquí ni en tu catálogo no lo inventa: lo pasa a una persona."
+                />
+              )}
+            </form.AppField>
             <fieldset className="flex flex-col gap-3">
               <legend className="mb-1 text-sm font-medium">
                 Seguimientos que Argos le encarga
               </legend>
-              <SwitchField
-                checked={values.followPayment}
-                onChange={(next) => set("followPayment", next)}
-                label="Recordar el pago a quien no pagó"
-              />
-              <SwitchField
-                checked={values.followThanks}
-                onChange={(next) => set("followThanks", next)}
-                label="Agradecer y preguntar si llegó bien, al día siguiente"
-              />
-              <SwitchField
-                checked={values.followRestock}
-                onChange={(next) => set("followRestock", next)}
-                label="Avisar que volvió lo que alguien pidió agotado"
-              />
-              <SwitchField
-                checked={values.followReturn}
-                onChange={(next) => set("followReturn", next)}
-                label="Invitar a volver a quien compró hace dos meses"
-              />
+              {switchField("followPayment", () => "Recordar el pago a quien no pagó")}
+              {switchField(
+                "followThanks",
+                () => "Agradecer y preguntar si llegó bien, al día siguiente",
+              )}
+              {switchField("followRestock", () => "Avisar que volvió lo que alguien pidió agotado")}
+              {switchField("followReturn", () => "Invitar a volver a quien compró hace dos meses")}
             </fieldset>
           </FieldGroup>
         </fieldset>
         {canEdit ? (
           <div className="flex flex-wrap items-center gap-3">
-            <SubmitButton type="submit" pending={save.isPending}>
+            <SubmitButton type="submit" pending={isSubmitting}>
               Guardar
             </SubmitButton>
-            <FormAlert error={save.error} />
+            {error ? (
+              <p role="alert" className="text-sm text-danger">
+                {error}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </form>
@@ -222,7 +231,6 @@ function TestChat({ overview }: { overview: SofiOverview }) {
       await queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) })
     },
   })
-  const [text, setText] = useState("")
   const [pendingText, setPendingText] = useState<string | null>(null)
   const send = useMutation({
     mutationFn: async (message: string) => {
@@ -235,7 +243,6 @@ function TestChat({ overview }: { overview: SofiOverview }) {
     onMutate: (message) => setPendingText(message),
     onSuccess: (data) => {
       queryClient.setQueryData(["conversacion", store.id, data.conversation.id], data.conversation)
-      setText("")
       if (data.result.status === "sin_modelo")
         toast.error("Sofi no pudo responder: falta configurar su modelo.")
     },
@@ -256,19 +263,25 @@ function TestChat({ overview }: { overview: SofiOverview }) {
   useEffect(() => {
     if (count > 0) end.current?.scrollIntoView({ block: "nearest" })
   }, [count])
-  const inputId = useId()
   const disabled = !overview.modelReady || send.isPending || view?.handler === "persona"
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault()
-    const message = text.trim()
-    if (message && !disabled) send.mutate(message)
-  }
+  const form = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: messageSchema },
+    onSubmit: async ({ value, formApi }) => {
+      if (disabled) return
+      await send.mutateAsync(value.text.trim())
+      formApi.reset()
+    },
+  })
+  const { onSubmit, error: sendError } = useFormSurface(form)
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      submit()
+      event.currentTarget.form?.requestSubmit()
     }
   }
+  const otherError = start.error ?? giveBack.error
+  const shownError = sendError ?? (otherError ? submitErrorMessage(otherError) : null)
 
   return (
     <section
@@ -303,7 +316,10 @@ function TestChat({ overview }: { overview: SofiOverview }) {
         </PageNotice>
       ) : null}
       {conversation.isError ? (
-        <ErrorBlock error={conversation.error} onRetry={() => void conversation.refetch()} />
+        <ErrorState
+          error={conversation.error instanceof Error ? conversation.error : "No se pudo cargar"}
+          onRetry={() => void conversation.refetch()}
+        />
       ) : null}
       <div
         className="flex max-h-[28rem] min-h-40 flex-col gap-3 overflow-y-auto rounded-lg border bg-surface-muted p-3"
@@ -372,28 +388,31 @@ function TestChat({ overview }: { overview: SofiOverview }) {
           Sofi pasó esta conversación a una persona: {view.waitingReason ?? "sin motivo"}.
         </PageNotice>
       ) : null}
-      <form onSubmit={submit} className="flex items-end gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label htmlFor={inputId} className="sr-only">
-            Tu mensaje, como cliente
-          </label>
-          <Textarea
-            id={inputId}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            rows={2}
-            maxLength={1000}
-            placeholder="Escribe como cliente…"
-            disabled={!overview.modelReady || view?.handler === "persona"}
-          />
-        </div>
-        <Button type="submit" disabled={disabled || !text.trim()} aria-label="Enviar">
+      <form noValidate onSubmit={onSubmit} className="flex items-end gap-2">
+        <form.AppField name="text">
+          {(field) => (
+            <field.TextareaField
+              label="Tu mensaje, como cliente"
+              hideLabel
+              className="min-w-0 flex-1"
+              onKeyDown={onKey}
+              rows={2}
+              maxLength={1000}
+              placeholder="Escribe como cliente…"
+              disabled={!overview.modelReady || view?.handler === "persona"}
+            />
+          )}
+        </form.AppField>
+        <Button type="submit" disabled={disabled} aria-label="Enviar">
           <SendHorizontal aria-hidden />
           <span className="hidden sm:inline">Enviar</span>
         </Button>
       </form>
-      <FormAlert error={send.error ?? start.error ?? giveBack.error} />
+      {shownError ? (
+        <p role="alert" className="text-sm text-danger">
+          {shownError}
+        </p>
+      ) : null}
       {view && view.costMicros > 0 ? (
         <p className="text-xs text-muted-foreground">Esta prueba costó {usd(view.costMicros)}.</p>
       ) : null}
