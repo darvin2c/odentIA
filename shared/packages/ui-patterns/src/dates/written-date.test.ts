@@ -95,7 +95,11 @@ describe("fecha escrita", () => {
   it("dice la edad cumplida, también la de un bebé", () => {
     expect(ageText("1995-07-30", TODAY)).toBe("31 años")
     expect(ageText("1995-10-17", TODAY)).toBe("30 años")
-    expect(ageText("2025-10-16", TODAY)).toBe("1 año")
+    // Antes de los dos años, en meses (QA clínica del 26 nov: 18 meses salía «1 año»).
+    expect(ageText("2025-10-16", TODAY)).toBe("12 meses")
+    expect(ageText("2025-04-16", TODAY)).toBe("18 meses")
+    expect(ageText("2024-10-18", TODAY)).toBe("23 meses")
+    expect(ageText("2024-10-16", TODAY)).toBe("2 años")
     expect(ageText("2026-02-10", TODAY)).toBe("8 meses")
     expect(ageText("2026-10-04", TODAY)).toBe("12 días")
     expect(ageText(TODAY, TODAY)).toBe("Nació hoy")
