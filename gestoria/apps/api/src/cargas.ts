@@ -418,17 +418,29 @@ function applyItem(
         : (colors.length ? colors : sizes).map((v) => [v])
     if (combos.length > 200)
       throw new StoreError(400, "VALIDATION_ERROR", "Hasta 200 variantes por producto")
+    // La variante de antes con los mismos valores, por el nombre de cada opción (la hoja pudo
+    // traer la talla primero): conserva su stock, su código, su precio y su costo.
+    const names = options.map((o) => o.name)
     const before = (values: string[]) =>
       item.variants.find(
         (v) =>
-          v.values.length === values.length && v.values.every((x, i) => sameText(x, values[i]!)),
+          v.values.length === values.length &&
+          names.every((name, i) => {
+            const at = item.options.findIndex((o) => sameText(o.name, name))
+            return at >= 0 && sameText(v.values[at] ?? "", values[i]!)
+          }),
       )
     out.options = options
-    out.variants = combos.map((values) => ({
-      values,
-      stock: patch.stock ?? before(values)?.stock ?? 0,
-      sku: before(values)?.sku ?? null,
-    }))
+    out.variants = combos.map((values) => {
+      const was = before(values)
+      return {
+        values,
+        stock: patch.stock ?? was?.stock ?? 0,
+        sku: was?.sku ?? null,
+        priceCents: was?.priceCents ?? null,
+        costCents: was?.costCents ?? null,
+      }
+    })
   } else if (patch.stock !== undefined) {
     out.variants = (item.variants.length ? item.variants : [{ values: [], stock: 0 }]).map((v) => ({
       ...v,

@@ -97,6 +97,14 @@ describe("leer la hoja de la tienda", () => {
     ])
   })
 
+  it("el error dice la fila del Excel aunque haya filas en blanco", () => {
+    const source = readSheetBytes(
+      xlsx([["Producto", "Precio", "Stock"], ["Correa", 45, 1], [null], ["Gorra", "mucho", 1]]),
+    )
+    const plan = planSheet(source as string[][], "PEN", new Set(), new Set())
+    expect(plan.errors).toEqual([{ row: 4, message: expect.stringMatching(/precio/) }])
+  })
+
   it("dice qué pasa con un Excel roto o un zip que no es una hoja", () => {
     const broken = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3])
     expect(readSheetBytes(broken)).toEqual({ row: 0, message: expect.stringMatching(/Excel/) })

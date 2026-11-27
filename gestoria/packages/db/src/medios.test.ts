@@ -32,6 +32,7 @@ const mario = { userId: "u-mario", email: "mario@otra.test" }
 const calzados = randomUUID()
 const otra = randomUUID()
 let productId = ""
+const proposal = randomUUID()
 
 const inStoreAs = <T>(
   who: { userId: string; email: string },
@@ -120,7 +121,7 @@ describe("las fotos y los videos en la base", () => {
     const changed = await inStoreAs(lucia, calzados, (tx) =>
       tx
         .update(productPhoto)
-        .set({ position: 3, cutout: "propuesta" })
+        .set({ position: 3, cutout: "propuesta", cutoutId: proposal })
         .where(eq(productPhoto.id, photoId))
         .returning(),
     )
@@ -131,11 +132,14 @@ describe("las fotos y los videos en la base", () => {
 
   it("«Dejar la original» anota la propuesta para borrarla; quitar la foto, su carpeta", async () => {
     await inRosa((tx) =>
-      tx.update(productPhoto).set({ cutout: null }).where(eq(productPhoto.id, photoId)),
+      tx
+        .update(productPhoto)
+        .set({ cutout: null, cutoutId: null })
+        .where(eq(productPhoto.id, photoId)),
     )
-    expect(await trash()).toEqual([`${folder("f1")}/sin-fondo`])
+    expect(await trash()).toEqual([`${folder("f1")}/sin-fondo/${proposal}`])
     await inRosa((tx) => tx.delete(productPhoto).where(eq(productPhoto.id, photoId)))
-    expect(await trash()).toEqual([folder("f1"), `${folder("f1")}/sin-fondo`].sort())
+    expect(await trash()).toEqual([folder("f1"), `${folder("f1")}/sin-fondo/${proposal}`].sort())
     // La aplicación no ve lo que queda por borrar.
     await expect(inRosa((tx) => tx.select().from(mediaTrash))).rejects.toThrow()
     await db.ownerDb.delete(mediaTrash)

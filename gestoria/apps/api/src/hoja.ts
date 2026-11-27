@@ -345,7 +345,8 @@ export function planSheet(
     planned.variants.push({ row, values, sku, priceCents, stock: Number(stockText), costCents })
     return true
   }
-  for (const [i, r] of rows.slice(1).entries()) readRow(r, read.sourceRows[i + 1] ?? i + 2)
+  for (const [i, r] of rows.slice(1).entries())
+    if (r.some((c) => c.trim() !== "")) readRow(r, read.sourceRows[i + 1] ?? i + 2)
   // Cada producto cumple las mismas reglas que al crearlo a mano; el error va en su primera fila.
   for (const planned of byName.values()) {
     const checked = productInput.safeParse({

@@ -84,8 +84,16 @@ export function createS3Storage(config: S3Config): Storage & { ensureBucket(): P
           new ListObjectsV2Command({ Bucket, Prefix: folder, ContinuationToken: token }),
         )
         const keys = (page.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []))
-        if (keys.length > 0)
-          await client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys } }))
+        if (keys.length > 0) {
+          const out = await client.send(
+            new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys } }),
+          )
+          // S3 responde 200 aunque alguno no se borre: lo dice en `Errors`.
+          if (out.Errors?.length)
+            throw new Error(
+              `no se borraron ${out.Errors.length} archivo(s): ${out.Errors[0]?.Code ?? "?"}`,
+            )
+        }
         token = page.IsTruncated ? page.NextContinuationToken : undefined
       } while (token)
     },

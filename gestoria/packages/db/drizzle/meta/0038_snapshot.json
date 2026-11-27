@@ -1,5 +1,5 @@
 {
-  "id": "5e076c3b-e6b2-4264-9d57-b9a49fb0b570",
+  "id": "d800c258-5610-40b8-9724-8fbc4ca5cd00",
   "prevId": "795a274c-39eb-4b6e-b794-64ed3bedb932",
   "version": "7",
   "dialect": "postgresql",
@@ -3135,6 +3135,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "cutout_id": {
+          "name": "cutout_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "color_id": {
           "name": "color_id",
           "type": "uuid",
@@ -3233,7 +3239,7 @@
         },
         "product_photo_where_check": {
           "name": "product_photo_where_check",
-          "value": "(\"product_photo\".\"content\" is not null or \"product_photo\".\"object_key\" is not null) and (\"product_photo\".\"object_key\" is null or \"product_photo\".\"object_key\" ~ '^[a-z0-9/-]{1,200}$') and (\"product_photo\".\"size_bytes\" is null or \"product_photo\".\"size_bytes\" between 1 and 8000000) and (\"product_photo\".\"cutout\" is null or (\"product_photo\".\"object_key\" is not null and cutout IN ('propuesta','usada')))"
+          "value": "(\"product_photo\".\"content\" is not null or \"product_photo\".\"object_key\" is not null) and (\"product_photo\".\"object_key\" is null or \"product_photo\".\"object_key\" ~ '^[a-z0-9/-]{1,200}$') and (\"product_photo\".\"size_bytes\" is null or \"product_photo\".\"size_bytes\" between 1 and 8000000) and (\"product_photo\".\"cutout\" is null or (\"product_photo\".\"object_key\" is not null and cutout IN ('propuesta','usada'))) and (\"product_photo\".\"cutout\" is null) = (\"product_photo\".\"cutout_id\" is null)"
         }
       },
       "isRLSEnabled": false

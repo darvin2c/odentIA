@@ -104,6 +104,11 @@ export function checkVideo(bytes: Uint8Array): VideoCheck {
     }
     if (!timescale) return fail("El video está incompleto. Grábalo o expórtalo otra vez.")
     const durationMs = Math.round((duration / timescale) * 1000)
+    // En partes (`moof`) la duración no está en el índice: WhatsApp lo quiere entero.
+    if (durationMs <= 0 || top.some((b) => b.type === "moof"))
+      return fail(
+        "El video no está listo para enviarse por WhatsApp. Vuelve a subirlo desde la ficha.",
+      )
 
     let videoTracks = 0
     let audioTracks = 0

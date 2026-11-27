@@ -12,7 +12,7 @@
 -- 3. El agente (Sofi, Argos) solo lee las fotos y los videos, y no ve las cargas.
 -- 4. Lo que hay que borrar del almacenamiento lo anota la base al borrar la fila que lo usaba
 --    (`media_trash`), también cuando se borra en cascada. La aplicación no lo ve.
-GRANT UPDATE (cutout) ON TABLE product_photo TO gestoria_app;--> statement-breakpoint
+GRANT UPDATE (cutout, cutout_id) ON TABLE product_photo TO gestoria_app;--> statement-breakpoint
 DROP POLICY product_photo_store ON product_photo;--> statement-breakpoint
 CREATE POLICY product_photo_read ON product_photo FOR SELECT TO gestoria_app
   USING (store_id = app_store_id());--> statement-breakpoint
@@ -20,6 +20,8 @@ CREATE POLICY product_photo_create ON product_photo FOR INSERT TO gestoria_app
   WITH CHECK (
     store_id = app_store_id() AND created_by = app_user_id() AND created_at = now()
     AND content IS NULL AND object_key IS NOT NULL
+    -- La carpeta es de la tienda: ninguna fila apunta (ni manda a borrar) la de otra.
+    AND starts_with(object_key, 'tiendas/' || app_store_id()::text || '/')
   );--> statement-breakpoint
 CREATE POLICY product_photo_change ON product_photo FOR UPDATE TO gestoria_app
   USING (store_id = app_store_id()) WITH CHECK (store_id = app_store_id());--> statement-breakpoint
@@ -44,7 +46,10 @@ ALTER TABLE media_trash ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE POLICY product_video_read ON product_video FOR SELECT TO gestoria_app
   USING (store_id = app_store_id());--> statement-breakpoint
 CREATE POLICY product_video_create ON product_video FOR INSERT TO gestoria_app
-  WITH CHECK (store_id = app_store_id() AND created_by = app_user_id() AND created_at = now());--> statement-breakpoint
+  WITH CHECK (
+    store_id = app_store_id() AND created_by = app_user_id() AND created_at = now()
+    AND starts_with(object_key, 'tiendas/' || app_store_id()::text || '/')
+  );--> statement-breakpoint
 CREATE POLICY product_video_change ON product_video FOR UPDATE TO gestoria_app
   USING (store_id = app_store_id()) WITH CHECK (store_id = app_store_id());--> statement-breakpoint
 CREATE POLICY product_video_remove ON product_video FOR DELETE TO gestoria_app
@@ -86,6 +91,7 @@ CREATE POLICY bulk_load_photo_read ON bulk_load_photo FOR SELECT TO gestoria_app
 CREATE POLICY bulk_load_photo_create ON bulk_load_photo FOR INSERT TO gestoria_app
   WITH CHECK (
     store_id = app_store_id() AND created_by = app_user_id() AND created_at = now()
+    AND starts_with(object_key, 'tiendas/' || app_store_id()::text || '/')
     AND EXISTS (SELECT 1 FROM bulk_load l WHERE l.id = load_id AND l.state = 'abierta')
   );--> statement-breakpoint
 CREATE POLICY bulk_load_photo_change ON bulk_load_photo FOR UPDATE TO gestoria_app
@@ -127,9 +133,10 @@ DECLARE
   folder text;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
-    -- Dejar la original: se borra la propuesta de quitar el fondo.
-    IF OLD.cutout IS NOT NULL AND NEW.cutout IS NULL AND OLD.object_key IS NOT NULL THEN
-      INSERT INTO media_trash (object_key) VALUES (OLD.object_key || '/sin-fondo')
+    -- «Dejar la original» o una propuesta nueva: se borra la propuesta de antes, que tiene su
+    -- propia carpeta (la nueva nunca la comparte).
+    IF OLD.cutout_id IS NOT NULL AND NEW.cutout_id IS DISTINCT FROM OLD.cutout_id THEN
+      INSERT INTO media_trash (object_key) VALUES (OLD.object_key || '/sin-fondo/' || OLD.cutout_id)
         ON CONFLICT (object_key) DO NOTHING;
     END IF;
     RETURN NEW;
@@ -150,7 +157,7 @@ $$;--> statement-breakpoint
 REVOKE ALL ON FUNCTION note_media_trash() FROM PUBLIC;--> statement-breakpoint
 CREATE TRIGGER product_photo_trash AFTER DELETE ON product_photo
   FOR EACH ROW EXECUTE FUNCTION note_media_trash();--> statement-breakpoint
-CREATE TRIGGER product_photo_cutout_trash AFTER UPDATE OF cutout ON product_photo
+CREATE TRIGGER product_photo_cutout_trash AFTER UPDATE OF cutout_id ON product_photo
   FOR EACH ROW EXECUTE FUNCTION note_media_trash();--> statement-breakpoint
 CREATE TRIGGER product_video_trash AFTER DELETE ON product_video
   FOR EACH ROW EXECUTE FUNCTION note_media_trash();--> statement-breakpoint

@@ -809,8 +809,8 @@ export function createApp(deps: AppDeps) {
       "content-type": photo.contentType,
       "x-content-type-options": "nosniff",
       "content-security-policy": "default-src 'none'; sandbox",
-      // La foto no cambia (otra foto es otro id); solo quien la pidió la guarda.
-      "cache-control": "private, max-age=86400, immutable",
+      // La que se ve cambia con «Usar esta»: el navegador pregunta cada vez.
+      "cache-control": "private, no-cache",
     })
   })
   app.delete("/api/tiendas/:id/fotos/:photoId", async (c) => {

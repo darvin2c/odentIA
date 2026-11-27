@@ -13,7 +13,7 @@ import {
   productVideo,
   storeLink,
 } from "@gestoria/db"
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm"
+import { and, asc, eq, isNull, notInArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Storage } from "./archivos.js"
 import { imageType, logProductEvent, productRow, uuidOr404 } from "./catalogo.js"
@@ -69,8 +69,17 @@ export const videoFolder = (storeId: string, productId: string, videoId: string)
   `tiendas/${storeId}/productos/${productId}/videos/${videoId}`
 
 /** Qué copia se muestra de una foto: la de fondo quitado si la tienda la eligió. */
-const copyKey = (folder: string, copy: PhotoCopy | "original", cutout: string | null) =>
-  cutout === "usada" ? `${folder}/sin-fondo/${copy}` : `${folder}/${copy}`
+const copyKey = (
+  folder: string,
+  copy: PhotoCopy | "original",
+  photo: { cutout: string | null; cutoutId: string | null },
+) =>
+  photo.cutout === "usada" && photo.cutoutId
+    ? `${cutoutFolder(folder, photo.cutoutId)}/${copy}`
+    : `${folder}/${copy}`
+
+/** Cada propuesta sin fondo, en su carpeta: una nueva nunca pisa la que se está mostrando. */
+const cutoutFolder = (folder: string, cutoutId: string) => `${folder}/sin-fondo/${cutoutId}`
 
 const typeError = () =>
   new StoreError(400, "PHOTO_TYPE", "No pudimos abrir la foto. Sube una JPG, PNG o WebP.")
@@ -114,9 +123,15 @@ export async function storePhoto(
     if (error instanceof ImageError) throw typeError()
     throw typeError()
   }
-  await storage.put(`${folder}/original`, bytes, contentType)
-  for (const copy of PHOTO_COPIES)
-    await storage.put(`${folder}/${copy}`, copies[copy], COPY_TYPE[copy])
+  try {
+    await storage.put(`${folder}/original`, bytes, contentType)
+    for (const copy of PHOTO_COPIES)
+      await storage.put(`${folder}/${copy}`, copies[copy], COPY_TYPE[copy])
+  } catch (error) {
+    // Lo que alcanzó a guardarse no queda sin dueño.
+    await undoStored(storage, folder)
+    throw error
+  }
   return { contentType, sizeBytes: bytes.length, width: facts.width, height: facts.height }
 }
 
@@ -220,6 +235,7 @@ async function photoRow(tx: Db, storeId: string, photoId: string) {
       productId: productPhoto.productId,
       objectKey: productPhoto.objectKey,
       cutout: productPhoto.cutout,
+      cutoutId: productPhoto.cutoutId,
     })
     .from(productPhoto)
     .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
@@ -251,8 +267,22 @@ export async function proposeCutout(
   const files = need(storage)
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const photo = await photoRow(tx, storeId, photoId)
-    await storePhoto(files, `${photo.objectKey}/sin-fondo`, bytes, { transparent: true })
-    await tx.update(productPhoto).set({ cutout: "propuesta" }).where(eq(productPhoto.id, photoId))
+    const cutoutId = crypto.randomUUID()
+    const folder = cutoutFolder(photo.objectKey, cutoutId)
+    await storePhoto(files, folder, bytes, { transparent: true })
+    try {
+      // La de antes, si había, la anota la base para borrarla.
+      await tx
+        .update(productPhoto)
+        .set({ cutout: "propuesta", cutoutId })
+        .where(eq(productPhoto.id, photoId))
+      await logProductEvent(tx, storeId, photo.productId, person.userId, "foto", [
+        { field: "cutout", from: photo.cutout, to: "propuesta" },
+      ])
+    } catch (error) {
+      await undoStored(files, folder)
+      throw error
+    }
     return { id: photoId, cutout: "propuesta" as const }
   })
 }
@@ -274,7 +304,10 @@ export async function chooseCutout(
       throw new StoreError(404, "NOT_FOUND", "Esa foto no tiene una propuesta sin fondo")
     const next = use ? ("usada" as const) : null
     if (next !== photo.cutout) {
-      await tx.update(productPhoto).set({ cutout: next }).where(eq(productPhoto.id, photoId))
+      await tx
+        .update(productPhoto)
+        .set(next ? { cutout: next } : { cutout: null, cutoutId: null })
+        .where(eq(productPhoto.id, photoId))
       await logProductEvent(tx, storeId, photo.productId, person.userId, "foto", [
         { field: "cutout", from: photo.cutout, to: next },
       ])
@@ -299,6 +332,7 @@ export async function photoContent(
         content: productPhoto.content,
         objectKey: productPhoto.objectKey,
         cutout: productPhoto.cutout,
+        cutoutId: productPhoto.cutoutId,
       })
       .from(productPhoto)
       .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
@@ -307,7 +341,7 @@ export async function photoContent(
   })
   if (row.content) return { contentType: row.contentType, content: new Uint8Array(row.content) }
   const content = row.objectKey
-    ? await need(storage).get(copyKey(row.objectKey, "vitrina", row.cutout))
+    ? await need(storage).get(copyKey(row.objectKey, "vitrina", row))
     : null
   if (!content) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
   return { contentType: COPY_TYPE.vitrina, content }
@@ -380,9 +414,9 @@ export async function addVideo(
       )
     const id = crypto.randomUUID()
     const folder = videoFolder(storeId, productId, id)
-    await files.put(`${folder}/video`, input.video, "video/mp4")
-    await files.put(`${folder}/poster`, poster, "image/jpeg")
     try {
+      await files.put(`${folder}/video`, input.video, "video/mp4")
+      await files.put(`${folder}/poster`, poster, "image/jpeg")
       const [row] = await tx
         .insert(productVideo)
         .values({
@@ -516,6 +550,7 @@ export async function productMedia(
         width: productPhoto.width,
         height: productPhoto.height,
         cutout: productPhoto.cutout,
+        cutoutId: productPhoto.cutoutId,
         objectKey: productPhoto.objectKey,
       })
       .from(productPhoto)
@@ -541,13 +576,13 @@ export async function productMedia(
       const urls =
         key && storage
           ? {
-              miniatura: (await sign(copyKey(key, "miniatura", p.cutout)))!,
-              vitrina: (await sign(copyKey(key, "vitrina", p.cutout)))!,
+              miniatura: (await sign(copyKey(key, "miniatura", p)))!,
+              vitrina: (await sign(copyKey(key, "vitrina", p)))!,
               original: (await sign(`${key}/original`))!,
-              sinFondo: p.cutout
+              sinFondo: p.cutoutId
                 ? {
-                    miniatura: (await sign(`${key}/sin-fondo/miniatura`))!,
-                    vitrina: (await sign(`${key}/sin-fondo/vitrina`))!,
+                    miniatura: (await sign(`${cutoutFolder(key, p.cutoutId!)}/miniatura`))!,
+                    vitrina: (await sign(`${cutoutFolder(key, p.cutoutId!)}/vitrina`))!,
                   }
                 : null,
             }
@@ -620,6 +655,7 @@ export async function sofiMediaIn(
       colorId: productPhoto.colorId,
       objectKey: productPhoto.objectKey,
       cutout: productPhoto.cutout,
+      cutoutId: productPhoto.cutoutId,
     })
     .from(productPhoto)
     .where(and(eq(productPhoto.productId, productId), eq(productPhoto.storeId, storeId)))
@@ -642,7 +678,7 @@ export async function sofiMediaIn(
           id: chosen.id,
           mimeType: COPY_TYPE.whatsapp,
           url: await storage.signedUrl(
-            copyKey(chosen.objectKey!, "whatsapp", chosen.cutout),
+            copyKey(chosen.objectKey!, "whatsapp", chosen),
             PUBLIC_LINK_SECONDS,
           ),
           label: null,
@@ -704,6 +740,7 @@ export async function publicMedia(
       height: productPhoto.height,
       objectKey: productPhoto.objectKey,
       cutout: productPhoto.cutout,
+      cutoutId: productPhoto.cutoutId,
     })
     .from(productPhoto)
     .where(
@@ -731,8 +768,8 @@ export async function publicMedia(
           color: colorName(p.colorId),
           width: p.width,
           height: p.height,
-          miniatura: await sign(copyKey(p.objectKey!, "miniatura", p.cutout)),
-          vitrina: await sign(copyKey(p.objectKey!, "vitrina", p.cutout)),
+          miniatura: await sign(copyKey(p.objectKey!, "miniatura", p)),
+          vitrina: await sign(copyKey(p.objectKey!, "vitrina", p)),
         })),
     ),
     videos: await Promise.all(
@@ -754,6 +791,9 @@ export async function publicMedia(
  * el dueño de la base. Corre al arrancar el servidor y cada tanto hasta que no queda ninguna. La
  * que no se puede abrir se deja como está (se ve igual) y se avisa en el registro.
  */
+/** Las fotos de antes que no se pudieron abrir: se dejan en la base, como están. */
+const unmovable = new Set<string>()
+
 export async function moveStoredPhotos(ownerDb: Db, storage: Storage, batch = 20) {
   const rows = await ownerDb
     .select({
@@ -763,7 +803,12 @@ export async function moveStoredPhotos(ownerDb: Db, storage: Storage, batch = 20
       content: productPhoto.content,
     })
     .from(productPhoto)
-    .where(isNull(productPhoto.objectKey))
+    .where(
+      and(
+        isNull(productPhoto.objectKey),
+        unmovable.size ? notInArray(productPhoto.id, [...unmovable]) : undefined,
+      ),
+    )
     .orderBy(asc(productPhoto.createdAt))
     .limit(batch)
   let moved = 0
@@ -788,10 +833,12 @@ export async function moveStoredPhotos(ownerDb: Db, storage: Storage, batch = 20
       else moved++
     } catch (error) {
       failed++
+      // No se vuelve a probar hasta que el servidor arranque otra vez: no tapa a las demás.
+      unmovable.add(row.id)
       console.error("gestoria-api: no se pudo pasar una foto al almacenamiento", row.id, error)
     }
   }
-  return { moved, failed, more: rows.length === batch && moved > 0 }
+  return { moved, failed, more: rows.length === batch }
 }
 
 /** Borra del almacenamiento lo que la base anotó (`media_trash`), de a tantas carpetas. */
@@ -810,17 +857,7 @@ export async function emptyMediaTrash(ownerDb: Db, storage: Storage, batch = 50)
         or exists (select 1 from bulk_load_photo where object_key = ${row.objectKey}) as used`,
     )
     try {
-      if (!inUse?.used || row.objectKey.endsWith("/sin-fondo")) {
-        // Dejar la original: la propuesta se borra solo si la foto sigue sin propuesta.
-        if (row.objectKey.endsWith("/sin-fondo")) {
-          const folder = row.objectKey.slice(0, -"/sin-fondo".length)
-          const [again] = await ownerDb
-            .select({ id: productPhoto.id })
-            .from(productPhoto)
-            .where(and(eq(productPhoto.objectKey, folder), sql`${productPhoto.cutout} is not null`))
-          if (!again) await storage.removeFolder(row.objectKey)
-        } else await storage.removeFolder(row.objectKey)
-      }
+      if (!inUse?.used) await storage.removeFolder(row.objectKey)
       await ownerDb.delete(mediaTrash).where(eq(mediaTrash.objectKey, row.objectKey))
       removed++
     } catch (error) {

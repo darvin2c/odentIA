@@ -726,6 +726,8 @@ export const productPhoto = pgTable(
     height: integer("height"),
     /** La propuesta de quitar el fondo (decisión 9): nula si no hay; la original se guarda siempre. */
     cutout: text("cutout").$type<CutoutState>(),
+    /** La carpeta de esa propuesta (`<object_key>/sin-fondo/<id>`): cada propuesta, la suya. */
+    cutoutId: uuid("cutout_id"),
     /** El color al que pertenece (decisión 9); nulo: vale para todos. */
     colorId: uuid("color_id"),
     createdBy: text("created_by").notNull(),
@@ -744,7 +746,7 @@ export const productPhoto = pgTable(
     ),
     check(
       "product_photo_where_check",
-      sql`(${table.content} is not null or ${table.objectKey} is not null) and (${table.objectKey} is null or ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$') and (${table.sizeBytes} is null or ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_MEDIA_PHOTO_BYTES))}) and (${table.cutout} is null or (${table.objectKey} is not null and ${inList("cutout", CUTOUT_STATES)}))`,
+      sql`(${table.content} is not null or ${table.objectKey} is not null) and (${table.objectKey} is null or ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$') and (${table.sizeBytes} is null or ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_MEDIA_PHOTO_BYTES))}) and (${table.cutout} is null or (${table.objectKey} is not null and ${inList("cutout", CUTOUT_STATES)})) and (${table.cutout} is null) = (${table.cutoutId} is null)`,
     ),
     foreignKey({
       name: "product_photo_product_fkey",

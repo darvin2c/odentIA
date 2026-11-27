@@ -257,17 +257,22 @@ describe("las fotos en el almacenamiento", () => {
     let seen = (await call("lucia", "GET", `${base}/productos/${zapatilla}/medios`)).json.photos[0]
     expect(seen.cutout).toBe("propuesta")
     expect(seen.urls.vitrina).not.toMatch(/sin-fondo/)
-    expect(seen.urls.sinFondo.vitrina).toMatch(/sin-fondo\/vitrina/)
+    expect(seen.urls.sinFondo.vitrina).toMatch(/sin-fondo\/[0-9a-f-]{36}\/vitrina/)
+    const [{ cutoutId }] = (await db.ownerDb
+      .select({ cutoutId: productPhoto.cutoutId })
+      .from(productPhoto)
+      .where(eq(productPhoto.id, first))) as [{ cutoutId: string }]
+    const cutoutAt = `tiendas/${storeId}/productos/${zapatilla}/fotos/${first}/sin-fondo/${cutoutId}`
     // «Usar esta»: se ve la sin fondo; la original sigue.
     expect(
       (await call("mario", "PATCH", `${base}/fotos/${first}/sin-fondo`, { usar: true })).status,
     ).toBe(200)
     seen = (await call("lucia", "GET", `${base}/productos/${zapatilla}/medios`)).json.photos[0]
     expect(seen.cutout).toBe("usada")
-    expect(seen.urls.vitrina).toMatch(/sin-fondo\/vitrina/)
+    expect(seen.urls.vitrina).toMatch(new RegExp(`${cutoutId}/vitrina`))
     expect(seen.urls.original).toMatch(new RegExp(`${first}/original`))
     // El WhatsApp de la sin fondo va sobre blanco, en JPEG.
-    const key = `tiendas/${storeId}/productos/${zapatilla}/fotos/${first}/sin-fondo/whatsapp`
+    const key = `${cutoutAt}/whatsapp`
     const flat = await sharp(storage.files.get(key)!.bytes).metadata()
     expect(flat.format).toBe("jpeg")
     // «Dejar la original»: la propuesta se borra después (la base la anota).
@@ -275,9 +280,7 @@ describe("las fotos en el almacenamiento", () => {
       (await call("rosa", "PATCH", `${base}/fotos/${first}/sin-fondo`, { usar: false })).status,
     ).toBe(200)
     const trash = await db.ownerDb.select().from(mediaTrash)
-    expect(trash.map((t) => t.objectKey)).toContain(
-      `tiendas/${storeId}/productos/${zapatilla}/fotos/${first}/sin-fondo`,
-    )
+    expect(trash.map((t) => t.objectKey)).toEqual([cutoutAt])
     await emptyMediaTrash(db.ownerDb, storage)
     expect(storage.files.has(key)).toBe(false)
     expect(
@@ -311,7 +314,9 @@ describe("las fotos en el almacenamiento", () => {
       tx.delete(productPhoto).where(eq(productPhoto.id, first)).returning(),
     )
     expect(gone).toEqual([])
-    expect(await db.ownerDb.select().from(productPhoto).where(eq(productPhoto.id, first))).toHaveLength(1)
+    expect(
+      await db.ownerDb.select().from(productPhoto).where(eq(productPhoto.id, first)),
+    ).toHaveLength(1)
   })
 
   it("al quitarla, la base anota su carpeta y el servidor la borra", async () => {

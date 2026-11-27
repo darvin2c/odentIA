@@ -113,7 +113,12 @@ export function readXlsx(bytes: Uint8Array): string[][] {
     while (rows.length < at) rows.push([])
     rows[at] = cells
   }
-  return rows.filter((r) => r.some((c) => c.trim() !== ""))
+  // Las filas en blanco del medio se quedan (vacías): así el error dice la fila del Excel.
+  const blank = (r: string[] | undefined) => !r || r.every((c) => c.trim() === "")
+  const filled = Array.from(rows, (r) => r ?? [])
+  while (filled.length && blank(filled[0])) filled.shift()
+  while (filled.length && blank(filled.at(-1))) filled.pop()
+  return filled
 }
 
 const fold = (text: string) =>
@@ -155,6 +160,7 @@ export function toExampleColumns(
     return /^\d/.test(raw) ? raw.replace(",", ".") : raw.toUpperCase().replace(/^UNICA$/, "Única")
   }
   for (const [n, row] of rows.slice(1).entries()) {
+    if (row.every((c) => c.trim() === "")) continue
     const base = canonical.map(() => "")
     // Lo que ya está con su nombre de la hoja de ejemplo.
     canonical.forEach((title, i) => {
