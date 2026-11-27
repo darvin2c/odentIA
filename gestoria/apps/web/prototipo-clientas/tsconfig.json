@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "include": ["."],
+  "compilerOptions": {
+    "paths": {
+      "@tanstack/react-table": [
+        "../../../../shared/packages/ui-patterns/node_modules/@tanstack/react-table"
+      ]
+    }
+  }
+}

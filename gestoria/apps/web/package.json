@@ -9,7 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "prototipo": "vite --config vite.prototipo.config.ts",
-    "build:prototipo": "vite build --config vite.prototipo.config.ts"
+    "build:prototipo": "vite build --config vite.prototipo.config.ts",
+    "prototipo:clientas": "vite --config vite.clientas.config.ts",
+    "build:prototipo-clientas": "vite build --config vite.clientas.config.ts"
   },
   "dependencies": {
     "@odentia/contract": "workspace:*",
