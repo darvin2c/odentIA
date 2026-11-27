@@ -9,5 +9,5 @@ interface Props {
 const parts = segments(Astro.props.text)
 ---
 {parts.map((part) =>
-  part.mark ? <span class="mark">{part.text}</span> : part.href ? <a href={part.href}>{part.text}</a> : part.text,
+  part.mark ? <span class="pendiente">{part.text}</span> : part.href ? <a class="enlace" href={part.href}>{part.text}</a> : part.text,
 )}

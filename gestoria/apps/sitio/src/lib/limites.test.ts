@@ -1,7 +1,8 @@
 /**
  * La web de gestorIA no usa nada de las clínicas (ADR 0203). La prueba común de límites
  * (`gestoria-boundaries.test.ts`) no lee los `.astro`: esta mira lo que traen las páginas y piezas
- * de la web. Solo lo suyo, Astro y sus integraciones, y lo de uso general (`shared/`).
+ * de la web. Solo lo suyo, Astro y sus integraciones, lo de uso general (`shared/`) y las
+ * librerías del movimiento del Inicio.
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
@@ -19,8 +20,9 @@ function files(dir: string): string[] {
 }
 
 const IMPORT = /(?:from\s+|\bimport\s*\(?\s*|@import\s+)["']([^"']+)["']/g
+// Las librerías del movimiento del Inicio (web v4): GSAP con ScrollTrigger, Lenis y three.js.
 const ALLOWED =
-  /^(astro(:|\/|$)|@astrojs\/|@fontsource|@odentia\/(ui|ui-patterns)(\/|$)|react-dom\/server$|vitest$|node:)/
+  /^(astro(:|\/|$)|@astrojs\/|@fontsource|@odentia\/(ui|ui-patterns)(\/|$)|react-dom\/server$|vitest$|node:|gsap(\/|$)|lenis$|three$)/
 
 describe("la web de gestorIA no usa nada de las clínicas", () => {
   it("solo trae lo suyo, Astro y lo de uso general", () => {
