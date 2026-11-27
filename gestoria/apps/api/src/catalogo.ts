@@ -25,6 +25,7 @@ import {
   saleOrderLine,
   stockMovement,
   storeEvent,
+  storeTemplateField,
 } from "@gestoria/db"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
@@ -32,7 +33,7 @@ import { isAgent } from "./agente.js"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
 import { can, type StoreSeat } from "./permisos.js"
-import { applyRubroData, RUBROS, readinessOf, templateIn } from "./rubros.js"
+import { applyRubroData, mergeTemplate, RUBROS, readinessOf, templateIn } from "./rubros.js"
 import { lastEntryCost } from "./stock.js"
 import { sameText } from "./texto.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -377,6 +378,11 @@ export async function takenSkus(tx: Db, storeId: string): Promise<Set<string>> {
 }
 
 /** La lista del catálogo: cada producto con su rango de precio, sus variantes y lo que queda. */
+/**
+ * El catálogo, una fila por producto: su precio, sus variantes y su stock, y para la tabla de la
+ * pantalla (lienzo «La ficha del producto», e7) sus colores con su muestra, su estado y qué tan
+ * lista está para Sofi (`readinessOf`, la misma cuenta de la ficha).
+ */
 export async function catalog(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "catalogo.ver", async (tx) => {
     const products = await tx
@@ -387,10 +393,36 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
         listPriceCents: product.listPriceCents,
         minPriceCents: product.minPriceCents,
         options: product.options,
+        colorOption: product.colorOption,
+        status: product.status,
+        rubro: product.rubro,
+        rubroData: product.rubroData,
+        keywords: product.keywords,
+        offerDelivery: product.offerDelivery,
+        offerDiscount: product.offerDiscount,
+        offerSecondUnit: product.offerSecondUnit,
+        offerGift: product.offerGift,
+        packageWeightG: product.packageWeightG,
+        packageLengthMm: product.packageLengthMm,
       })
       .from(product)
       .where(eq(product.storeId, storeId))
       .orderBy(asc(product.name))
+    const looks = await tx
+      .select({
+        productId: productColor.productId,
+        id: productColor.id,
+        value: productColor.value,
+        hex: productColor.hex,
+        hex2: productColor.hex2,
+        photoId: productColor.photoId,
+      })
+      .from(productColor)
+      .where(eq(productColor.storeId, storeId))
+    const ownTemplates = await tx
+      .select()
+      .from(storeTemplateField)
+      .where(eq(storeTemplateField.storeId, storeId))
     const variants = await tx
       .select({
         productId: productVariant.productId,
@@ -404,25 +436,80 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
         id: productPhoto.id,
         productId: productPhoto.productId,
         position: productPhoto.position,
+        colorId: productPhoto.colorId,
       })
       .from(productPhoto)
       .where(eq(productPhoto.storeId, storeId))
       .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
     const byProduct = Map.groupBy(variants, (v) => v.productId)
-    const firstPhoto = new Map<string, string>()
-    for (const photo of photos)
-      if (!firstPhoto.has(photo.productId)) firstPhoto.set(photo.productId, photo.id)
+    const photosOf = Map.groupBy(photos, (p) => p.productId)
+    const looksOf = Map.groupBy(looks, (l) => l.productId)
+    const templates = new Map(
+      PRODUCT_RUBROS.map((rubro) => [
+        rubro,
+        mergeTemplate(
+          rubro,
+          ownTemplates.filter((row) => row.rubro === rubro),
+        ),
+      ]),
+    )
     return {
       products: products.map((p) => {
         const own = byProduct.get(p.id) ?? []
         const prices = own.map((v) => v.priceCents ?? p.listPriceCents)
+        const stock = own.reduce((sum, v) => sum + v.stock, 0)
+        const ownPhotos = photosOf.get(p.id) ?? []
+        const colors = (p.colorOption === null ? [] : (p.options[p.colorOption]?.values ?? [])).map(
+          (value) => {
+            const look = (looksOf.get(p.id) ?? []).find((l) => sameText(l.value, value))
+            return {
+              value,
+              hex: look?.hex ?? null,
+              hex2: look?.hex2 ?? null,
+              hasPhoto:
+                !!look?.photoId || (!!look && ownPhotos.some((ph) => ph.colorId === look.id)),
+            }
+          },
+        )
+        const readiness = readinessOf({
+          listPriceCents: p.listPriceCents,
+          minPriceCents: p.minPriceCents,
+          stock,
+          sellsWithoutStock: sellsWithoutStock(p.status),
+          colors,
+          photoCount: ownPhotos.length,
+          rowLabel: p.rubro ? RUBROS[p.rubro].rowLabel : "Color",
+          template: p.rubro ? (templates.get(p.rubro) ?? []) : [],
+          rubroData: p.rubroData,
+          offersSomething: p.offerDelivery || p.offerDiscount || p.offerSecondUnit || !!p.offerGift,
+          keywordCount: p.keywords.length,
+          hasPackage: p.packageWeightG !== null && p.packageLengthMm !== null,
+        })
         return {
-          ...p,
+          id: p.id,
+          name: p.name,
+          category: p.category,
+          listPriceCents: p.listPriceCents,
+          minPriceCents: p.minPriceCents,
+          options: p.options,
+          colorOption: p.colorOption,
+          rubro: p.rubro,
+          colors: colors.map(({ hasPhoto: _photo, ...color }) => color),
+          state: saleStateOf(p.status, stock),
+          readiness: {
+            level: readiness.level,
+            sellsAlone: readiness.sellsAlone,
+            complete: readiness.complete,
+            done: readiness.done,
+            total: readiness.total,
+            neededMissing: readiness.items.filter((i) => i.needed && !i.ok).length,
+          },
           variantCount: own.length,
-          stock: own.reduce((sum, v) => sum + v.stock, 0),
+          stock,
+          soldOut: own.filter((v) => v.stock === 0).length,
           fromCents: prices.length ? Math.min(...prices) : p.listPriceCents,
           toCents: prices.length ? Math.max(...prices) : p.listPriceCents,
-          photoId: firstPhoto.get(p.id) ?? null,
+          photoId: ownPhotos[0]?.id ?? null,
         }
       }),
     }

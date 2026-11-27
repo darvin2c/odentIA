@@ -32,6 +32,7 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
+import { ProductPage } from "./ficha/ficha"
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { startInstalledApp } from "./lib/avisos"
@@ -41,7 +42,6 @@ import { BrandPage } from "./marca"
 import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
-import { ProductPage } from "./producto"
 import { ReportsPage } from "./reportes"
 import { SofiPage } from "./sofi"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"

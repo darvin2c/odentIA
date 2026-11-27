@@ -129,8 +129,12 @@ describe("la pantalla donde está", () => {
     const owner = helpScreenView("owner", "/pedidos")
     expect(owner.title).toBe("Pedidos")
     expect(owner.suggestions).toHaveLength(3)
-    // A Ventas no se le sugiere lo que no puede hacer, aunque abra la pantalla.
-    expect(helpScreenView("sales", "/catalogo")).toEqual({ title: "Catálogo", suggestions: [] })
+    // A Ventas no se le sugiere lo que no puede hacer, aunque abra la pantalla: del catálogo, solo
+    // responder lo que Sofi no supo.
+    expect(helpScreenView("sales", "/catalogo")).toEqual({
+      title: "Catálogo",
+      suggestions: ["Sofi no supo responder algo de un producto, ¿cómo se lo enseño?"],
+    })
     expect(helpScreenView("sales", "/")).toEqual({
       title: "Inicio",
       suggestions: ["¿Qué me toca hacer hoy?"],

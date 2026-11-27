@@ -1,5 +1,7 @@
 import { Badge, Button, Field, FieldGroup, FieldLabel, Input, toast } from "@odentia/ui"
 import {
+  DataTable,
+  DataTableSkeleton,
   EmptyState,
   ErrorState,
   type FieldControl,
@@ -9,12 +11,17 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Download, Package, Plus, Trash2, Upload } from "lucide-react"
-import { useId, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { MoneyInput } from "./campos"
+import { TEMPLATES_KEY } from "./ficha/datos"
+import { StateBadge } from "./ficha/lateral"
+import { SofiDot, Swatch } from "./ficha/piezas"
 import { api } from "./lib/api"
+import type { RubroTemplate } from "./lib/ficha"
 import {
   type CatalogItem,
   money,
@@ -47,15 +54,152 @@ function priceSpan(item: { fromCents: number; toCents: number }, currency: strin
     : `${money(item.fromCents, currency)} a ${money(item.toCents, currency)}`
 }
 
+/** Cómo se cuentan las unidades de cada rubro (de la plantilla); sin rubro, «unidades». */
+function unitsOf(templates: RubroTemplate[] | undefined, rubro: CatalogItem["rubro"]) {
+  const found = templates?.find((t) => t.id === rubro)
+  return { unit: found?.unit ?? "unidades", unitOne: found?.unitOne ?? "unidad" }
+}
+
+/** «blanca, negra · 35 a 42»: los colores y el rango de la otra opción. */
+function axisText(item: CatalogItem) {
+  const sizes = item.options.find((_, i) => i !== item.colorOption)
+  const range =
+    sizes && sizes.values.length > 1 ? valuesSummary(sizes.values) : (sizes?.values[0] ?? "")
+  return { colors: item.colors.map((c) => c.value).join(", "), range }
+}
+
 export function CatalogPage() {
   const { store } = useStoreContext()
   const canEdit = store.permissions.includes("configuracion")
   const catalog = useCatalog(store.id)
+  const navigate = useNavigate()
+  const templates = useQuery({
+    queryKey: TEMPLATES_KEY(store.id),
+    queryFn: () => api<{ rubros: RubroTemplate[] }>(`/api/tiendas/${store.id}/plantillas`),
+    staleTime: 60_000,
+  })
   const [adding, setAdding] = useState(false)
   const [uploading, setUploading] = useState(false)
   const products = catalog.data?.products ?? []
   const variants = products.reduce((n, p) => n + p.variantCount, 0)
   const soldOut = products.filter((p) => p.stock === 0).length
+
+  const columns = useMemo<ColumnDef<CatalogItem>[]>(
+    () => [
+      {
+        id: "foto",
+        header: "Foto",
+        meta: { view: { role: "media" } },
+        cell: ({ row }) => (
+          <Photo storeId={store.id} photoId={row.original.photoId} alt="" className="size-11" />
+        ),
+      },
+      {
+        id: "producto",
+        header: "Producto",
+        meta: { view: { role: "title" } },
+        cell: ({ row }) => (
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate font-semibold">{row.original.name}</span>
+            {row.original.category ? (
+              <span className="truncate text-xs text-muted-foreground">
+                {row.original.category}
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        id: "precio",
+        header: "Precio",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => (
+          <span className="tabular-nums">{priceSpan(row.original, store.currency)}</span>
+        ),
+      },
+      {
+        id: "variantes",
+        header: "Color y talla",
+        meta: { view: { tableOnly: true } },
+        cell: ({ row }) => {
+          const { colors, range } = axisText(row.original)
+          if (!colors && !range) return <span className="text-muted-foreground">Única</span>
+          return (
+            <span className="flex min-w-0 items-center gap-2">
+              {row.original.colors.length ? (
+                <span className="flex -space-x-1">
+                  {row.original.colors.map((c) => (
+                    <Swatch
+                      key={c.value}
+                      hex={c.hex}
+                      hex2={c.hex2}
+                      className="size-4 ring-2 ring-card"
+                    />
+                  ))}
+                </span>
+              ) : null}
+              <span className="truncate text-sm">
+                {colors}
+                {range ? (
+                  <span className="text-muted-foreground">
+                    {colors ? " · " : ""}
+                    {range}
+                  </span>
+                ) : null}
+              </span>
+            </span>
+          )
+        },
+      },
+      {
+        id: "stock",
+        header: "Queda",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          const item = row.original
+          const { unit, unitOne } = unitsOf(templates.data?.rubros, item.rubro)
+          return item.stock === 0 ? (
+            <Badge variant="outline">Agotado</Badge>
+          ) : (
+            <span className="tabular-nums">
+              {item.stock} {item.stock === 1 ? unitOne : unit}
+              {item.soldOut ? (
+                <span className="text-muted-foreground"> · {item.soldOut} sin stock</span>
+              ) : null}
+            </span>
+          )
+        },
+      },
+      {
+        id: "estado",
+        header: "Estado",
+        meta: { view: { tableOnly: true } },
+        cell: ({ row }) => <StateBadge state={row.original.state} />,
+      },
+      {
+        id: "sofi",
+        header: "Sofi",
+        meta: { view: { tableOnly: true } },
+        cell: ({ row }) => {
+          const r = row.original.readiness
+          return (
+            <span className="flex items-center gap-2 text-sm">
+              <SofiDot done={r.done} total={r.total} sellsAlone={r.sellsAlone} />
+              <span className={r.sellsAlone ? undefined : "text-warning"}>
+                {r.complete
+                  ? "Responde todo"
+                  : r.sellsAlone
+                    ? "Vende sola"
+                    : `Le ${r.neededMissing === 1 ? "falta 1" : `faltan ${r.neededMissing}`}`}
+              </span>
+            </span>
+          )
+        },
+      },
+    ],
+    [store.id, store.currency, templates.data],
+  )
+  const table = useReactTable({ data: products, columns, getCoreRowModel: getCoreRowModel() })
 
   return (
     <>
@@ -87,7 +231,7 @@ export function CatalogPage() {
       />
 
       {catalog.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando el catálogo…</p>
+        <DataTableSkeleton columnCount={7} rowCount={4} label="Cargando el catálogo" />
       ) : null}
       {catalog.isError ? (
         <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />
@@ -109,52 +253,16 @@ export function CatalogPage() {
         />
       ) : null}
       {products.length > 0 ? (
-        <div className="elevated overflow-hidden rounded-xl border bg-card">
-          <div className="hidden grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_8rem] gap-4 border-b bg-surface-muted px-4 py-2.5 text-xs font-semibold text-muted-foreground md:grid">
-            <span>Foto</span>
-            <span>Producto</span>
-            <span>Precio</span>
-            <span>Variantes</span>
-            <span>Queda</span>
-          </div>
-          <ul className="flex flex-col divide-y">
-            {products.map((item) => (
-              <li key={item.id}>
-                <Link
-                  to="/tiendas/$id/catalogo/$productId"
-                  params={{ id: store.id, productId: item.id }}
-                  className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1 px-4 py-3 transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_8rem]"
-                >
-                  <Photo
-                    storeId={store.id}
-                    photoId={item.photoId}
-                    alt=""
-                    className="row-span-3 size-11 md:row-span-1"
-                  />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate font-semibold">{item.name}</span>
-                    {item.category ? (
-                      <span className="truncate text-xs text-muted-foreground">
-                        {item.category}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="text-sm">{priceSpan(item, store.currency)}</span>
-                  <span className="min-w-0 text-sm text-muted-foreground md:text-foreground">
-                    {optionsSummary(item.options) || "Sin variantes"}
-                  </span>
-                  <span className="col-start-2 text-sm md:col-start-auto">
-                    {item.stock === 0 ? (
-                      <Badge variant="outline">0 · agotado</Badge>
-                    ) : (
-                      `${item.stock} ${item.stock === 1 ? "unidad" : "unidades"}`
-                    )}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <DataTable
+          table={table}
+          isFetching={catalog.isFetching}
+          onRowClick={(item) =>
+            void navigate({
+              to: "/tiendas/$id/catalogo/$productId",
+              params: { id: store.id, productId: item.id },
+            })
+          }
+        />
       ) : null}
       {adding ? <NewProduct onClose={() => setAdding(false)} /> : null}
       {uploading ? <SheetUpload onClose={() => setUploading(false)} /> : null}

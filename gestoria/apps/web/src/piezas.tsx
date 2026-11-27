@@ -65,6 +65,28 @@ export function Photo({
 }
 
 /**
+ * La dirección de una foto de la tienda para mostrarla o leer sus colores: la misma que pide
+ * `Photo`, una sola vez por foto. Vacía mientras llega.
+ */
+export function usePhotoUrl(storeId: string, photoId: string | null): string | null {
+  const blob = useQuery({
+    queryKey: ["foto", storeId, photoId],
+    queryFn: () => api<Blob>(`/api/tiendas/${storeId}/fotos/${photoId}`, { as: "blob" }),
+    enabled: Boolean(photoId),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 10 * 60_000,
+  })
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!blob.data) return
+    const next = URL.createObjectURL(blob.data)
+    setUrl(next)
+    return () => URL.revokeObjectURL(next)
+  }, [blob.data])
+  return photoId ? url : null
+}
+
+/**
  * Achica una foto antes de subirla (hasta 1600 px por lado, WebP o, si el navegador no lo
  * escribe, JPEG): llega más rápido y pesa menos de lo que acepta el servidor.
  */

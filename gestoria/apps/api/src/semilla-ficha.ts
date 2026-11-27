@@ -144,7 +144,12 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
     .from(productPhoto)
     .where(eq(productPhoto.productId, zapatilla))
     .orderBy(asc(productPhoto.position))
-  const [blanca, negra] = await tx
+  const sandaliaPhotos = await tx
+    .select({ id: productPhoto.id })
+    .from(productPhoto)
+    .where(eq(productPhoto.productId, sandalia))
+    .orderBy(asc(productPhoto.position))
+  const [blanca, negra, sandaliaNegra, sandaliaBeige] = await tx
     .insert(productColor)
     .values([
       {
@@ -161,9 +166,22 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
         hex: "#1f1f1f",
         photoId: photos[1]?.id ?? null,
       },
-      { storeId, productId: sandalia, value: "negra", hex: "#1c1c1c" },
+      {
+        storeId,
+        productId: sandalia,
+        value: "negra",
+        hex: "#1c1c1c",
+        photoId: sandaliaPhotos[0]?.id ?? null,
+      },
       // Bicolor: beige con la tira dorada.
-      { storeId, productId: sandalia, value: "beige", hex: "#e7d8c3", hex2: "#b08d57" },
+      {
+        storeId,
+        productId: sandalia,
+        value: "beige",
+        hex: "#e7d8c3",
+        hex2: "#b08d57",
+        photoId: sandaliaPhotos[1]?.id ?? null,
+      },
     ])
     .returning({ id: productColor.id })
   if (photos[0])
@@ -176,6 +194,13 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
       .update(productPhoto)
       .set({ colorId: negra!.id })
       .where(eq(productPhoto.id, photos[1].id))
+
+  for (const [photo, color] of [
+    [sandaliaPhotos[0], sandaliaNegra],
+    [sandaliaPhotos[1], sandaliaBeige],
+  ] as const)
+    if (photo && color)
+      await tx.update(productPhoto).set({ colorId: color.id }).where(eq(productPhoto.id, photo.id))
 
   // Los códigos de barras de la zapatilla blanca.
   const variants = await tx

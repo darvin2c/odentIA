@@ -88,9 +88,11 @@ const CATALOG: SeedProduct[] = [
     stock: ([color, size]) =>
       color === "blanca" ? (size === "42" ? 0 : 3) : size === "35" ? 0 : 2,
     costCents: ([color]) => (color === "blanca" ? 6800 : 5500),
+    // Una foto de cada color (la blanca y la negra, las de su muestra) y otra de la blanca.
     colors: [
-      [254, 215, 170],
-      [251, 146, 60],
+      [242, 240, 234],
+      [31, 31, 31],
+      [226, 223, 215],
     ],
   },
   {
@@ -104,7 +106,10 @@ const CATALOG: SeedProduct[] = [
     ],
     stock: ([color]) => (color === "negra" ? 2 : 2),
     costCents: () => 4200,
-    colors: [[231, 229, 228]],
+    colors: [
+      [28, 28, 28],
+      [231, 216, 195],
+    ],
   },
   {
     name: "Botín de cuero marrón",
