@@ -15,7 +15,7 @@ import { inStore, StoreError } from "./tiendas.js"
 
 /**
  * Las franjas de entrega y los repartidores de una tienda (entrega 3 del lienzo «gestorIA como
- * odentIA», tableros 6 y 23; ADR 0227). Las dos son opcionales: un pedido sin franja ni repartidor
+ * odentIA», tableros 6 y 23; ADR 0228). Las dos son opcionales: un pedido sin franja ni repartidor
  * sale igual («Sin franja», «Sin repartidor»). Las usan Despachos y las operaciones del pedido.
  */
 

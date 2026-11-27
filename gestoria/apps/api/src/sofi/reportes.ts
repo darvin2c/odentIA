@@ -32,6 +32,51 @@ export function periodStart(period: ReportPeriod, today: string, timeZone: strin
 
 const n = (value: unknown) => Number(value ?? 0)
 
+/**
+ * Lo cobrado desde `since`: los pagos confirmados desde entonces, sin los pedidos de prueba. Es la
+ * misma cuenta de Caja (`collectedBetween`) para «Vendido y cobrado» de Reportes y «Cobrado hoy»
+ * de Inicio.
+ */
+export function collectedSinceIn(tx: Db, storeId: string, since: Date) {
+  return collectedBetween(tx, storeId, since, null)
+}
+
+/**
+ * Lo que falta cobrar y lo que espera a una persona ahora, del saldo de cada pedido
+ * (`order_balance`): la misma cuenta en Reportes e Inicio. Un pedido por pagar con el precio
+ * vencido ya no se cuenta: no se va a cobrar así. Los de prueba y los anulados, tampoco.
+ */
+export async function pendingNowIn(tx: Db, storeId: string, now = new Date()) {
+  const [row] = await tx.execute<{
+    to_confirm: string
+    to_confirm_cents: string
+    to_confirm_payments: string
+    due: string
+    due_cents: string
+  }>(sql`
+    select
+      count(*) filter (where b.pending_cents > 0) as to_confirm,
+      coalesce(sum(b.pending_cents), 0) as to_confirm_cents,
+      coalesce(sum((select count(*) from order_payment p
+        where p.order_id = b.order_id and p.status = 'por_confirmar')), 0) as to_confirm_payments,
+      count(*) filter (where b.due_cents > 0) as due,
+      coalesce(sum(b.due_cents), 0) as due_cents
+    from order_balance b join sale_order o on o.id = b.order_id
+    where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
+      and (o.state <> 'por_pagar' or o.price_expires_at is null
+        or o.price_expires_at > ${now.toISOString()})`)
+  return {
+    /** Los pagos que esperan a una persona: no son «falta cobrar». */
+    toConfirm: {
+      orders: n(row?.to_confirm),
+      cents: n(row?.to_confirm_cents),
+      payments: n(row?.to_confirm_payments),
+    },
+    /** Falta cobrar = total − confirmado − por confirmar, pedido por pedido. */
+    due: { orders: n(row?.due), cents: n(row?.due_cents) },
+  }
+}
+
 export async function storeReport(
   appDb: Db,
   person: Person,
@@ -44,25 +89,8 @@ export async function storeReport(
     const from = periodStart(period, today, timeZone)
     // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
     const since = from.toISOString()
-    const at = now.toISOString()
-    // Vendido y cobrado: los pagos confirmados del periodo, la misma cuenta de Caja.
-    const sold = await collectedBetween(tx, storeId, from, null)
-    // Lo que falta cobrar y lo que espera a una persona, hoy, del saldo de cada pedido. Un
-    // pedido por pagar con el precio vencido ya no se cuenta: no se va a cobrar así.
-    const [pending] = await tx.execute<{
-      to_confirm: string
-      to_confirm_cents: string
-      due: string
-      due_cents: string
-    }>(sql`
-      select
-        count(*) filter (where b.pending_cents > 0) as to_confirm,
-        coalesce(sum(b.pending_cents), 0) as to_confirm_cents,
-        count(*) filter (where b.due_cents > 0) as due,
-        coalesce(sum(b.due_cents), 0) as due_cents
-      from order_balance b join sale_order o on o.id = b.order_id
-      where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
-        and (o.state <> 'por_pagar' or o.price_expires_at is null or o.price_expires_at > ${at})`)
+    const sold = await collectedSinceIn(tx, storeId, from)
+    const pending = await pendingNowIn(tx, storeId, now)
     // Conversaciones del periodo y cuántas compraron; quienes volvieron a comprar (siempre).
     const [talks] = await tx.execute<{ total: string; bought: string }>(sql`
       select count(*) as total,
@@ -138,10 +166,8 @@ export async function storeReport(
         ticketCents: soldOrders ? Math.round(sold.cents / soldOrders) : 0,
       },
       pending: {
-        /** Los pagos que esperan a una persona: no son «falta cobrar». */
-        toConfirm: { orders: n(pending?.to_confirm), cents: n(pending?.to_confirm_cents) },
-        /** Falta cobrar = total − confirmado − por confirmar, pedido por pedido. */
-        due: { orders: n(pending?.due), cents: n(pending?.due_cents) },
+        toConfirm: { orders: pending.toConfirm.orders, cents: pending.toConfirm.cents },
+        due: pending.due,
       },
       conversations: { total: n(talks?.total), bought: n(talks?.bought) },
       returning: n(again?.customers),

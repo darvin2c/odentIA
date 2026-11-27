@@ -43,7 +43,7 @@ test("el menú del día lleva Configuración al pie, con sus grupos", async ({ p
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
   const nav = page.getByRole("navigation", { name: "Principal" })
-  for (const name of ["Pedidos", "Catálogo", "Reportes"])
+  for (const name of ["Inicio", "Pedidos", "Catálogo", "Reportes"])
     await expect(nav.getByRole("link", { name })).toBeVisible()
   // Lo que se mudó a Configuración ya no está en el menú del día.
   for (const name of ["Sofi", "Pagos y entregas", "Equipo"])

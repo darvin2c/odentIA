@@ -30,7 +30,8 @@ const CASH = sql`p.kind = 'al_recibir' and p.method_type = '10' and p.status = '
 
 /**
  * Lo cobrado entre dos momentos (sin `to`, hasta ahora): los pagos confirmados, por la hora en que
- * se confirmaron. Es la cifra de «Vendido y cobrado» de Reportes y de «Cobrado» de Caja.
+ * se confirmaron. Es la cifra de «Vendido y cobrado» de Reportes, «Cobrado hoy» de Inicio y
+ * «Cobrado» de Caja.
  */
 export async function collectedBetween(tx: Db, storeId: string, from: Date, to: Date | null) {
   // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
@@ -54,16 +55,54 @@ export async function collectedBetween(tx: Db, storeId: string, from: Date, to: 
     cents: Number(row.cents),
     orders: Number(row.orders),
   }))
-  const [all] = await tx.execute<{ orders: string }>(sql`
-    select count(distinct p.order_id) as orders
+  const [all] = await tx.execute<{ orders: string; payments: string }>(sql`
+    select count(distinct p.order_id) as orders, count(*) as payments
     from order_payment p join sale_order o on o.id = p.order_id
     where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
       and p.reviewed_at >= ${from.toISOString()} ${until}`)
   return {
     cents: byMethod.reduce((total, one) => total + one.cents, 0),
     orders: Number(all?.orders ?? 0),
+    payments: Number(all?.payments ?? 0),
     byMethod,
   }
+}
+
+/**
+ * El efectivo que nadie recibió todavía, de cualquier día, por quien lo trae («En la tienda», sin
+ * repartidor: `courierId` null). Lo muestra Caja con su «Recibí» y lo avisa «Te toca» de Inicio.
+ */
+export async function cashToReceiveIn(tx: Db, storeId: string) {
+  const pending = await tx.execute<{
+    id: string
+    courier_id: string | null
+    order_id: string
+    number: number
+    customer_name: string
+    amount_cents: number
+    at: string
+  }>(sql`
+    select p.id, p.courier_id, p.order_id, o.number, o.customer_name, p.amount_cents,
+      to_json(p.reviewed_at) #>> '{}' as at
+    from order_payment p join sale_order o on o.id = p.order_id
+    where p.store_id = ${storeId} and o.test = false and ${CASH}
+      and not exists (select 1 from cash_handover_payment h where h.payment_id = p.id)
+    order by p.reviewed_at`)
+  const names = await courierNamesIn(tx, storeId)
+  const groups = Map.groupBy([...pending], (row) => row.courier_id ?? "")
+  return [...groups.entries()].map(([courierId, rows]) => ({
+    courierId: courierId || null,
+    name: courierId ? (names.get(courierId) ?? "Repartidor") : null,
+    cents: rows.reduce((total, row) => total + row.amount_cents, 0),
+    payments: rows.map((row) => ({
+      id: row.id,
+      orderId: row.order_id,
+      number: pad(row.number),
+      customerName: row.customer_name,
+      amountCents: row.amount_cents,
+      at: row.at,
+    })),
+  }))
 }
 
 export const cashDay = z
@@ -90,24 +129,8 @@ export async function cashBox(
       select count(*) filter (where b.due_cents > 0) as orders, coalesce(sum(b.due_cents), 0) as cents
       from sale_order o join order_balance b on b.order_id = o.id
       where ${onBoard(storeId, chosen, today, timeZone)} and o.state in ('por_salir', 'en_camino')`)
-    // El efectivo que nadie recibió todavía, de cualquier día, por quien lo trae.
-    const pending = await tx.execute<{
-      id: string
-      courier_id: string | null
-      order_id: string
-      number: number
-      customer_name: string
-      amount_cents: number
-      at: string
-    }>(sql`
-      select p.id, p.courier_id, p.order_id, o.number, o.customer_name, p.amount_cents,
-        to_json(p.reviewed_at) #>> '{}' as at
-      from order_payment p join sale_order o on o.id = p.order_id
-      where p.store_id = ${storeId} and o.test = false and ${CASH}
-        and not exists (select 1 from cash_handover_payment h where h.payment_id = p.id)
-      order by p.reviewed_at`)
+    const toReceive = await cashToReceiveIn(tx, storeId)
     const names = await courierNamesIn(tx, storeId)
-    const groups = Map.groupBy([...pending], (row) => row.courier_id ?? "")
     const received = await tx
       .select({
         id: cashHandover.id,
@@ -135,19 +158,7 @@ export async function cashBox(
       /** Lo que falta cobrar en las entregas de ese día (el saldo de cada pedido). */
       due: { orders: Number(due?.orders ?? 0), cents: Number(due?.cents ?? 0) },
       /** El efectivo por recibir, de quien lo trae; «En la tienda» es lo cobrado sin repartidor. */
-      toReceive: [...groups.entries()].map(([courierId, rows]) => ({
-        courierId: courierId || null,
-        name: courierId ? (names.get(courierId) ?? "Repartidor") : null,
-        cents: rows.reduce((total, row) => total + row.amount_cents, 0),
-        payments: rows.map((row) => ({
-          id: row.id,
-          orderId: row.order_id,
-          number: pad(row.number),
-          customerName: row.customer_name,
-          amountCents: row.amount_cents,
-          at: row.at,
-        })),
-      })),
+      toReceive,
       /** Lo recibido ese día, con lo que cuadró o la diferencia anotada. */
       received: received.map((row) => ({
         ...row,

@@ -16,6 +16,12 @@ import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
+import {
+  DEMO_NEW_STORE_ID,
+  DEMO_NEW_STORE_OWNER,
+  seedDemoNewStore,
+  seedDemoSetupDone,
+} from "./semilla-primeros-pasos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
 import { receiveSupportRequest } from "./soporte.js"
 
@@ -24,7 +30,8 @@ import { receiveSupportRequest } from "./soporte.js"
  * demostraciones: nunca corre en producción ni en las pruebas. Cada entrega de gestorIA le suma
  * lo suyo (B2 sus conversaciones, B3 su configuración y su catálogo en `semilla-catalogo.ts`,
  * B4 sus pedidos, B5 Sofi y Argos en `semilla-sofi.ts`, Clientes en `semilla-clientes.ts` y
- * «Tu marca» en `semilla-marca.ts`).
+ * «Tu marca» en `semilla-marca.ts`). Inicio muestra su «Te toca» con eso mismo; para sus primeros
+ * pasos, la demo suma una tienda que recién empieza, Tortas Carmen (`semilla-primeros-pasos.ts`).
  *
  * Las personas del equipo son copias de cuentas de ejemplo: no existen en la cuenta, así que no
  * se puede entrar con ellas. Para entrar a la tienda, `GESTORIA_SEMILLA_CORREO` deja una
@@ -99,43 +106,69 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCustomers(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
-    // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta) y si ya
-    // es del equipo: así sembrar otra vez no le deja otra invitación.
+    await seedDemoSetupDone(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoNewStore(tx as unknown as Db)
+    // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta).
     const email = invite?.trim().toLowerCase()
     const [guest] = email
       ? await tx
-          .select({ userId: accountCopy.userId, member: storeMember.role })
+          .select({ userId: accountCopy.userId })
           .from(accountCopy)
-          .leftJoin(
-            storeMember,
-            and(eq(storeMember.userId, accountCopy.userId), eq(storeMember.storeId, DEMO_STORE_ID)),
-          )
           .where(eq(accountCopy.email, email))
           .limit(1)
       : []
     await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID, guest?.userId)
     await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
-    if (email && !guest?.member) {
-      const [pending] = await tx
-        .select({ id: storeInvitation.id })
-        .from(storeInvitation)
-        .where(
-          and(
-            eq(storeInvitation.storeId, DEMO_STORE_ID),
-            eq(storeInvitation.email, email),
-            isNull(storeInvitation.acceptedAt),
-            isNull(storeInvitation.revokedAt),
-          ),
-        )
-      if (!pending)
-        await tx.insert(storeInvitation).values({
-          storeId: DEMO_STORE_ID,
-          email,
-          role: "owner",
-          invitedBy: "semilla-rosa",
-          expiresAt: new Date(Date.now() + 30 * 86_400_000),
-        })
+    if (email) {
+      await inviteGuest(tx as unknown as Db, DEMO_STORE_ID, "semilla-rosa", email, guest?.userId)
+      // La tienda que recién empieza (tablero 16), para ver sus primeros pasos en Inicio.
+      await inviteGuest(
+        tx as unknown as Db,
+        DEMO_NEW_STORE_ID,
+        DEMO_NEW_STORE_OWNER,
+        email,
+        guest?.userId,
+      )
     }
+  })
+}
+
+/**
+ * Una invitación de Dueño para quien va a usar la demo, si todavía no es del equipo ni tiene una
+ * pendiente: así sembrar otra vez no le deja otra.
+ */
+async function inviteGuest(
+  tx: Db,
+  storeId: string,
+  invitedBy: string,
+  email: string,
+  guestId?: string,
+): Promise<void> {
+  if (guestId) {
+    const [member] = await tx
+      .select({ role: storeMember.role })
+      .from(storeMember)
+      .where(and(eq(storeMember.storeId, storeId), eq(storeMember.userId, guestId)))
+    if (member) return
+  }
+  const [pending] = await tx
+    .select({ id: storeInvitation.id })
+    .from(storeInvitation)
+    .where(
+      and(
+        eq(storeInvitation.storeId, storeId),
+        eq(storeInvitation.email, email),
+        isNull(storeInvitation.acceptedAt),
+        isNull(storeInvitation.revokedAt),
+      ),
+    )
+  if (pending) return
+  await tx.insert(storeInvitation).values({
+    storeId,
+    email,
+    role: "owner",
+    invitedBy,
+    expiresAt: new Date(Date.now() + 30 * 86_400_000),
   })
 }
 

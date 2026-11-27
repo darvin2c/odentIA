@@ -257,7 +257,7 @@ const queues: QueueDef[] = [
       if (!msg) return false
       await consumeOutbound(
         db,
-        { storage, fetch, secretsKey, senderMode: env.CHANNEL_SENDER_MODE, ownerDb },
+        { storage, fetch, secretsKey, senderMode: env.CHANNEL_SENDER_MODE, mockStatus: env.CHANNEL_MOCK_STATUS, ownerDb },
         msg,
       )
       console.log(`worker: outbound msg_id=${msg.msg_id}`)

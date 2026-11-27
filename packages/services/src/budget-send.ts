@@ -32,6 +32,7 @@ import {
 } from "./automation-messages.js"
 import { clinicName, firstName } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
+import { BUDGET_HANDED_ACTION } from "./budget-delivery.js"
 import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { type BudgetWithTotals, deliverBudget, getBudgetDetail, requireOwnBudget, valueOptionOf } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
@@ -437,6 +438,34 @@ export async function sendBudget(
     },
   })
   return result
+}
+
+/**
+ * «Ya se lo di en mano»: el presupuesto que no le llegó por mensaje se le entregó
+ * impreso o en la consulta. Imprimir no deja traza; esto sí (`budget.handed`), y
+ * desde ahí cuenta como que le llegó (`budgetReached`, `budgetNotReachedSql`). Lo
+ * anota quien puede enviarlo; no cambia el presupuesto ni le envía nada.
+ */
+export async function markBudgetHanded(
+  tx: Db,
+  orgId: string,
+  actor: { userId: string; memberRole?: string },
+  input: { patientId: string; budgetId: string },
+): Promise<{ handed: true }> {
+  await requireOwnBudget(tx, orgId, input.budgetId, actor.userId, actor.memberRole)
+  const budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
+  if (budget.status !== "presentado") {
+    throw new ServiceError("BUDGET_STATUS", 409, "Solo se anota en mano un presupuesto entregado que espera respuesta")
+  }
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: actor.userId,
+    action: BUDGET_HANDED_ACTION,
+    entity: "treatment_budget",
+    entityId: input.budgetId,
+    metadata: { patientId: input.patientId },
+  })
+  return { handed: true }
 }
 
 /** En el correo, el número del presupuesto (y cuántas opciones trae). */

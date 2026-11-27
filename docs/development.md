@@ -123,6 +123,12 @@ reales aunque el LLM sea real; habilitar `live` y validación externa de conexio
 solo para una prueba autorizada, con destinatarios consentidos. Una respuesta
 del modelo no demuestra entrega del canal ni sustituye la observación humana.
 
+En desarrollo, `CHANNEL_MOCK_STATUS` (`delivered`, `read` o `failed`) hace que el
+WhatsApp simulado dé ese acuse al «enviar», por el mismo adaptador y `applyStatus`
+que el aviso de Meta: así se ve «Entregado», «Leído» o «No llegó» (con `failed`, el
+131026 de un número sin WhatsApp, que también marca su número). El worker no
+arranca con ella en producción.
+
 ### Búsqueda por significado del agente
 
 Ver `docs/decisions/0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md`.

@@ -1,5 +1,5 @@
 /**
- * Las reglas de Despachos y Caja en la base (`0025_reglas_despachos_y_caja.sql`), con el rol de la
+ * Las reglas de Despachos y Caja en la base (`0027_reglas_despachos_y_caja.sql`), con el rol de la
  * aplicación y una base real: Sofi no asigna repartidor, franja ni agencia, ni al anotar el pedido
  * ni al cambiarlo; lo cobrado en la puerta va a nombre de quien llevaba el pedido; «Recibí» solo
  * se agrega, toma cada pago una vez y solo el efectivo del mismo repartidor; y cada tienda ve solo

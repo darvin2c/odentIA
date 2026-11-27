@@ -19,6 +19,7 @@ import { useId, useState } from "react"
 import { api } from "./lib/api"
 import { CASH_KEY } from "./lib/caja"
 import { type Courier, DISPATCH_KEY, noticeLink, noticeText, type Slot } from "./lib/despachos"
+import { HOME_KEY } from "./lib/inicio"
 import {
   type Balance,
   dayName,
@@ -132,6 +133,7 @@ export function useDeliveryAction(orderId: string, onDone?: () => void) {
         queryClient.invalidateQueries({ queryKey: DISPATCH_KEY(store.id) }),
         queryClient.invalidateQueries({ queryKey: ["despachos-resumen", store.id] }),
         queryClient.invalidateQueries({ queryKey: CASH_KEY(store.id) }),
+        queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) }),
         queryClient.invalidateQueries({ queryKey: ["pagos-y-entregas", store.id] }),
       ])
       if (vars.done) toast.success(vars.done)
@@ -639,6 +641,7 @@ function PendingPayments({ target }: { target: DeliveryTarget }) {
         queryClient.invalidateQueries({ queryKey: ["pedidos", store.id] }),
         queryClient.invalidateQueries({ queryKey: DISPATCH_KEY(store.id) }),
         queryClient.invalidateQueries({ queryKey: CASH_KEY(store.id) }),
+        queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) }),
       ])
       toast.success("Pago confirmado: ya puedes entregar")
     },

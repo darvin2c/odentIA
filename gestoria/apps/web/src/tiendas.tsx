@@ -43,11 +43,13 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {
+  ArrowLeft,
   Banknote,
   ChartColumn,
   CircleHelp,
   Copy,
   CreditCard,
+  House,
   KeyRound,
   LifeBuoy,
   MailOpen,
@@ -676,16 +678,19 @@ export function useStoreContext() {
 }
 
 /**
- * El menú del día (lienzo «gestorIA como odentIA», tablero 4): arriba lo diario y, en «Gestión», lo
- * que se mira de la tienda. Solo lo que ya existe: Inicio y Bandeja se suman cuando lleguen sus
- * pantallas, en su lugar (Despachos va segunda, después de la Bandeja). Configuración y Ayuda van
- * al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no sale.
+ * El menú del día (lienzo «gestorIA como odentIA», tablero 4): arriba lo diario, con Inicio
+ * primero y Despachos antes de Pedidos, y en «Gestión» lo que se mira de la tienda, con Caja. Solo
+ * lo que ya existe: la Bandeja se suma cuando llegue su pantalla, en su lugar. Configuración y
+ * Ayuda van al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no
+ * sale.
  */
 function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
   const id = store.id
   // Soporte de gestorIA solo mira: sin pedidos, clientas ni conversaciones (`ventas.atender`).
   const attends = store.permissions.includes("ventas.atender")
   return [
+    // Inicio (tablero 5): lo que le toca a cada rol, para todo el equipo que atiende.
+    ...(attends ? [{ label: "Inicio", to: `/tiendas/${id}`, icon: House }] : []),
     ...(store.permissions.includes("entregas")
       ? [
           {
@@ -752,13 +757,15 @@ export function StoreLayout() {
   if (me.isPending) return <Opening message="Abriendo tu tienda…" />
   if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
   if (!store) return <NotYours me={me.data} id={id} />
-  // Quien solo mira (soporte) entra por el catálogo: los pedidos y las clientas no son suyos.
+  // Quien solo mira (soporte) entra por el catálogo: Inicio, los pedidos y las clientas no son suyos.
+  const inside = pathname.slice(`/tiendas/${id}`.length).replace(/\/$/, "")
   if (
     !store.permissions.includes("ventas.atender") &&
-    (pathname.endsWith("/pedidos") ||
-      pathname.includes("/clientes") ||
-      pathname.endsWith("/despachos") ||
-      pathname.endsWith("/caja"))
+    (inside === "" ||
+      inside === "/pedidos" ||
+      inside.startsWith("/clientes") ||
+      inside === "/despachos" ||
+      inside === "/caja")
   )
     return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
   // El color de «Tu marca» pinta la app de todo el equipo, como el de cada clínica (los tonos para
@@ -870,13 +877,26 @@ function NotYours({ me, id }: { me: Me; id: string }) {
 /**
  * El encabezado de cada sección de la tienda (`PageHeader`) y, debajo, lo que soporte de
  * gestorIA pide o tiene abierto, para que el Dueño o un Administrador lo vea donde esté. En
- * Equipo ya se ve entero.
+ * Equipo ya se ve entero. Si se llegó desde los primeros pasos de Inicio, arriba va «Volver a
+ * Inicio».
  */
 export function StoreHeader(props: PageHeaderProps) {
   const { store } = useStoreContext()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  // Abierto desde los primeros pasos de Inicio (`?desde=inicio`): un toque para volver a la lista.
+  const fromHome = (search as Record<string, unknown>).desde === "inicio"
   return (
     <>
+      {fromHome ? (
+        <Link
+          to="/tiendas/$id"
+          params={{ id: store.id }}
+          className="-mb-3 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-md text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 md:min-h-0"
+        >
+          <ArrowLeft aria-hidden className="size-4" />
+          Volver a Inicio
+        </Link>
+      ) : null}
       <PageHeader {...props} />
       {store.permissions.includes("equipo.gestionar") && !pathname.endsWith("/equipo") ? (
         <SupportAccessPanel store={store} only="actual" />

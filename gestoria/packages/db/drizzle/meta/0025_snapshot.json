@@ -1,6 +1,6 @@
 {
-  "id": "83eb1f56-77e5-4841-9356-0045faa697dd",
-  "prevId": "d8e24692-5927-4d12-8fd1-f481eb1ef861",
+  "id": "6b073e4b-40de-4ecd-9f0d-a8f870ab5af8",
+  "prevId": "03cedff8-7b82-48b8-abf8-0e9f6d491405",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -151,223 +151,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.cash_handover": {
-      "name": "cash_handover",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "courier_id": {
-          "name": "courier_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expected_cents": {
-          "name": "expected_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "received_cents": {
-          "name": "received_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "received_by": {
-          "name": "received_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "cash_handover_store_idx": {
-          "name": "cash_handover_store_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "received_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "cash_handover_store_id_fkey": {
-          "name": "cash_handover_store_id_fkey",
-          "tableFrom": "cash_handover",
-          "columnsFrom": [
-            "store_id"
-          ],
-          "tableTo": "store",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "cash_handover_courier_fkey": {
-          "name": "cash_handover_courier_fkey",
-          "tableFrom": "cash_handover",
-          "columnsFrom": [
-            "store_id",
-            "courier_id"
-          ],
-          "tableTo": "store_courier",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "cash_handover_store_id_key": {
-          "name": "cash_handover_store_id_key",
-          "columns": [
-            "store_id",
-            "id"
-          ],
-          "nullsNotDistinct": false
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "cash_handover_amounts_check": {
-          "name": "cash_handover_amounts_check",
-          "value": "\"cash_handover\".\"expected_cents\" > 0 and \"cash_handover\".\"received_cents\" >= 0"
-        },
-        "cash_handover_note_check": {
-          "name": "cash_handover_note_check",
-          "value": "(\"cash_handover\".\"note\" is null or char_length(btrim(\"cash_handover\".\"note\")) between 3 and 300) and (\"cash_handover\".\"received_cents\" = \"cash_handover\".\"expected_cents\" or \"cash_handover\".\"note\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.cash_handover_payment": {
-      "name": "cash_handover_payment",
-      "schema": "",
-      "columns": {
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "handover_id": {
-          "name": "handover_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payment_id": {
-          "name": "payment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "cash_handover_payment_handover_idx": {
-          "name": "cash_handover_payment_handover_idx",
-          "columns": [
-            {
-              "expression": "handover_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "cash_handover_payment_handover_fkey": {
-          "name": "cash_handover_payment_handover_fkey",
-          "tableFrom": "cash_handover_payment",
-          "columnsFrom": [
-            "store_id",
-            "handover_id"
-          ],
-          "tableTo": "cash_handover",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "cash_handover_payment_payment_fkey": {
-          "name": "cash_handover_payment_payment_fkey",
-          "tableFrom": "cash_handover_payment",
-          "columnsFrom": [
-            "store_id",
-            "payment_id"
-          ],
-          "tableTo": "order_payment",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "cash_handover_payment_payment_id_pk": {
-          "name": "cash_handover_payment_payment_id_pk",
-          "columns": [
-            "payment_id"
-          ]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1498,7 +1281,7 @@
       "checkConstraints": {
         "order_event_action_check": {
           "name": "order_event_action_check",
-          "value": "action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho','repartidor','envio')"
+          "value": "action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho')"
         }
       },
       "isRLSEnabled": false
@@ -1589,12 +1372,6 @@
         "note": {
           "name": "note",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "courier_id": {
-          "name": "courier_id",
-          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -1690,21 +1467,6 @@
           ],
           "onUpdate": "no action",
           "onDelete": "cascade"
-        },
-        "order_payment_courier_fkey": {
-          "name": "order_payment_courier_fkey",
-          "tableFrom": "order_payment",
-          "columnsFrom": [
-            "store_id",
-            "courier_id"
-          ],
-          "tableTo": "store_courier",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2705,30 +2467,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "slot_start": {
-          "name": "slot_start",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "slot_end": {
-          "name": "slot_end",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "courier_id": {
-          "name": "courier_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "agency": {
-          "name": "agency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "tracking": {
           "name": "tracking",
           "type": "text",
@@ -2788,27 +2526,6 @@
         }
       },
       "indexes": {
-        "sale_order_deliver_on_idx": {
-          "name": "sale_order_deliver_on_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "deliver_on",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
         "sale_order_conversation_idx": {
           "name": "sale_order_conversation_idx",
           "columns": [
@@ -2874,21 +2591,6 @@
         }
       },
       "foreignKeys": {
-        "sale_order_courier_fkey": {
-          "name": "sale_order_courier_fkey",
-          "tableFrom": "sale_order",
-          "columnsFrom": [
-            "store_id",
-            "courier_id"
-          ],
-          "tableTo": "store_courier",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
         "sale_order_store_id_fkey": {
           "name": "sale_order_store_id_fkey",
           "tableFrom": "sale_order",
@@ -2985,14 +2687,6 @@
         "sale_order_tracking_check": {
           "name": "sale_order_tracking_check",
           "value": "\"sale_order\".\"tracking\" is null or char_length(\"sale_order\".\"tracking\") between 1 and 80"
-        },
-        "sale_order_slot_check": {
-          "name": "sale_order_slot_check",
-          "value": "(\"sale_order\".\"slot_start\" is null) = (\"sale_order\".\"slot_end\" is null) and (\"sale_order\".\"slot_start\" is null or (\"sale_order\".\"slot_start\" >= 0 and \"sale_order\".\"slot_start\" < \"sale_order\".\"slot_end\" and \"sale_order\".\"slot_end\" <= 1440))"
-        },
-        "sale_order_agency_check": {
-          "name": "sale_order_agency_check",
-          "value": "\"sale_order\".\"agency\" is null or char_length(btrim(\"sale_order\".\"agency\")) between 1 and 60"
         }
       },
       "isRLSEnabled": false
@@ -3532,13 +3226,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "delivery_slots": {
-          "name": "delivery_slots",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -3592,10 +3279,6 @@
         "store_brand_color_check": {
           "name": "store_brand_color_check",
           "value": "\"store\".\"brand_color\" is null or \"store\".\"brand_color\" ~ '^#[0-9a-f]{6}$'"
-        },
-        "store_delivery_slots_check": {
-          "name": "store_delivery_slots_check",
-          "value": "jsonb_typeof(\"store\".\"delivery_slots\") = 'array' and jsonb_array_length(\"store\".\"delivery_slots\") <= 8"
         },
         "store_time_zone_check": {
           "name": "store_time_zone_check",
@@ -3699,150 +3382,6 @@
         "store_agent_texts_check": {
           "name": "store_agent_texts_check",
           "value": "(\"store_agent\".\"display_name\" is null or char_length(btrim(\"store_agent\".\"display_name\")) between 1 and 60) and char_length(\"store_agent\".\"knowledge\") <= 2000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.store_courier": {
-      "name": "store_courier",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "store_courier_user_uidx": {
-          "name": "store_courier_user_uidx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "where": "user_id is not null",
-          "concurrently": false
-        },
-        "store_courier_name_uidx": {
-          "name": "store_courier_name_uidx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "lower(btrim(\"name\"))",
-              "isExpression": true,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "where": "user_id is null",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "store_courier_store_id_fkey": {
-          "name": "store_courier_store_id_fkey",
-          "tableFrom": "store_courier",
-          "columnsFrom": [
-            "store_id"
-          ],
-          "tableTo": "store",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "store_courier_user_fkey": {
-          "name": "store_courier_user_fkey",
-          "tableFrom": "store_courier",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "tableTo": "account_copy",
-          "columnsTo": [
-            "user_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "store_courier_store_id_key": {
-          "name": "store_courier_store_id_key",
-          "columns": [
-            "store_id",
-            "id"
-          ],
-          "nullsNotDistinct": false
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "store_courier_name_check": {
-          "name": "store_courier_name_check",
-          "value": "char_length(btrim(\"store_courier\".\"name\")) between 1 and 80"
         }
       },
       "isRLSEnabled": false
@@ -4756,6 +4295,70 @@
         "store_payment_method_details_check": {
           "name": "store_payment_method_details_check",
           "value": "char_length(\"store_payment_method\".\"details\") <= 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_setup": {
+      "name": "store_setup",
+      "schema": "",
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "store_setup_store_id_fkey": {
+          "name": "store_setup_store_id_fkey",
+          "tableFrom": "store_setup",
+          "columnsFrom": [
+            "store_id"
+          ],
+          "tableTo": "store",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "store_setup_skipped_check": {
+          "name": "store_setup_skipped_check",
+          "value": "skipped <@ ARRAY['datos','catalogo','pagos','entregas','chats','sofi','equipo']::text[]"
         }
       },
       "isRLSEnabled": false

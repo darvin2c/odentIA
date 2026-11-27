@@ -103,8 +103,38 @@ export function stockShortSql(o: string) {
     ) d group by d.variant_id having sum(d.q) <> 0)`
 }
 
+/**
+ * Si un pedido (`o`, el alias de `sale_order`) volvió sin entregar y todavía no sale otra vez: está
+ * «Por salir» y lo último entre «Salió» y «No se entregó» de su historia es «No se entregó». Lo
+ * usan Inicio y su cifra «Sale hoy»; la pantalla del pedido lo lee igual de su historia.
+ */
+export function missedSql(o: string) {
+  const a = sql.raw(o)
+  // Sin «Salió» ni «No se entregó» la subconsulta da null: `coalesce` deja siempre sí o no, para
+  // que `not missedSql(…)` cuente los que nunca salieron.
+  return sql`(${a}.state = 'por_salir' and coalesce((
+    select e.action from order_event e
+    where e.order_id = ${a}.id and e.action in ('salio', 'no_entregado')
+    order by e.seq desc limit 1), '') = 'no_entregado')`
+}
+
+/**
+ * Los pedidos con su pago confirmado (todo o una parte) que no pueden salir: no alcanzaba el stock
+ * al pagar, o al cambiarlo (lo que tienen fuera no es lo de sus líneas). Los de prueba no cuentan.
+ */
+export async function paidWithoutStockIn(tx: Db, storeId: string) {
+  const rows = await tx.execute<{ id: string; number: number; customer_name: string }>(sql`
+    select o.id, o.number, o.customer_name from sale_order o
+    where o.store_id = ${storeId} and o.state = 'por_salir' and o.test = false
+      and o.payment_collection <> 'al_recibir'
+      and ${stockShortSql("o")}
+    order by o.number`)
+  return [...rows].map((o) => ({ orderId: o.id, number: pad(o.number), customer: o.customer_name }))
+}
+
 const OPEN: OrderState[] = ["por_pagar", "por_confirmar", "por_salir", "en_camino"]
-const TO_DELIVER: OrderState[] = ["por_salir", "en_camino"]
+/** Lo que sale: «Para entregar hoy» es lo de estos estados con su día hasta hoy. */
+export const TO_DELIVER: OrderState[] = ["por_salir", "en_camino"]
 /** Lo que se cambia o se pasa a otro día: lo que todavía no salió. */
 const NOT_SHIPPED: OrderState[] = ["por_pagar", "por_confirmar", "por_salir"]
 

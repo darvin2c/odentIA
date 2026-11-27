@@ -702,3 +702,21 @@ it("si el proveedor rechaza la respuesta que resolvió un tema, el tema vuelve a
   expect((await messageState(sent.id))?.status).toBe("failed")
   expect(await taskStatus()).toBe("open")
 })
+
+it("en desarrollo, el WhatsApp simulado da el acuse pedido (CHANNEL_MOCK_STATUS) por el mismo camino que el de Meta", async () => {
+  const delivered = await queuedWhatsApp("wa:51987654321")
+  expect(await processOutbound(appDb, { ...deps, mockStatus: "delivered" }, outJob(delivered))).toBe("done")
+  expect((await messageState(delivered))?.status).toBe("delivered")
+
+  // «No llegó»: el 131026 de un número sin WhatsApp, con su motivo en palabras.
+  const failed = await queuedWhatsApp("wa:51987654322")
+  expect(await processOutbound(appDb, { ...deps, mockStatus: "failed" }, outJob(failed))).toBe("done")
+  const [row] = await ownerDb.select({ status: message.status, error: message.error }).from(message).where(eq(message.id, failed))
+  expect(row?.status).toBe("failed")
+  expect(row?.error).toContain("no tenga WhatsApp")
+
+  // Sin la variable, como siempre: enviado y sin acuse.
+  const plain = await queuedWhatsApp("wa:51987654323")
+  expect(await processOutbound(appDb, deps, outJob(plain))).toBe("done")
+  expect((await messageState(plain))?.status).toBe("sent")
+})

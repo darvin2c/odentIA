@@ -94,7 +94,6 @@ const OWN_QUOTED = [
   "Entregados",
   "Anulados",
   "En laboratorio",
-  "Entregado",
   "se rehízo",
   "Lo que lleva",
   "Montura",

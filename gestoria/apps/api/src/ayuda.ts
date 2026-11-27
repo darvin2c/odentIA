@@ -15,6 +15,7 @@ import { can, ROLE_NAMES, type StorePermission, type StoreSeat } from "./permiso
 
 /** Las pantallas de la tienda a las que lleva una respuesta: su ruta y lo que hace falta para abrirla. */
 export const HELP_SCREENS = {
+  inicio: { label: "Inicio", path: "/", opens: "ventas.atender" },
   despachos: { label: "Despachos", path: "/despachos", opens: "entregas" },
   pedidos: { label: "Pedidos", path: "/pedidos", opens: "ventas.atender" },
   catalogo: { label: "Catálogo", path: "/catalogo", opens: "catalogo.ver" },
@@ -53,6 +54,32 @@ export interface HelpGroup {
 }
 
 export const HELP_GUIDE: readonly HelpGroup[] = [
+  {
+    id: "inicio",
+    title: "Inicio",
+    faqs: [
+      {
+        id: "te-toca",
+        q: "¿Qué me toca hacer hoy?",
+        a: [
+          "En Inicio, «Te toca»: lo que hay que hacer ahora, hoy y sin apuro, cada línea con su botón. Un pago por confirmar se abre con «Ver y confirmar», que muestra la captura junto al pedido; un pedido que no se entregó se mueve con «Pasar a…»; dos fichas que quizá son la misma clienta se miran con «Comparar»; un pedido pagado al que le falta stock, con «Ver pedido», y el efectivo cobrado en la puerta que nadie recibió todavía, con «Ir a Caja» (lo ve quien ve Caja).",
+          "Arriba van las cifras del día, con la hora de la tienda: «Cobrado hoy», «Por confirmar», «Falta cobrar» y «Sale hoy», que abre Despachos. Lo que está por confirmar no se suma a lo que falta cobrar. Los montos del día los ve quien puede ver Reportes; quien atiende ve lo que le toca, sin los totales.",
+        ],
+        needs: "ventas.atender",
+        screen: "inicio",
+      },
+      {
+        id: "primeros-pasos",
+        q: "Acabo de crear mi tienda, ¿qué me falta para vender?",
+        a: [
+          "En Inicio, «Tu tienda está casi lista»: los pasos para empezar, cada uno con cómo va. Cada paso abre su apartado y, con «Volver a Inicio», regresas a la lista. Se marcan solos cuando lo guardas: nadie los marca a mano.",
+          "Puedes vender sin terminarlos. Si trabajas sola o no vas a usar a Sofi, ese paso se salta con «No lo necesito». Conectar los chats dice «Muy pronto»: todavía no se puede y no cuenta. Cuando todos están hechos o saltados, la lista se va de Inicio y no vuelve.",
+        ],
+        needs: "configuracion",
+        screen: "inicio",
+      },
+    ],
+  },
   {
     id: "vender",
     title: "Vender",
@@ -107,7 +134,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "pago-por-confirmar",
         q: "¿Por qué un pedido dice «Pago por confirmar»?",
         a: [
-          "Porque llegó la captura de un pago y falta que alguien la revise. Ábrelo desde el filtro «Pago por confirmar», mira la captura y revisa la cuenta de la tienda.",
+          "Porque llegó la captura de un pago y falta que alguien la revise. Ábrelo desde Inicio con «Ver y confirmar», o desde el filtro «Pago por confirmar» de Pedidos, mira la captura y revisa la cuenta de la tienda.",
           "Si el pago está, «Confirmar pago». Si no, «No coincide» con su motivo: el pedido vuelve a «Por pagar» y el motivo queda escrito en el pedido.",
         ],
         needs: "pagos.confirmar",
@@ -404,7 +431,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "reportes",
         q: "¿Dónde veo cuánto vendí?",
         a: [
-          "En Reportes: lo vendido y cobrado, lo que falta cobrar, quiénes volvieron a comprar, lo más vendido y lo que se acaba, y lo que hizo Sofi. En «Te toca», Argos dice lo que queda pendiente.",
+          "En Reportes: lo vendido y cobrado, lo que falta cobrar, quiénes volvieron a comprar, lo más vendido y lo que se acaba, y lo que hicieron Sofi y Argos. Lo de hoy y lo que queda pendiente está en Inicio, en «Te toca».",
         ],
         needs: "reportes.ver",
         screen: "reportes",

@@ -1,5 +1,5 @@
 -- Despachos y Caja (entrega 3 del lienzo «gestorIA como odentIA», tableros 6, 17, 23 y 24; ADR
--- 0227): las franjas de entrega de la tienda, quién lleva cada pedido (una persona del equipo o un
+-- 0228): las franjas de entrega de la tienda, quién lleva cada pedido (una persona del equipo o un
 -- nombre externo, listo para enlazarse a su cuenta con gestorIA Reparto), la franja y la agencia de
 -- cada pedido, a nombre de quién queda lo cobrado en la puerta y el «Recibí» del efectivo en Caja.
 CREATE TABLE "cash_handover" (

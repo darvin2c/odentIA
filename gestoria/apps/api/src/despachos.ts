@@ -31,8 +31,11 @@ export const dayQuery = z
 const BEFORE = 2
 const AFTER = 4
 
-/** Lo que todavía sale ese día: el suyo y, hoy, también lo atrasado y lo que no tiene día. */
-const dueOn = (day: SQL, today: string) => sql`(o.state in ('por_salir', 'en_camino') and (
+/**
+ * Lo que todavía sale ese día: el suyo y, hoy, también lo atrasado y lo que no tiene día. «Sale
+ * hoy» de Inicio cuenta con este mismo filtro lo que Despachos muestra hoy.
+ */
+export const dueOn = (day: SQL, today: string) => sql`(o.state in ('por_salir', 'en_camino') and (
   o.deliver_on = ${day}
   or (${day} = ${today}::date and (o.deliver_on < ${day} or o.deliver_on is null))))`
 

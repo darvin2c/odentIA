@@ -1,4 +1,4 @@
--- Las reglas de Despachos y Caja (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0227). Como en
+-- Las reglas de Despachos y Caja (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0228). Como en
 -- las migraciones de reglas anteriores, cada tabla nace cerrada a `gestoria_app`: se concede solo lo
 -- que la aplicación usa y cada tienda ve solo lo suyo. Qué rol puede hacer qué lo decide el servidor
 -- (`permisos.ts`): las entregas, todo el equipo; Caja, el Dueño y el Administrador.

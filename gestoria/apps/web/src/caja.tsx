@@ -6,6 +6,7 @@ import { type ReactNode, useId, useState } from "react"
 import { api } from "./lib/api"
 import { CASH_KEY, type CashBox, fromWhom } from "./lib/caja"
 import { DISPATCH_KEY } from "./lib/despachos"
+import { HOME_KEY } from "./lib/inicio"
 import { dayName, nextDay, storeToday, when } from "./lib/pedidos"
 import { money, moneyInput, readMoney } from "./lib/tienda"
 import { fieldErrors, MoneyField, TextField } from "./piezas"
@@ -222,6 +223,7 @@ function ReceiveDialog({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: CASH_KEY(store.id) }),
         queryClient.invalidateQueries({ queryKey: DISPATCH_KEY(store.id) }),
+        queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) }),
       ])
       toast.success(differs ? "Recibido, con la diferencia anotada" : "Recibido: cuadra")
       onClose()

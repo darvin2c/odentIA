@@ -799,7 +799,7 @@ export const productLink = pgTable(
  * Quien lleva los pedidos de la tienda: una persona del equipo (`user_id`) o un nombre externo
  * sencillo («Kevin»). Es de la tienda y no se borra: lo que llevó y lo que cobró siguen con su
  * nombre. Cuando llegue gestorIA Reparto, el repartidor externo que acepte su invitación queda
- * enlazado a su cuenta en este mismo `user_id`, sin cambiar sus pedidos ni su efectivo (ADR 0227).
+ * enlazado a su cuenta en este mismo `user_id`, sin cambiar sus pedidos ni su efectivo (ADR 0228).
  */
 export const storeCourier = pgTable(
   "store_courier",
@@ -1749,5 +1749,46 @@ export const storeSupportAccess = pgTable(
     }).onDelete("cascade"),
     index("store_support_access_store_idx").on(table.storeId, table.createdAt),
     index("store_support_access_staff_idx").on(table.staffUserId, table.expiresAt),
+  ],
+)
+
+/**
+ * Los primeros pasos de una tienda nueva (lienzo «gestorIA como odentIA», tablero 16; ADR 0227):
+ * «Tu tienda está casi lista», en Inicio. Cada paso se marca solo con lo que ya está guardado en
+ * su apartado: aquí va solo lo que no se ve en otra tabla, los pasos que la tienda saltó porque no
+ * le aplican («No lo necesito») y cuándo quedó lista, para que la lista no vuelva.
+ */
+export const SETUP_STEPS = [
+  "datos",
+  "catalogo",
+  "pagos",
+  "entregas",
+  "chats",
+  "sofi",
+  "equipo",
+] as const
+export type SetupStep = (typeof SETUP_STEPS)[number]
+
+export const storeSetup = pgTable(
+  "store_setup",
+  {
+    storeId: uuid("store_id").primaryKey(),
+    skipped: text("skipped").array().$type<SetupStep[]>().notNull().default(sql`'{}'::text[]`),
+    /** Con todos los pasos hechos o saltados: desde entonces, la lista no vuelve. */
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Quién saltó el último paso; nulo si lo anotó el sistema (al quedar lista). */
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "store_setup_skipped_check",
+      sql.raw(`skipped <@ ARRAY[${SETUP_STEPS.map((step) => `'${step}'`).join(",")}]::text[]`),
+    ),
+    foreignKey({
+      name: "store_setup_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
   ],
 )

@@ -1,4 +1,4 @@
-# 0227 · En gestorIA, Despachos, el repartidor de la tienda y la caja del efectivo
+# 0228 · En gestorIA, Despachos, el repartidor de la tienda y la caja del efectivo
 
 Fecha: 2026-11-27 · Estado: aceptada · Entrega 3 del lienzo «gestorIA como odentIA» (tableros 4, 6,
 17, 23 y 24; sobre el saldo del ADR 0222 y las correcciones del ADR 0226)
