@@ -1,4 +1,5 @@
 import {
+  agentGap,
   contractState,
   type Db,
   DELIVERY_COSTS,
@@ -18,7 +19,7 @@ import {
   storePaymentMethod,
 } from "@gestoria/db"
 import { accountState } from "@odentia/contract"
-import { and, asc, count, eq, gt, isNull } from "drizzle-orm"
+import { and, asc, count, countDistinct, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { can } from "./permisos.js"
@@ -390,6 +391,13 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
           .from(storeAgent)
           .where(eq(storeAgent.storeId, storeId))
       : []
+    // «Lo que aprendió»: cuántas preguntas distintas esperan respuesta de la tienda.
+    const [gaps] = seesSofi
+      ? await tx
+          .select({ open: countDistinct(agentGap.questionKey) })
+          .from(agentGap)
+          .where(and(eq(agentGap.storeId, storeId), isNull(agentGap.outcome)))
+      : []
     return {
       steps,
       brand: {
@@ -417,7 +425,9 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
         names: couriers.filter((courier) => courier.team).map((courier) => courier.name),
         supportAsks,
       },
-      sofi: seesSofi ? { enabled: agent?.enabled ?? false, tried: facts.triedSofi } : null,
+      sofi: seesSofi
+        ? { enabled: agent?.enabled ?? false, tried: facts.triedSofi, toAnswer: gaps?.open ?? 0 }
+        : null,
       plan: can(seat, "plan") ? await planLineIn(tx, storeId) : null,
     }
   })

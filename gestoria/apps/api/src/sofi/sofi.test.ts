@@ -24,8 +24,8 @@ import { defaultLinkAdapters } from "../link-de-pago.js"
 import { runArgos } from "./argos.js"
 import type { ChatModel, ChatRequest, ModelReply } from "./modelo.js"
 import { toolCall } from "./modelo.js"
-import { amountsIn, claimsPaid } from "./revisar.js"
 import { DEFAULT_CHOICES } from "./opciones.js"
+import { amountsIn, claimsPaid } from "./revisar.js"
 import { answer, SOFI_FALLBACK, SOFI_HANDOFF } from "./sofi.js"
 
 const ACCOUNT = "https://api.gestoria.test"
@@ -827,7 +827,9 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
       steps.push(
         use("pasar_a_persona", () => ({
           motivo: "No sé si es de cuero",
-          pregunta: text.startsWith("¿Es") ? "¿La zapatilla blanca es de cuero?" : "¿la zapatilla blanca es de cuero",
+          pregunta: text.startsWith("¿Es")
+            ? "¿La zapatilla blanca es de cuero?"
+            : "¿la zapatilla blanca es de cuero",
         })),
         say("Te consulto."),
       )
@@ -921,12 +923,19 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
     const [said] = await db.ownerDb
       .select()
       .from(conversationMessage)
-      .where(and(eq(conversationMessage.conversationId, id), eq(conversationMessage.author, "sofi")))
+      .where(
+        and(eq(conversationMessage.conversationId, id), eq(conversationMessage.author, "sofi")),
+      )
     expect(said!.text).toBe(
       "Te paso con una persona del equipo: te escribe por aquí mañana desde las 9 a. m.",
     )
     expect(said!.text).not.toBe(SOFI_HANDOFF)
-    await call("rosa", "PATCH", `${base}/sofi`, settings({ teamHours: hours, afterHoursSells: false }))
+    await call(
+      "rosa",
+      "PATCH",
+      `${base}/sofi`,
+      settings({ teamHours: hours, afterHoursSells: false }),
+    )
     const quiet = await realChat("Hola, ¿tienen sandalias?")
     expect(await answer(deps(sunday), storeId, quiet)).toEqual({ status: "fuera_de_horario" })
     const waiting = await call("rosa", "GET", `${base}/conversaciones/${quiet}`)

@@ -212,7 +212,7 @@ export interface ConfigOverview {
     supportAsks: number
   }
   /** Null para soporte: no mira Sofi. */
-  sofi: { enabled: boolean; tried: boolean } | null
+  sofi: { enabled: boolean; tried: boolean; toAnswer: number } | null
   /** Solo para quien ve el plan; null si todavía no se sabe nada de él. */
   plan: {
     name: string | null
@@ -416,13 +416,16 @@ export function configLines(
     const skipped = overview.steps.some((s) => s.step === "sofi" && s.state === "saltado")
     lines.sofi = {
       id: "sofi",
-      summary: overview.sofi.tried
-        ? "Ya la probaste"
-        : skipped
-          ? "No la usas por ahora"
-          : "Sin probar",
+      summary:
+        overview.sofi.toAnswer > 0
+          ? `${overview.sofi.toAnswer === 1 ? "Una pregunta" : `${overview.sofi.toAnswer} preguntas`} por responder en «Lo que aprendió»`
+          : overview.sofi.tried
+            ? "Ya la probaste"
+            : skipped
+              ? "No la usas por ahora"
+              : "Sin probar",
       status: overview.sofi.enabled ? "Encendida" : "Apagada",
-      pending: !overview.sofi.tried && !skipped,
+      pending: (!overview.sofi.tried && !skipped) || overview.sofi.toAnswer > 0,
     }
   }
   const byCollection = (collection: PaymentCollection) =>
@@ -541,9 +544,29 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   { text: "Nombre de tu link", section: "marca", terms: ["link", "enlace", "url", "dirección"] },
   { text: "Encender o apagar a Sofi", section: "sofi", terms: ["sofi", "vendedora", "apagar"] },
   {
-    text: "Lo que Sofi debe saber",
+    text: "Cómo habla Sofi",
     section: "sofi",
-    terms: ["horario", "cambios", "talla", "cuidados", "saber"],
+    terms: ["tono", "trato", "usted", "emojis", "presenta", "habla"],
+  },
+  {
+    text: "Qué ofrece Sofi para cerrar",
+    section: "sofi",
+    terms: ["oferta", "descuento", "rebaja", "envío gratis", "regalo", "negociar"],
+  },
+  {
+    text: "Cuándo te pasa el chat y tu horario",
+    section: "sofi",
+    terms: ["horario", "persona", "pasa", "molesta", "fuera de horario", "domingo"],
+  },
+  {
+    text: "Lo que sabe Sofi",
+    section: "sofi",
+    terms: ["preguntas", "respuestas", "cambios", "talla", "cuidados", "saber"],
+  },
+  {
+    text: "Lo que aprendió Sofi",
+    section: "sofi",
+    terms: ["aprendió", "no supo", "preguntas sin respuesta", "responder"],
   },
   { text: "Probar a Sofi", section: "sofi", terms: ["probar", "prueba", "conversación"] },
   {

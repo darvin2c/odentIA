@@ -446,7 +446,7 @@ describe("Configuración: lo que falta para vender", () => {
       deliveries: [],
       catalog: { withStock: 0 },
       team: { members: 3, supportAsks: 0 },
-      sofi: { enabled: false, tried: false },
+      sofi: { enabled: false, tried: false, toAnswer: 0 },
     })
     // El plan es del Dueño: al Administrador no le llega.
     const mario = await call("mario", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)
@@ -894,12 +894,12 @@ describe("la tienda de ejemplo", () => {
       await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/configuracion/resumen`)
     ).json()) as {
       paymentLink: unknown
-      sofi: { enabled: boolean; tried: boolean }
+      sofi: { enabled: boolean; tried: boolean; toAnswer: number }
       team: { supportAsks: number }
       catalog: { withStock: number }
     }
     expect(overview.paymentLink).toBeNull()
-    expect(overview.sofi).toEqual({ enabled: true, tried: false })
+    expect(overview.sofi).toEqual({ enabled: true, tried: false, toAnswer: 0 })
     expect(overview.team.supportAsks).toBe(1)
     expect(overview.catalog.withStock).toBeGreaterThan(0)
     const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {

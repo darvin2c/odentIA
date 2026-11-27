@@ -72,9 +72,7 @@ export async function knowledgeView(appDb: Db, person: Person, storeId: string) 
     const bare = await tx
       .select({ id: product.id, name: product.name })
       .from(product)
-      .where(
-        and(eq(product.storeId, storeId), sql`char_length(btrim(${product.description})) = 0`),
-      )
+      .where(and(eq(product.storeId, storeId), sql`char_length(btrim(${product.description})) = 0`))
       .orderBy(asc(product.name))
       .limit(20)
     return {

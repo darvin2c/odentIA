@@ -18,7 +18,6 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
-import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   choicesInput,
   deviceInput,
@@ -29,6 +28,7 @@ import {
   storeChoices,
   subscribeInput,
 } from "./avisos.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   createExchange,
   exchangeInput,
@@ -160,6 +160,7 @@ import {
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
+import { reportPeriod, storeReport } from "./sofi/reportes.js"
 import {
   addAnswer,
   answerGap,
@@ -171,7 +172,6 @@ import {
   knowledgeView,
   removeAnswer,
 } from "./sofi/saber.js"
-import { reportPeriod, storeReport } from "./sofi/reportes.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,

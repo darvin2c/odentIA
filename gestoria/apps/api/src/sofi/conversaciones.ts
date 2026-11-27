@@ -14,8 +14,15 @@ import type { Person } from "../cuenta.js"
 import { pad } from "../pedidos.js"
 import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
-import { choicesInput, DEFAULT_CHOICES, OFFER_NAMES, type OfferKind } from "./opciones.js"
-import { type AnswerResult, answer, type SofiDeps } from "./sofi.js"
+import {
+  choicesInput,
+  DEFAULT_CHOICES,
+  hoursWords,
+  hourWords,
+  OFFER_NAMES,
+  type OfferKind,
+} from "./opciones.js"
+import { type AnswerResult, answer, handoffLater, type SofiDeps } from "./sofi.js"
 
 /**
  * Lo que el equipo ve y pone de Sofi (paso B5, tablero 8): lo que el dueño deja escrito y la
@@ -98,7 +105,15 @@ export async function agentSettings(
       .orderBy(desc(conversation.updatedAt))
       .limit(10)
     // Si la administración detuvo a Sofi (la cuenta no puede seguir o llegó a su tope).
-    return { settings, modelReady, tests, agentStop: await agentStopIn(tx, storeId) }
+    // El horario y el aviso fuera de él, en las mismas palabras que usa Sofi.
+    const hours = settings.teamHours
+    const words = hours
+      ? {
+          hours: hoursWords(hours),
+          afterHours: handoffLater(`mañana desde las ${hourWords(hours.from)}`),
+        }
+      : null
+    return { settings, words, modelReady, tests, agentStop: await agentStopIn(tx, storeId) }
   })
 }
 
@@ -166,8 +181,7 @@ export function whyOf(detail: Record<string, unknown>): string[] {
   const why: string[] = []
   if (typeof detail.estilo === "string") why.push(`Habló ${detail.estilo}, como elegiste.`)
   const read = strings(detail.sabe)
-  if (read.length)
-    why.push(`Usó de «Lo que sabe»: ${read.map((q) => `«${q}»`).join(", ")}.`)
+  if (read.length) why.push(`Usó de «Lo que sabe»: ${read.map((q) => `«${q}»`).join(", ")}.`)
   const offered = strings(detail.ofrecio).filter((k): k is OfferKind => k in OFFER_NAMES)
   if (offered.length)
     why.push(

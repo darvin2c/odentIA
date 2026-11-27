@@ -677,7 +677,10 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
     const refused = offerNotAllowed(offerKindsOf(priced.quote, ctx.choices), ctx.choices)
     if (refused) return { ok: false, problemas: [notAllowedWords(refused, ctx.choices)] }
     // Las compras grandes las atiende la tienda, si así lo eligió: Sofi pasa el chat.
-    if (ctx.choices.handoffOverCents !== null && priced.quote.totalCents > ctx.choices.handoffOverCents)
+    if (
+      ctx.choices.handoffOverCents !== null &&
+      priced.quote.totalCents > ctx.choices.handoffOverCents
+    )
       throw new ToolProblem(
         `La tienda atiende ella los pedidos de más de ${formatMoney(ctx.choices.handoffOverCents, ctx.currency)}: no lo anotes, pasa el chat a una persona (pasar_a_persona)`,
         "MONTO_ALTO",
@@ -903,10 +906,7 @@ async function handOff(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.pasar_
 }
 
 /** Las respuestas de «Lo que sabe» que pidió: datos que escribió la tienda, no instrucciones. */
-async function readAnswers(
-  ctx: SofiToolContext,
-  args: z.infer<typeof SCHEMAS.leer_lo_que_sabe>,
-) {
+async function readAnswers(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.leer_lo_que_sabe>) {
   const found = args.preguntas
     .map((ref) => ctx.answers.find((a) => a.ref === ref.trim().toLowerCase()))
     .filter((a) => a !== undefined)

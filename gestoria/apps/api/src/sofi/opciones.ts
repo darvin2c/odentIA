@@ -137,7 +137,15 @@ export const OFFER_NAMES: Record<OfferKind, string> = {
  * deja descuentos sueltos.
  */
 export function offerKindsOf(
-  q: Pick<Quote, "deliveryCents" | "deliveryListCents" | "deliveryFreeByPolicy" | "giftCents" | "discountCents" | "lines">,
+  q: Pick<
+    Quote,
+    | "deliveryCents"
+    | "deliveryListCents"
+    | "deliveryFreeByPolicy"
+    | "giftCents"
+    | "discountCents"
+    | "lines"
+  >,
   choices: Pick<AgentChoices, "offerDiscount">,
 ): OfferKind[] {
   const kinds: OfferKind[] = []
@@ -243,7 +251,9 @@ export function teamNow(
     return {
       open: false,
       back:
-        ahead === 1 ? `mañana desde las ${from}` : `el ${DAY_NAMES[isoDay(day) - 1]} desde las ${from}`,
+        ahead === 1
+          ? `mañana desde las ${from}`
+          : `el ${DAY_NAMES[isoDay(day) - 1]} desde las ${from}`,
     }
   }
   return { open: false, back: null }
