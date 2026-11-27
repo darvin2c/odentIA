@@ -2,6 +2,7 @@ import type { Db } from "@gestoria/db"
 import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
+import { collectedBetween } from "../caja.js"
 import type { Person } from "../cuenta.js"
 import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
@@ -44,12 +45,8 @@ export async function storeReport(
     // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
     const since = from.toISOString()
     const at = now.toISOString()
-    // Vendido y cobrado: los pagos confirmados del periodo, por pedido.
-    const [sold] = await tx.execute<{ cents: string; orders: string }>(sql`
-      select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders
-      from order_payment p join sale_order o on o.id = p.order_id
-      where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
-        and p.reviewed_at >= ${since}`)
+    // Vendido y cobrado: los pagos confirmados del periodo, la misma cuenta de Caja.
+    const sold = await collectedBetween(tx, storeId, from, null)
     // Lo que falta cobrar y lo que espera a una persona, hoy, del saldo de cada pedido. Un
     // pedido por pagar con el precio vencido ya no se cuenta: no se va a cobrar así.
     const [pending] = await tx.execute<{
@@ -130,15 +127,15 @@ export async function storeReport(
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_by = ${SOFI_ACTOR} and o.created_at >= ${since}`)
-    const soldOrders = n(sold?.orders)
+    const soldOrders = sold.orders
     const conversations = n(agent?.conversations)
     return {
       period,
       from,
       sold: {
-        cents: n(sold?.cents),
+        cents: sold.cents,
         orders: soldOrders,
-        ticketCents: soldOrders ? Math.round(n(sold?.cents) / soldOrders) : 0,
+        ticketCents: soldOrders ? Math.round(sold.cents / soldOrders) : 0,
       },
       pending: {
         /** Los pagos que esperan a una persona: no son «falta cobrar». */

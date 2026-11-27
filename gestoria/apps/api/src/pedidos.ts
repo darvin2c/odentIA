@@ -10,6 +10,7 @@ import {
   orderPayment,
   type PaymentCollection,
   type PaymentTypeCode,
+  type PhotoType,
   product,
   productPhoto,
   productPromotion,
@@ -223,10 +224,20 @@ export const shipInput = z.object({ tracking, agency })
 export const shippingInput = z.object({ tracking, agency })
 
 export const deliverInput = z.object({
-  /** Si falta cobrar: lo que cobró en la puerta. */
+  /** Si falta cobrar: lo que cobró en la puerta, con un solo medio. */
   collectedCents: cents.nullable().default(null),
   /** Con qué le pagaron en la puerta (un medio de la tienda que se cobra al recibir). */
   methodId,
+  /** Si pagó una parte con cada medio («Agregar otro medio»): cada uno con su monto. */
+  payments: z
+    .array(
+      z.object({
+        methodId: z.uuid("Elige el medio de pago"),
+        amountCents: cents.min(1, "Escribe cuánto cobraste"),
+      }),
+    )
+    .max(3, "Hasta 3 medios")
+    .default([]),
 })
 
 export const cancelInput = z.object({ reason })
@@ -1507,11 +1518,25 @@ export async function markShipped(
   })
 }
 
+/** Lo cobrado en la puerta, uno por medio: con qué y cuánto. */
+type DoorPayment = { methodId: string | null; amountCents: number }
+
+/** Lo que se cobró en la puerta: varios medios, o el monto y el medio de antes (uno solo). */
+function doorPaymentsOf(input: z.infer<typeof deliverInput>): DoorPayment[] {
+  if (input.payments.length > 0) return input.payments
+  return input.collectedCents ? [{ methodId: input.methodId, amountCents: input.collectedCents }] : []
+}
+
 /**
- * «Entregado» (o «Entregado y cobrado» si falta cobrar: queda quién cobró, cuánto y con qué). Si
- * pagó una parte antes, en la puerta se cobra lo que falta. Cualquier paso completa los anteriores
- * (tableros 6 y 7): si nadie marcó «Salió», queda también «Salió», con la misma hora. Un recojo en
- * tienda no sale: pasa de «por salir» a entregado.
+ * «Entregado» (o «Cobrar y entregar» si falta cobrar). Sin pago confirmado no se entrega (tablero
+ * 24): si falta cobrar, lo cobrado en la puerta se anota en este mismo paso, con su medio (efectivo
+ * o el POS de la tienda, con la foto del voucher si la hay), y tiene que ser todo lo que falta; un
+ * pago que espera a una persona (una captura de Yape a la tienda, un link que no coincide) se
+ * confirma antes. Lo cobrado queda a nombre de quien llevaba el pedido (su efectivo lo entrega en
+ * Caja), y quién lo anotó, con su nombre.
+ *
+ * Cualquier paso completa los anteriores (tableros 6 y 7): si nadie marcó «Salió», queda también
+ * «Salió», con la misma hora. Un recojo en tienda no sale: pasa de «por salir» a entregado.
  */
 export async function markDelivered(
   appDb: Db,
@@ -1519,48 +1544,80 @@ export async function markDelivered(
   storeId: string,
   orderId: string,
   input: z.infer<typeof deliverInput>,
+  voucher: { photo: Uint8Array; type: PhotoType } | null = null,
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
-    const { dueCents } = await balanceIn(tx, order)
+    const { dueCents, pendingCents } = await balanceIn(tx, order)
     const { currency } = await storeRow(tx, storeId)
-    let collected: (MethodCopy & { cents: number; short: string | null }) | null = null
+    if (pendingCents > 0)
+      throw new StoreError(
+        409,
+        "PAYMENT_PENDING",
+        `Hay un pago de ${formatMoney(pendingCents, currency)} por confirmar. Confírmalo, o di que no coincide, antes de entregar: sin pago confirmado no se entrega.`,
+      )
+    const door = doorPaymentsOf(input)
+    if (dueCents === 0 && door.length > 0)
+      throw new StoreError(
+        409,
+        "NOTHING_DUE",
+        `El pedido ${pad(order.number)} ya no debe nada. Recarga para verlo.`,
+      )
     if (dueCents > 0) {
-      if (input.collectedCents === null || input.collectedCents === 0)
+      const sum = door.reduce((total, one) => total + one.amountCents, 0)
+      if (sum === 0)
         throw new StoreError(400, "VALIDATION_ERROR", "Escribe cuánto cobraste", {
           collectedCents: "Escribe cuánto cobraste al entregar",
         })
-      const method = await methodFor(tx, storeId, order, "al_recibir", input.methodId)
-      // Lo cobrado en la puerta se anota tal cual; si no es lo que faltaba, queda escrito para revisarlo.
-      const short =
-        input.collectedCents !== dueCents
-          ? `Cobró ${formatMoney(input.collectedCents, currency)} de ${formatMoney(dueCents, currency)}`
-          : null
-      collected = { ...method, cents: input.collectedCents, short }
-      const now = new Date()
+      if (sum !== dueCents)
+        throw new StoreError(
+          400,
+          "VALIDATION_ERROR",
+          sum < dueCents
+            ? `Falta cobrar ${formatMoney(dueCents - sum, currency)}: sin todo el pago no se entrega. Anota lo que falta o pásalo a otro día.`
+            : `Es más de lo que falta (${formatMoney(dueCents, currency)}): anota solo lo que debía, sin el vuelto.`,
+          { collectedCents: `Falta cobrar ${formatMoney(dueCents, currency)}` },
+        )
+    }
+    const methods: MethodCopy[] = []
+    for (const one of door) methods.push(await methodFor(tx, storeId, order, "al_recibir", one.methodId))
+    // La foto del voucher va con lo cobrado con tarjeta (el POS), o con lo único cobrado.
+    const withPhoto = voucher
+      ? Math.max(
+          0,
+          methods.findIndex((m) => m.methodType === "48"),
+        )
+      : -1
+    const now = new Date()
+    for (const [i, one] of door.entries())
       await tx.insert(orderPayment).values({
         storeId,
         orderId,
         kind: "al_recibir",
         status: "confirmado",
-        amountCents: input.collectedCents,
-        ...method,
-        note: short,
+        amountCents: one.amountCents,
+        ...methods[i]!,
+        courierId: order.courierId,
+        ...(i === withPhoto && voucher
+          ? { photo: Buffer.from(voucher.photo), photoType: voucher.type }
+          : {}),
         createdBy: person.userId,
         reviewedBy: person.userId,
         reviewedAt: now,
       })
-    }
     await mustSale(tx, order, person.userId)
     await setState(tx, order, "entregado")
     if (order.state === "por_salir" && order.deliveryType !== "OnSitePickup")
       await logEvent(tx, storeId, orderId, person.userId, "salio", { completado: true })
     await logEvent(tx, storeId, orderId, person.userId, "entregado", {
-      ...(collected
-        ? { cobrado: collected.cents, medio: collected.methodName, moneda: currency }
+      ...(door.length > 0
+        ? {
+            cobrado: dueCents,
+            medio: [...new Set(methods.map((m) => m.methodName))].join(" y "),
+            moneda: currency,
+          }
         : {}),
-      ...(collected?.short ? { porRevisar: collected.short } : {}),
     })
     await notifyCustomer(tx, order, person.userId, currency, "entregado")
     return orderDetailIn(tx, storeId, orderId)

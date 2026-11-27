@@ -1,4 +1,4 @@
-import { type Db, MAX_PHOTO_BYTES } from "@gestoria/db"
+import { type Db, MAX_PHOTO_BYTES, type PhotoType } from "@gestoria/db"
 import { APP_CONTRACT_PATHS, CONTRACT_MAX_RECEIPT_BYTES } from "@odentia/contract"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -23,6 +23,7 @@ import {
   catalog,
   createProduct,
   deleteProduct,
+  imageType,
   photoContent,
   productDetail,
   productInput,
@@ -80,6 +81,7 @@ import {
   storeDataInput,
   storeImageContent,
 } from "./marca.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
 import {
   addReceipt,
@@ -190,7 +192,7 @@ const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 /** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
 const MAX_LINK_NOTICES = 120
 const LINK_NOTICE_WINDOW_MS = 60_000
-const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/comprobante$/
+const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/(comprobante|entregado)$/
 /** El comprobante del plan (una foto o un PDF) va a la administración: su propio tope. */
 const PLAN_RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/plan\/comprobante$/
 /**
@@ -662,11 +664,37 @@ export function createApp(deps: AppDeps) {
     const { id, orderId } = c.req.param()
     return c.json({ order: await markShipped(deps.appDb, c.get("person"), id, orderId, input) })
   })
+  // «Entregado», con lo cobrado en la puerta y, si se quiere, la foto del voucher del POS (entonces
+  // llega como formulario: `datos` con lo cobrado y `voucher` con la foto).
   app.post("/api/tiendas/:id/pedidos/:orderId/entregado", async (c) => {
-    const input = await bodyOf(c, deliverInput)
     const { id, orderId } = c.req.param()
+    let input: z.infer<typeof deliverInput>
+    let voucher: { photo: Uint8Array; type: PhotoType } | null = null
+    if ((c.req.header("content-type") ?? "").startsWith("multipart/form-data")) {
+      let form: FormData
+      try {
+        form = await c.req.formData()
+      } catch {
+        throw new StoreError(400, "VALIDATION_ERROR", "Lo cobrado no se pudo leer")
+      }
+      try {
+        input = deliverInput.parse(JSON.parse(String(form.get("datos") ?? "{}")))
+      } catch (error) {
+        if (error instanceof ZodError) throw error
+        throw new StoreError(400, "VALIDATION_ERROR", "Lo cobrado no se pudo leer")
+      }
+      const file = form.get("voucher")
+      if (file instanceof File && file.size > 0) {
+        const photo = new Uint8Array(await file.arrayBuffer())
+        if (photo.length > MAX_PHOTO_BYTES)
+          throw new StoreError(400, "PHOTO_TOO_LARGE", "La foto pesa demasiado. Prueba con otra.")
+        const type = imageType(photo)
+        if (!type) throw new StoreError(400, "PHOTO_TYPE", "Sube la foto en JPG, PNG o WebP")
+        voucher = { photo, type }
+      }
+    } else input = await bodyOf(c, deliverInput)
     return c.json({
-      order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
+      order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input, voucher),
     })
   })
   // Corregir sin anular (ADR 0226): cambiar, no se entregó y pasar a otro día.
@@ -816,6 +844,16 @@ export function createApp(deps: AppDeps) {
     return c.json({
       conversation: await returnToSofi(deps.appDb, c.get("person"), id, conversationId),
     })
+  })
+
+  // Caja (entrega 3): lo cobrado del día y «Recibí» el efectivo. Solo Dueño y Administrador.
+  app.get("/api/tiendas/:id/caja", async (c) => {
+    const day = cashDay.parse(c.req.query("dia") || undefined)
+    return c.json(await cashBox(deps.appDb, c.get("person"), c.req.param("id"), day))
+  })
+  app.post("/api/tiendas/:id/caja/recibi", async (c) => {
+    const input = await bodyOf(c, receiveInput)
+    return c.json(await receiveCash(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
   })
 
   // Reportes y Argos (B5): solo Dueño y Administrador.

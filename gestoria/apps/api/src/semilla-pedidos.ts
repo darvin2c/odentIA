@@ -115,7 +115,7 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
   })
   await confirm(pedro, 22900, "00412233")
   await markShipped(tx, lucia, storeId, pedro, { tracking: null, agency: null })
-  await markDelivered(tx, lucia, storeId, pedro, { collectedCents: null, methodId: null })
+  await markDelivered(tx, lucia, storeId, pedro, { collectedCents: null, methodId: null, payments: [] })
 
   // Anulado: el cliente se arrepintió antes de pagar.
   const sofia = await create({
