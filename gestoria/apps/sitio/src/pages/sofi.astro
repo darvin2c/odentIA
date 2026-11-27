@@ -113,6 +113,8 @@ const app = {
         <span class="ag-heroe__anillo" aria-hidden="true"></span>
         <span class="ag-heroe__anillo ag-heroe__anillo--b" aria-hidden="true"></span>
         <span class="ag-heroe__sofi" data-sofi="curiosa" data-sofi-escala="0.5" data-sofi-juego aria-hidden="true"></span>
+        <button type="button" class="sofi-toque" data-sofi-toque aria-describedby="sofi-dice-heroe"><span class="sr">Tocar a Sofi</span></button>
+        <p class="sofi-dice" id="sofi-dice-heroe" data-sofi-dice aria-live="polite"></p>
         <ul class="llegan" aria-label="Chats que le llegan a Sofi, de ejemplo">
           {llegan.map((l, i) => (
             <li class:list={["llega", `llega--${i}`]} data-llega>

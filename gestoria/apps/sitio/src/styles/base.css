@@ -968,15 +968,14 @@ button {
   color: var(--texto-2);
 }
 /* ================================================================ cierre */
+/* Sin contexto de apilado propio: así el globo de Sofi puede salir delante de ella. */
 .cierre {
   position: relative;
   overflow: hidden;
-  isolation: isolate;
 }
 .cierre__fondo {
   position: absolute;
   inset: 0;
-  z-index: -1;
 }
 .cierre__luz {
   position: absolute;
@@ -988,6 +987,7 @@ button {
   background: radial-gradient(closest-side, rgba(254, 79, 2, 0.4), transparent);
 }
 .cierre__marco {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   align-items: center;
@@ -1064,6 +1064,68 @@ html:not(.mueve) .cierre__pista {
   border-right: 2px solid var(--naranja-vivo);
   border-bottom: 2px solid var(--naranja-vivo);
   transform: rotate(45deg);
+}
+
+/* Tocar a Sofi: el botón cubre su lugar y el globo con su frase sale debajo de ella, sobre «Tócala»
+   (arriba lo taparía la cabecera cuando el cierre queda al final de la página). */
+.sofi-toque {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  width: min(300px, 70%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 46;
+}
+.sofi-toque:focus-visible {
+  outline: 2px dashed var(--naranja-vivo);
+  outline-offset: 6px;
+}
+.sofi-dice {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 47;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 32px));
+  text-align: center;
+  padding: 14px 18px;
+  border-radius: 20px;
+  background: #fff;
+  color: var(--texto);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  box-shadow: 0 20px 50px -20px rgba(17, 17, 19, 0.6);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -16px) scale(0.85);
+  transform-origin: 50% 0;
+  transition:
+    opacity 0.25s var(--suave),
+    transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.sofi-dice::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  translate: -50% 0;
+  rotate: 45deg;
+  background: inherit;
+  border-radius: 3px 0 0 0;
+}
+.sofi-dice:empty {
+  display: none;
+}
+.sofi-dice.es-visible {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
 }
 
 /* Reducir movimiento: nada se desliza ni se transforma por sí solo. */

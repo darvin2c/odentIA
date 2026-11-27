@@ -88,6 +88,39 @@ function aparecer() {
   for (const el of items) io.observe(el)
 }
 
+/** Lo que dice Sofi cuando la tocan: una frase por toque, en orden. */
+export const FRASES_DE_SOFI = [
+  "¡Hola! Soy Sofi. Vendo por ti, a toda hora.",
+  "Tú duermes, yo atiendo. Tú empacas, yo cobro.",
+  "Nunca bajo de tu mínimo. Palabra de Sofi.",
+  "Una sola oferta, con plazo. Así se cierra una venta.",
+  "WhatsApp, Instagram y Messenger: yo contesto los tres.",
+  "¿Vendemos juntas? Escríbenos y te muestro cómo.",
+]
+
+/**
+ * Tocar a Sofi: un globo con su frase aparece sobre ella y se va solo. Con el mouse o el dedo, el
+ * rebote lo hace sofi.ts al tocarla; con el teclado (Enter o espacio), este botón se lo pide.
+ */
+function sofiHabla() {
+  let n = 0
+  for (const boton of document.querySelectorAll<HTMLButtonElement>("[data-sofi-toque]")) {
+    const globo = boton.parentElement?.querySelector<HTMLElement>("[data-sofi-dice]")
+    if (!globo) continue
+    let reloj = 0
+    boton.addEventListener("click", (e) => {
+      if (e.detail === 0) window.dispatchEvent(new CustomEvent("sofi:tocar"))
+      globo.textContent = FRASES_DE_SOFI[n % FRASES_DE_SOFI.length] ?? ""
+      n++
+      globo.classList.remove("es-visible")
+      void globo.offsetWidth
+      globo.classList.add("es-visible")
+      window.clearTimeout(reloj)
+      reloj = window.setTimeout(() => globo.classList.remove("es-visible"), 4200)
+    })
+  }
+}
+
 export function iniciarSitio() {
   if (!reduceMovimiento()) {
     lenis = new Lenis({ duration: 1.15, smoothWheel: true, wheelMultiplier: 0.95 })
@@ -110,6 +143,7 @@ export function iniciarSitio() {
   cabecera()
   menu()
   aparecer()
+  sofiHabla()
   // Sofi está en el cierre de todas las páginas; la que la carga ella misma lo marca (`data-sofi-propia`).
   if (
     !document.documentElement.hasAttribute("data-sofi-propia") &&

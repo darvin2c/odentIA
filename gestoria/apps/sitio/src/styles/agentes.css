@@ -248,6 +248,16 @@ html:not(.mueve) .ag-heroe__pista {
   .llega--1 {
     justify-self: end;
   }
+  /* El botón y el globo van con Sofi, no con la escena entera (los chats la alargan). */
+  .ag-heroe__escena .sofi-toque {
+    top: 40px;
+    translate: -50% 0;
+    width: 230px;
+  }
+  .ag-heroe__escena .sofi-dice {
+    top: 250px;
+    bottom: auto;
+  }
 }
 
 /* ================================================================ su oficio */
