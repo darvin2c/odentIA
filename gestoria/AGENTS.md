@@ -65,9 +65,16 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   a las 24 horas (ADR 0207). Lo acordado no se cambia: un pedido se anula con motivo y se anota otro.
 - El stock baja al confirmar el pago, o al salir si se paga al recibir, y vuelve al anular. Si al
   pagar no alcanza, el pago se confirma igual y el pedido no sale hasta que entre stock.
+- «Hoy» es el de la tienda, con su zona horaria (`store.time_zone`, `apps/api/src/hora.ts`; ADR
+  0221): nunca el del servidor ni el del navegador. Todo lo que cuenta días la usa.
+- Un solo saldo por pedido: la vista `order_balance` (`saldo.ts`). Falta cobrar = total −
+  confirmado − por confirmar; «Pagado» es no deber nada con todo confirmado; «Pago doble», solo si
+  lo confirmado pasa del total. Ninguna pantalla ni respuesta lo recalcula. Un pedido acepta varios
+  pagos mientras falte cobrar, cada uno con su medio (el de la tienda, copiado).
 - El cobro va en orden: link de pago (se confirma solo), captura (la confirma quien tiene
-  `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró).
-  Un pedido pagado lo anula solo quien confirma pagos; uno entregado no se anula.
+  `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró y
+  con qué medio; si pagó una parte antes, cobra lo que falta).
+  Un pedido con un pago lo anula solo quien confirma pagos; uno entregado no se anula.
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
