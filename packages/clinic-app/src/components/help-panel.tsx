@@ -1,4 +1,4 @@
-import { HelpButton } from "@odentia/ui-patterns"
+import { HelpButton } from "@odentia/ui-patterns/help"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ADMIN_NAME, useReceptionName, withReceptionName } from "../lib/agent-names"
 import { apiFetch } from "../lib/api"

@@ -1,11 +1,5 @@
+/**
+ * El panel de la Ayuda (`@odentia/ui-patterns/help`). Va aparte del índice del paquete porque
+ * carga AI Elements: solo lo carga la cabecera de cada app, no cada pantalla ni cada prueba.
+ */
 export { HelpButton, type HelpButtonProps } from "./help-button.js"
-export {
-  ASK_HELP_EVENT,
-  FOLLOW_UP_MS,
-  HELP_NAME,
-  type HelpReply,
-  helpReply,
-  OPEN_HELP_EVENT,
-  openSupportRequest,
-  previousOf,
-} from "./help-reply.js"

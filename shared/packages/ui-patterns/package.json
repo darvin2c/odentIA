@@ -5,6 +5,12 @@
   "type": "module",
   "main": "./src/index.tsx",
   "types": "./src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx",
+    "./help": "./src/help/index.ts",
+    "./src/brand": "./src/brand.tsx",
+    "./src/*": "./src/*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
