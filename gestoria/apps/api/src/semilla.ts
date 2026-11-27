@@ -223,12 +223,27 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
         instructions: "Cuenta en dólares 193-0000000-1-00 a nombre de Sallca Group E.I.R.L.",
       },
     ],
+    // Cada caso dice quién lo abrió: la Ayuda le muestra a cada persona solo los suyos (ADR 0221).
     support: [
+      {
+        id: "semilla-soporte-2",
+        status: "esperando_clinica",
+        question: "Un cliente dice que ya pagó por Yape, pero su pedido sigue «Pago por confirmar»",
+        createdAt: at(-1),
+        userId: "semilla-lucia",
+        replies: [
+          {
+            body: "Su captura está anotada y falta confirmarla: revisa la cuenta de la tienda y, si el pago está, usa «Confirmar pago» en el pedido.",
+            at: at(-1),
+          },
+        ],
+      },
       {
         id: "semilla-soporte-1",
         status: "esperando_clinica",
         question: "¿Puedo pagar con Yape?",
         createdAt: at(-3),
+        userId: "semilla-rosa",
         replies: [
           {
             body: "Sí: al pagar el cobro de este mes, elige Yape y sube la captura.",
@@ -253,7 +268,11 @@ async function seedDemoSupport(tx: Db, storeId: string): Promise<void> {
   if (pending) return
   await receiveSupportRequest(tx, {
     account: storeId,
-    staff: { userId: "semilla-soporte", name: "Ana de Soporte (ficticia)", email: "soporte@example.test" },
+    staff: {
+      userId: "semilla-soporte",
+      name: "Ana de Soporte (ficticia)",
+      email: "soporte@example.test",
+    },
     minutes: 30,
     reason: "Revisar contigo por qué no se ven las fotos del catálogo",
   })

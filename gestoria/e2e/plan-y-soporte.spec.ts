@@ -14,6 +14,8 @@ import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, type Who } from "./entorno"
  * - El armazón común (lienzo «Una cuenta, todas las apps»): el selector de la tienda con el rol,
  *   «Pedir ayuda» en la cabecera, el menú de la persona con Apariencia, y la entrada que recuerda
  *   a quien entró, con su correo entero y «Entrar con otra cuenta».
+ * - La Ayuda al pie del menú (entrega 7, tablero 19): cada respuesta dice quién puede y lleva a su
+ *   pantalla; «Pedir ayuda» sale con la pantalla y el rol y queda en «Tus preguntas».
  * Cada pantalla en escritorio y a 390 px, sin desborde y con el botón principal por teclado. Las
  * capturas van a `gestoria/e2e/capturas/`.
  */
@@ -66,10 +68,13 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   await expect(page.getByRole("menuitem", { name: "Plan y pagos" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Crear otra tienda" })).toBeVisible()
   await page.keyboard.press("Escape")
-  // «Pedir ayuda» de la cabecera lleva a la ayuda del soporte, con el foco en su primer campo.
-  await page.getByRole("link", { name: "Pedir ayuda" }).click()
-  await expect(page).toHaveURL(/\/plan#plan-ayuda$/)
-  await expect(page.getByLabel("Sobre qué")).toBeFocused()
+  // «Pedir ayuda» de la cabecera se abre ahí mismo, con la pantalla y el rol de quien pregunta.
+  await page.getByRole("button", { name: "Pedir ayuda" }).click()
+  const asking = page.getByRole("dialog", { name: "Pedir ayuda" })
+  await expect(asking.getByLabel("¿Qué pasó?")).toBeFocused()
+  await expect(asking.getByText(/\(Pedidos · Dueño · Calzados Rosa\)/)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(asking).toHaveCount(0)
   await page.goto(`${BASE}/plan`)
   await expect(page.getByRole("heading", { name: "Plan y pagos" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Lo que se te cobró" })).toBeVisible()
@@ -169,7 +174,7 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   const nav = page.getByRole("navigation", { name: "Principal" })
   await expect(nav.getByRole("link", { name: "Catálogo" })).toBeVisible()
   await expect(nav.getByRole("link", { name: "Pedidos" })).toHaveCount(0)
-  await expect(page.getByRole("link", { name: "Pedir ayuda" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Pedir ayuda" })).toHaveCount(0)
   await page.getByRole("button", { name: /^Calzados Rosa, Tienda, Soporte\./ }).click()
   await expect(page.getByRole("menuitem", { name: "Plan y pagos" })).toHaveCount(0)
   await expect(page.getByRole("menuitem", { name: "Crear otra tienda" })).toHaveCount(0)
@@ -205,6 +210,55 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await page.setViewportSize(PHONE)
   await noSideScroll(page)
   await shot(page, "soporte-acceso-termino-telefono")
+})
+
+test("la Ayuda dice cómo hacer cada tarea y quién puede, y «Pedir ayuda» queda en «Tus preguntas»", async ({
+  page,
+}) => {
+  await as("rosa")
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/pedidos`)
+  // Al pie del menú, para todos.
+  await page.getByRole("link", { name: "Ayuda", exact: true }).click()
+  await expect(page).toHaveURL(/\/ayuda$/)
+  await expect(page.getByRole("heading", { name: "Ayuda", exact: true })).toBeVisible()
+  // En la Ayuda, «Pedir ayuda» es el botón de la página: la cabecera no lo repite.
+  await expect(page.getByRole("button", { name: "Pedir ayuda", exact: true })).toHaveCount(1)
+  // Una pregunta por tarea: la respuesta, quién puede y su pantalla.
+  await page.getByRole("link", { name: "¿Cómo cambio el stock?" }).click()
+  await expect(page).toHaveURL(/\?pregunta=cambiar-stock$/)
+  const answer = page.getByRole("article", { name: "¿Cómo cambio el stock?" })
+  await expect(answer.getByText("Lo pueden hacer: Dueño y Administrador.")).toBeVisible()
+  await expect(answer.getByRole("link", { name: "Ir a Catálogo" })).toBeVisible()
+  await noSideScroll(page)
+  await shot(page, "ayuda-escritorio")
+
+  // «¿No era esto?» abre «Pedir ayuda» desde la Ayuda; Enter envía.
+  await answer.getByRole("button", { name: "¿No era esto? Pedir ayuda" }).click()
+  const asking = page.getByRole("dialog", { name: "Pedir ayuda" })
+  await expect(asking.getByText(/\(Ayuda · Dueño · Calzados Rosa\)/)).toBeVisible()
+  await asking.getByLabel("¿Qué pasó?").fill("No encuentro dónde cambiar el nombre de la tienda")
+  await page.keyboard.press("Enter")
+  await expect(asking).toHaveCount(0)
+  const mine = page.getByRole("region", { name: "Tus preguntas" })
+  await expect(mine.getByText("No encuentro dónde cambiar el nombre de la tienda")).toBeVisible()
+  await expect(mine.getByText("Por enviar")).toBeVisible()
+  await shot(page, "ayuda-pregunta-escritorio")
+
+  // En el teléfono: la lista o la respuesta, y la vuelta a la lista.
+  await page.setViewportSize(PHONE)
+  await page.goto(`${BASE}/ayuda`)
+  const list = page.getByRole("navigation", { name: "Preguntas de la Ayuda" })
+  await expect(list).toBeVisible()
+  await noSideScroll(page)
+  await shot(page, "ayuda-telefono")
+  await list.getByRole("link", { name: "¿Sofi confirma pagos?" }).click()
+  await expect(page.getByRole("heading", { name: "¿Sofi confirma pagos?" })).toBeFocused()
+  await expect(list).toHaveCount(0)
+  await noSideScroll(page)
+  await shot(page, "ayuda-respuesta-telefono")
+  await page.getByRole("link", { name: "Todas las preguntas" }).click()
+  await expect(list).toBeVisible()
 })
 
 test("la conversación que Sofi no atendió espera a una persona, con su motivo", async ({

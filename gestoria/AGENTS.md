@@ -125,6 +125,17 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`supportStateOf`); a cualquier otra persona, 404. «Salir» termina solo la entrada, nunca la
   sesión. Ventas ve solo quién mira y hasta cuándo; soporte no ve la lista de soporte.
 
+## La Ayuda (entrega 7 del lienzo «gestorIA como odentIA»)
+
+- La guía es `apps/api/src/ayuda.ts`: una pregunta por tarea, solo de lo que gestorIA hace hoy. Un
+  cambio de pantalla, botón o permiso cambia su respuesta en el mismo cambio, y una pantalla nueva
+  suma su pregunta. Quién puede sale de `needs` con `permisos.ts`, nunca del texto; lo que va entre
+  «» existe en la pantalla (lo prueba `ayuda.test.ts`).
+- «Pedir ayuda» es de todo el equipo (`ayuda.pedir`; soporte no), en la cabecera y en la Ayuda,
+  con la pantalla y el rol de quien pregunta: sale por `soporte.pedido` a la Bandeja de la
+  administración. Cada persona ve solo sus preguntas y respuestas (`helpView`, ADR 0221); «Plan y
+  pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de `plan`.
+
 ## La web pública (B8)
 
 - `gestoria24.com` es `apps/sitio`: Astro armado una vez al publicar, solo archivos en el Worker
