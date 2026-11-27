@@ -80,13 +80,16 @@ import {
   storeDataInput,
   storeImageContent,
 } from "./marca.js"
+import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
 import {
   addReceipt,
+  assignCourier,
   cancelInput,
   cancelOrder,
   changeInput,
   changeOrder,
   connectPaymentLink,
+  courierInput,
   createOrder,
   createPaymentLink,
   deliverInput,
@@ -98,6 +101,7 @@ import {
   markMissed,
   markShipped,
   missedInput,
+  noteSentByYou,
   ORDER_FILTERS,
   type OrderFilter,
   orderDetail,
@@ -114,10 +118,14 @@ import {
   reviewInput,
   reviewPayment,
   sellable,
+  sentByYouInput,
+  setShipping,
   shipInput,
+  shippingInput,
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import { setDeliverySlots, slotsInput } from "./repartidores.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
@@ -495,6 +503,10 @@ export function createApp(deps: AppDeps) {
   })
 
   // El catálogo (B3): productos, variantes, fotos, stock y la hoja.
+  app.patch("/api/tiendas/:id/franjas", async (c) => {
+    const input = await bodyOf(c, slotsInput)
+    return c.json(await setDeliverySlots(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
   app.get("/api/tiendas/:id/catalogo", async (c) =>
     c.json(await catalog(deps.appDb, c.get("person"), c.req.param("id"))),
   )
@@ -678,11 +690,36 @@ export function createApp(deps: AppDeps) {
     const { id, orderId } = c.req.param()
     return c.json({ order: await reschedule(deps.appDb, c.get("person"), id, orderId, input) })
   })
+  // Despachos (entrega 3): quién lo lleva, la agencia y «Avisar» (enviado por usted).
+  app.post("/api/tiendas/:id/pedidos/:orderId/repartidor", async (c) => {
+    const input = await bodyOf(c, courierInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await assignCourier(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/envio", async (c) => {
+    const input = await bodyOf(c, shippingInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await setShipping(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/avisado", async (c) => {
+    const input = await bodyOf(c, sentByYouInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await noteSentByYou(deps.appDb, c.get("person"), id, orderId, input) })
+  })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)
     const { id, orderId } = c.req.param()
     return c.json({ order: await cancelOrder(deps.appDb, c.get("person"), id, orderId, input) })
   })
+
+  // Despachos (entrega 3): las entregas de un día y lo que el menú cuenta.
+  app.get("/api/tiendas/:id/despachos", async (c) => {
+    const day = dayQuery.parse(c.req.query("dia") || undefined)
+    return c.json(await dispatchBoard(deps.appDb, c.get("person"), c.req.param("id"), day))
+  })
+  app.get("/api/tiendas/:id/despachos/resumen", async (c) =>
+    c.json(await dispatchCount(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
 
   // Las clientas (entrega 4): la lista, la ficha, «¿Es la misma clienta?», unir y separar.
   app.get("/api/tiendas/:id/clientes", async (c) =>
