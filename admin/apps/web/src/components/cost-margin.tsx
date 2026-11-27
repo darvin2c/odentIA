@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Fragment, useState } from "react"
 import { api } from "../lib/api"
+import { type Overview, summaryOf } from "./cost-margin-summary"
 import { matchesProduct, type ProductChoice, ProductMark, useOrgProducts } from "./product"
 
 interface CostLine {
@@ -62,18 +63,6 @@ export interface ClinicCostMargin {
     extraCents: number
     maxMessages: number
   } | null
-}
-
-interface Overview {
-  clinics: ClinicCostMargin[]
-  founders: number
-  chargedCents: number
-  costMicros: number
-  aiMicros: number
-  storageMicros: number
-  fixedMicros: number
-  marginPct: number | null
-  marginAfterCommissionPct: number | null
 }
 
 const LOCALE = "es-PE"
@@ -155,25 +144,6 @@ function reviewReason(item: ClinicCostMargin): string {
 
 /** La tabla de una clínica: cada agente y tipo, lo regalado y lo que no es IA. */
 /** Costo y margen de todas las clínicas, con «Para revisar» arriba (tablero O3). */
-/** Los totales de las clínicas que se ven, como los suma el servidor (`getCostMarginOverview`). */
-function summaryOf(clinics: ClinicCostMargin[]): Overview {
-  const charged = clinics.reduce((sum, item) => sum + item.chargedCents, 0)
-  const costTotal = clinics.reduce((sum, item) => sum + item.costMicros, 0)
-  const commission = clinics.reduce((sum, item) => sum + item.commissionCents, 0)
-  const pct = (base: number, spent: number) => (base > 0 ? Math.round((1 - spent / base) * 100) : null)
-  return {
-    clinics,
-    founders: clinics.filter((item) => item.founder).length,
-    chargedCents: charged,
-    costMicros: costTotal,
-    aiMicros: clinics.reduce((sum, item) => sum + item.aiMicros, 0),
-    storageMicros: clinics.reduce((sum, item) => sum + item.storageMicros, 0),
-    fixedMicros: clinics.reduce((sum, item) => sum + item.fixedMicros, 0),
-    marginPct: pct(charged * 10_000, costTotal),
-    marginAfterCommissionPct: pct(charged * 10_000, costTotal + commission * 10_000),
-  }
-}
-
 export function CostMarginOverviewSection({ product = "todos" }: { product?: ProductChoice }) {
   const [order, setOrder] = useState<"margen" | "costo">("margen")
   const query = useQuery({
@@ -183,13 +153,13 @@ export function CostMarginOverviewSection({ product = "todos" }: { product?: Pro
   })
   const products = useOrgProducts().data ?? {}
   // Soporte no ve importes: sin acceso, la sección no aparece.
-  if (!query.data || query.data.clinics.length === 0) return null
+  if (!query.data || (query.data.clinics.length === 0 && query.data.apps.length === 0)) return null
   // Con un producto elegido, los totales se suman solo de sus clínicas.
   const data =
     product === "todos"
       ? query.data
       : summaryOf(query.data.clinics.filter((item) => matchesProduct(product, products[item.organizationId])))
-  if (data.clinics.length === 0) return null
+  if (data.clinics.length === 0 && data.apps.length === 0) return null
   const review = data.clinics.filter((item) => item.alarm || item.idle)
   const sorted = [...data.clinics].sort((a, b) =>
     order === "margen" ? (a.marginPct ?? -1) - (b.marginPct ?? -1) : b.costMicros - a.costMicros,
@@ -332,10 +302,34 @@ export function CostMarginOverviewSection({ product = "todos" }: { product?: Pro
           </tbody>
         </table>
       </ScrollArea>
+      {data.apps.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-semibold">Lo que regalamos por la Ayuda de las apps</h3>
+          <ul className="divide-y rounded-xl border bg-card">
+            {data.apps.map((item) => (
+              <li key={item.app} className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4 text-sm">
+                <div className="min-w-0 flex-1 basis-60">
+                  <p className="font-medium">{item.label}</p>
+                  <p className="text-muted-foreground">
+                    {item.calls === 1 ? "1 llamada" : `${item.calls} llamadas`} a los modelos en{" "}
+                    {month(item.period.start)}
+                    {item.unpricedCalls > 0
+                      ? ` · ${item.unpricedCalls === 1 ? "1 sin precio conocido, que no suma" : `${item.unpricedCalls} sin precio conocido, que no suman`}`
+                      : ""}
+                  </p>
+                </div>
+                <p className="whitespace-nowrap tabular-nums">{cost(item.costMicros)}</p>
+                <Badge variant="secondary">Lo regalamos</Badge>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <p className="text-xs text-muted-foreground">
         La alarma avisa cuando la IA de una clínica pasa del 20 % de lo que paga o de USD 30 al mes.
         Nunca corta nada: es para revisar si hay un error o un abuso. El servidor y los gastos fijos
-        son estimados y se reparten entre las clínicas activas.
+        son estimados y se reparten entre las clínicas activas. La Ayuda de las apps no es de ninguna
+        clínica: va aparte, en el mes en curso, y suma en lo que nos costó.
       </p>
     </section>
   )

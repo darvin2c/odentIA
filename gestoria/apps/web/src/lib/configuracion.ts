@@ -235,6 +235,14 @@ export function listText(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
 }
 
+/** «Yape y Plin con captura»; el nombre que ya lo dice («Efectivo al recibir») no lo repite. */
+function namesWith(names: readonly string[], how: string): string | null {
+  const says = (name: string) => name.toLowerCase().includes(how)
+  const plain = names.filter((name) => !says(name))
+  const parts = [plain.length > 0 ? `${listText(plain)} ${how}` : null, ...names.filter(says)]
+  return parts.filter(Boolean).join(" · ") || null
+}
+
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
@@ -422,8 +430,8 @@ export function configLines(
   const capture = byCollection("comprobante")
   const onDelivery = byCollection("al_recibir")
   const paymentParts = [
-    capture.length > 0 ? `${listText(capture)} con captura` : null,
-    onDelivery.length > 0 ? `${listText(onDelivery)} al recibir` : null,
+    namesWith(capture, "con captura"),
+    namesWith(onDelivery, "al recibir"),
   ].filter(Boolean)
   lines.pagos = {
     id: "pagos",

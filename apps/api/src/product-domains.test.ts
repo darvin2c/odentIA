@@ -1,5 +1,6 @@
 import type { Auth } from "@odentia/auth"
 import { signAccountEvent } from "@odentia/auth/account-events"
+import { helpAskAnswer } from "@odentia/contract"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import type { Storage } from "@odentia/services"
@@ -327,6 +328,63 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       expect((await send(contract(), usage, SECRET, "api.odentia.test")).status).not.toBe(200)
       expect((await contract().request("https://api.gestoria.test/api/contract/state")).status).toBe(404)
       expect(received).toEqual(["aviso"])
+    })
+
+    /** Una base de prueba cuyas consultas devuelven `rows`: la regla se prueba en services. */
+    const helpDbWith = (rows: unknown[]) => {
+      const chain: unknown = new Proxy(() => chain, {
+        get: (_, key) => (key === "then" ? (resolve: (value: unknown) => void) => resolve(rows) : chain),
+        apply: () => chain,
+      })
+      return { transaction: (run: (tx: unknown) => unknown) => run(chain), update: () => chain } as unknown as Db
+    }
+    const ASK_ID = "6f1d8a52-3c1b-4b8e-9f3e-2a7c5d9e0b11"
+
+    it("la Ayuda responde con ids de la guía solo a lo firmado", async () => {
+      const app = appWith(sessionOf("gestorIA"), {
+        ownerDb: helpDbWith([{ id: ASK_ID, total: 0 }]),
+        appContractPeers: [{ app: "gestoria", secret: SECRET }],
+      })
+      const question = JSON.stringify({
+        question: "¿Cómo anulo un pedido?",
+        screen: "/pedidos",
+        previous: null,
+        guide: [
+          {
+            id: "pedidos",
+            path: "/pedidos",
+            title: "Pedidos",
+            parent: null,
+            purpose: "Los pedidos de la tienda.",
+            terms: [],
+            faqs: [{ id: "pedido-anular", q: "¿Cómo anulo un pedido?", a: "Ábrelo y toca «Anular»." }],
+          },
+        ],
+      })
+      expect((await send(app, question, EVENTS_SECRET, "api.gestoria.test", "/api/contract/help")).status).toBe(401)
+      const ok = await send(app, question, SECRET, "api.gestoria.test", "/api/contract/help")
+      expect(ok.status).toBe(200)
+      const { data } = (await ok.json()) as { data: unknown }
+      expect(helpAskAnswer.parse(data).askId).toBe(ASK_ID)
+      expect((await send(app, JSON.stringify({ question: "hola" }), SECRET, "api.gestoria.test", "/api/contract/help")).status).toBe(400)
+    })
+
+    it("«¿Te sirvió?» y «Ninguna es lo que busco» se anotan solo firmados y sobre una pregunta de la app", async () => {
+      const peers = [{ app: "gestoria" as const, secret: SECRET }]
+      const found = appWith(sessionOf("gestorIA"), { ownerDb: helpDbWith([{ id: ASK_ID }]), appContractPeers: peers })
+      const missing = appWith(sessionOf("gestorIA"), { ownerDb: helpDbWith([]), appContractPeers: peers })
+      const path = "/api/contract/help/feedback"
+      const helpful = JSON.stringify({ askId: ASK_ID, helpful: true })
+      expect((await send(found, helpful, EVENTS_SECRET, "api.gestoria.test", path)).status).toBe(401)
+      const ok = await send(found, helpful, SECRET, "api.gestoria.test", path)
+      expect(ok.status).toBe(200)
+      expect(await ok.json()).toEqual({ data: { ok: true } })
+      expect((await send(found, JSON.stringify({ askId: ASK_ID, noneFits: true }), SECRET, "api.gestoria.test", path)).status).toBe(200)
+      // Uno de los dos, nunca ambos ni ninguno.
+      expect((await send(found, JSON.stringify({ askId: ASK_ID }), SECRET, "api.gestoria.test", path)).status).toBe(400)
+      expect((await send(found, JSON.stringify({ askId: ASK_ID, helpful: false, noneFits: true }), SECRET, "api.gestoria.test", path)).status).toBe(400)
+      // Una pregunta que no es de la app: 404.
+      expect((await send(missing, helpful, SECRET, "api.gestoria.test", path)).status).toBe(404)
     })
   })
 })

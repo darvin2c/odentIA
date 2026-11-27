@@ -12,7 +12,7 @@ import {
 } from "@odentia/ui"
 import {
   type CountryCode,
-  CountrySelect,
+  countryOptions,
   EmptyState,
   ErrorState,
   SectionNav,
@@ -34,6 +34,7 @@ import {
   type ConfigLine,
   type ConfigOverview,
   type ConfigSection,
+  type ConfigSectionId,
   configEntryFor,
   configGroupsFor,
   configLines,
@@ -51,6 +52,14 @@ import { DraftGuard } from "./lib/draft-guard"
 import { currencySymbol } from "./lib/tienda"
 import { RouterLink, StoreHeader, useStoreContext } from "./tiendas"
 
+/**
+ * Lo que dice una parte sin estado propio: los avisos son de cada persona y el plan, mientras la
+ * administración no dijo nada todavía, no tiene cifras que mostrar.
+ */
+const PLAIN_SUMMARY: Partial<Record<ConfigSectionId, string>> = {
+  avisos: "Lo que te llega a ti, en cada celular",
+  plan: "Tu plan, lo que gastó Sofi y tus pagos",
+}
 /**
  * Lo guardado en cada apartado, para «Lo que falta» y el buscador (tablero 3). Lo pide quien ve
  * «Lo que falta»: quien configura la tienda y soporte.
@@ -408,9 +417,9 @@ function PartsIndex({
                         <span className="min-w-0 truncate text-sm text-muted-foreground">
                           {line.summary}
                         </span>
-                      ) : item.id === "avisos" ? (
+                      ) : PLAIN_SUMMARY[item.id] ? (
                         <span className="min-w-0 truncate text-sm text-muted-foreground">
-                          Lo que te llega a ti, en cada celular
+                          {PLAIN_SUMMARY[item.id]}
                         </span>
                       ) : null}
                     </span>
@@ -536,22 +545,19 @@ function StoreDataForm({ store }: { store: MyStore }) {
         )}
         <form.AppField name="country">
           {(field) => (
-            <field.Control
+            // El nombre del país, no el prefijo del teléfono: aquí se elige dónde vende la tienda.
+            <field.SelectField
               label="País de tu tienda"
               id={`${id}-pais`}
-              description="Con él te cobramos el plan con el impuesto que corresponde."
-            >
-              {(control) => (
-                <CountrySelect
-                  id={control.id}
-                  value={field.state.value as CountryCode}
-                  onChange={(next) => field.handleChange(next)}
-                  disabled={!canEdit}
-                  invalid={control.invalid}
-                  aria-describedby={control.describedBy}
-                />
+              options={countryOptions(field.state.value as CountryCode, undefined, "es").map(
+                (c) => ({
+                  value: c.value,
+                  label: c.label,
+                }),
               )}
-            </field.Control>
+              disabled={!canEdit}
+              description="Con él te cobramos el plan con el impuesto que corresponde."
+            />
           )}
         </form.AppField>
         {canEdit ? (

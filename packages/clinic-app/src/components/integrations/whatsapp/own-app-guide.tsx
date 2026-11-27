@@ -1,9 +1,8 @@
 import { Button } from "@odentia/ui"
-import { DetailDrawer } from "@odentia/ui-patterns"
+import { DetailDrawer, openSupportRequest } from "@odentia/ui-patterns"
 import { ExternalLink } from "lucide-react"
 import type { ReactNode } from "react"
 import { appWords } from "../../../lib/product-words"
-import { openSupportRequest } from "../../help-panel"
 
 /** Las páginas de Meta de cada paso. Los nombres de sus botones pueden cambiar o salir en inglés. */
 const META = {
