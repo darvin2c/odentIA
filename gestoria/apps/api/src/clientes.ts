@@ -234,7 +234,8 @@ async function summariesOf(
   filter: { roots?: string[]; search?: string } = {},
 ): Promise<CustomerSummary[]> {
   if (filter.roots && filter.roots.length === 0) return []
-  const text = filter.search ? nameKey(filter.search) : ""
+  // Lo escrito se busca tal cual: «%» o «_» no son comodines.
+  const text = filter.search ? nameKey(filter.search).replace(/[\\%_]/g, (c) => `\\${c}`) : ""
   const digits = filter.search ? filter.search.replace(/\D/g, "") : ""
   const rows = await tx.execute<{
     id: string
