@@ -1,32 +1,187 @@
 ---
-// Contacto (lienzo B8, tablero 5): el WhatsApp de ventas con el mensaje ya escrito, el correo y, para
-// quien ya tiene tienda, entrar. Los correos de la cuenta la enlazan como «Ayuda».
+// Contacto (web v5): el WhatsApp de ventas con el mensaje ya escrito, el correo y, para quien ya
+// tiene tienda, entrar. El héroe muestra ese mismo chat escribiéndose; sin número de WhatsApp, el
+// correo pasa al frente. Los correos de la cuenta la enlazan como «Ayuda».
+import { Image } from "astro:assets"
+import whatsapp from "../assets/iconos/whatsapp.svg"
+import sofiFeliz from "../assets/sofi-feliz.png"
 import Base from "../layouts/Base.astro"
 import { CONTACT_EMAIL, LOGIN_URL, SALES_TEXT, salesWhatsApp } from "../lib/sitio"
+import "../styles/agentes.css"
+
+// El número a la vista, en grupos de tres (+51 941 244 705), tomado del mismo enlace del botón.
+const digitos = salesWhatsApp?.match(/wa\.me\/(\d+)/)?.[1] ?? ""
+const numero =
+  digitos.startsWith("51") && digitos.length === 11
+    ? `+51 ${digitos.slice(2, 5)} ${digitos.slice(5, 8)} ${digitos.slice(8)}`
+    : digitos && `+${digitos}`
+
+const pasos = [
+  { t: "Nos cuentas tu tienda", d: "Qué vendes, por dónde vendes hoy y cuántos chats te llegan." },
+  {
+    t: "Te mostramos a Sofi",
+    d: "Vendiendo con tus productos, tus precios y tu forma de entregar.",
+  },
+  { t: "Decides tú", d: "Si te sirve, empiezas: USD 19 al mes, que vuelven como saldo." },
+]
 ---
-<Base title="Contacto" description="Habla con una persona de gestorIA por WhatsApp o por correo.">
-  <div class="wrap page">
-    <header class="page-head">
-      <h1>Hablemos</h1>
-      <p>Te contamos cómo vendería gestorIA en tu tienda. Te responde una persona.</p>
-    </header>
-    <ul class="contact">
-      {salesWhatsApp && (
-        <li>
-          <h2>Escríbenos por WhatsApp</h2>
-          <p>Abre el chat con «{SALES_TEXT}».</p>
-          <a class="btn btn-big" href={salesWhatsApp}>Abrir WhatsApp</a>
+<Base title="Contacto" description="Habla con una persona de gestorIA por WhatsApp o por correo y mira cómo vendería Sofi en tu tienda.">
+  <section class="ag-heroe ct-heroe" data-ag-heroe aria-labelledby="ct-h">
+    <div class="ag-heroe__fondo" aria-hidden="true"></div>
+    <div class="marco ag-heroe__marco">
+      <div class="ag-heroe__texto">
+        <nav class="migas" aria-label="Migas de pan">
+          <ol>
+            <li><a href="/">Inicio</a></li>
+            <li><span aria-current="page">Contacto</span></li>
+          </ol>
+        </nav>
+        <p class="ag-chip"><span aria-hidden="true"></span>Te responde una persona</p>
+        <h1 class="ag-heroe__h" id="ct-h">Hablemos de <span class="cur">tu tienda</span></h1>
+        <p class="bajada">
+          Cuéntanos qué vendes y por dónde. Te mostramos cómo vendería Sofi en tu tienda, con tus
+          productos.
+        </p>
+        <div class="fila-botones">
+          {salesWhatsApp ? (
+            <a class="boton" href={salesWhatsApp}>Escríbenos por WhatsApp</a>
+          ) : (
+            <a class="boton" href={`mailto:${CONTACT_EMAIL}`}>Escríbenos un correo</a>
+          )}
+          <a class="boton boton--fantasma" href="#formas">Otras formas</a>
+        </div>
+      </div>
+
+      <div class="ct-chat" aria-hidden="true">
+        <div class="ct-chat__tel">
+          <div class="ct-chat__barra">
+            <Image src={whatsapp} alt="" width={22} height={22} />
+            <div><b>gestorIA · Ventas</b><small>en línea</small></div>
+          </div>
+          <div class="ct-chat__hilo">
+            <p class="ct-chat__dia">Hoy</p>
+            <p class="ct-chat__tu" data-ct-tu><span data-ct-texto>{SALES_TEXT}</span><i>✓✓</i></p>
+            <p class="ct-chat__escribe" data-ct-escribe><i></i><i></i><i></i></p>
+            <p class="ct-chat__ellos" data-ct-ellos>¡Hola! Cuéntanos qué vendes y por dónde vendes hoy.</p>
+          </div>
+          <div class="ct-chat__caja"><span data-ct-caja>Escribe un mensaje</span><b>➤</b></div>
+        </div>
+        <Image class="ct-chat__sofi" src={sofiFeliz} alt="" width={180} />
+      </div>
+    </div>
+  </section>
+
+  <section class="ct-formas" id="formas" aria-labelledby="formas-t">
+    <div class="marco">
+      <p class="etiqueta">Elige cómo</p>
+      <h2 class="titulo-2" id="formas-t">Por donde te quede <span class="cur">más cómodo</span></h2>
+      <ul class="ct-grilla">
+        {salesWhatsApp && (
+          <li class="ct-tarjeta ct-tarjeta--wa" data-aparece>
+            <span class="ct-tarjeta__icono"><Image src={whatsapp} alt="" width={30} height={30} /></span>
+            <h3>WhatsApp</h3>
+            <p>El chat se abre con «{SALES_TEXT}» ya escrito. Solo envíalo.</p>
+            <p class="ct-tarjeta__dato">{numero}</p>
+            <a class="boton boton--blanco" href={salesWhatsApp}>Abrir WhatsApp</a>
+          </li>
+        )}
+        <li class="ct-tarjeta" data-aparece>
+          <span class="ct-tarjeta__icono ct-tarjeta__icono--correo" aria-hidden="true">@</span>
+          <h3>Correo</h3>
+          <p>Para propuestas, prensa o lo que prefieras escribir con calma.</p>
+          <p class="ct-tarjeta__dato">{CONTACT_EMAIL}</p>
+          <div class="fila-botones">
+            <a class="boton" href={`mailto:${CONTACT_EMAIL}`}>Escribir</a>
+            <button type="button" class="boton boton--fantasma" data-copiar={CONTACT_EMAIL}>Copiar</button>
+          </div>
+          <p class="ct-copiado" data-copiado aria-live="polite"></p>
         </li>
-      )}
-      <li>
-        <h2>Por correo</h2>
-        <a class="email" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
-      </li>
-      <li>
-        <h2>¿Ya tienes tienda?</h2>
-        <p>Entra con tu cuenta y sigue donde lo dejaste.</p>
-        <a class="btn btn-ghost" href={LOGIN_URL}>Entrar a mi tienda</a>
-      </li>
-    </ul>
-  </div>
+        <li class="ct-tarjeta ct-tarjeta--oscura" data-aparece>
+          <span class="ct-tarjeta__icono ct-tarjeta__icono--tienda" aria-hidden="true">⌂</span>
+          <h3>¿Ya tienes tienda?</h3>
+          <p>Entra con tu cuenta y sigue donde lo dejaste. La ayuda está dentro de la app.</p>
+          <a class="boton boton--blanco" href={LOGIN_URL}>Entrar a mi tienda</a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="ct-pasos" aria-labelledby="pasos-t">
+    <div class="marco">
+      <p class="etiqueta">Cuando nos escribes</p>
+      <h2 class="titulo-2" id="pasos-t">Tres pasos y <span class="cur">sin apuro</span></h2>
+      <ol class="ct-pasos__lista">
+        {pasos.map((p, i) => (
+          <li data-aparece>
+            <span class="ct-pasos__n">0{i + 1}</span>
+            <b>{p.t}</b>
+            <span>{p.d}</span>
+          </li>
+        ))}
+      </ol>
+      <p class="ct-pasos__mas">
+        ¿Una duda rápida? Mira las <a class="enlace" href="/preguntas">preguntas frecuentes</a>{" o "}
+        <a class="enlace" href="/precios">cómo funciona el precio</a>.
+      </p>
+    </div>
+  </section>
 </Base>
+
+<script>
+  import { reduceMovimiento } from "../scripts/sitio"
+
+  // Copiar el correo: si el navegador no deja, se selecciona para copiarlo a mano.
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-copiar]")) {
+    const aviso = b.closest("li")?.querySelector<HTMLElement>("[data-copiado]")
+    b.addEventListener("click", async () => {
+      const texto = b.dataset.copiar ?? ""
+      try {
+        await navigator.clipboard.writeText(texto)
+        if (aviso) aviso.textContent = "Copiado"
+      } catch {
+        const dato = b.closest("li")?.querySelector(".ct-tarjeta__dato")
+        if (dato) window.getSelection()?.selectAllChildren(dato)
+        if (aviso) aviso.textContent = "Selecciónalo y cópialo"
+      }
+      window.setTimeout(() => {
+        if (aviso) aviso.textContent = ""
+      }, 2400)
+    })
+  }
+
+  // El chat del héroe: el mensaje se escribe en la caja, se envía y responden. En bucle.
+  const chat = document.querySelector<HTMLElement>(".ct-chat")
+  const tu = document.querySelector<HTMLElement>("[data-ct-tu]")
+  const texto = document.querySelector<HTMLElement>("[data-ct-texto]")
+  const caja = document.querySelector<HTMLElement>("[data-ct-caja]")
+  const escribe = document.querySelector<HTMLElement>("[data-ct-escribe]")
+  const ellos = document.querySelector<HTMLElement>("[data-ct-ellos]")
+  if (chat && tu && texto && caja && escribe && ellos && !reduceMovimiento()) {
+    const mensaje = texto.textContent ?? ""
+    const espera = (ms: number) => new Promise((ok) => window.setTimeout(ok, ms))
+    chat.classList.add("en-vivo")
+    const vuelta = async () => {
+      for (;;) {
+        for (const el of [tu, escribe, ellos]) el.classList.remove("visto")
+        caja.textContent = ""
+        caja.classList.add("tecleando")
+        await espera(700)
+        for (const letra of mensaje) {
+          caja.textContent += letra
+          await espera(45)
+        }
+        await espera(400)
+        caja.classList.remove("tecleando")
+        caja.textContent = "Escribe un mensaje"
+        tu.classList.add("visto")
+        await espera(900)
+        escribe.classList.add("visto")
+        await espera(1600)
+        escribe.classList.remove("visto")
+        ellos.classList.add("visto")
+        await espera(5000)
+      }
+    }
+    void vuelta()
+  }
+</script>

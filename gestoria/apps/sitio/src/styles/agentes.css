@@ -1,0 +1,1108 @@
+/* Las páginas de los agentes (web v5): Sofi (/sofi) y Argos (/argos). Usan también inicio.css (el
+   chat, el mapa y la venta por capítulos). Sin `mueve`, todo queda visible y quieto. */
+
+/* ================================================================ héroe de un agente */
+.ag-heroe {
+  position: relative;
+  padding: calc(var(--cabecera) + clamp(30px, 5vh, 70px)) 0 clamp(60px, 8vh, 100px);
+  background: linear-gradient(180deg, #fff, var(--papel-2));
+  overflow: clip;
+}
+/* Sin contexto de apilado propio: así los chats que le llegan pueden ir delante de Sofi. */
+.ag-heroe__fondo {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 45% 60% at 72% 45%, rgba(254, 79, 2, 0.18), transparent 70%),
+    radial-gradient(rgba(17, 17, 19, 0.09) 1.1px, transparent 1.3px) 0 0 / 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 65% 45%, #000 20%, transparent 80%);
+  mask-image: radial-gradient(ellipse 80% 80% at 65% 45%, #000 20%, transparent 80%);
+}
+.ag-heroe__marco {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(28px, 4vw, 64px);
+  align-items: center;
+  min-height: min(72vh, 680px);
+}
+.ag-heroe__texto {
+  display: grid;
+  gap: 22px;
+  justify-items: start;
+}
+.ag-heroe__texto .migas ol {
+  margin: 0;
+}
+.ag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px 7px 10px;
+  border-radius: 999px;
+  background: var(--naranja-card);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 10px 26px -12px rgba(254, 79, 2, 0.7);
+}
+.ag-chip span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  animation: latido 2.4s ease-in-out infinite;
+}
+.ag-chip--oscuro {
+  background: var(--tinta);
+  box-shadow: 0 10px 26px -12px rgba(17, 17, 19, 0.6);
+}
+.ag-chip--oscuro span {
+  background: var(--naranja-vivo);
+}
+@keyframes latido {
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15);
+  }
+}
+.ag-heroe__h {
+  font-size: clamp(46px, 6.4vw, 96px);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+.ag-heroe__h .linea {
+  display: block;
+  overflow: hidden;
+  padding: 0.04em 0 0.12em;
+  margin-bottom: -0.12em;
+}
+.ag-heroe__h .linea > span {
+  display: inline-block;
+}
+.ag-verbos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ag-verbos li {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--linea-2);
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  font-weight: 500;
+}
+.ag-heroe__escena {
+  position: relative;
+  aspect-ratio: 1;
+  width: min(100%, 560px);
+  justify-self: center;
+  display: grid;
+  place-items: center;
+}
+.ag-heroe__anillo {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(254, 79, 2, 0.3);
+  animation: gira 50s linear infinite;
+}
+.ag-heroe__anillo--b {
+  inset: 20%;
+  border-style: solid;
+  border-color: rgba(254, 79, 2, 0.12);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.3) 70%);
+  animation: none;
+}
+.ag-heroe__sofi {
+  position: relative;
+  width: 64%;
+  aspect-ratio: 1;
+}
+.ag-heroe__pista {
+  position: absolute;
+  bottom: 4%;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+html:not(.mueve) .ag-heroe__pista {
+  display: none;
+}
+.llegan {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+}
+.llega {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 10px 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--linea);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--sombra-2);
+  font-size: 14.5px;
+  line-height: 1.3;
+  max-width: 250px;
+}
+.llega small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--texto-3);
+}
+.llega img {
+  flex: none;
+}
+.llega--0 {
+  left: -4%;
+  top: 10%;
+}
+.llega--1 {
+  right: -6%;
+  top: 40%;
+}
+.llega--2 {
+  left: 2%;
+  bottom: 10%;
+}
+@keyframes gira {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 960px) {
+  .ag-heroe__marco {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .ag-heroe__escena {
+    width: min(100%, 420px);
+  }
+  .llega {
+    font-size: 13px;
+    max-width: 200px;
+  }
+  .llega--0 {
+    left: 0;
+    top: 0;
+  }
+  .llega--1 {
+    right: 0;
+    top: auto;
+    bottom: 22%;
+  }
+  .llega--2 {
+    left: 0;
+    bottom: 0;
+  }
+}
+/* En el celular, Sofi arriba y los chats que le llegan debajo, sin cruzarse con ella. */
+@media (max-width: 560px) {
+  .ag-heroe__escena {
+    aspect-ratio: auto;
+    display: grid;
+    gap: 14px;
+    padding-top: 10px;
+  }
+  .ag-heroe__anillo {
+    inset: auto;
+    width: 300px;
+    height: 300px;
+    top: 0;
+    left: 50%;
+    translate: -50% 0;
+  }
+  .ag-heroe__anillo--b {
+    width: 220px;
+    height: 220px;
+    top: 40px;
+  }
+  .ag-heroe__sofi {
+    width: 230px;
+    justify-self: center;
+    margin-top: 30px;
+  }
+  .ag-heroe__pista {
+    position: static;
+    text-align: center;
+  }
+  .llegan {
+    position: static;
+    display: grid;
+    gap: 8px;
+  }
+  .llega {
+    position: static;
+    max-width: none;
+    font-size: 13.5px;
+  }
+  .llega--1 {
+    justify-self: end;
+  }
+  /* El botón y el globo van con Sofi, no con la escena entera (los chats la alargan). */
+  .ag-heroe__escena .sofi-toque {
+    top: 40px;
+    translate: -50% 0;
+    width: 230px;
+  }
+  .ag-heroe__escena .sofi-dice {
+    top: 250px;
+    bottom: auto;
+  }
+}
+
+/* ================================================================ su oficio */
+.oficio {
+  padding-block: clamp(70px, 9vw, 120px) 40px;
+  overflow: clip;
+}
+.oficio__pin {
+  display: grid;
+  gap: clamp(30px, 4vw, 50px);
+}
+.mueve .oficio__pin {
+  min-height: 100vh;
+  align-content: center;
+}
+.oficio__pista {
+  display: flex;
+  gap: 20px;
+  padding-inline: max(var(--margen), calc((100vw - var(--ancho)) / 2));
+  width: max-content;
+}
+.oficio__tarjeta {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  width: 340px;
+  min-height: 360px;
+  padding: 26px;
+  border-radius: 28px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+}
+.oficio__tarjeta:nth-child(3n + 1) {
+  background: var(--naranja-card);
+  color: #fff;
+  border-color: transparent;
+}
+.oficio__tarjeta:nth-child(3n + 1) p {
+  color: rgba(255, 255, 255, 0.9);
+}
+.oficio__tarjeta:nth-child(3n + 1) .oficio__n {
+  color: #fff;
+}
+.oficio__n {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 56px;
+  line-height: 0.9;
+  color: var(--naranja-vivo);
+}
+.oficio__tarjeta h3 {
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
+.oficio__tarjeta p {
+  color: var(--texto-2);
+}
+.oficio__chat {
+  margin-top: auto;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.oficio__ella,
+.oficio__sofi {
+  max-width: 88%;
+  padding: 8px 11px;
+  color: var(--texto);
+}
+.oficio__ella {
+  justify-self: end;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--durazno-2);
+}
+.oficio__sofi {
+  border-radius: 14px 14px 14px 4px;
+  background: #fff;
+  border: 1px solid var(--linea);
+}
+@media (max-width: 1023px) {
+  .oficio__pista {
+    width: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    padding-inline: var(--margen);
+  }
+  .oficio__tarjeta {
+    width: auto;
+    min-height: 0;
+  }
+}
+
+/* ================================================================ pregúntale tú */
+.prueba {
+  padding-block: clamp(70px, 9vw, 120px);
+  background: var(--papel-2);
+}
+.prueba__marco {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+@media (max-width: 1023px) {
+  .prueba__marco {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================ sus reglas */
+.reglas {
+  padding-block: clamp(80px, 10vw, 130px);
+  overflow-x: clip;
+}
+.regla-g {
+  position: relative;
+  margin: clamp(50px, 6vw, 80px) auto 0;
+  max-width: 900px;
+  padding: 70px 40px 80px 60px;
+  border-radius: 32px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+}
+.regla-g__piso {
+  position: absolute;
+  left: 60px;
+  top: 30px;
+  bottom: 30px;
+  width: 4px;
+  border-radius: 4px;
+  background: var(--tinta);
+}
+.regla-g__piso b {
+  position: absolute;
+  left: 12px;
+  top: -4px;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.regla-g__riel {
+  position: relative;
+  height: 10px;
+  margin-right: 210px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #ececef, #ffd2bd);
+}
+.regla-g__marca {
+  position: absolute;
+  left: var(--x);
+  bottom: 20px;
+  translate: -50% 0;
+  display: grid;
+  justify-items: center;
+  white-space: nowrap;
+}
+.regla-g__marca b {
+  font-size: 20px;
+  font-weight: 500;
+}
+.regla-g__marca small {
+  font-size: 12.5px;
+  color: var(--texto-3);
+}
+.regla-g__marca--pide {
+  bottom: auto;
+  top: 20px;
+}
+.regla-g__marca--pide b {
+  color: #b3261e;
+  text-decoration: line-through;
+}
+.regla-g__marca--oferta b {
+  color: var(--naranja);
+}
+.regla-g__punto {
+  position: absolute;
+  top: 50%;
+  left: 69%;
+  width: 28px;
+  height: 28px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--naranja-vivo);
+  box-shadow:
+    0 0 0 8px rgba(254, 79, 2, 0.18),
+    0 6px 16px rgba(254, 79, 2, 0.5);
+}
+.regla-g__sofi {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 150px;
+  height: 150px;
+}
+.reglas__lista {
+  margin-top: 40px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.reglas__item {
+  display: grid;
+  gap: 6px;
+  padding: 22px;
+  border-radius: 22px;
+  background: var(--papel-2);
+  border: 1px solid var(--linea);
+}
+.reglas__item b {
+  font-size: 18px;
+  font-weight: 500;
+}
+.reglas__item span {
+  color: var(--texto-2);
+}
+@media (max-width: 760px) {
+  .regla-g {
+    padding: 70px 16px 90px 36px;
+  }
+  .regla-g__piso {
+    left: 30px;
+  }
+  .regla-g__riel {
+    margin-right: 20px;
+  }
+  .regla-g__sofi {
+    top: auto;
+    bottom: -40px;
+    right: 4px;
+    translate: none;
+    width: 100px;
+    height: 100px;
+  }
+  .regla-g__marca b {
+    font-size: 16px;
+  }
+  .reglas__lista {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================ sus humores */
+.humores {
+  padding-block: clamp(70px, 9vw, 120px);
+  background: linear-gradient(180deg, #fff, var(--durazno));
+}
+.humores__lista {
+  margin-top: clamp(36px, 4vw, 56px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.humor {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 28px 20px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--linea);
+}
+.humor__cara {
+  width: min(200px, 60vw);
+  animation: humor-flota 4.2s ease-in-out infinite;
+}
+.humor:nth-child(2) .humor__cara {
+  animation-delay: -1.4s;
+}
+.humor:nth-child(3) .humor__cara {
+  animation-delay: -2.8s;
+}
+@keyframes humor-flota {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-8%) rotate(3deg);
+  }
+}
+.humor b {
+  font-size: 22px;
+  font-weight: 500;
+}
+.humor > span:last-child {
+  color: var(--texto-2);
+}
+@media (max-width: 760px) {
+  .humores__lista {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================ Argos: el radar */
+.radar-g {
+  position: relative;
+  aspect-ratio: 1;
+  width: min(100%, 540px);
+  justify-self: center;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(254, 79, 2, 0.1), transparent 70%);
+}
+.radar-g__anillo {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  border: 1px solid rgba(254, 79, 2, 0.28);
+}
+.radar-g__anillo--b {
+  inset: 22%;
+}
+.radar-g__anillo--c {
+  inset: 36%;
+}
+.radar-g__barrido {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(254, 79, 2, 0.45),
+    rgba(254, 79, 2, 0.06) 18%,
+    transparent 30%
+  );
+  animation: gira 4.5s linear infinite;
+}
+.radar-g__ojo {
+  position: absolute;
+  inset: 41%;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--tinta);
+  box-shadow:
+    0 0 0 8px rgba(254, 79, 2, 0.12),
+    0 20px 50px -10px rgba(254, 79, 2, 0.6);
+}
+.radar-g__ojo svg {
+  width: 58%;
+  --identity-ink: #fff;
+}
+.radar-g__avisos {
+  position: absolute;
+  inset: 0;
+}
+.aviso-r {
+  position: absolute;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--linea);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--sombra-2);
+  font-size: 14px;
+  line-height: 1.3;
+}
+.aviso-r b {
+  display: block;
+  font-weight: 500;
+}
+.aviso-r small {
+  color: var(--texto-3);
+  font-size: 12.5px;
+}
+.aviso-r i {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+}
+.aviso-r--verde i {
+  background: #12b866;
+  box-shadow: 0 0 10px #12b866;
+}
+.aviso-r--naranja i {
+  background: var(--naranja-vivo);
+  box-shadow: 0 0 10px var(--naranja-vivo);
+}
+.aviso-r--ambar i {
+  background: #f2a900;
+  box-shadow: 0 0 10px #f2a900;
+}
+.aviso-r--0 {
+  left: 0;
+  top: 8%;
+}
+.aviso-r--1 {
+  right: -4%;
+  top: 26%;
+}
+.aviso-r--2 {
+  right: 0;
+  bottom: 12%;
+}
+.aviso-r--3 {
+  left: -2%;
+  bottom: 24%;
+}
+@media (max-width: 960px) {
+  .radar-g {
+    width: min(100%, 400px);
+  }
+  .aviso-r {
+    font-size: 12.5px;
+    padding: 8px 10px;
+  }
+  .aviso-r--0,
+  .aviso-r--3 {
+    left: 0;
+  }
+  .aviso-r--1,
+  .aviso-r--2 {
+    right: 0;
+  }
+}
+
+/* ================================================================ Argos: un día */
+.dia {
+  background: var(--tinta);
+  color: #fff;
+  overflow-x: clip;
+}
+.dia .etiqueta {
+  color: var(--naranja-claro);
+}
+.dia .bajada {
+  color: #b4b4ba;
+}
+.dia .cur {
+  color: var(--naranja-claro);
+}
+.dia__pin {
+  padding-block: clamp(70px, 9vw, 110px);
+}
+.mueve .dia__pin {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding-block: calc(var(--cabecera) + 20px) 30px;
+}
+.dia__marco {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+.dia__reloj {
+  display: grid;
+  gap: 18px;
+}
+.dia__hora {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(80px, 10vw, 150px);
+  line-height: 0.9;
+  color: var(--naranja-vivo);
+  font-variant-numeric: tabular-nums;
+}
+html:not(.mueve) .dia__hora,
+html:not(.mueve) .dia__barra {
+  display: none;
+}
+.dia__barra {
+  display: block;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.dia__barra i {
+  display: block;
+  height: 100%;
+  background: var(--naranja-vivo);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.dia__escena {
+  position: relative;
+}
+.dia__sofi {
+  position: absolute;
+  right: -10px;
+  top: -70px;
+  width: 120px;
+  height: 120px;
+}
+.dia__feed {
+  display: grid;
+  gap: 10px;
+}
+.evento {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition:
+    background-color 0.4s,
+    border-color 0.4s;
+}
+.evento.es-ahora {
+  background: rgba(254, 79, 2, 0.14);
+  border-color: rgba(254, 79, 2, 0.5);
+}
+.evento__hora {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--naranja-claro);
+  padding-top: 2px;
+}
+.evento__para {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  background: rgba(18, 184, 102, 0.16);
+  color: #6ee7a8;
+}
+.evento--tu .evento__para {
+  background: rgba(242, 169, 0, 0.16);
+  color: #ffd166;
+}
+.evento b {
+  display: block;
+  font-weight: 500;
+  font-size: 15.5px;
+}
+.evento small {
+  color: #a1a1a8;
+  font-size: 13.5px;
+}
+@media (max-width: 1023px) {
+  .dia__marco {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .mueve .dia__hora {
+    font-size: 64px;
+  }
+  .mueve .dia__reloj .bajada,
+  .mueve .dia__reloj .titulo-2 {
+    display: none;
+  }
+  .dia__escena {
+    position: static;
+  }
+  .dia__sofi {
+    top: 0;
+    right: 0;
+    width: 84px;
+    height: 84px;
+  }
+  .evento {
+    padding: 10px 12px;
+  }
+  .evento small {
+    display: none;
+  }
+  .evento.es-ahora small {
+    display: block;
+  }
+}
+
+/* ================================================================ Argos: lo que hace */
+.poderes {
+  padding-block: clamp(80px, 10vw, 130px);
+  overflow-x: clip;
+}
+.poderes__grilla {
+  margin-top: clamp(36px, 4vw, 56px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.poder {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: clamp(24px, 3vw, 34px);
+  border-radius: 28px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+}
+.poder h3 {
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
+.poder > p {
+  color: var(--texto-2);
+}
+.poder__nota {
+  font-size: 13px;
+  color: var(--texto-3) !important;
+}
+.poder--vende {
+  background: var(--naranja-card);
+  color: #fff;
+  border-color: transparent;
+}
+.poder--vende > p {
+  color: rgba(255, 255, 255, 0.92);
+}
+.poder__mensajes {
+  display: grid;
+  gap: 8px;
+}
+.poder__mensajes li {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 16px 16px 16px 4px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--texto);
+}
+.poder__mensajes b {
+  font-weight: 500;
+}
+.poder__mensajes span {
+  font-size: 13.5px;
+  color: var(--texto-3);
+}
+.stock-v {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 18px;
+  background: var(--papel-2);
+}
+.stock-v__fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.stock-v__fila b {
+  font-size: 34px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.stock-v__barra {
+  height: 10px;
+  border-radius: 10px;
+  background: #e4e4e7;
+  overflow: hidden;
+}
+.stock-v__barra i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--degradado);
+  transform-origin: left;
+}
+.stock-v__reponer {
+  justify-self: start;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--naranja-vivo);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.barras {
+  display: grid;
+  gap: 10px;
+}
+.barras li {
+  display: grid;
+  grid-template-columns: minmax(0, 170px) 1fr 30px;
+  gap: 12px;
+  align-items: center;
+  font-size: 14px;
+}
+.barras i {
+  display: block;
+  height: 12px;
+  border-radius: 12px;
+  background: var(--degradado);
+  transform-origin: left;
+  width: calc(var(--v) * 100%);
+}
+.barras b {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.poder--ordena {
+  background: var(--tinta);
+  color: #fff;
+  border-color: var(--tinta);
+}
+.poder--ordena > p {
+  color: #b4b4ba;
+}
+.toca {
+  display: grid;
+  gap: 10px;
+}
+.toca li {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.toca i {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+}
+.toca__a {
+  background: #f2a900;
+}
+.toca__b {
+  background: var(--naranja-vivo);
+}
+.toca__c {
+  background: #12b866;
+}
+.toca b {
+  display: block;
+  font-weight: 500;
+}
+.toca small {
+  color: #a1a1a8;
+}
+.poder-pronto {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+  border-radius: 22px;
+  border: 1.5px dashed rgba(207, 60, 0, 0.4);
+  color: var(--texto-2);
+}
+@media (max-width: 900px) {
+  .poderes__grilla {
+    grid-template-columns: 1fr;
+  }
+  .barras li {
+    grid-template-columns: minmax(0, 1fr) 80px 24px;
+  }
+}
+
+/* ================================================================ Argos, Sofi y tu equipo */
+.equipo {
+  padding-block: clamp(80px, 10vw, 130px);
+  background: var(--papel-2);
+}
+.equipo__escena {
+  margin-top: clamp(40px, 5vw, 64px);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  align-items: center;
+  justify-items: center;
+}
+.equipo__agente {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.equipo__agente b {
+  font-size: 20px;
+  font-weight: 500;
+}
+.equipo__agente small {
+  color: var(--texto-3);
+}
+.equipo__ojo {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--tinta);
+  overflow: hidden;
+}
+.equipo__ojo svg {
+  position: relative;
+  width: 60%;
+  --identity-ink: #fff;
+}
+.equipo__ojo .agente__barrido {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(254, 79, 2, 0.6), transparent 35%);
+  animation: gira 4s linear infinite;
+}
+.equipo__sofi {
+  width: 150px;
+  height: 130px;
+}
+.equipo__tu {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  border: 2px solid var(--linea-2);
+  font-size: 34px;
+  font-weight: 400;
+}
+.equipo__linea {
+  width: 100%;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--naranja-vivo) 0 8px, transparent 8px 16px);
+  transform-origin: left;
+}
+@media (max-width: 860px) {
+  .equipo__escena {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .equipo__linea {
+    width: 2px;
+    height: 40px;
+    background: repeating-linear-gradient(180deg, var(--naranja-vivo) 0 8px, transparent 8px 16px);
+    transform-origin: top;
+  }
+}

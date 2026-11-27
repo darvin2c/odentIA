@@ -9,7 +9,24 @@ const dist = new URL("../dist/", import.meta.url)
 const read = (file) => readFileSync(new URL(file, dist), "utf8")
 const fallos = []
 
-const PAGINAS = ["index.html", "terminos.html", "privacidad.html", "contacto.html", "404.html"]
+const PAGINAS = [
+  "index.html",
+  "sofi.html",
+  "como-funciona.html",
+  "cobros.html",
+  "entregas.html",
+  "clientes.html",
+  "catalogo.html",
+  "inventario.html",
+  "argos.html",
+  "rubros.html",
+  "precios.html",
+  "preguntas.html",
+  "terminos.html",
+  "privacidad.html",
+  "contacto.html",
+  "404.html",
+]
 for (const file of [
   ...PAGINAS,
   "sitemap-index.xml",

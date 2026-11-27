@@ -1,0 +1,38 @@
+[
+  {
+    "file": "instagram.svg",
+    "icon": "logos:instagram-icon",
+    "name": "Instagram",
+    "kind": "colour",
+    "source": "gilbarbara/logos@d6960edc1b7309d392c76e40d3a320df7f9ff85c",
+    "author": "Gil Barbara",
+    "licence": "CC0-1.0",
+    "url": "https://github.com/gilbarbara/logos",
+    "trademark": true,
+    "markUrl": "https://instagram.com/"
+  },
+  {
+    "file": "messenger.svg",
+    "icon": "logos:messenger",
+    "name": "Messenger",
+    "kind": "colour",
+    "source": "gilbarbara/logos@d6960edc1b7309d392c76e40d3a320df7f9ff85c",
+    "author": "Gil Barbara",
+    "licence": "CC0-1.0",
+    "url": "https://github.com/gilbarbara/logos",
+    "trademark": true,
+    "markUrl": "https://www.messenger.com/"
+  },
+  {
+    "file": "whatsapp.svg",
+    "icon": "logos:whatsapp-icon",
+    "name": "WhatsApp",
+    "kind": "colour",
+    "source": "gilbarbara/logos@d6960edc1b7309d392c76e40d3a320df7f9ff85c",
+    "author": "Gil Barbara",
+    "licence": "CC0-1.0",
+    "url": "https://github.com/gilbarbara/logos",
+    "trademark": true,
+    "markUrl": "https://www.whatsapp.com/"
+  }
+]
