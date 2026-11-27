@@ -1,5 +1,9 @@
 import {
+  type ConsentState,
   conversation,
+  conversationMessage,
+  customer,
+  customerConsent,
   type Db,
   type OrderChannel,
   orderPayment,
@@ -11,10 +15,11 @@ import {
   storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, asc, eq, inArray, or } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
+import { conversationCustomerIn, shownCustomerId } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
 import { momentWords } from "../hora.js"
@@ -72,6 +77,8 @@ export interface TurnTrace {
   handoff: string | null
   /** Las cotizaciones negociadas de este turno: su total y lo que cede. De ahí sale la oferta. */
   offers: { totalCents: number; cededCents: number }[]
+  /** Pidió la baja de promociones: la respuesta es esta frase fija, y nada más. */
+  optOut: string | null
 }
 
 export function newTrace(): TurnTrace {
@@ -82,6 +89,7 @@ export function newTrace(): TurnTrace {
     quotes: new Map(),
     handoff: null,
     offers: [],
+    optOut: null,
   }
 }
 
@@ -191,6 +199,14 @@ const orderSchema = quoteSchema.extend({
   notas: z.string().max(300).optional(),
 })
 
+/** Lo que dijo la clienta, copiado tal cual de su mensaje: así se sabe de dónde salió. */
+const quoteText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .describe("Sus palabras, copiadas tal cual de su mensaje en esta conversación")
+
 const SCHEMAS = {
   buscar_productos: z.object({
     texto: z.string().min(1).max(200).describe("Lo que busca el cliente, en sus palabras"),
@@ -208,6 +224,11 @@ const SCHEMAS = {
   pasar_a_persona: z.object({
     motivo: z.string().trim().min(3).max(200).describe("Por qué, en una frase para el equipo"),
   }),
+  anotar_permiso: z.object({
+    respuesta: z.enum(["si", "no"]).describe("Lo que contestó: si (quiere que le avises) o no"),
+    cita: quoteText,
+  }),
+  anotar_baja: z.object({ cita: quoteText }),
 } as const
 
 export type SofiToolName = keyof typeof SCHEMAS
@@ -228,6 +249,10 @@ const DESCRIPTIONS: Record<SofiToolName, string> = {
     "Anota que el cliente quiere que le avises cuando vuelva una variante agotada.",
   pasar_a_persona:
     "Pasa la conversación a una persona del equipo: cuando no sabes, hay un reclamo, una devolución o un cambio, o el cliente lo pide.",
+  anotar_permiso:
+    "Anota lo que contestó cuando le preguntaste si quiere que le avises cuando llegue algo en su talla o algo nuevo: si o no, con sus palabras tal cual. También si después de una baja escribe que quiere promociones otra vez.",
+  anotar_baja:
+    "Anota que pidió que no le escriban más promociones, con sus palabras tal cual. Solo si lo pidió claro; si dudas, no la uses. Te devuelve la frase que le respondes.",
 }
 
 function jsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -837,6 +862,150 @@ async function handOff(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.pasar_
   return { ok: true, nota: "Una persona del equipo seguirá la conversación" }
 }
 
+/* ------------------------------------------------ el permiso de promociones (ADR 0240) */
+
+/** La ficha de la clienta de una conversación (la que se ve), con la regla de `clientes.ts`. */
+async function conversationCustomerId(tx: Db, storeId: string, conversationId: string) {
+  return (await conversationCustomerIn(tx, storeId, conversationId))?.id ?? null
+}
+
+export interface ConsentNow {
+  state: ConsentState
+  at: Date
+}
+
+/**
+ * Lo último que dijo la clienta de una conversación sobre las promociones: lo de su ficha (y de
+ * las que una persona le unió), por cualquier chat, y lo de esta conversación sin ficha todavía.
+ * Null si nunca se le preguntó.
+ */
+export async function consentIn(
+  tx: Db,
+  storeId: string,
+  conversationId: string,
+): Promise<ConsentNow | null> {
+  const head = await conversationCustomerId(tx, storeId, conversationId)
+  const members = head
+    ? (
+        await tx
+          .select({ id: customer.id })
+          .from(customer)
+          .where(
+            and(
+              eq(customer.storeId, storeId),
+              or(eq(customer.id, head), eq(customer.mergedInto, head)),
+            ),
+          )
+      ).map((m) => m.id)
+    : []
+  const [last] = await tx
+    .select({ state: customerConsent.state, at: customerConsent.createdAt })
+    .from(customerConsent)
+    .where(
+      and(
+        eq(customerConsent.storeId, storeId),
+        members.length
+          ? or(
+              eq(customerConsent.conversationId, conversationId),
+              inArray(customerConsent.customerId, members),
+            )
+          : eq(customerConsent.conversationId, conversationId),
+      ),
+    )
+    .orderBy(desc(customerConsent.createdAt))
+    .limit(1)
+  return last ?? null
+}
+
+/** Lo que responde Sofi al anotar la baja: fijo, sin ofrecer nada más. */
+export function optOutReply(firstName: string | null): string {
+  return `Entendido${firstName ? `, ${firstName}` : ""}. No te enviaremos más promociones. Los avisos de tus pedidos sí te seguirán llegando. Si algún día las quieres de nuevo, escríbeme «quiero promociones».`
+}
+
+/** El primer nombre para nombrarla, si lo dio: el del chat o el de su ficha. */
+function firstNameOf(...names: (string | null | undefined)[]): string | null {
+  for (const name of names) {
+    const first = name?.trim().split(/\s+/)[0]
+    // «Cliente» es el nombre por defecto de un pedido sin nombre, y un número no es un nombre.
+    if (first && /\p{L}/u.test(first) && plain(first) !== "cliente") return first
+  }
+  return null
+}
+
+/**
+ * Anota el permiso o la baja. La cita tiene que estar tal cual en un mensaje de ella de esta
+ * conversación (el más reciente que la contenga); la base lo vuelve a mirar (`0051`). Si ya está
+ * en ese estado, no suma otra fila. Después de una baja, vuelve a aceptar solo con un mensaje suyo
+ * posterior a la baja.
+ */
+async function noteConsent(ctx: SofiToolContext, state: ConsentState, quote: string) {
+  return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
+    const [conv] = await tx
+      .select({ channel: conversation.channel, customerName: conversation.customerName })
+      .from(conversation)
+      .where(and(eq(conversation.id, ctx.conversationId), eq(conversation.storeId, ctx.storeId)))
+    if (!conv) throw new ToolProblem("La conversación no existe", "DATOS")
+    const [said] = await tx
+      .select({ id: conversationMessage.id, createdAt: conversationMessage.createdAt })
+      .from(conversationMessage)
+      .where(
+        and(
+          eq(conversationMessage.storeId, ctx.storeId),
+          eq(conversationMessage.conversationId, ctx.conversationId),
+          eq(conversationMessage.author, "cliente"),
+          sql`position(${quote} in ${conversationMessage.text}) > 0`,
+        ),
+      )
+      .orderBy(desc(conversationMessage.seq))
+      .limit(1)
+    if (!said)
+      throw new ToolProblem(
+        "Esas palabras no están en ningún mensaje de ella en esta conversación: no se anotó. Copia sus palabras tal cual; si no lo dijo, no lo anotes",
+        "SIN_CITA",
+      )
+    const now = await consentIn(tx, ctx.storeId, ctx.conversationId)
+    if (now?.state === "baja" && state === "si" && said.createdAt.getTime() <= now.at.getTime())
+      throw new ToolProblem(
+        "Pidió la baja después de ese mensaje: solo vuelve a aceptar si lo escribe de nuevo",
+        "BAJA",
+      )
+    // «No» después de una baja ya está: tampoco recibe promociones.
+    const already = now?.state === state || (state === "no" && now?.state === "baja")
+    const customerId = await conversationCustomerId(tx, ctx.storeId, ctx.conversationId)
+    if (!already)
+      await tx.insert(customerConsent).values({
+        storeId: ctx.storeId,
+        customerId,
+        conversationId: ctx.conversationId,
+        channel: conv.channel,
+        state,
+        messageId: said.id,
+        quote,
+        actorUserId: SOFI_ACTOR,
+      })
+    if (state !== "baja")
+      return {
+        ok: true,
+        anotado: !already,
+        nota:
+          state === "si"
+            ? "Anotado: le avisarás por este chat cuando llegue algo en su talla o algo nuevo. Agradécele en una frase y sigue."
+            : "Anotado: no le escribirás promociones. Dile que está bien, sin insistir, y sigue.",
+      }
+    let fichaName: string | null = null
+    if (customerId) {
+      const [row] = await tx
+        .select({ name: customer.name })
+        .from(customer)
+        .where(eq(customer.id, customerId))
+      fichaName = row?.name ?? null
+    }
+    const reply = optOutReply(firstNameOf(conv.customerName, fichaName))
+    ctx.trace.optOut = reply
+    return { ok: true, anotado: !already, responde_tal_cual: reply }
+  })
+}
+
 const RUN: Record<SofiToolName, (ctx: SofiToolContext, args: never) => Promise<unknown>> = {
   buscar_productos: search,
   cotizar: quote,
@@ -846,6 +1015,10 @@ const RUN: Record<SofiToolName, (ctx: SofiToolContext, args: never) => Promise<u
   ver_pedidos: orders,
   avisar_cuando_vuelva: notifyBack,
   pasar_a_persona: handOff,
+  anotar_permiso: (ctx, args: z.infer<typeof SCHEMAS.anotar_permiso>) =>
+    noteConsent(ctx, args.respuesta, args.cita),
+  anotar_baja: (ctx, args: z.infer<typeof SCHEMAS.anotar_baja>) =>
+    noteConsent(ctx, "baja", args.cita),
 }
 
 /**
