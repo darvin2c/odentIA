@@ -995,13 +995,18 @@ export function PedidoPage({ pid }: { pid: string }) {
     cambio: RotateCcw,
     cobrar: Check,
   }
-  const lateral = (
+  // El pedido es lo principal: el carrito, el saldo y la entrega van a la izquierda.
+  const pedido = (
     <>
       <Carrito p={p} />
       {p.paso !== "anulado" ? (
         <Saldo p={p} onAccion={(a, pago) => setAccion({ a, pago })} />
       ) : null}
       <EntregaB p={p} />
+    </>
+  )
+  const extras = (
+    <>
       <Clienta p={p} />
       <OrigenB p={p} />
     </>
@@ -1023,7 +1028,6 @@ export function PedidoPage({ pid }: { pid: string }) {
           <Chat p={p} />
         </section>
       ) : null}
-      <Simular p={p} />
     </div>
   )
   return (
@@ -1064,13 +1068,22 @@ export function PedidoPage({ pid }: { pid: string }) {
       </section>
       {isMobile ? (
         <div className="flex min-w-0 flex-col gap-4">
-          {lateral}
+          {pedido}
           {seguimiento}
+          {extras}
+          <Simular p={p} />
         </div>
       ) : (
-        <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
-          {seguimiento}
-          <div className="flex min-w-0 flex-col gap-4">{lateral}</div>
+        // A la derecha, el seguimiento y los extras, con más ancho que una columna lateral.
+        <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+          <div className="flex min-w-0 flex-col gap-4">
+            {pedido}
+            <Simular p={p} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            {seguimiento}
+            {extras}
+          </div>
         </div>
       )}
       {accion ? (
