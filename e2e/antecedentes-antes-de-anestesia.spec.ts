@@ -77,10 +77,10 @@ test("la atención pide sus enfermedades y su medicación, y el cierre avisa la 
   await pending.getByRole("button", { name: "Registrar enfermedades o medicación" }).click()
   await expect(page.getByRole("region", { name: "Medicación vigente" })).toBeVisible()
   await shot("antecedentes-encima")
-  // Sin guardar nada: se cierra el formulario y luego Antecedentes, y la atención sigue igual.
+  // Sin guardar nada: se cierra el formulario y la atención sigue igual (abre solo el formulario, sin
+  // Antecedentes detrás; QA del 26 nov).
   await page.keyboard.press("Escape")
-  await page.getByRole("button", { name: "Volver a la atención" }).click()
-  await expect(page.getByRole("button", { name: "Volver a la atención" })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Medicación vigente" })).toHaveCount(0)
   await expect(pending).toBeVisible()
 
   // «Antecedentes y última atención» distingue «niega» de «no se preguntó» y dice la ASA.
