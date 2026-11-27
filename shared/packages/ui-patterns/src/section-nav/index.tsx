@@ -1,9 +1,11 @@
 import { cn } from "@odentia/ui"
-import { ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import * as React from "react"
 import type { ShellLinkComponent } from "../app-shell.js"
 import {
+  BACK_LINK_CLASSES,
   BADGE_CLASSES,
+  BADGE_PENDING_CLASSES,
   GROUP_LABEL_CLASSES,
   GROUP_LIST_CLASSES,
   GROUP_SEPARATOR_CLASSES,
@@ -12,6 +14,7 @@ import {
   resolveActiveTo,
   type SectionNavGroup,
   type SectionNavItem,
+  type SectionNavItemsPosition,
   type SectionNavMobilePosition,
   type SectionNavSide,
 } from "./types.js"
@@ -19,17 +22,32 @@ import {
 export type {
   SectionNavGroup,
   SectionNavItem,
+  SectionNavItemsPosition,
   SectionNavMobilePosition,
   SectionNavSide,
 } from "./types.js"
 
 export interface SectionNavProps {
-  /** Entradas de la sección. Con `groups` son las sueltas: van al final, tras
-   * un separador. */
+  /** Entradas de la sección. Con `groups` son las sueltas, sin título: al
+   * final tras un separador, o al principio con `itemsPosition="start"`. */
   items: SectionNavItem[]
-  /** Grupos con título, antes de las entradas sueltas. Para listas largas que
-   * se leen mejor por tema que de corrido. */
+  /** Grupos con título. Para listas largas que se leen mejor por tema que de
+   * corrido. */
   groups?: SectionNavGroup[]
+  /** Con `groups`, dónde van las entradas sueltas: al final (por defecto) o
+   * al principio, antes del primer grupo (la portada: «Lo que falta»). */
+  itemsPosition?: SectionNavItemsPosition
+  /** Lo que va sobre la lista, dentro del riel: un buscador propio de la
+   * sección. En el teléfono se ve en la portada de `mobileIndex`; en la barra
+   * no (ahí no hay lugar). */
+  header?: React.ReactNode
+  /** Ruta de la portada de la sección en el teléfono (<1024px). Con ella no
+   * hay barra: en esa ruta la lista es la página, debajo de lo que ella
+   * pinta (su `PageHeader`); en las demás, cada parte va en su pantalla con
+   * «‹ `label`» arriba para volver. La portada no es una de las entradas: lo
+   * que esa ruta muestra solo en web lo esconde ella (`max-lg:hidden`). En web
+   * no cambia nada: sigue el riel. Con ella, `mobilePosition` no aplica. */
+  mobileIndex?: string
   LinkComponent: ShellLinkComponent
   pathname: string
   /** Nombre accesible del landmark (`aria-label` del `<nav>`). */
@@ -82,15 +100,23 @@ export function SectionNav({
   children,
   side = "left",
   mobilePosition = "footer",
+  itemsPosition = "end",
+  header,
+  mobileIndex,
   className,
 }: SectionNavProps): React.JSX.Element {
   const isGrouped = groups.length > 0
   const allItems = isGrouped ? [...groups.flatMap((group) => group.items), ...items] : items
   const activeTo = resolveActiveTo(allItems, pathname)
   const isRight = side === "right"
-  const isBottom = mobilePosition === "footer"
+  // Teléfono y tablet: la barra, o con portada, la portada misma («index») o una
+  // parte abierta desde ella («part»).
+  const mobile: "bar" | "index" | "part" =
+    mobileIndex === undefined ? "bar" : trimSlash(pathname) === trimSlash(mobileIndex) ? "index" : "part"
+  const isBar = mobile === "bar"
+  const isBottom = isBar && mobilePosition === "footer"
   // Una lista agrupada no cabe en una barra de celdas: siempre usa el selector.
-  const usesPicker = isGrouped || allItems.length > 5
+  const usesPicker = isBar && (isGrouped || allItems.length > 5)
   const activeItem = activeTo ? allItems.find((item) => item.to === activeTo) : undefined
   const ActiveIcon = activeItem?.iconActive ?? activeItem?.icon
   const [expanded, setExpanded] = React.useState(false)
@@ -99,7 +125,7 @@ export function SectionNav({
   const renderEntry = (item: SectionNavItem, shape: EntryShape) => {
     const active = item.to === activeTo
     const Icon = active && item.iconActive ? item.iconActive : item.icon
-    const { badge } = item
+    const { badge, badgeLabel, badgeTone } = item
     return (
       <li key={item.to} className="relative min-w-0">
         <LinkComponent
@@ -119,7 +145,9 @@ export function SectionNav({
             // Riel: fila del sidebar, con su alto y su padding.
             "lg:h-9 lg:min-h-0 lg:flex-row lg:justify-normal lg:gap-2 lg:px-3 lg:text-left lg:text-sm",
             active && ITEM_ACTIVE_CLASSES,
-            badge !== undefined && (shape === "group" ? "pr-16 lg:pr-8" : "pr-8"),
+            // En la tarjeta del grupo la flecha queda al borde y el contador, antes de ella: el hueco
+            // lo deja el nombre (abajo). En el riel no hay flecha.
+            badge !== undefined && (shape === "group" ? "lg:pr-8" : "pr-8"),
           )}
         >
           {Icon ? <Icon /> : null}
@@ -127,17 +155,21 @@ export function SectionNav({
             className={cn(
               shape === "bar" ? "truncate" : "whitespace-normal",
               shape === "group" && "min-w-0 flex-1",
+              shape === "group" && badge !== undefined && "pr-8 lg:pr-0",
               "lg:truncate",
             )}
           >
             {item.label}
           </span>
+          {badge !== undefined && badgeLabel ? <span className="sr-only">, {badgeLabel}</span> : null}
           {shape === "group" ? (
             <ChevronRight aria-hidden className="text-muted-foreground lg:hidden" />
           ) : null}
         </LinkComponent>
         {badge === undefined ? null : (
           <span
+            // Con `badgeLabel` lo dice el enlace: el número no se lee dos veces.
+            aria-hidden={badgeLabel ? true : undefined}
             className={cn(
               BADGE_CLASSES,
               shape === "bar"
@@ -149,7 +181,11 @@ export function SectionNav({
               // Riel: al final de la fila, con el espacio ya reservado
               // por el `pr-8` del link.
               "lg:top-1.5 lg:right-1 lg:left-auto lg:translate-x-0 lg:translate-y-0",
-              active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
+              badgeTone === "pending"
+                ? BADGE_PENDING_CLASSES
+                : active
+                  ? "text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground",
             )}
           >
             {badge}
@@ -166,15 +202,27 @@ export function SectionNav({
   // sobresale, así que el contenido se alinea con ella para no quedar cortado.
   // scroll-nativo: la misma lista es menú desplegable en la barra y riel visible
   // en ancho (`lg:overflow-visible`); ScrollArea no se apaga por ancho. Barra fina.
-  const pickerListClasses = cn(
-    "flex-col overflow-y-auto overscroll-y-contain px-4 py-2 [scrollbar-width:thin] sm:px-6 lg:flex lg:max-h-none lg:overflow-visible lg:p-0",
-    // Todo el alto menos el botón del selector y su aire (y el margen seguro
-    // del teléfono): si el nav midiera más que la pantalla, al estar pegado
-    // abajo sus primeras filas quedarían fuera de alcance.
-    isGrouped
-      ? "max-h-[calc(100svh-4.5rem-env(safe-area-inset-bottom))]"
-      : "max-h-[min(60svh,28rem)]",
-    expanded ? "flex" : "hidden",
+  const pickerListClasses = usesPicker
+    ? cn(
+        "flex-col overflow-y-auto overscroll-y-contain px-4 py-2 [scrollbar-width:thin] sm:px-6 lg:flex lg:max-h-none lg:overflow-visible lg:p-0",
+        // Todo el alto menos el botón del selector y su aire (y el margen seguro
+        // del teléfono): si el nav midiera más que la pantalla, al estar pegado
+        // abajo sus primeras filas quedarían fuera de alcance.
+        isGrouped
+          ? "max-h-[calc(100svh-4.5rem-env(safe-area-inset-bottom))]"
+          : "max-h-[min(60svh,28rem)]",
+        expanded ? "flex" : "hidden",
+      )
+    : // Portada: la lista es la página, entera y sin desplazarse por dentro.
+      "flex flex-col"
+
+  // Las entradas sueltas, sin título: al final tras un separador o, con
+  // `itemsPosition="start"`, antes del primer grupo.
+  const looseFirst = itemsPosition === "start" && items.length > 0
+  const looseList = (
+    <ul className={cn(GROUP_LIST_CLASSES, "shrink-0", looseFirst && "lg:pt-1")}>
+      {items.map((item) => renderEntry(item, "group"))}
+    </ul>
   )
 
   return (
@@ -186,7 +234,8 @@ export function SectionNav({
         // borde. `overflow-x-clip` evita que su sangrado genere scroll
         // horizontal si la sección no va dentro de una columna con padding.
         "flex w-full flex-col overflow-x-clip",
-        "min-h-[calc(100svh-1rem)] sm:min-h-[calc(100svh-1.5rem)]",
+        // La portada no tiene barra que pegar al borde.
+        isBar && "min-h-[calc(100svh-1rem)] sm:min-h-[calc(100svh-1.5rem)]",
         isBottom ? "flex-col-reverse" : "flex-col",
         // Riel (web ≥1024px): el nav y el contenido en fila, y el alto lo pone el
         // contenido (el riel no se estira a todo el alto: no es un segundo
@@ -204,10 +253,18 @@ export function SectionNav({
           // pegada al borde elegido. El sangrado inferior relaja el tope del
           // `sticky`: sin él, al final del scroll la barra queda 16px por encima
           // del borde.
-          "[--radius:var(--radius-xl)] sticky z-20 -mx-4 bg-sidebar pt-2 text-sidebar-foreground sm:-mx-6",
-          isBottom
-            ? "bottom-0 -mb-4 border-t border-sidebar-border pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:-mb-6"
-            : "top-0 border-b border-sidebar-border pb-2",
+          "[--radius:var(--radius-xl)] text-sidebar-foreground",
+          isBar && "sticky z-20 -mx-4 bg-sidebar pt-2 sm:-mx-6",
+          isBottom &&
+            "bottom-0 -mb-4 border-t border-sidebar-border pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:-mb-6",
+          isBar && !isBottom && "top-0 border-b border-sidebar-border pb-2",
+          // Portada: en el teléfono, la lista de la página debajo de su
+          // encabezado (sin barra ni sangrado); se ve debajo aunque en el DOM va
+          // antes, como el riel de web: el buscador y las partes se recorren
+          // antes que el encabezado. En una parte no se ve. En web, el riel pegado.
+          !isBar && "lg:sticky lg:z-20 lg:bg-sidebar",
+          mobile === "index" && "max-lg:order-last max-lg:mt-4",
+          mobile === "part" && "max-lg:hidden",
           // Riel: panel de su alto, dentro de la rejilla de la página y pegado
           // mientras se scrollea. Deshace el sangrado, el borde pegajoso y la
           // altura de la barra.
@@ -219,7 +276,7 @@ export function SectionNav({
           isGrouped
             ? "lg:max-h-[calc(100svh-3rem)] lg:w-64 lg:overflow-y-auto lg:[scrollbar-width:thin]"
             : "lg:w-56",
-          usesPicker && "flex flex-col",
+          (usesPicker || header) && "flex flex-col",
           usesPicker && isBottom && "flex-col-reverse lg:flex-col",
           isBottom && "lg:bottom-auto",
         )}
@@ -239,8 +296,13 @@ export function SectionNav({
             </span>
           </button>
         ) : null}
-        {isGrouped ? (
+        {header ? (
+          // Sobre la lista en el riel y en la portada; en la barra no hay lugar.
+          <div className={cn("shrink-0 pb-3 lg:pb-2", isBar && "hidden lg:block")}>{header}</div>
+        ) : null}
+        {isGrouped || !isBar ? (
           <div id={listId} className={cn("gap-3 lg:gap-0", pickerListClasses)}>
+            {looseFirst ? looseList : null}
             {groups.map((group, index) => {
               const headingId = `${listId}-grupo-${index}`
               return (
@@ -250,12 +312,14 @@ export function SectionNav({
                   aria-labelledby={headingId}
                   // `shrink-0`: en una pantalla baja la lista se desplaza; un grupo
                   // nunca se encoge recortando sus filas.
-                  className={cn("flex shrink-0 flex-col", index === 0 && "lg:pt-1")}
+                  className={cn("flex shrink-0 flex-col", index === 0 && !looseFirst && "lg:pt-1")}
                 >
-                  {/* En el riel, una línea separa cada grupo del anterior; solo
+                  {/* En el riel, una línea separa cada grupo de lo anterior; solo
                       visual, porque el grupo ya se anuncia con su título. En el
                       selector lo separa su tarjeta. */}
-                  {index > 0 ? <div aria-hidden className={GROUP_SEPARATOR_CLASSES} /> : null}
+                  {index > 0 || looseFirst ? (
+                    <div aria-hidden className={GROUP_SEPARATOR_CLASSES} />
+                  ) : null}
                   <p id={headingId} className={GROUP_LABEL_CLASSES}>
                     {group.label}
                   </p>
@@ -265,14 +329,12 @@ export function SectionNav({
                 </div>
               )
             })}
-            {items.length > 0 ? (
+            {items.length > 0 && !looseFirst ? (
               <>
                 {/* En el riel, una línea separa lo que no pertenece a un grupo;
                     en el selector ya lo separa su propia tarjeta. */}
-                <div role="separator" className={GROUP_SEPARATOR_CLASSES} />
-                <ul className={cn(GROUP_LIST_CLASSES, "shrink-0")}>
-                  {items.map((item) => renderEntry(item, "group"))}
-                </ul>
+                {isGrouped ? <div role="separator" className={GROUP_SEPARATOR_CLASSES} /> : null}
+                {looseList}
               </>
             ) : null}
           </div>
@@ -291,7 +353,22 @@ export function SectionNav({
         )}
       </nav>
       {/* Sin padding ni fondo: los aporta el `PageShell` que envuelve la sección. */}
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1">
+        {mobile === "part" && mobileIndex !== undefined ? (
+          <div className="mb-3 lg:hidden">
+            <LinkComponent to={mobileIndex} className={BACK_LINK_CLASSES}>
+              <ChevronLeft aria-hidden />
+              {label}
+            </LinkComponent>
+          </div>
+        ) : null}
+        {children}
+      </div>
     </div>
   )
+}
+
+/** `/configuracion/` y `/configuracion` son la misma portada. */
+function trimSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") : path
 }
