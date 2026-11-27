@@ -3,7 +3,7 @@
  * de Lima gestorIA ya contaba el día siguiente, con la hora de Londres) y los periodos de Reportes.
  */
 import { describe, expect, it } from "vitest"
-import { addDays, dayIn, isTimeZone, startOfDay, weekdayOf } from "./hora.js"
+import { addDays, dayIn, isTimeZone, momentWords, startOfDay, weekdayOf } from "./hora.js"
 import { periodStart } from "./sofi/reportes.js"
 
 const LIMA = "America/Lima"
@@ -72,5 +72,23 @@ describe("los periodos de Reportes", () => {
     expect(periodStart("semana", "2026-11-25", LIMA).toISOString()).toBe("2026-11-23T05:00:00.000Z")
     expect(periodStart("semana", "2026-11-23", LIMA).toISOString()).toBe("2026-11-23T05:00:00.000Z")
     expect(periodStart("mes", "2026-11-25", LIMA).toISOString()).toBe("2026-11-01T05:00:00.000Z")
+  })
+})
+
+describe("el plazo de una oferta, en la hora de la tienda", () => {
+  // Jueves 26 de noviembre de 2026, 18:40 en Lima = 23:40 en UTC.
+  const now = new Date("2026-11-26T23:40:00Z")
+
+  it("dice hoy o mañana con la hora exacta de la tienda", () => {
+    expect(momentWords(LIMA, new Date("2026-11-27T02:00:00Z"), now)).toBe("hoy a las 9:00 p. m.")
+    expect(momentWords(LIMA, new Date(now.getTime() + 86_400_000), now)).toBe(
+      "mañana a las 6:40 p. m.",
+    )
+  })
+
+  it("más allá de mañana, con el día de la semana", () => {
+    expect(momentWords(LIMA, new Date("2026-11-28T14:05:00Z"), now)).toBe(
+      "el sábado 28 a las 9:05 a. m.",
+    )
   })
 })

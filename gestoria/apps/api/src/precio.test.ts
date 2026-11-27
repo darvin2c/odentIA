@@ -2,7 +2,7 @@
  * El precio de un pedido (tablero 14), sin base: los ejemplos del lienzo, con soles.
  */
 import { describe, expect, it } from "vitest"
-import { autoUnitCents, floorUnitCents, type QuoteLine, quote } from "./precio.js"
+import { autoUnitCents, floorUnitCents, negotiatedUntil, type QuoteLine, quote } from "./precio.js"
 
 /** La zapatilla de S/ 129 con mínimo S/ 100. */
 const zapatilla = (over: Partial<QuoteLine> = {}): QuoteLine => ({
@@ -124,5 +124,23 @@ describe("lo que se cede sale de un solo margen (tablero 14)", () => {
       totalCents: 13900,
     })
     expect(quote([medias], reparto, "PEN").ok).toBe(false)
+  })
+})
+
+describe("hasta cuándo vale un precio negociado", () => {
+  const now = new Date("2026-11-26T23:40:00Z")
+
+  it("24 horas, o la hora que ya se le prometió si es antes", () => {
+    expect(negotiatedUntil(now)?.toISOString()).toBe("2026-11-27T23:40:00.000Z")
+    const promised = new Date("2026-11-27T20:00:00Z")
+    expect(negotiatedUntil(now, promised)?.toISOString()).toBe(promised.toISOString())
+    // Nunca más de 24 horas, aunque se haya dicho otra cosa.
+    expect(negotiatedUntil(now, new Date("2026-11-29T00:00:00Z"))?.toISOString()).toBe(
+      "2026-11-27T23:40:00.000Z",
+    )
+  })
+
+  it("una hora prometida que ya pasó no se renueva", () => {
+    expect(negotiatedUntil(now, new Date("2026-11-26T23:00:00Z"))).toBeNull()
   })
 })

@@ -28,6 +28,7 @@ import { and, asc, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizz
 import { z } from "zod"
 import { agentName, SOFI_ACTOR } from "./agente.js"
 import { imageType } from "./catalogo.js"
+import { customerForOrderIn, shownCustomerId } from "./clientes.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
 import { storeClockIn } from "./hora.js"
@@ -36,7 +37,7 @@ import { can } from "./permisos.js"
 import {
   autoUnitCents,
   floorUnitCents,
-  NEGOTIATED_PRICE_MS,
+  negotiatedUntil,
   type PricedVariant,
   type Quote,
   type QuoteLine,
@@ -98,11 +99,13 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Elige una fecha")
 const cents = z.number().int("Escribe un monto válido").min(0).max(100_000_000)
 
 export const orderInput = z.object({
-  customerName: z
-    .string()
-    .trim()
-    .min(1, "Escribe el nombre del cliente")
-    .max(120, "Máximo 120 caracteres"),
+  /**
+   * La ficha de la clienta, elegida en «Anotar un pedido» o en «Repetir pedido» (entrega 4). Sin
+   * ella, el pedido abre su ficha con el nombre y el teléfono de abajo (`customerForOrderIn`).
+   */
+  customerId: z.uuid("Elige la clienta").nullable().default(null),
+  /** Con una ficha elegida puede ir vacío: el pedido copia el de la ficha. */
+  customerName: z.string().trim().max(120, "Máximo 120 caracteres").default(""),
   customerPhone: z
     .string()
     .trim()
@@ -136,10 +139,8 @@ export const orderInput = z.object({
 })
 export type OrderInput = z.infer<typeof orderInput>
 
-/** El resumen antes de guardar: el nombre del cliente todavía puede faltar. */
-export const quoteInput = orderInput.extend({
-  customerName: z.string().trim().max(120).default(""),
-})
+/** El resumen antes de guardar: el nombre de la clienta todavía puede faltar. */
+export const quoteInput = orderInput
 
 /** El medio de pago de la tienda con que pagó; vacío: el del pedido, si se cobra así. */
 const methodId = z
@@ -496,13 +497,23 @@ async function notifyCustomer(
  * Arma un pedido dentro de la transacción de la tienda. Es la operación que llamará la
  * conversación (B2 y Sofi en B5) con su `conversationId`; el equipo la usa con «Anotar un
  * pedido». Con pago al recibir, empieza en «por salir»: se cobra en la puerta.
+ *
+ * Un precio negociado vence a las 24 horas (ADR 0207). Sofi puede pasar la hora que ya le dijo a
+ * la clienta al ofrecerlo (`priceExpiresAt`): nunca más tarde que esas 24 horas, para que el
+ * pedido venza a la misma hora que la oferta.
  */
 export async function createOrderIn(
   tx: Db,
   storeId: string,
   actorUserId: string,
   input: OrderInput,
-  options: { conversationId?: string | null; now?: Date; today?: string; test?: boolean } = {},
+  options: {
+    conversationId?: string | null
+    now?: Date
+    today?: string
+    test?: boolean
+    priceExpiresAt?: Date | null
+  } = {},
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
@@ -516,6 +527,19 @@ export async function createOrderIn(
       result.fields,
     )
   const { quote: q, variants, delivery, payment } = result.priced
+  // El trato que ya venció no se renueva solo: quien arma el pedido vuelve a cotizar.
+  const expiresAt = q.negotiated ? negotiatedUntil(now, options.priceExpiresAt) : null
+  if (q.negotiated && !expiresAt)
+    throw new StoreError(409, "PRICE_EXPIRED", "El precio acordado ya venció: vuelve a cotizar.")
+  // La ficha de la clienta: la elegida, la de su conversación o una nueva (nunca por el teléfono).
+  const client = await customerForOrderIn(tx, storeId, actorUserId, input, {
+    conversationId: options.conversationId,
+    test: options.test,
+  })
+  if (!client && !input.customerName)
+    throw new StoreError(400, "VALIDATION_ERROR", "Escribe el nombre de la clienta", {
+      customerName: "Escribe el nombre de la clienta",
+    })
   // El número sigue al último de la tienda; dos pedidos a la vez esperan su turno.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}`}))`)
   const [last] = await tx
@@ -531,8 +555,9 @@ export async function createOrderIn(
       state: payment.collection === "al_recibir" ? "por_salir" : "por_pagar",
       channel: input.channel,
       conversationId: options.conversationId ?? null,
-      customerName: input.customerName,
-      customerPhone: input.customerPhone,
+      customerId: client?.id ?? null,
+      customerName: client?.name ?? input.customerName,
+      customerPhone: client ? client.phone : input.customerPhone,
       address: input.address,
       notes: input.notes,
       deliveryMethodId: delivery.id,
@@ -553,7 +578,7 @@ export async function createOrderIn(
       totalCents: q.totalCents,
       marginCents: q.marginCents,
       marginUsedCents: q.marginUsedCents,
-      priceExpiresAt: q.negotiated ? new Date(now.getTime() + NEGOTIATED_PRICE_MS) : null,
+      priceExpiresAt: expiresAt,
       deliverOn: input.deliverOn,
       test: options.test ?? false,
       createdBy: actorUserId,
@@ -597,6 +622,7 @@ export async function createOrderIn(
   return {
     id: order!.id,
     number: pad(number),
+    customerId: order!.customerId,
     state: order!.state,
     paymentCollection: order!.paymentCollection,
     totalCents: q.totalCents,
@@ -869,6 +895,8 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     bySofi: order.createdBy === SOFI_ACTOR,
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
     linkConnected,
+    /** La ficha de la clienta que se ve (si quedó dentro de otra, esa otra); nula sin ficha. */
+    customerId: await shownCustomerId(tx, order.customerId),
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,
     priceExpired: Boolean(order.priceExpiresAt && order.priceExpiresAt.getTime() <= now),
     /** Lo cobrado, lo por confirmar y lo que falta cobrar (`saldo.ts`). */

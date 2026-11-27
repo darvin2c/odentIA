@@ -17,6 +17,7 @@ import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
+import { momentWords } from "../hora.js"
 import {
   addReceiptIn,
   cancelOrderIn,
@@ -44,6 +45,9 @@ import { percentsIn } from "./revisar.js"
  * - Arma un pedido solo con un resumen que el cliente ya vio: la misma cotización tuvo que salir
  *   en una respuesta anterior y el cliente tuvo que escribir después.
  * - Nunca confirma un pago: anota la captura y queda por confirmar (la base tampoco la deja).
+ * - Su oferta (lienzo «gestorIA como odentIA», tablero 21): una sola por conversación, sin
+ *   mejorarla si la clienta insiste, siempre a cambio de pagar en el plazo que le dijo y nunca con
+ *   pago al recibir (`offerProblem`). Vencido el plazo, no la renueva sola.
  *
  * Lo que devuelven es JSON en palabras del cliente, con los importes ya escritos en la moneda de
  * la tienda: el modelo los repite tal cual. Cada importe y porcentaje que muestran queda anotado
@@ -66,10 +70,66 @@ export interface TurnTrace {
   quotes: Map<string, number>
   /** Pasó la conversación a una persona, con este motivo. */
   handoff: string | null
+  /** Las cotizaciones negociadas de este turno: su total y lo que cede. De ahí sale la oferta. */
+  offers: { totalCents: number; cededCents: number }[]
 }
 
 export function newTrace(): TurnTrace {
-  return { tools: [], amounts: new Set(), percents: new Set(), quotes: new Map(), handoff: null }
+  return {
+    tools: [],
+    amounts: new Set(),
+    percents: new Set(),
+    quotes: new Map(),
+    handoff: null,
+    offers: [],
+  }
+}
+
+/**
+ * Lo que de verdad le ofreció en este turno, o null si no negoció. Sofi prueba opciones con
+ * cotizar antes de decirlas: cuenta lo más que cede una cotización cuyo total salió en su
+ * respuesta. Si no escribió ningún total (dijo «S/ 10 menos» sin el total), cuenta la que menos
+ * cede: así una prueba que no dijo no le deja mejorar la oferta después.
+ */
+export function offeredIn(trace: Pick<TurnTrace, "offers">, said: number[]): number | null {
+  if (trace.offers.length === 0) return null
+  const shown = trace.offers.filter((o) => said.includes(o.totalCents))
+  return shown.length
+    ? Math.max(...shown.map((o) => o.cededCents))
+    : Math.min(...trace.offers.map((o) => o.cededCents))
+}
+
+/**
+ * La oferta que Sofi ya le hizo en esta conversación, desde su última compra: lo más que cedió y
+ * hasta cuándo vale (la hora que le dijo). Sale de sus respuestas anteriores (`detail.oferta`).
+ */
+export interface SofiOffer {
+  cededCents: number
+  expiresAt: Date
+}
+
+/**
+ * Por qué una cotización negociada no se puede ofrecer, o null si se puede. Es lo propio de Sofi
+ * al vender (tablero 21), no una regla del precio: el equipo sigue negociando como siempre.
+ *
+ * - Con pago al recibir no hay rebaja: es a cambio de pagar ya.
+ * - Vencido el plazo que le dijo, la oferta no se renueva sola.
+ * - Ofrece una sola vez: si la clienta insiste, no cede más que lo que ya le ofreció.
+ */
+export function offerProblem(
+  offer: SofiOffer | null,
+  now: Date,
+  priced: { negotiated: boolean; marginUsedCents: number },
+  collection: string | null,
+): string | null {
+  if (!priced.negotiated) return null
+  if (collection === "al_recibir")
+    return "Con pago al recibir no hay rebaja: es a cambio de pagar ya. Cotiza a su precio normal, o que pague con link o captura para mantener lo que le ofreciste."
+  if (offer && offer.expiresAt.getTime() <= now.getTime())
+    return "Lo que le ofreciste ya venció y no se renueva: cotiza a su precio normal."
+  if (offer && priced.marginUsedCents > offer.cededCents)
+    return "Ya le hiciste tu oferta en esta conversación y no se mejora: repite la misma, o dale a elegir otra que ceda lo mismo o menos."
+  return null
 }
 
 export interface SofiToolContext {
@@ -84,6 +144,13 @@ export interface SofiToolContext {
   link: LinkDeps
   /** Las cotizaciones que el cliente ya vio en respuestas anteriores (y escribió después). */
   shownQuotes: Set<string>
+  /** La hora de la tienda, para decir el plazo de la oferta. */
+  timeZone: string
+  now: Date
+  /** La oferta que ya le hizo en esta conversación; null si todavía no le ofreció nada. */
+  offer: SofiOffer | null
+  /** Hasta cuándo vale lo que ofrezca ahora: el plazo de su oferta, o 24 horas desde ahora. */
+  offerDeadline: Date
   trace: TurnTrace
 }
 
@@ -149,9 +216,9 @@ const DESCRIPTIONS: Record<SofiToolName, string> = {
   buscar_productos:
     "Busca en el catálogo de la tienda: productos con su precio, sus variantes con stock, si se negocia, y lo parecido y lo que combina. Úsala antes de hablar de cualquier producto o precio.",
   cotizar:
-    "Calcula el total de una compra con las reglas de la tienda: precio, promoción o precio por cantidad, envío y lo que negocies. Si pides algo bajo el mínimo o más de lo que se puede ceder, te dice que no y cuánto queda. Úsala antes de dar un total o un precio negociado.",
+    "Calcula el total de una compra con las reglas de la tienda: precio, promoción o precio por cantidad, envío y lo que negocies. Si pides algo bajo el mínimo, más de lo que se puede ceder o más de lo que ya ofreciste, te dice que no. Con un precio negociado te da el plazo exacto para pagarlo. Úsala antes de dar un total o una oferta.",
   armar_pedido:
-    "Anota el pedido cuando el cliente confirmó el resumen. Necesita la misma cotización que ya le mostraste. El precio negociado vale 24 horas.",
+    "Anota el pedido cuando el cliente confirmó el resumen. Necesita la misma cotización que ya le mostraste. El precio negociado vale hasta la hora que le dijiste.",
   link_de_pago:
     "Crea el link de pago del pedido (primera forma de cobro). Si la tienda no tiene link, te lo dice.",
   anotar_pago:
@@ -278,6 +345,15 @@ async function paymentMethodFor(tx: Db, storeId: string, wanted: string | undefi
   if (!first)
     throw new ToolProblem("La tienda no tiene medios de pago encendidos: pásalo a una persona")
   return first.id
+}
+
+/** Cómo se cobra un medio de pago de la tienda (link, captura o al recibir). */
+async function collectionOf(tx: Db, storeId: string, paymentMethodId: string) {
+  const [method] = await tx
+    .select({ collection: storePaymentMethod.collection })
+    .from(storePaymentMethod)
+    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.id, paymentMethodId)))
+  return method?.collection ?? null
 }
 
 async function toOrderInput(
@@ -490,6 +566,15 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
     const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
     if (!result.quote) return { ok: false, problemas: problemsOf(result.fields, input) }
     const q = result.quote
+    const problem = offerProblem(
+      ctx.offer,
+      ctx.now,
+      q,
+      await collectionOf(tx, ctx.storeId, input.paymentMethodId),
+    )
+    if (problem) return { ok: false, problemas: [problem] }
+    if (q.negotiated)
+      ctx.trace.offers.push({ totalCents: q.totalCents, cededCents: q.marginUsedCents })
     const money = (cents: number) => {
       ctx.trace.amounts.add(cents)
       return formatMoney(cents, ctx.currency)
@@ -519,7 +604,11 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
       // Para que negocie, no para decirlo: no entran en lo que puede escribir (revela el mínimo).
       margen_usado: formatMoney(q.marginUsedCents, ctx.currency),
       margen_que_queda: formatMoney(q.marginCents - q.marginUsedCents, ctx.currency),
-      ...(q.negotiated ? { vence: "El precio negociado vale 24 horas desde que se anota" } : {}),
+      ...(q.negotiated
+        ? {
+            plazo: `Si lo paga hasta ${momentWords(ctx.timeZone, ctx.offerDeadline, ctx.now)}. Dilo con esa hora exacta: es a cambio de pagar en ese plazo.`,
+          }
+        : {}),
     }
   })
 }
@@ -529,6 +618,13 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
     const input = await toOrderInput(tx, ctx, args, args)
     const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
     if (!priced.quote) return { ok: false, problemas: problemsOf(priced.fields, input) }
+    const problem = offerProblem(
+      ctx.offer,
+      ctx.now,
+      priced.quote,
+      await collectionOf(tx, ctx.storeId, input.paymentMethodId),
+    )
+    if (problem) return { ok: false, problemas: [problem] }
     // Solo con un resumen que el cliente ya vio y respondió (tablero 8: «manda el resumen con
     // el total para que el cliente lo confirme»).
     if (!ctx.shownQuotes.has(quoteKey(input, priced.quote.totalCents)))
@@ -570,6 +666,8 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
       conversationId: ctx.conversationId,
       today: ctx.today,
       test: ctx.test,
+      // Vence a la hora que le dijo al ofrecerlo (la de cotizar), no 24 horas desde ahora.
+      priceExpiresAt: ctx.offerDeadline,
     })
     // Tomó un pedido: la conversación sube a «pedido» en lo que se cobra, en la misma
     // transacción que el pedido (el de prueba nunca).
@@ -591,7 +689,11 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
       estado: stateWords({ state: created.state, paymentCollection: created.paymentCollection }),
       total: formatMoney(created.totalCents, ctx.currency),
       ...(open.length ? { reemplaza: open.map((o) => pad(o.number)) } : {}),
-      ...(created.priceExpiresAt ? { vence: "El precio negociado vale 24 horas" } : {}),
+      ...(created.priceExpiresAt
+        ? {
+            plazo: `El precio negociado vale si lo paga hasta ${momentWords(ctx.timeZone, created.priceExpiresAt, ctx.now)}`,
+          }
+        : {}),
     }
   })
 }
@@ -695,7 +797,9 @@ async function orders(ctx: SofiToolContext) {
           ...(o.priceExpiresAt && o.state === "por_pagar"
             ? o.priceExpiresAt.getTime() <= Date.now()
               ? { precio: "El precio negociado venció: vuelve a cotizar" }
-              : { precio: "Precio negociado vigente" }
+              : {
+                  precio: `Precio negociado vigente si lo paga hasta ${momentWords(ctx.timeZone, o.priceExpiresAt, ctx.now)}`,
+                }
             : {}),
         }
       }),

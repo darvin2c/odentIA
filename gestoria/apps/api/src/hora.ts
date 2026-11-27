@@ -109,6 +109,31 @@ export function weekdayOf(day: string): number {
   return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7
 }
 
+/**
+ * Un momento exacto como lo dice la tienda, en su hora: «hoy a las 6:40 p. m.», «mañana a las
+ * 6:40 p. m.» o «el sábado 28 a las 9:05 a. m.». Lo usa Sofi para el plazo de una oferta: la
+ * clienta ve la misma hora que vence en el pedido.
+ */
+export function momentWords(timeZone: string, at: Date, now = new Date()): string {
+  const plain = (text: string) => text.replace(/[  ]/g, " ")
+  const time = plain(
+    new Intl.DateTimeFormat("es-PE", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(at),
+  )
+  const day = dayIn(timeZone, at)
+  const today = dayIn(timeZone, now)
+  if (day === today) return `hoy a las ${time}`
+  if (day === addDays(today, 1)) return `mañana a las ${time}`
+  const date = plain(
+    new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric" }).format(at),
+  )
+  return `el ${date} a las ${time}`
+}
+
 /** La hora de la tienda y qué día es en ella, dentro de su transacción. */
 export async function storeClockIn(tx: Db, storeId: string, now = new Date()) {
   const [row] = await tx

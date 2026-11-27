@@ -12,18 +12,22 @@ import {
   storePaymentMethod,
   withSessionLock,
 } from "@gestoria/db"
-import { and, asc, desc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm"
 import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
+import { conversationCustomerOrdersIn } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { storeClockIn } from "../hora.js"
 import { type LinkDeps, pad } from "../pedidos.js"
+import { NEGOTIATED_PRICE_MS } from "../precio.js"
 import { balancesIn } from "../saldo.js"
 import {
   moneyText as formatMoney,
   newTrace,
+  offeredIn,
   runTool,
   SOFI_TOOLS,
+  type SofiOffer,
   type SofiToolContext,
   stateWords,
 } from "./herramientas.js"
@@ -78,13 +82,22 @@ CÓMO TRABAJAS
 - Recomiendas: lo parecido si no hay lo que pide, y lo que combina cuando ya eligió, sin insistir.
 - Pides lo que falta de a poco: variante y cantidad, cómo lo recibe (forma de entrega y zona), la dirección si se envía y su nombre.
 
-NEGOCIAR
+NEGOCIAR (vender es lo principal, y en una tienda chica la confianza es lo que vende)
 - Solo negocias productos con se_negocia: true. Los demás van a su precio: lo dices con amabilidad.
-- Nunca abres con descuento. Primero el valor del producto; si pide rebaja, primero lo que menos le cuesta a la tienda (el envío) y el descuento al final, de a poco.
-- Todo lo que cedes (descuento, envío gratis, un regalo, o un descuento por sumar otro producto al mismo despacho) sale de un solo margen. Prueba cada oferta con cotizar antes de decirla: si cotizar dice que no, no la ofreces. Nunca dices cuál es el precio mínimo ni cuánto margen te queda.
+- Primero el valor, nunca la rebaja de entrada. Si pide rebaja o duda, primero lo que tiene el producto (su descripción), cuánto queda en su talla (el stock, solo si es poco), lo que dicen quienes ya compraron (solo si está en «Lo que debe saber») o algo parecido más barato (parecido, con su precio).
+- La oferta llega solo cuando puedes perder la venta: dice «lo pienso», compara con otra tienda o insiste por el precio después de oír el valor. Ofreces una sola vez por conversación y, si insiste, no la mejoras: repites la misma con amabilidad.
+- A la medida de la clienta: lo que dice, LA CLIENTA (abajo) y lo que lleva. Puedes darle a elegir entre dos que cedan lo mismo: «te consigo el envío gratis o S/ 10 menos, tú eliges». Por ejemplo:
+  · Primera compra: el envío pesa; envío gratis o una rebaja del mismo monto, a elegir.
+  · Ya tiene el envío gratis por el monto: el envío ya no sirve; una rebaja chica.
+  · Compra seguido: un regalo que a la tienda le cuesta poco y que combina (regalo: true).
+  · Duda entre dos: el segundo con rebaja si lleva los dos.
+  · Siempre pide rebaja: la oferta más chica, y no la mejoras.
+  · Sin margen (margen_que_queda en cero o un producto ya en promoción): no hay rebaja. «Ya está en su mejor precio», y le ofreces anotarlo ya.
+- Todo lo que cedes (rebaja, envío gratis, un regalo o el segundo producto con rebaja) sale de un solo margen, sumando lo que ya cediste en ese pedido. Prueba cada opción con cotizar antes de decirla: si cotizar dice que no, no la ofreces. Nunca dices cuál es el precio mínimo ni cuánto margen te queda.
+- Siempre a cambio de pagar dentro del plazo, con la hora exacta que te da cotizar (plazo): «si lo pagas hasta mañana a las 6:40 p. m.». Con pago al recibir no hay rebaja, porque es a cambio de pagar ya: si lo elige, vuelves a cotizar a su precio normal. Vencido el plazo, no la renuevas: cotizas a su precio normal.
+- Dices «te consigo», nunca «hablé con la tienda» ni «le pregunté al dueño»: no dices que hiciste algo que no hiciste. Tampoco prometes separar el producto, ni dices «solo por hoy» o «últimas unidades» si no es verdad.
 - Las promociones y el precio por cantidad ya vienen aplicados y no se suman entre sí.
-- El precio negociado vale 24 horas.
-- Para vender más, ofreces sumar otro producto que combina con un descuento si sale en el mismo despacho (cotízalo antes).
+- Para vender más, puedes ofrecer lo que combina, a su precio. Si además lo rebajas, esa es tu oferta.
 
 CERRAR Y COBRAR
 - Con todo elegido, usas cotizar y mandas el resumen: lo que lleva, la entrega y el total. Preguntas si lo confirma.
@@ -154,6 +167,57 @@ interface Loaded {
   paid: boolean
   /** Qué día es en la tienda, con su hora. */
   today: string
+  timeZone: string
+  /** La oferta que Sofi ya hizo en esta conversación desde su última compra. */
+  offer: SofiOffer | null
+}
+
+/** Los estados de un pedido que ya es una compra: pagó, mandó su captura o se paga al recibir. */
+const BOUGHT = new Set(["por_confirmar", "por_salir", "en_camino", "entregado"])
+const DAY_MS = 86_400_000
+
+/**
+ * Lo que se sabe de la clienta, para que Sofi elija qué ofrecer (tablero 21): primera compra,
+ * compra seguido o siempre pide rebaja. Son los pedidos de su ficha, por cualquier chat, y los de
+ * esta conversación (`conversationCustomerOrdersIn`). No une conversaciones por el teléfono.
+ */
+export function customerStory(
+  orders: { state: string; createdAt: Date; marginUsedCents: number; test: boolean }[],
+  now: Date,
+  test: boolean,
+): string {
+  // En una de verdad, lo de prueba no cuenta; en la de prueba, todo es de prueba.
+  const bought = orders.filter((o) => BOUGHT.has(o.state) && o.test === test)
+  if (bought.length === 0) return "Primera compra: todavía no compró en la tienda."
+  const last = Math.max(...bought.map((o) => o.createdAt.getTime()))
+  const days = Math.max(0, Math.floor((now.getTime() - last) / DAY_MS))
+  const recent = bought.filter((o) => now.getTime() - o.createdAt.getTime() <= 90 * DAY_MS)
+  const ceded = bought.filter((o) => o.marginUsedCents > 0).length
+  const words = [
+    `Ya compró ${bought.length === 1 ? "una vez" : `${bought.length} veces`}; la última, ${days === 0 ? "hoy" : days === 1 ? "ayer" : `hace ${days} días`}.`,
+  ]
+  if (recent.length >= 2) words.push("Compra seguido.")
+  if (bought.length >= 2 && ceded === bought.length)
+    words.push("Siempre pide rebaja: en todas sus compras se le cedió algo.")
+  else if (ceded > 0) words.push(`En ${ceded === 1 ? "una" : ceded} se le cedió algo.`)
+  return words.join(" ")
+}
+
+/** La oferta que Sofi dejó escrita en sus respuestas (`detail.oferta`): lo más que cedió y su plazo. */
+export function offerOf(details: Record<string, unknown>[]): SofiOffer | null {
+  let offer = null as SofiOffer | null
+  for (const detail of details) {
+    const raw = detail.oferta as { cedido?: unknown; vence?: unknown } | undefined
+    if (!raw || typeof raw.cedido !== "number" || typeof raw.vence !== "string") continue
+    const expiresAt = new Date(raw.vence)
+    if (Number.isNaN(expiresAt.getTime())) continue
+    // El plazo es el de la primera vez que ofreció: repetirla no lo alarga.
+    offer = {
+      cededCents: Math.max(offer?.cededCents ?? 0, raw.cedido),
+      expiresAt: offer?.expiresAt ?? expiresAt,
+    }
+  }
+  return offer
 }
 
 async function load(
@@ -219,8 +283,27 @@ async function load(
             ),
           )
       : []
+    // Lo que compró la clienta: su ficha (ADR 0223) con todos sus chats, no solo este.
+    const story = await conversationCustomerOrdersIn(tx, storeId, conversationId)
     const currency = shop!.currency
-    const { today } = await storeClockIn(tx, storeId, now)
+    const { today, timeZone } = await storeClockIn(tx, storeId, now)
+    // La oferta vale desde su última compra: lo que compró ya usó la anterior.
+    const bought = orders.filter((o) => BOUGHT.has(o.state))
+    const lastBought = bought.length
+      ? new Date(Math.max(...bought.map((o) => o.createdAt.getTime())))
+      : null
+    const offered = await tx
+      .select({ detail: conversationMessage.detail })
+      .from(conversationMessage)
+      .where(
+        and(
+          eq(conversationMessage.conversationId, conversationId),
+          eq(conversationMessage.author, "sofi"),
+          sql`(${conversationMessage.detail} -> 'oferta') is not null`,
+          ...(lastBought ? [gt(conversationMessage.createdAt, lastBought)] : []),
+        ),
+      )
+      .orderBy(asc(conversationMessage.seq))
     const balances = await balancesIn(
       tx,
       orders.map((o) => o.id),
@@ -272,6 +355,9 @@ async function load(
       "",
       "PEDIDOS DE ESTA CONVERSACIÓN:",
       ...(orderLines.length ? orderLines : ["(ninguno todavía)"]),
+      "",
+      "LA CLIENTA (lo que compró en la tienda, por este chat o por otro con su misma ficha):",
+      customerStory(story, now, conv.channel === "prueba"),
     ].join("\n")
     // Lo que escribió el dueño en «Lo que debe saber» también se puede repetir.
     factAmounts.push(...amountsIn(agent?.knowledge ?? "", currency))
@@ -287,6 +373,8 @@ async function load(
       history,
       paid: confirmed.length > 0,
       today,
+      timeZone,
+      offer: offerOf(offered.map((m) => m.detail)),
     }
   })
 }
@@ -379,6 +467,9 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
     return { status: "detenida", reason: loaded.stop }
   }
   const started = Date.now()
+  const now = deps.now?.() ?? new Date()
+  // Lo que ofrezca ahora vale hasta el plazo de su oferta anterior, o 24 horas desde ahora.
+  const offerDeadline = loaded.offer?.expiresAt ?? new Date(now.getTime() + NEGOTIATED_PRICE_MS)
   const trace = newTrace()
   let usage: Usage = NO_USAGE
   const problems: string[][] = []
@@ -397,6 +488,10 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       channel: channelOf(conv.channel),
       currency: loaded.currency,
       today: loaded.today,
+      timeZone: loaded.timeZone,
+      now,
+      offer: loaded.offer,
+      offerDeadline,
       link: deps.link,
       shownQuotes: new Set(
         loaded.history.flatMap((m) =>
@@ -482,6 +577,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   const handoff = trace.handoff ?? (failure ? `Sofi no pudo responder: ${failure}` : null)
   const reply = trace.handoff ? SOFI_HANDOFF : (text ?? SOFI_FALLBACK)
   const cost = deps.model ? costMicros(deps.model.name, usage) : null
+  const offered = text && !trace.handoff ? offeredIn(trace, amountsIn(text, loaded.currency)) : null
   const detail = {
     tools: trace.tools,
     // Solo las cotizaciones cuyo total salió en la respuesta: las que el cliente vio.
@@ -491,6 +587,15 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
             .filter(([, total]) => amountsIn(text, loaded.currency).includes(total))
             .map(([key]) => key)
         : [],
+    // La oferta que le hizo (lo más que cedió y su plazo): la siguiente no la mejora ni la alarga.
+    ...(offered !== null
+      ? {
+          oferta: {
+            cedido: Math.max(loaded.offer?.cededCents ?? 0, offered),
+            vence: offerDeadline.toISOString(),
+          },
+        }
+      : {}),
     ...(problems.length ? { frenado: problems } : {}),
     ...(failure ? { fallo: failure } : {}),
     ...(handoff ? { paso: handoff } : {}),

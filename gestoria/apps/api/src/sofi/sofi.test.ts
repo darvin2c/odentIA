@@ -490,6 +490,73 @@ describe("Sofi vende con las reglas de la tienda", () => {
       dueCents: 4900,
     })
   })
+
+  // Al final: arma un pedido, y los de arriba cuentan los números desde el 0001.
+  it("la oferta llega una vez, con la hora exacta, no se mejora y el pedido vence a esa hora", async () => {
+    const id = await newTest()
+    const args = {
+      lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+      entrega_id: ids.reparto,
+      envio_cobrado: 0,
+    }
+    let deadline = ""
+    const offered = await write(
+      id,
+      "Mmm, lo voy a pensar",
+      use("cotizar", () => args),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(true)
+        // La hora exacta, en la de la tienda: la misma que vencerá el pedido.
+        expect(result.plazo).toMatch(/hasta (hoy|mañana) a las \d{1,2}:\d{2} [ap]\. m\./)
+        deadline = result.plazo.match(/hasta [^.]+\. m\./)[0]
+        return {
+          content: `Te consigo el envío gratis: te queda en ${result.total} si lo pagas ${deadline}.`,
+        }
+      },
+    )
+    expect(lastSofi(offered).text).toContain(deadline)
+    const [said] = await db.ownerDb
+      .select({ detail: conversationMessage.detail })
+      .from(conversationMessage)
+      .where(
+        and(eq(conversationMessage.conversationId, id), eq(conversationMessage.author, "sofi")),
+      )
+    const offer = (said!.detail as Json).oferta
+    expect(offer.cedido).toBe(1000)
+
+    // Insiste: no la mejora.
+    await write(
+      id,
+      "¿Y si además me bajas 10 soles?",
+      use("cotizar", () => ({ ...args, lineas: [{ ...args.lineas[0]!, precio_unitario: 119 }] })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(false)
+        expect(result.problemas[0]).toContain("no se mejora")
+        return { content: `Lo que te consigo es el envío gratis, si lo pagas ${deadline}.` }
+      },
+    )
+
+    // Acepta: el pedido vence a la hora que le dijo, no 24 horas desde que se anota.
+    const confirmed = await write(
+      id,
+      "Ya, lo confirmo. Soy Ana, Av. Primavera 123",
+      use("armar_pedido", () => ({ ...args, nombre: "Ana", direccion: "Av. Primavera 123" })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(true)
+        expect(result.plazo).toContain(deadline)
+        return { content: `Listo, tu pedido ${result.pedido} por ${result.total}.` }
+      },
+    )
+    const [order] = await db.ownerDb
+      .select()
+      .from(saleOrder)
+      .where(eq(saleOrder.id, confirmed.conversation.orders[0].id))
+    expect(order).toMatchObject({ marginUsedCents: 1000, state: "por_pagar" })
+    expect(order!.priceExpiresAt?.toISOString()).toBe(offer.vence)
+  })
 })
 
 describe("lo que escribe el cliente mientras Sofi responde", () => {

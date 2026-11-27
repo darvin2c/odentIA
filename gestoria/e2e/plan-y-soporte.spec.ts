@@ -144,7 +144,9 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await accept.focus()
   await page.keyboard.press("Enter")
   await expect(
-    page.getByText(/Ana de Soporte puede mirar tu tienda hasta las? .* · todavía no entró/),
+    page.getByText(
+      /Ana de Soporte puede mirar tu tienda hasta (el .* a )?las? .* · todavía no entró/,
+    ),
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Sacar ahora" })).toBeVisible()
   await noSideScroll(page)
@@ -167,13 +169,19 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await page.goto("/")
   // Con una sola tienda, «Tus tiendas» entra directo a ella; a soporte, por el catálogo.
   await expect(
-    page.getByText(/Solo mirar · Estás viendo Calzados Rosa como soporte de gestorIA, hasta las?/),
+    page.getByText(
+      /Solo mirar · Estás viendo Calzados Rosa como soporte de gestorIA, hasta (el .* a )?las?/,
+    ),
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Salir" })).toBeVisible()
   await expect(page).toHaveURL(/\/catalogo$/)
   const nav = page.getByRole("navigation", { name: "Principal" })
   await expect(nav.getByRole("link", { name: "Catálogo" })).toBeVisible()
   await expect(nav.getByRole("link", { name: "Pedidos" })).toHaveCount(0)
+  // Las clientas tampoco son suyas: sin Clientes en el menú, y su dirección lleva al catálogo.
+  await expect(nav.getByRole("link", { name: "Clientes" })).toHaveCount(0)
+  await page.goto(`${BASE}/clientes`)
+  await expect(page).toHaveURL(/\/catalogo$/)
   await expect(page.getByRole("button", { name: "Pedir ayuda" })).toHaveCount(0)
   await page.getByRole("button", { name: /^Calzados Rosa, Tienda, Soporte\./ }).click()
   await expect(page.getByRole("menuitem", { name: "Plan y pagos" })).toHaveCount(0)

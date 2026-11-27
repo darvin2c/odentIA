@@ -80,6 +80,17 @@ export interface Quote {
 /** Cuánto vale un precio negociado (tablero 14). */
 export const NEGOTIATED_PRICE_MS = 24 * 3_600_000
 
+/**
+ * Hasta cuándo vale un precio negociado: 24 horas, o antes si ya se le prometió otra hora (la de
+ * la oferta de Sofi). Null si esa hora ya pasó: el trato venció y no se renueva solo.
+ */
+export function negotiatedUntil(now: Date, promised?: Date | null): Date | null {
+  const limit = now.getTime() + NEGOTIATED_PRICE_MS
+  if (!promised) return new Date(limit)
+  if (promised.getTime() <= now.getTime()) return null
+  return new Date(Math.min(limit, promised.getTime()))
+}
+
 /** Lo más que suma un pedido (la base guarda enteros de 32 bits): diez millones en soles. */
 export const MAX_ORDER_CENTS = 1_000_000_000
 
