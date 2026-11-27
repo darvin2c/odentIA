@@ -5,7 +5,7 @@ import { useState } from "react"
 import { RUBROS } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { useTienda } from "../tienda"
-import { AccionDrawer } from "./acciones"
+import { AccionDrawer, empacar } from "./acciones"
 import { TeTocaPedidos } from "./lista"
 import { type Accion, cuentas, money, type Pedido, teToca, usePedidos } from "./modelo"
 import { ConRouter } from "./router"
@@ -19,26 +19,31 @@ function AvisosCelular({ list }: { list: Pedido[] }) {
     p.pagos.some((g) => g.medio === "link" && g.cuando.startsWith("Hoy")),
   )
   const items = [
-    ...(urgente ? [{ I: Bike, t: "Ahora", d: urgente.toca!.texto, ok: true }] : []),
+    ...(urgente ? [{ I: Bike, t: "Ahora", d: urgente.toca!.texto, id: urgente.id }] : []),
     ...pagos.map((p) => ({
+      id: p.id,
       I: CreditCard,
       t: "Ahora",
       d: `${p.clienta.split(" ")[0]} pagó ${money(cuentas(p).confirmado)} · pedido ${p.id}`,
-      ok: true,
     })),
     {
       I: CreditCard,
       t: "8:06 a. m.",
       d: "Milagros pagó con su link · pedido 0162 · campaña «Vuelven las sandalias»",
-      ok: true,
+      id: "0162",
     },
     {
       I: Smartphone,
       t: "9:12 a. m.",
       d: "Llegó un Yape de Carla para confirmar · pedido 0164",
-      ok: true,
+      id: "0164",
     },
-    { I: PackageCheck, t: "8:00 a. m.", d: "Hoy salen 5 pedidos: 1 sin repartidor", ok: true },
+    {
+      I: PackageCheck,
+      t: "8:00 a. m.",
+      d: "No hay repartidor libre para Fiorella (Los Olivos, 2 a 6 p. m.) · pedido 0161",
+      id: "0161",
+    },
   ]
   return (
     <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4">
@@ -48,7 +53,12 @@ function AvisosCelular({ list }: { list: Pedido[] }) {
       </h2>
       <ul className="flex flex-col gap-2">
         {items.slice(0, 4).map((x, i) => (
-          <li key={i} className="flex items-start gap-3 rounded-xl bg-muted/60 p-2.5 text-sm">
+          <li key={i}>
+            <button
+              type="button"
+              onClick={() => ir(`/pedidos/${x.id}`)}
+              className="flex w-full items-start gap-3 rounded-xl bg-muted/60 p-2.5 text-left text-sm hover:bg-muted"
+            >
             <span
               className="flex size-8 shrink-0 items-center justify-center rounded-lg text-white"
               style={{ background: R.store.color }}
@@ -62,6 +72,7 @@ function AvisosCelular({ list }: { list: Pedido[] }) {
               </span>
               <span className="block leading-snug">{x.d}</span>
             </span>
+            </button>
           </li>
         ))}
       </ul>
@@ -102,7 +113,7 @@ function Inicio() {
         {toca ? (
           <>
             <b>{toca === 1 ? "Una cosa te necesita." : `${toca} cosas te necesitan.`}</b> Lo demás
-            lo están moviendo Sofi, la pasarela y Kevin.
+            lo mueven solos Sofi, gestorIA, la pasarela y los repartidores. A ti solo te queda empacar, confirmar capturas de Yape o Plin y los casos raros.
           </>
         ) : (
           "Nada te espera. Todo avanza solo."
@@ -110,8 +121,8 @@ function Inicio() {
       </p>
       <TeTocaPedidos
         list={all}
-        onAbrir={(id) => ir("/pedidos", { extra: `p=${id}` })}
-        onAccion={(p, a) => setAccion({ p, a })}
+        onAbrir={(id) => ir(`/pedidos/${id}`)}
+        onAccion={(p, a) => (a === "empacar" ? empacar(rubro, p) : setAccion({ p, a }))}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {owner ? (
@@ -159,7 +170,7 @@ function Inicio() {
                   <button
                     type="button"
                     className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/50"
-                    onClick={() => ir("/pedidos", { extra: `p=${p.id}` })}
+                    onClick={() => ir(`/pedidos/${p.id}`)}
                   >
                     <span>
                       {p.id} · {p.clienta}

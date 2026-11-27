@@ -449,7 +449,7 @@ export function ClientaPage() {
         secondary={{
           label: "Volver al pedido",
           icon: <ArrowLeft aria-hidden />,
-          onClick: () => ir("/pedidos", { extra: `p=${p.id}` }),
+          onClick: () => ir(`/pedidos/${p.id}`),
         }}
       />
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -524,7 +524,7 @@ export function ClientaPage() {
       <Button
         variant="outline"
         className="self-start"
-        onClick={() => ir("/pedidos", { extra: `p=${p.id}` })}
+        onClick={() => ir(`/pedidos/${p.id}`)}
       >
         Ver el pedido en la tienda
       </Button>
