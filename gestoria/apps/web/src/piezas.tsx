@@ -309,3 +309,81 @@ export function useDirty(values: unknown): boolean {
   const [initial] = useState(() => JSON.stringify(values))
   return JSON.stringify(values) !== initial
 }
+
+/** Una lista para elegir, con su etiqueta y su error. */
+export function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  error,
+  placeholder,
+  className,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string; disabled?: boolean }[]
+  error?: string
+  placeholder?: string
+  className?: string
+}) {
+  const id = useId()
+  return (
+    <Field data-invalid={error ? true : undefined} className={className}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={SELECT_CLASSES}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+      >
+        {placeholder ? (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        ) : null}
+        {options.map((o) => (
+          <option key={o.value} value={o.value} disabled={o.disabled}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </Field>
+  )
+}
+
+/** Un día, con su etiqueta y su error. */
+export function DateField({
+  label,
+  value,
+  onChange,
+  min,
+  error,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  min?: string
+  error?: string
+}) {
+  const id = useId()
+  return (
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Input
+        id={id}
+        type="date"
+        value={value}
+        min={min}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+      />
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </Field>
+  )
+}

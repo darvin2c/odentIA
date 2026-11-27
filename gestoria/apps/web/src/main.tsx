@@ -19,10 +19,12 @@ import {
 import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { HelpPage } from "./ayuda"
+import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
 import { ConfigFrame, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
+import { DispatchPage } from "./despachos"
 import {
   ForgotPasswordPage,
   LoginPage,
@@ -116,8 +118,8 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: el menú del día (los pedidos, las clientas, el catálogo y su
-// producto, Reportes), y al pie Configuración y la Ayuda.
+// La tienda y sus secciones: el menú del día (Despachos, los pedidos, las clientas, el catálogo y
+// su producto, Caja, Reportes), y al pie Configuración y la Ayuda.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
@@ -165,6 +167,9 @@ const storeChildren = [
       typeof s.pedido === "string" ? { pedido: s.pedido } : {},
     component: OrdersPage,
   }),
+  // Despachos y Caja (entrega 3): qué sale, cuándo y quién lo lleva, y el efectivo del día.
+  createRoute({ getParentRoute: () => storeRoute, path: "/despachos", component: DispatchPage }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/caja", component: CashPage }),
   customersRoute.addChildren([
     createRoute({ getParentRoute: () => customersRoute, path: "/", component: CustomersIndex }),
     createRoute({
