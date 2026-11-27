@@ -11,7 +11,7 @@ import {
   toast,
 } from "@odentia/ui"
 import { Textarea } from "@odentia/ui/components/textarea"
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Plus, Trash2 } from "lucide-react"
@@ -36,7 +36,15 @@ import {
   type PaymentMethod,
   readMoney,
 } from "./lib/tienda"
-import { DateField, fieldErrors, MoneyField, SelectField, shrinkPhoto, TextField } from "./piezas"
+import {
+  DateField,
+  fieldErrors,
+  MoneyField,
+  ReceiptImage,
+  SelectField,
+  shrinkPhoto,
+  TextField,
+} from "./piezas"
 import { useStoreContext } from "./tiendas"
 
 /**
@@ -493,7 +501,7 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
       }
       description={
         pending > 0
-          ? `Hay un pago de ${money(pending, cur)} por confirmar. Sin pago confirmado no se entrega: confírmalo en el pedido, o di que no coincide.`
+          ? `Hay un pago de ${money(pending, cur)} por confirmar. Sin pago confirmado no se entrega: mira la captura y confírmalo aquí mismo; si no coincide, dilo en el pedido.`
           : charge
             ? due < target.totalCents
               ? `Falta cobrar ${money(due, cur)} de ${money(target.totalCents, cur)}. Anota lo que cobraste y con qué: queda a nombre de quien lo llevó.`
@@ -509,18 +517,7 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
       onClose={onClose}
     >
       {pending > 0 ? (
-        <Button
-          variant="outline"
-          render={
-            <Link
-              to="/tiendas/$id/pedidos"
-              params={{ id: store.id }}
-              search={{ pedido: target.id }}
-            />
-          }
-        >
-          Abrir el pedido
-        </Button>
+        <PendingPayments target={target} />
       ) : charge ? (
         <FieldGroup className="gap-3">
           {methods.length === 0 ? (
@@ -611,6 +608,92 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
         </FieldGroup>
       ) : null}
     </ConfirmDialog>
+  )
+}
+
+/**
+ * El pago que espera a una persona, en el mismo paso de entregar (tableros 6 y 24: «¿ya te
+ * pagó?»): la captura y «Ya me pagó: confirmar», la misma revisión del pedido. Confirmado, la
+ * ventana sigue abierta y pasa a entregar (o a cobrar lo que falte). «No coincide» pide motivo y se
+ * dice en el pedido.
+ */
+function PendingPayments({ target }: { target: DeliveryTarget }) {
+  const { store } = useStoreContext()
+  const cur = store.currency
+  const queryClient = useQueryClient()
+  const canConfirm = store.permissions.includes("pagos.confirmar")
+  const detail = useQuery({
+    queryKey: ["pedido", store.id, target.id],
+    queryFn: async () =>
+      (await api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos/${target.id}`)).order,
+  })
+  const confirm = useMutation({
+    mutationFn: (paymentId: string) =>
+      api<{ order: OrderDetail }>(
+        `/api/tiendas/${store.id}/pedidos/${target.id}/pagos/${paymentId}/revision`,
+        { method: "POST", body: { decision: "confirmar" } },
+      ),
+    onSuccess: async (data) => {
+      queryClient.setQueryData(["pedido", store.id, target.id], data.order)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["pedidos", store.id] }),
+        queryClient.invalidateQueries({ queryKey: DISPATCH_KEY(store.id) }),
+        queryClient.invalidateQueries({ queryKey: CASH_KEY(store.id) }),
+      ])
+      toast.success("Pago confirmado: ya puedes entregar")
+    },
+  })
+  const waiting = (detail.data?.payments ?? []).filter((p) => p.status === "por_confirmar")
+  return (
+    <div className="flex flex-col gap-3">
+      {detail.isPending ? <p className="text-sm text-muted-foreground">Cargando el pago…</p> : null}
+      {waiting.map((payment) => (
+        <div key={payment.id} className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
+          <span className="text-sm font-medium">
+            {payment.methodName} · {money(payment.amountCents, cur)}
+            {payment.operation ? (
+              <span className="font-normal text-muted-foreground"> · op. {payment.operation}</span>
+            ) : null}
+          </span>
+          {payment.hasPhoto ? (
+            <ReceiptImage storeId={store.id} orderId={target.id} paymentId={payment.id} />
+          ) : null}
+          {payment.overIfConfirmedCents > 0 ? (
+            <p className="text-sm text-warning">
+              Con este pago se cobra {money(payment.overIfConfirmedCents, cur)} más que el total: si
+              lo confirmas, queda como pago doble para revisar.
+            </p>
+          ) : null}
+          {canConfirm ? (
+            <SubmitButton
+              className="self-start"
+              pending={confirm.isPending && confirm.variables === payment.id}
+              onClick={() => confirm.mutate(payment.id)}
+            >
+              Ya me pagó: confirmar
+            </SubmitButton>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Lo confirma quien revisa los pagos de la tienda.
+            </p>
+          )}
+        </div>
+      ))}
+      {confirm.isError ? <p className="text-sm text-danger">{confirm.error.message}</p> : null}
+      <Button
+        variant="outline"
+        className="self-start"
+        render={
+          <Link
+            to="/tiendas/$id/pedidos"
+            params={{ id: store.id }}
+            search={{ pedido: target.id }}
+          />
+        }
+      >
+        Abrir el pedido
+      </Button>
+    </div>
   )
 }
 

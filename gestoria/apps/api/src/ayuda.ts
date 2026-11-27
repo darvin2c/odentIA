@@ -137,7 +137,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo anoto lo que cobré al entregar?",
         a: [
           "En Despachos, «Cobrar y entregar» (en el pedido, «Entregado y cobrado»): con qué te pagaron (efectivo o el POS de la tienda, con la foto del voucher si la tienes) y cuánto. Si pagó una parte con cada medio, «Agregar otro medio».",
-          "Sin pago confirmado no se entrega: lo cobrado tiene que ser todo lo que falta, sin el vuelto. Si pagó con Yape o Plin al número de la tienda, anota su captura en el pedido y confírmala antes. Lo cobrado queda a nombre de quien llevó el pedido y, el efectivo, por recibir en Caja.",
+          "Sin pago confirmado no se entrega: lo cobrado tiene que ser todo lo que falta, sin el vuelto. Si pagó con Yape o Plin al número de la tienda, anota su captura en el pedido; si ya la mandó, al entregar ves la captura y «Ya me pagó: confirmar» en el mismo paso. Lo cobrado queda a nombre de quien llevó el pedido y, el efectivo, por recibir en Caja.",
         ],
         needs: "entregas",
         screen: "despachos",

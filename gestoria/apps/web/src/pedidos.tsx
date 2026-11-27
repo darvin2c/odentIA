@@ -30,7 +30,6 @@ import { Link, useSearch } from "@tanstack/react-router"
 import {
   CalendarClock,
   Copy,
-  ImageOff,
   Link2,
   PackageCheck,
   PackageX,
@@ -79,6 +78,7 @@ import {
   fieldErrors,
   MoneyField,
   Photo,
+  ReceiptImage,
   SelectField,
   shrinkPhoto,
   TextField,
@@ -579,45 +579,6 @@ function NextStep({ order }: { order: OrderDetail }) {
     >
       {message}
     </p>
-  )
-}
-
-function ReceiptImage({
-  storeId,
-  orderId,
-  paymentId,
-}: {
-  storeId: string
-  orderId: string
-  paymentId: string
-}) {
-  const blob = useQuery({
-    queryKey: ["captura", storeId, paymentId],
-    queryFn: () =>
-      api<Blob>(`/api/tiendas/${storeId}/pedidos/${orderId}/pagos/${paymentId}/captura`, {
-        as: "blob",
-      }),
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    if (!blob.data) return
-    const next = URL.createObjectURL(blob.data)
-    setUrl(next)
-    return () => URL.revokeObjectURL(next)
-  }, [blob.data])
-  if (blob.isError)
-    return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <ImageOff className="size-4" aria-hidden /> No se pudo abrir la captura
-      </span>
-    )
-  return url ? (
-    <a href={url} target="_blank" rel="noreferrer" className="block w-fit">
-      <img src={url} alt="Captura del pago" className="max-h-64 rounded-lg border object-contain" />
-    </a>
-  ) : (
-    <span className="block h-24 w-40 animate-pulse rounded-lg bg-muted" />
   )
 }
 
