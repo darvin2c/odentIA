@@ -13,6 +13,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
+import { seedDemoDispatch } from "./semilla-despachos.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
@@ -97,6 +98,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoCorrections(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCustomers(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
     // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta) y si ya
     // es del equipo: así sembrar otra vez no le deja otra invitación.
     const email = invite?.trim().toLowerCase()
