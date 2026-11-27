@@ -1,0 +1,63 @@
+---
+// Rubros (web v5): gestorIA sirve a cualquier tienda que vende productos con envío por chat. Los
+// rubros son ejemplos, no un límite.
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { RUBROS } from "../lib/contenido"
+
+const como = [
+  {
+    t: "Opciones a tu medida",
+    d: "Cada producto agrupa hasta tres opciones, como talla, color o tamaño. Cada combinación tiene su código, su stock y, si quieres, su precio y su foto.",
+  },
+  {
+    t: "Stock al día",
+    d: "Sofi solo ofrece lo que tienes. El stock cambia con cada venta y con cada entrada, y un ajuste a mano pide su motivo.",
+  },
+  {
+    t: "Tu precio mínimo",
+    d: "Sin precio mínimo, el producto no se negocia. Con él, Sofi ofrece una sola vez y nunca baja de ahí.",
+  },
+]
+---
+<Base
+  title="gestorIA para cualquier rubro que vende por chat"
+  description="Ropa, calzado, belleza, accesorios, tecnología, juguetes, mascotas, hogar, comida por encargo y más: si vendes productos con envío por chat, Sofi los vende."
+>
+  <PaginaHeroe
+    etiqueta="Rubros"
+    titulo="Si lo vendes por chat,"
+    acento="Sofi lo vende."
+    bajada="gestorIA sirve a cualquier tienda que vende productos con envío por WhatsApp, Instagram o Messenger. Estos rubros son ejemplos, no un límite."
+    humor="feliz"
+    segundo={{ href: "/sofi", label: "Conoce a Sofi" }}
+  />
+  <section class="p-bloques" aria-labelledby="rubros-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Algunos rubros</p>
+        <h2 id="rubros-h" class="titulo-2">Tiendas de todo tipo, <span class="tenue">una misma vendedora.</span></h2>
+      </div>
+      <ul class="p-rubros">
+        {RUBROS.map((r, i) => <li data-aparece style={`--i:${i % 8}`}>{r}</li>)}
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="como-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Cómo lo hace</p>
+        <h2 id="como-h" class="titulo-2">Tu catálogo, <span class="cur">tus reglas.</span></h2>
+      </div>
+      <ol class="p-bloques__lista">
+        {como.map((c, i) => (
+          <li class="p-bloque" data-aparece style={`--i:${i}`}>
+            <span class="p-bloque__n">{String(i + 1).padStart(2, "0")}</span>
+            <h3>{c.t}</h3>
+            <p>{c.d}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+</Base>
