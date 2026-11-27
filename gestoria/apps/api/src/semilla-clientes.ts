@@ -145,7 +145,7 @@ export async function seedDemoCustomers(tx: Db, storeId: string): Promise<void> 
     customerName: "Andrea Castillo",
     customerPhone: "+51 955 210 778",
     address: "Av. Javier Prado Oeste 640, San Isidro",
-    lines: [{ variantId: await variant("Mocasín azul", ["38"]), quantity: 1 }],
+    lines: [{ variantId: await variant("Sandalia", ["negra", "38"]), quantity: 1 }],
   })
   await mergeCustomersIn(tx, storeId, lucia.userId, {
     a: instagram.customerId!,
