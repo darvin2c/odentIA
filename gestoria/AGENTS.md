@@ -66,7 +66,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El stock baja al confirmar el pago, o al salir si se paga al recibir, y vuelve al anular. Si al
   pagar no alcanza, el pago se confirma igual y el pedido no sale hasta que entre stock.
 - «Hoy» es el de la tienda, con su zona horaria (`store.time_zone`, `apps/api/src/hora.ts`; ADR
-  0221): nunca el del servidor ni el del navegador. Todo lo que cuenta días la usa.
+  0222): nunca el del servidor ni el del navegador. Todo lo que cuenta días la usa.
 - Un solo saldo por pedido: la vista `order_balance` (`saldo.ts`). Falta cobrar = total −
   confirmado − por confirmar; «Pagado» es no deber nada con todo confirmado; «Pago doble», solo si
   lo confirmado pasa del total. Ninguna pantalla ni respuesta lo recalcula. Un pedido acepta varios

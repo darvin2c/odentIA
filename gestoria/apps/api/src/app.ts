@@ -335,7 +335,7 @@ export function createApp(deps: AppDeps) {
     c.json({ store: await storeSummary(deps.appDb, c.get("person"), c.req.param("id")) }),
   )
 
-  // La hora de la tienda (ADR 0221): con ella se cuenta «hoy».
+  // La hora de la tienda (ADR 0222): con ella se cuenta «hoy».
   app.patch("/api/tiendas/:id/hora", async (c) => {
     const input = await bodyOf(c, timeZoneInput)
     return c.json({

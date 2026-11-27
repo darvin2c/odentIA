@@ -321,7 +321,7 @@ export async function storeSummary(appDb: Db, person: Person, storeId: string) {
 }
 
 /**
- * La hora de la tienda (ADR 0221): con ella se cuentan «hoy», «mañana», los periodos de Reportes y
+ * La hora de la tienda (ADR 0222): con ella se cuentan «hoy», «mañana», los periodos de Reportes y
  * las promociones. La cambia quien tiene `configuracion`, y queda anotado quién y de qué a qué.
  */
 export async function setStoreTimeZone(

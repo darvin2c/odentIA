@@ -1,4 +1,4 @@
--- Un solo saldo por pedido y el pago en partes (ADR 0221).
+-- Un solo saldo por pedido y el pago en partes (ADR 0222).
 --
 -- 1. Cada pago guarda su medio (el de la tienda, copiado como en el pedido) y su tipo de
 --    UN/CEFACT 4461. Los pagos de antes toman el medio de su pedido; si ya no se sabe el tipo,

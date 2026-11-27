@@ -1,4 +1,4 @@
--- Las reglas de la hora de la tienda (ADR 0221). Como en las migraciones de reglas anteriores,
+-- Las reglas de la hora de la tienda (ADR 0222). Como en las migraciones de reglas anteriores,
 -- se concede solo lo que la aplicación usa.
 --
 -- La cambia quien tiene `configuracion` (lo decide el servidor), solo en la tienda en la que está

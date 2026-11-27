@@ -89,7 +89,7 @@ export const store = pgTable(
     /**
      * La hora de la tienda: su zona horaria de la base de datos de zonas horarias de IANA
      * («America/Lima»). Con ella se cuenta qué es «hoy», «mañana», los periodos de Reportes y las
-     * promociones (ADR 0221). La aplicación comprueba que exista; aquí, solo su forma.
+     * promociones (ADR 0222). La aplicación comprueba que exista; aquí, solo su forma.
      */
     timeZone: text("time_zone").notNull().default("America/Lima"),
     createdBy: text("created_by").notNull(),
@@ -213,7 +213,7 @@ export const STORE_EVENT_ACTIONS = [
   "soporte.entro",
   // Soporte terminó su mirada con «Salir» (ADR 0219).
   "soporte.salio",
-  // Los datos de la tienda: su hora (ADR 0221).
+  // Los datos de la tienda: su hora (ADR 0222).
   "configuracion.tienda",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
@@ -865,7 +865,7 @@ export type OrderPaymentState = (typeof ORDER_PAYMENT_STATES)[number]
 
 /**
  * Un pago de un pedido: por el link (lo confirma el proveedor), una captura o al recibir. Un
- * pedido acepta varios (el pago en partes, ADR 0221): cada uno con su medio y su estado.
+ * pedido acepta varios (el pago en partes, ADR 0222): cada uno con su medio y su estado.
  */
 export const orderPayment = pgTable(
   "order_payment",
@@ -932,7 +932,7 @@ export const orderPayment = pgTable(
 )
 
 /**
- * El saldo de cada pedido (ADR 0221), calculado en un solo lugar: esta vista, que leen el pedido,
+ * El saldo de cada pedido (ADR 0222), calculado en un solo lugar: esta vista, que leen el pedido,
  * las listas, Reportes, Argos y Sofi. Falta cobrar = total − confirmado − por confirmar (nunca
  * menos de 0, y 0 si se anuló). «Pagado» es no deber nada con todo confirmado; lo confirmado que
  * pasa del total es un pago doble para revisar. La vista corre con los permisos de quien la lee

@@ -2,7 +2,7 @@ import { type Db, orderBalance } from "@gestoria/db"
 import { inArray } from "drizzle-orm"
 
 /**
- * El saldo de un pedido (ADR 0221): una sola cifra, la misma en el pedido, las listas, Reportes,
+ * El saldo de un pedido (ADR 0222): una sola cifra, la misma en el pedido, las listas, Reportes,
  * Argos y lo que dice Sofi. Lo calcula la base en un solo lugar (la vista `order_balance`); aquí
  * solo se lee.
  *

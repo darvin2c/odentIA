@@ -1,4 +1,4 @@
--- La hora de la tienda (ADR 0221): cada tienda guarda su zona horaria (IANA) y con ella se cuenta
+-- La hora de la tienda (ADR 0222): cada tienda guarda su zona horaria (IANA) y con ella se cuenta
 -- qué es «hoy». Las de antes quedan en la de Lima. Cambiarla queda anotado en su registro.
 ALTER TABLE "store_event" DROP CONSTRAINT "store_event_action_check";--> statement-breakpoint
 ALTER TABLE "store" ADD COLUMN "time_zone" text DEFAULT 'America/Lima' NOT NULL;--> statement-breakpoint

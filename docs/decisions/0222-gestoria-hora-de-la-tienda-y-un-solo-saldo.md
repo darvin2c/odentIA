@@ -1,4 +1,4 @@
-# 0221 · gestorIA cuenta el día con la hora de la tienda, y cada pedido tiene un solo saldo
+# 0222 · gestorIA cuenta el día con la hora de la tienda, y cada pedido tiene un solo saldo
 
 Fecha: 2026-11-26 · Estado: aceptada · Entrega 1 del lienzo «gestorIA como odentIA» (tableros 3,
 5 y 7; sobre ADR 0207)

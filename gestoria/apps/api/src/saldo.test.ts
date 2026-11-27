@@ -1,5 +1,5 @@
 /**
- * El pago doble (ADR 0221), sin base: un pago en partes no lo es; solo lo que pasa del total. El
+ * El pago doble (ADR 0222), sin base: un pago en partes no lo es; solo lo que pasa del total. El
  * saldo mismo lo calcula la base (`order_balance`) y se prueba con ella en `@gestoria/db`.
  */
 import { describe, expect, it } from "vitest"

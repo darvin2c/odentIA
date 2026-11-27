@@ -12,7 +12,7 @@ import { inStore } from "../tiendas.js"
  * (`reportes.ver`). Los pedidos de prueba no cuentan.
  *
  * Los periodos empiezan a las 00:00 de la tienda, con su hora (`hora.ts`): «hoy», desde el lunes
- * o desde el día 1. Lo que falta cobrar sale del saldo de cada pedido (`order_balance`, ADR 0221),
+ * o desde el día 1. Lo que falta cobrar sale del saldo de cada pedido (`order_balance`, ADR 0222),
  * el mismo que ve el pedido.
  */
 
