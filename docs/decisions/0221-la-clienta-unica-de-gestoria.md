@@ -18,8 +18,9 @@ persona única de las clínicas (ADR 0001), sin decidir la identidad porque coin
   por el teléfono. Los de «Probar a Sofi» no tienen ficha.
 - **Unir es dejar una dentro de otra** (`merged_into`): la más nueva queda dentro de la más
   antigua, con lo que ya estaba dentro de ella; nada se mueve ni se borra, y los pedidos siguen
-  con la ficha con que se anotaron. «Separar» la deja sola otra vez, con sus pedidos. La base no
-  deja que una ficha quede dentro de otra que a su vez está dentro de una tercera.
+  con la ficha con que se anotaron. «Separar» la deja sola otra vez, con sus pedidos y con las
+  fichas que una persona le había unido antes (se sabe por la historia). La base no deja que una
+  ficha quede dentro de otra que a su vez está dentro de una tercera.
 - **Lo decide una persona del equipo que atiende** (`ventas.atender`): el mismo teléfono (sus
   últimos 8 dígitos) o el mismo nombre solo lo sugieren. Lo decidido queda en `customer_event`
   (unida, separada, distintas), que solo se agrega, y lo contestado no se vuelve a preguntar.

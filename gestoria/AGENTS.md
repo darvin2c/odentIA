@@ -83,8 +83,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Los pedidos de «Probar a Sofi» y los de antes de Clientes no tienen ficha.
 - Unir, separar y «son distintas» los decide una persona que atiende (`ventas.atender`). Unir deja
   la ficha más nueva dentro de la más antigua (`merged_into`), sin mover ni borrar nada; «Separar»
-  la deja sola. Lo decidido va a `customer_event` y no se vuelve a preguntar. Un pedido no cambia
-  de ficha. Sofi abre fichas, pero no las cambia ni anota decisiones (`0015_reglas_clientas.sql`).
+  la deja sola, con las que se le unieron antes. Lo decidido va a `customer_event` y no se vuelve a
+  preguntar. Un pedido no cambia de ficha. Sofi abre fichas, pero no las cambia ni anota
+  decisiones (`0015_reglas_clientas.sql`).
 - Lo que debe una clienta no se calcula en Clientes: sale del saldo de cada pedido.
 
 ## Sofi y Argos (B5)
