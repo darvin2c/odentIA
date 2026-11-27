@@ -56,8 +56,8 @@ const schema = z.object({
   GESTORIA_OPENAI_BASE_URL: z.string().trim().default(""),
   /**
    * Quién escribe por Sofi: «openai» (por omisión) o «anthropic» (Claude, `sofi/modelo-claude.ts`).
-   * Con Claude: el modelo (`claude-haiku-5-5` por omisión, `claude-sonnet-5-5` u
-   * `claude-opus-5-5`), el esfuerzo (`low` por omisión) y la clave, que en producción se pide.
+   * Con Claude: el modelo (`claude-opus-5-5` por omisión, `claude-sonnet-5-5` o
+   * `claude-haiku-5-5`), el esfuerzo (`low` por omisión) y la clave, que en producción se pide.
    */
   GESTORIA_LLM_PROVIDER: z.enum(["", "openai", "anthropic"]).default(""),
   GESTORIA_ANTHROPIC_API_KEY: z.string().trim().default(""),

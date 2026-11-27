@@ -26,7 +26,8 @@ import {
  * precio siguen en el servidor (`precio.ts`, las herramientas y `revisar.ts`), nunca aquí.
  *
  * - El SDK oficial (`@anthropic-ai/sdk`), por streaming y con la respuesta completa al final.
- * - Razonamiento adaptativo con esfuerzo explícito (`low` por omisión: es un chat).
+ * - Razonamiento adaptativo con esfuerzo explícito (`low` por omisión: es un chat y `medium` no
+ *   vendió mejor).
  * - Caché: las herramientas, las reglas fijas de Sofi y los datos de la tienda van primero y sin
  *   cambios entre llamadas, cada uno con su marca; la cuarta marca va en el último mensaje, para
  *   que cada paso de un turno lea de la caché lo que ya leyó el anterior.
@@ -43,8 +44,12 @@ export type ClaudeEffort = (typeof CLAUDE_EFFORTS)[number]
 
 export const CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] as const
 export type ClaudeModelId = (typeof CLAUDE_MODELS)[number]
-/** El de Sofi con Claude si no se elige otro (ver la medición del PR que lo agregó). */
-export const CLAUDE_DEFAULT_MODEL: ClaudeModelId = "claude-haiku-5-5"
+/**
+ * El de Sofi con Claude si no se elige otro: Opus 5.5 con esfuerzo bajo fue el que mejor vendió en
+ * `eval:sofi` (oferta a tiempo, tono y sin inventar), a unos US$ 0,055 por conversación; Sonnet 5.5
+ * vendió un poco peor a la mitad, y Haiku 5.5, bastante peor. Con esfuerzo medio no mejoró ninguno.
+ */
+export const CLAUDE_DEFAULT_MODEL: ClaudeModelId = "claude-opus-5-5"
 export const CLAUDE_DEFAULT_EFFORT: ClaudeEffort = "low"
 
 /** Haiku no tiene reintento en el servidor; Sonnet 5.5 y Opus 5.5 sí. */

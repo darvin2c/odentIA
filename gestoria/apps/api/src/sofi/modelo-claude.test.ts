@@ -7,7 +7,7 @@
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { CLAUDE_DEFAULT_MODEL, claudeModel } from "./modelo-claude.js"
+import { claudeModel } from "./modelo-claude.js"
 import {
   type ChatMessage,
   costMicros,
@@ -185,7 +185,7 @@ const TOOLS: ToolDef[] = [
 ]
 
 const silent = () => {}
-const model = (name = CLAUDE_DEFAULT_MODEL, effort: "low" | "medium" = "low") =>
+const model = (name = "claude-haiku-5-5", effort: "low" | "medium" = "low") =>
   claudeModel({
     model: name,
     effort,
@@ -431,7 +431,7 @@ describe("el costo y el entorno", () => {
     ).toBe("gpt-6-luna")
     expect(
       modelFromEnv({ GESTORIA_LLM_PROVIDER: "anthropic", GESTORIA_ANTHROPIC_API_KEY: "k" })?.name,
-    ).toBe("claude-haiku-5-5@low")
+    ).toBe("claude-opus-5-5@low")
     expect(
       modelFromEnv({
         GESTORIA_LLM_PROVIDER: "anthropic",

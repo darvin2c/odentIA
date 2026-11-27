@@ -193,9 +193,14 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
 - Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
   fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
+- El modelo de Sofi lo elige `GESTORIA_LLM_PROVIDER`: OpenAI por omisión (`sofi/modelo.ts`) o
+  Claude (`sofi/modelo-claude.ts`, SDK oficial). Los dos reciben los mismos mensajes y
+  herramientas; ninguna regla de precio vive en el adaptador.
 - Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
   `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
-  las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
+  todas las versiones, en la misma llamada (`--juzgar=a.json,b.json[,…]`, `--juez=`). Lo que Sofi
+  sabe de la tienda del banco lo ve también el juez (`JUDGE_STORE`): si cambia `armarTienda`,
+  cambia en el mismo cambio. Las pruebas usan un modelo controlado, nunca la red.
 
 ## El acuerdo con la administración (B7)
 
