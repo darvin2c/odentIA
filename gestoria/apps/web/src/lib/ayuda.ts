@@ -55,9 +55,11 @@ export function questionStatus(status: string): string {
 
 /** Las pantallas de la tienda por su ruta, con el nombre que les da el menú. */
 const SCREENS: [path: string, name: string][] = [
+  ["/despachos", "Despachos"],
   ["/pedidos", "Pedidos"],
   ["/clientes", "Clientes"],
   ["/catalogo", "Catálogo"],
+  ["/caja", "Caja"],
   ["/reportes", "Reportes"],
   ["/configuracion/marca", "Tu marca"],
   ["/configuracion/equipo", "Equipo"],

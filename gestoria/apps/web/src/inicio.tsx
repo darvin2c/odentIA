@@ -6,6 +6,7 @@ import { Check, Circle, Clock3, MinusCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { SimilarQueue } from "./clientes"
 import { api } from "./lib/api"
+import { fromWhom } from "./lib/caja"
 import {
   byWhen,
   FROM_HOME,
@@ -36,8 +37,9 @@ import { ErrorBlock, StoreHeader, useMe, useStoreContext } from "./tiendas"
  * - Las cuatro cifras del día; Ventas ve las suyas, sin los totales de dinero.
  * - «Te toca», ahora, hoy y sin apuro: cada línea con el único botón que la resuelve.
  *
- * Lo de la Bandeja (los chats que esperan), Caja y Despachos se suma cuando lleguen sus pantallas:
- * hoy no se dibuja.
+ * «Sale hoy» abre Despachos, que cuenta lo mismo. El efectivo por recibir es una línea de «Te toca»
+ * que lleva a Caja. Lo de la Bandeja (los chats que esperan) se suma cuando llegue su pantalla: hoy
+ * no se dibuja.
  */
 export function HomePage() {
   const { store } = useStoreContext()
@@ -116,9 +118,8 @@ function Figures({ figures }: { figures: StoreHome["figures"] }) {
         />
       ) : null}
       <Link
-        to="/tiendas/$id/pedidos"
+        to="/tiendas/$id/despachos"
         params={{ id: store.id }}
-        search={{ filtro: "hoy" }}
         className="rounded-xl focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 [&>div]:transition-colors [&>div]:hover:bg-surface-muted"
       >
         <KpiCard
@@ -142,6 +143,7 @@ function Figures({ figures }: { figures: StoreHome["figures"] }) {
 const TAGS: Record<ToDoItem["kind"], string> = {
   pago: "Pago",
   no_entregado: "No se entregó",
+  efectivo: "Efectivo",
   misma: "Clienta",
   stock: "Stock",
   reponer: "Reponer",
@@ -194,6 +196,8 @@ function lineKey(item: ToDoItem): string {
     case "no_entregado":
     case "stock":
       return `${item.kind}-${item.orderId}`
+    case "efectivo":
+      return `efectivo-${item.courierId ?? "tienda"}`
     case "misma":
       return `misma-${item.a.id}-${item.b.id}`
     case "reponer":
@@ -249,6 +253,24 @@ function ToDoLine({
           size="sm"
           order={{ id: item.orderId, number: item.number, deliverOn: item.deliverOn }}
         />
+      )
+      break
+    case "efectivo":
+      text = (
+        <>
+          <strong className="font-semibold">{fromWhom(item.courier)}</strong>: {m(item.cents)} en
+          efectivo por recibir ·{" "}
+          {plural(item.payments, "cobro en la puerta", "cobros en la puerta")}
+        </>
+      )
+      action = (
+        <Button
+          size="sm"
+          variant="outline"
+          render={<Link to="/tiendas/$id/caja" params={{ id: store.id }} />}
+        >
+          Ir a Caja
+        </Button>
       )
       break
     case "misma":

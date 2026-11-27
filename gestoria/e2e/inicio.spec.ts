@@ -271,9 +271,11 @@ test.describe("«Te toca» en Calzados Rosa", () => {
     await expect(sheet).toHaveCount(0)
     await expect(camila).toHaveCount(0)
 
-    // «Pasar a…» desde Inicio: el mismo diálogo de Pedidos.
+    // «Pasar a…» desde Inicio: el mismo diálogo de Despachos y Pedidos, con el pedido abierto.
     await martin.getByRole("button", { name: "Pasar a…" }).click()
-    await expect(page.getByRole("alertdialog", { name: /^Pasar a… · pedido/ })).toBeVisible()
+    await expect(
+      page.getByRole("alertdialog", { name: /^Pasar a… · \d+ Martín Vega/ }),
+    ).toBeVisible()
     await page.keyboard.press("Escape")
 
     await page.setViewportSize(PHONE)
@@ -308,5 +310,8 @@ test.describe("«Te toca» en Calzados Rosa", () => {
     await expect(toDo).toBeVisible()
     await noSideScroll(page)
     await shot(page, "inicio-ventas-telefono")
+    // «Sale hoy» abre Despachos, que cuenta lo mismo.
+    await figures.getByRole("link", { name: /Sale hoy/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/tiendas/${STORE_ID}/despachos$`))
   })
 })

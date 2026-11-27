@@ -37,6 +37,15 @@ export type ToDoItem =
       b: { id: string; name: string }
       more: number
     }
+  | {
+      kind: "efectivo"
+      when: "hoy"
+      courierId: string | null
+      /** null: cobrado en la tienda, sin repartidor. */
+      courier: string | null
+      cents: number
+      payments: number
+    }
   | { kind: "stock"; when: "hoy"; orderId: string; number: string; customer: string }
   | {
       kind: "reponer"

@@ -117,6 +117,8 @@ export interface OrderEvent {
     | "no_entregado"
     | "reprogramado"
     | "pago_deshecho"
+    | "repartidor"
+    | "envio"
   detail: Record<string, unknown>
   createdAt: string
   actorName: string | null
@@ -155,6 +157,13 @@ export interface OrderDetail {
   priceExpiresAt: string | null
   priceExpired: boolean
   deliverOn: string | null
+  /** Su franja (Despachos); null: sin franja. */
+  slot: { start: number; end: number; label: string } | null
+  /** Quién lo lleva. */
+  courierId: string | null
+  courierName: string | null
+  /** Por agencia: con cuál va. */
+  agency: string | null
   tracking: string | null
   linkUrl: string | null
   linkConnected: boolean

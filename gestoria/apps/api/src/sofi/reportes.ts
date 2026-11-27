@@ -2,6 +2,7 @@ import type { Db } from "@gestoria/db"
 import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
+import { collectedBetween } from "../caja.js"
 import type { Person } from "../cuenta.js"
 import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
@@ -33,17 +34,11 @@ const n = (value: unknown) => Number(value ?? 0)
 
 /**
  * Lo cobrado desde `since`: los pagos confirmados desde entonces, sin los pedidos de prueba. Es la
- * misma cuenta para «Vendido y cobrado» de Reportes y «Cobrado hoy» de Inicio.
+ * misma cuenta de Caja (`collectedBetween`) para «Vendido y cobrado» de Reportes y «Cobrado hoy»
+ * de Inicio.
  */
-export async function collectedSinceIn(tx: Db, storeId: string, since: Date) {
-  // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
-  const [row] = await tx.execute<{ cents: string; orders: string; payments: string }>(sql`
-    select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders,
-      count(*) as payments
-    from order_payment p join sale_order o on o.id = p.order_id
-    where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
-      and p.reviewed_at >= ${since.toISOString()}`)
-  return { cents: n(row?.cents), orders: n(row?.orders), payments: n(row?.payments) }
+export function collectedSinceIn(tx: Db, storeId: string, since: Date) {
+  return collectedBetween(tx, storeId, since, null)
 }
 
 /**

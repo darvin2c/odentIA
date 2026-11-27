@@ -10,8 +10,6 @@ import {
   FieldLegend,
   FieldSet,
   Input,
-  RadioGroup,
-  RadioGroupItem,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -32,7 +30,6 @@ import { Link, useSearch } from "@tanstack/react-router"
 import {
   CalendarClock,
   Copy,
-  ImageOff,
   Link2,
   PackageCheck,
   PackageX,
@@ -41,8 +38,10 @@ import {
   ReceiptText,
   Trash2,
   Truck,
+  UserRound,
 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { type DeliveryStep, DeliveryStepDialog, targetOf } from "./entregas"
 import { api } from "./lib/api"
 import {
   CUSTOMER_KEY,
@@ -57,10 +56,8 @@ import {
   type ChangePreview,
   dayName,
   FILTERS,
-  MISSED_REASONS,
   missedReason,
   NOT_SHIPPED,
-  nextDay,
   type OrderChannel,
   type OrderDetail,
   type OrderFilter,
@@ -76,12 +73,14 @@ import {
 } from "./lib/pedidos"
 import { type DeliveryMethod, money, moneyInput, type PaymentMethod, readMoney } from "./lib/tienda"
 import {
+  DateField,
   FormAlert,
   FormSheet,
   fieldErrors,
   MoneyField,
   Photo,
-  SELECT_CLASSES,
+  ReceiptImage,
+  SelectField,
   shrinkPhoto,
   TextField,
   useDirty,
@@ -123,8 +122,8 @@ function StateBadge({
 
 export function OrdersPage() {
   const { store } = useStoreContext()
-  // «?pedido=…» llega desde la conversación de prueba: abre ese pedido. «?filtro=…», desde
-  // «Sale hoy» de Inicio: abre en ese filtro.
+  // «?pedido=…» llega desde la conversación de prueba: abre ese pedido. «?filtro=…» abre en ese
+  // filtro.
   const search = useSearch({ strict: false }) as { pedido?: string; filtro?: OrderFilter }
   const [filter, setFilter] = useState<OrderFilter>(search.filtro ?? "abiertos")
   const [open, setOpen] = useState<string | null>(search.pedido ?? null)
@@ -522,6 +521,9 @@ function OrderBody({ order }: { order: OrderDetail }) {
             </a>
           </Row>
         ) : null}
+        {order.slot ? <Row label="Franja">{order.slot.label}</Row> : null}
+        {order.courierName ? <Row label="Lo lleva">{order.courierName}</Row> : null}
+        {order.agency ? <Row label="Agencia">{order.agency}</Row> : null}
         {order.tracking ? <Row label="Número de envío">{order.tracking}</Row> : null}
         {order.notes ? <p className="text-sm">{order.notes}</p> : null}
         {(order.state === "por_salir" || order.state === "en_camino") && can("entregas") ? (
@@ -591,45 +593,6 @@ function NextStep({ order }: { order: OrderDetail }) {
     >
       {message}
     </p>
-  )
-}
-
-function ReceiptImage({
-  storeId,
-  orderId,
-  paymentId,
-}: {
-  storeId: string
-  orderId: string
-  paymentId: string
-}) {
-  const blob = useQuery({
-    queryKey: ["captura", storeId, paymentId],
-    queryFn: () =>
-      api<Blob>(`/api/tiendas/${storeId}/pedidos/${orderId}/pagos/${paymentId}/captura`, {
-        as: "blob",
-      }),
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    if (!blob.data) return
-    const next = URL.createObjectURL(blob.data)
-    setUrl(next)
-    return () => URL.revokeObjectURL(next)
-  }, [blob.data])
-  if (blob.isError)
-    return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <ImageOff className="size-4" aria-hidden /> No se pudo abrir la captura
-      </span>
-    )
-  return url ? (
-    <a href={url} target="_blank" rel="noreferrer" className="block w-fit">
-      <img src={url} alt="Captura del pago" className="max-h-64 rounded-lg border object-contain" />
-    </a>
-  ) : (
-    <span className="block h-24 w-40 animate-pulse rounded-lg bg-muted" />
   )
 }
 
@@ -1076,286 +1039,94 @@ function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => v
 /** Por salir o en camino: «Salió» y «Entregado» (o «Entregado y cobrado»). */
 function DeliveryActions({ order }: { order: OrderDetail }) {
   const { store } = useStoreContext()
+  const [step, setStep] = useState<DeliveryStep | null>(null)
   const due = order.balance.dueCents
-  const [tracking, setTracking] = useState("")
-  const [collected, setCollected] = useState(moneyInput(due, store.currency))
-  const methods = useMethodsFor(order, "al_recibir")
-  const [methodId, setMethodId] = useState("")
-  const chosen = methodId || methods[0]?.id || ""
-  const [asking, setAsking] = useState<"salio" | "entregado" | null>(null)
-  const action = useOrderAction(store.id, order.id, () => setAsking(null))
-  // Falta cobrar (todo, o lo que quedó de un adelanto): se cobra en la puerta.
-  const cashOnDelivery = due > 0
-  const errors = fieldErrors(action.error)
-  const collectedCents = readMoney(collected, store.currency)
   const pickup = order.deliveryType === "OnSitePickup"
   return (
     <div className="flex flex-col gap-2 pt-1">
       <div className="flex flex-wrap gap-2">
         {order.state === "por_salir" && !pickup ? (
-          <Button onClick={() => setAsking("salio")}>
+          <Button onClick={() => setStep("salio")}>
             <Truck aria-hidden />
             Salió
           </Button>
         ) : null}
         <Button
           variant={order.state === "en_camino" || pickup ? "default" : "outline"}
-          onClick={() => {
-            // Lo que falta cobrar ahora, aunque haya entrado otro pago desde que se abrió.
-            setCollected(moneyInput(due, store.currency))
-            setAsking("entregado")
-          }}
+          onClick={() => setStep("entregado")}
         >
           <PackageCheck aria-hidden />
-          {cashOnDelivery ? "Entregado y cobrado" : "Entregado"}
+          {due > 0 ? `Entregado y cobrado · ${money(due, store.currency)}` : "Entregado"}
         </Button>
-        {order.state === "en_camino" ? <Missed order={order} /> : null}
-      </div>
-      <ConfirmDialog
-        open={asking === "salio"}
-        title={`El pedido ${order.number} salió`}
-        description="Pasa a «En camino». Si va por agencia, pega su número de envío."
-        confirmLabel="Salió"
-        cancelLabel="Volver"
-        pending={action.isPending}
-        error={action.isError ? action.error.message : null}
-        onConfirm={() => action.mutate({ path: "salio", body: { tracking }, done: "En camino" })}
-        onClose={() => setAsking(null)}
-      >
-        <TextField
-          label="Número de envío (opcional)"
-          value={tracking}
-          onChange={setTracking}
-          maxLength={80}
-          error={errors.tracking}
-        />
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={asking === "entregado"}
-        title={cashOnDelivery ? "Entregado y cobrado" : `El pedido ${order.number} llegó`}
-        description={
-          cashOnDelivery
-            ? "Anota cuánto cobraste en la puerta y con qué: queda con tu nombre."
-            : "Pasa a «Entregado»."
-        }
-        confirmLabel={cashOnDelivery ? "Entregado y cobrado" : "Entregado"}
-        cancelLabel="Volver"
-        pending={action.isPending}
-        confirmDisabled={cashOnDelivery && !collectedCents}
-        error={action.isError && !errors.collectedCents ? action.error.message : null}
-        onConfirm={() =>
-          action.mutate({
-            path: "entregado",
-            body: cashOnDelivery ? { collectedCents, methodId: chosen || null } : {},
-            done: "Entregado",
-          })
-        }
-        onClose={() => setAsking(null)}
-      >
-        {cashOnDelivery ? (
-          <FieldGroup>
-            <MoneyField
-              label="¿Cuánto cobraste?"
-              currency={store.currency}
-              value={collected}
-              onChange={setCollected}
-              error={errors.collectedCents}
-              help={
-                collectedCents !== null && collectedCents !== due
-                  ? `No es lo que faltaba (${money(due, store.currency)}): queda anotado lo que cobraste para revisarlo.`
-                  : due < order.totalCents
-                    ? `Falta cobrar ${money(due, store.currency)} de ${money(order.totalCents, store.currency)}.`
-                    : `El total es ${money(order.totalCents, store.currency)}.`
-              }
-            />
-            {methods.length > 1 ? (
-              <SelectField
-                label="Medio"
-                value={chosen}
-                onChange={setMethodId}
-                options={methods.map((m) => ({ value: m.id, label: m.name }))}
-                error={errors.methodId}
-              />
-            ) : methods[0] ? (
-              // Con un solo medio para cobrar en la puerta, se dice con cuál queda anotado.
-              <p className="text-sm text-muted-foreground">Queda anotado con {methods[0].name}.</p>
-            ) : null}
-          </FieldGroup>
+        {order.state === "en_camino" ? (
+          <Button variant="ghost" onClick={() => setStep("no_entregado")}>
+            <PackageX aria-hidden />
+            No se entregó
+          </Button>
         ) : null}
-      </ConfirmDialog>
+        {order.deliveryType === "ParcelService" && order.state === "en_camino" ? (
+          <Button variant="ghost" onClick={() => setStep("envio")}>
+            Anotar el envío
+          </Button>
+        ) : null}
+        {!pickup ? (
+          <Button variant="ghost" onClick={() => setStep("repartidor")}>
+            <UserRound aria-hidden />
+            Cambiar repartidor
+          </Button>
+        ) : null}
+      </div>
+      <DeliveryStepDialog target={targetOf(order)} step={step} onClose={() => setStep(null)} />
     </div>
   )
 }
 
-/** «Pasar a…»: otro día de entrega, sin anular nada. También desde «Te toca» de Inicio. */
+/**
+ * «Pasar a…»: otro día de entrega (y su franja y quién lo lleva), sin anular nada. También desde
+ * «Te toca» de Inicio, que solo sabe el número del pedido: lo abre antes, para no cambiar sin ver
+ * la franja ni quién lo lleva.
+ */
 export function MoveToDay({
   order,
   size,
 }: {
-  order: Pick<OrderDetail, "id" | "number" | "deliverOn">
+  order: OrderDetail | Pick<OrderDetail, "id" | "number" | "deliverOn">
   size?: "sm"
 }) {
   const { store } = useStoreContext()
-  const today = storeToday(store.timeZone)
-  const [asking, setAsking] = useState(false)
-  const [day, setDay] = useState(
-    order.deliverOn && order.deliverOn >= today ? order.deliverOn : today,
-  )
-  const action = useOrderAction(store.id, order.id, () => setAsking(false))
-  const errors = fieldErrors(action.error)
+  const queryClient = useQueryClient()
+  const [target, setTarget] = useState<OrderDetail | null>(null)
+  const opening = useMutation({
+    mutationFn: () =>
+      "balance" in order
+        ? Promise.resolve(order)
+        : queryClient.fetchQuery({
+            queryKey: ["pedido", store.id, order.id],
+            queryFn: async () =>
+              (await api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos/${order.id}`))
+                .order,
+          }),
+    onSuccess: setTarget,
+    onError: (error) => toast.error(error.message),
+  })
   return (
     <>
-      <Button variant="outline" size={size} onClick={() => setAsking(true)}>
+      <Button
+        variant="outline"
+        size={size}
+        disabled={opening.isPending}
+        onClick={() => opening.mutate()}
+      >
         <CalendarClock aria-hidden />
         Pasar a…
       </Button>
-      <ConfirmDialog
-        open={asking}
-        variant="default"
-        title={`Pasar a… · pedido ${order.number}`}
-        description={
-          order.deliverOn
-            ? `Ahora sale ${dayName(order.deliverOn, today)}. Elige el día nuevo: nada se anula.`
-            : "Elige el día en que sale: nada se anula."
-        }
-        confirmLabel="Pasar a ese día"
-        cancelLabel="Volver"
-        pending={action.isPending}
-        confirmDisabled={!day}
-        error={action.isError && !errors.deliverOn ? action.error.message : null}
-        onConfirm={() =>
-          action.mutate({
-            path: "pasar-a",
-            body: { deliverOn: day },
-            done: `Sale ${dayName(day, today)}`,
-          })
-        }
-        onClose={() => setAsking(false)}
-      >
-        <DayChoice today={today} value={day} onChange={setDay} error={errors.deliverOn} />
-      </ConfirmDialog>
-    </>
-  )
-}
-
-/** Hoy, mañana u otro día (desde hoy, el de la tienda). */
-function DayChoice({
-  today,
-  value,
-  onChange,
-  error,
-  label = "Día de entrega",
-}: {
-  today: string
-  value: string
-  onChange: (day: string) => void
-  error?: string
-  label?: string
-}) {
-  const tomorrow = nextDay(today)
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={value === today ? "default" : "outline"}
-          aria-pressed={value === today}
-          onClick={() => onChange(today)}
-        >
-          Hoy
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={value === tomorrow ? "default" : "outline"}
-          aria-pressed={value === tomorrow}
-          onClick={() => onChange(tomorrow)}
-        >
-          Mañana
-        </Button>
-      </div>
-      <DateField label={label} value={value} onChange={onChange} min={today} error={error} />
-    </div>
-  )
-}
-
-/** «No se entregó»: volvió sin entregar. Vuelve a «Por salir» el día que se elige. */
-function Missed({ order }: { order: OrderDetail }) {
-  const { store } = useStoreContext()
-  const today = storeToday(store.timeZone)
-  const [asking, setAsking] = useState(false)
-  const [choice, setChoice] = useState<string>(MISSED_REASONS[0])
-  const [other, setOther] = useState("")
-  const [day, setDay] = useState(nextDay(today))
-  const action = useOrderAction(store.id, order.id, () => setAsking(false))
-  const errors = fieldErrors(action.error)
-  const reason = choice === "otro" ? other.trim() : choice
-  const id = useId()
-  return (
-    <>
-      <Button variant="ghost" onClick={() => setAsking(true)}>
-        <PackageX aria-hidden />
-        No se entregó
-      </Button>
-      <ConfirmDialog
-        open={asking}
-        variant="default"
-        title={`No se entregó · ${order.number}`}
-        description="Vuelve a «Por salir» el día que elijas. El stock no se mueve y nada se anula."
-        confirmLabel="Guardar"
-        cancelLabel="Volver"
-        pending={action.isPending}
-        confirmDisabled={reason.length < 3 || !day}
-        error={action.isError && !errors.deliverOn ? action.error.message : null}
-        onConfirm={() =>
-          action.mutate({
-            path: "no-se-entrego",
-            body: { reason, deliverOn: day },
-            done: `Vuelve a salir ${dayName(day, today)}`,
-          })
-        }
-        onClose={() => setAsking(false)}
-      >
-        <FieldGroup>
-          <FieldSet>
-            <FieldLegend variant="label">¿Qué pasó?</FieldLegend>
-            <RadioGroup
-              aria-label="¿Qué pasó?"
-              value={choice}
-              onValueChange={(value) => setChoice(String(value))}
-            >
-              {/* El id va con el número: un motivo con espacios no sirve de id y el botón se
-                  quedaría sin nombre. */}
-              {[...MISSED_REASONS, "otro"].map((option, i) => (
-                <Field key={option} orientation="horizontal">
-                  <RadioGroupItem id={`${id}-motivo-${i}`} value={option} />
-                  <FieldLabel htmlFor={`${id}-motivo-${i}`} className="font-normal">
-                    {option === "otro" ? "Otro motivo" : option}
-                  </FieldLabel>
-                </Field>
-              ))}
-            </RadioGroup>
-            {choice === "otro" ? (
-              <TextField
-                label="Escribe el motivo"
-                value={other}
-                onChange={setOther}
-                maxLength={300}
-                error={errors.reason}
-                autoFocus
-              />
-            ) : null}
-          </FieldSet>
-          <DayChoice
-            today={today}
-            value={day}
-            onChange={setDay}
-            label="¿Cuándo va?"
-            error={errors.deliverOn}
-          />
-        </FieldGroup>
-      </ConfirmDialog>
+      {target ? (
+        <DeliveryStepDialog
+          target={targetOf(target)}
+          step="pasar"
+          onClose={() => setTarget(null)}
+        />
+      ) : null}
     </>
   )
 }
@@ -1414,6 +1185,8 @@ const EVENT_TEXT: Record<Exclude<OrderDetail["events"][number]["action"], "aviso
   no_entregado: "No se entregó",
   reprogramado: "Lo pasó a otro día",
   pago_deshecho: "Deshizo la confirmación del pago",
+  repartidor: "Cambió quién lo lleva",
+  envio: "Anotó el envío por agencia",
 }
 
 function History({ order }: { order: OrderDetail }) {
@@ -1426,8 +1199,9 @@ function History({ order }: { order: OrderDetail }) {
           return (
             <li key={event.id} className="flex flex-col gap-0.5 text-sm">
               <span className="text-xs text-muted-foreground">
-                Aviso al cliente · {when(event.createdAt)} · sin enviar: WhatsApp todavía no está
-                conectado
+                {d.porUsted
+                  ? `Aviso a la clienta · ${when(event.createdAt)} · enviado por usted desde su WhatsApp, por ${event.actorName ?? "alguien del equipo"}`
+                  : `Aviso al cliente · ${when(event.createdAt)} · sin enviar: WhatsApp todavía no está conectado`}
               </span>
               <span className="w-fit max-w-full rounded-lg bg-surface-muted px-3 py-1.5 break-words">
                 {String(d.texto ?? "")}
@@ -1449,7 +1223,10 @@ function History({ order }: { order: OrderDetail }) {
           typeof d.medio === "string" ? d.medio : null,
           typeof d.cobrado === "number" ? `cobró ${money(d.cobrado, store.currency)}` : null,
           typeof d.falta === "number" ? `faltan ${money(d.falta, store.currency)}` : null,
+          typeof d.agencia === "string" ? `por ${d.agencia}` : null,
           typeof d.envio === "string" ? `envío ${d.envio}` : null,
+          typeof d.franja === "string" ? d.franja : null,
+          typeof d.repartidor === "string" ? `lo lleva ${d.repartidor}` : null,
           typeof d.porRevisar === "string" ? d.porRevisar : null,
           d.faltaStock ? "no alcanzaba el stock" : null,
           typeof d.stockDevuelto === "number" ? "el stock volvió" : null,
@@ -2248,51 +2025,6 @@ function CustomerMatches({
   )
 }
 
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-  error,
-  placeholder,
-  className,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: { value: string; label: string; disabled?: boolean }[]
-  error?: string
-  placeholder?: string
-  className?: string
-}) {
-  const id = useId()
-  return (
-    <Field data-invalid={error ? true : undefined} className={className}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={SELECT_CLASSES}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : undefined}
-      >
-        {placeholder ? (
-          <option value="" disabled>
-            {placeholder}
-          </option>
-        ) : null}
-        {options.map((o) => (
-          <option key={o.value} value={o.value} disabled={o.disabled}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
-    </Field>
-  )
-}
-
 function GiftCheck({ checked, onChange }: { checked: boolean; onChange: (gift: boolean) => void }) {
   const id = useId()
   return (
@@ -2300,36 +2032,5 @@ function GiftCheck({ checked, onChange }: { checked: boolean; onChange: (gift: b
       <Checkbox id={id} checked={checked} onCheckedChange={(next) => onChange(Boolean(next))} />
       <label htmlFor={id}>De regalo</label>
     </div>
-  )
-}
-
-function DateField({
-  label,
-  value,
-  onChange,
-  min,
-  error,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  min?: string
-  error?: string
-}) {
-  const id = useId()
-  return (
-    <Field data-invalid={error ? true : undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        type="date"
-        value={value}
-        min={min}
-        onChange={(e) => onChange(e.target.value)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : undefined}
-      />
-      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
-    </Field>
   )
 }

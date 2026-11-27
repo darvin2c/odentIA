@@ -114,8 +114,12 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
     lines: [{ variantId: await variant("Botín de cuero marrón", ["39"]), quantity: 1 }],
   })
   await confirm(pedro, 22900, "00412233")
-  await markShipped(tx, lucia, storeId, pedro, { tracking: null })
-  await markDelivered(tx, lucia, storeId, pedro, { collectedCents: null, methodId: null })
+  await markShipped(tx, lucia, storeId, pedro, { tracking: null, agency: null })
+  await markDelivered(tx, lucia, storeId, pedro, {
+    collectedCents: null,
+    methodId: null,
+    payments: [],
+  })
 
   // Anulado: el cliente se arrepintió antes de pagar.
   const sofia = await create({
@@ -156,7 +160,7 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
     lines: [{ variantId: await variant("Zapatilla urbana", ["negra", "36"]), quantity: 1 }],
     paymentMethodId: efectivo,
   })
-  await markShipped(tx, lucia, storeId, ana, { tracking: null })
+  await markShipped(tx, lucia, storeId, ana, { tracking: null, agency: null })
 
   // Por pagar: un botín a provincia y dos sandalias para recoger.
   await create({
@@ -358,7 +362,7 @@ export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void
     lines: [{ variantId: z39, quantity: 1 }],
     paymentMethodId: efectivo,
   })
-  await markShipped(tx, lucia, storeId, jorge.id, { tracking: null })
+  await markShipped(tx, lucia, storeId, jorge.id, { tracking: null, agency: null })
   await markMissed(tx, lucia, storeId, jorge.id, {
     reason: "No contestó",
     deliverOn: addDays(today, 1),

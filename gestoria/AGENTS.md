@@ -59,9 +59,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
-- El menú del día lleva solo pantallas que existen (Inicio, Pedidos, Clientes y, en «Gestión»,
-  Catálogo y Reportes); al pie, Configuración y Ayuda. Una pantalla nueva entra en su lugar del
-  tablero 4, no antes.
+- El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en
+  «Gestión», Catálogo, Caja y Reportes); al pie, Configuración y Ayuda. Una pantalla nueva entra en
+  su lugar del tablero 4, no antes.
 - Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`: cada apartado
   lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
   quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo. Sus nombres y
@@ -117,6 +117,29 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
+
+## Despachos y Caja (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0228)
+
+- Despachos (`apps/api/src/despachos.ts`) es una vista: cada botón es la operación del pedido de
+  `pedidos.ts`, la misma de Pedidos (`apps/web/src/entregas.tsx` las usa en las dos pantallas).
+  «No se entregó» es la última novedad de entrega del pedido, nunca una columna aparte. «Pasar a…»
+  es la única forma de mover una entrega: sin arrastrar.
+- La franja y el repartidor son opcionales: un pedido sin ellos sale igual. La franja es una copia
+  en el pedido (de `store.delivery_slots`); el repartidor es de la tienda (`store_courier`, del
+  equipo o un nombre externo, listo para enlazarse a gestorIA Reparto) y no se borra.
+- Sin pago confirmado no se entrega: «Entregado» con saldo anota en ese paso todo lo que falta, y un
+  pago por confirmar se confirma antes, en la misma ventana (la revisión del pedido). Lo cobrado en
+  la puerta queda a nombre del repartidor del pedido (`order_payment.courier_id`). Sofi no asigna
+  repartidor, franja ni agencia: la base lo frena al anotar y al cambiar (`0027`).
+- Lo que suma Caja de las entregas del día usa el mismo filtro que las filas de Despachos
+  (`onBoard`), y «Sale hoy» de Inicio, que abre Despachos, el de lo que sale hoy (`dueOn`): una
+  cifra nueva de entregas no arma su propia consulta.
+- Caja (`apps/api/src/caja.ts`, `caja`: Dueño y Administrador) recibe el efectivo con «Recibí», que
+  solo se agrega y toma cada pago una vez. Lo cobrado es la misma consulta de Reportes e Inicio
+  (`collectedBetween`) y lo que falta cobrar, el saldo de las filas de Despachos: ninguna pantalla
+  lo recalcula. El efectivo por recibir (`cashToReceiveIn`) es también una línea de «Te toca», solo
+  para quien ve Caja.
+- «Avisar» abre el WhatsApp del celular con el texto y queda «enviado por usted»: nunca entregado.
 
 ## Las clientas (entrega 4)
 

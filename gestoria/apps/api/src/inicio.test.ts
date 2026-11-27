@@ -292,6 +292,71 @@ describe("las cifras del día y «Te toca» (tablero 5)", () => {
     expect(after.figures.leaves).toEqual({ orders: 1, missed: 0 })
   })
 
+  it("«Sale hoy» cuenta lo mismo que Despachos hoy: también lo que no tiene día", async () => {
+    const free = (
+      await call(
+        "lucia",
+        "POST",
+        `${base}/pedidos`,
+        order({
+          customerName: "Sara Díaz",
+          customerPhone: "+51 944 333 222",
+          paymentMethodId: ids.efectivo,
+          deliverOn: null,
+        }),
+      )
+    ).json.order.id as string
+    const rosa = await home("rosa")
+    expect(rosa.figures.leaves).toEqual({ orders: 2, missed: 0 })
+    const board = (await call("rosa", "GET", `${base}/despachos`)).json
+    const leaving = (board.deliveries as Json[]).filter(
+      (d) => d.state === "por_salir" || d.state === "en_camino",
+    )
+    expect(leaving.map((d) => d.id).sort()).toEqual([paid, free].sort())
+    await call("lucia", "POST", `${base}/pedidos/${free}/anular`, { reason: "Fin de la prueba" })
+  })
+
+  it("el efectivo cobrado en la puerta: «Ir a Caja» para quien ve Caja, hasta que se recibe", async () => {
+    const cash = (
+      await call(
+        "lucia",
+        "POST",
+        `${base}/pedidos`,
+        order({
+          customerName: "Elena Ruiz",
+          customerPhone: "+51 955 111 222",
+          paymentMethodId: ids.efectivo,
+        }),
+      )
+    ).json.order.id as string
+    await call("lucia", "POST", `${base}/pedidos/${cash}/salio`, {})
+    const done = await call("lucia", "POST", `${base}/pedidos/${cash}/entregado`, {
+      payments: [{ methodId: ids.efectivo, amountCents: 13900 }],
+    })
+    expect(done.status).toBe(200)
+    expect((await home("rosa")).toDo).toEqual([
+      {
+        kind: "efectivo",
+        when: "hoy",
+        courierId: null,
+        courier: null,
+        cents: 13900,
+        payments: 1,
+      },
+    ])
+    // Ventas entrega y cobra, pero no ve Caja: la línea no es suya.
+    expect((await home("lucia")).toDo).toEqual([])
+    const box = (await call("rosa", "GET", `${base}/caja`)).json
+    const [group] = box.toReceive as { payments: Json[] }[]
+    const received = await call("rosa", "POST", `${base}/caja/recibi`, {
+      courierId: null,
+      paymentIds: (group?.payments ?? []).map((p) => p.id),
+      receivedCents: 13900,
+    })
+    expect(received.status).toBe(201)
+    expect((await home("rosa")).toDo).toEqual([])
+  })
+
   it("los pedidos de prueba no cuentan en ninguna cifra ni línea", async () => {
     await db.ownerDb.update(saleOrder).set({ test: true }).where(eq(saleOrder.id, waiting))
     const rosa = await home("rosa")

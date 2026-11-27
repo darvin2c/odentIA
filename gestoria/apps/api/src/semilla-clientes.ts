@@ -94,8 +94,12 @@ export async function seedDemoCustomers(tx: Db, storeId: string): Promise<void> 
     await reviewPayment(tx, rosa, storeId, orderId, detail.payments.at(-1)!.id, {
       decision: "confirmar",
     })
-    await markShipped(tx, lucia, storeId, orderId, { tracking: "SHALOM-448120" })
-    await markDelivered(tx, lucia, storeId, orderId, { collectedCents: null, methodId: null })
+    await markShipped(tx, lucia, storeId, orderId, { tracking: "SHALOM-448120", agency: null })
+    await markDelivered(tx, lucia, storeId, orderId, {
+      collectedCents: null,
+      methodId: null,
+      payments: [],
+    })
   }
 
   // Mariela Ríos, por Instagram: la zapatilla blanca 38 a Arequipa por agencia, ya entregada.

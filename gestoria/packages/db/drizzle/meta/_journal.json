@@ -183,6 +183,20 @@
       "when": 1795789246658,
       "tag": "0025_reglas_primeros_pasos",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795800840290,
+      "tag": "0026_despachos_y_caja",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795800852918,
+      "tag": "0027_reglas_despachos_y_caja",
+      "breakpoints": true
     }
   ]
 }

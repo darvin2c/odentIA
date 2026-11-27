@@ -19,10 +19,12 @@ import {
 import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { HelpPage } from "./ayuda"
+import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
 import { ConfigFrame, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
+import { DispatchPage } from "./despachos"
 import {
   ForgotPasswordPage,
   LoginPage,
@@ -118,8 +120,8 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: el menú del día (Inicio, los pedidos, las clientas, el catálogo y su
-// producto, Reportes), y al pie Configuración y la Ayuda.
+// La tienda y sus secciones: el menú del día (Inicio, Despachos, los pedidos, las clientas, el
+// catálogo y su producto, Caja, Reportes), y al pie Configuración y la Ayuda.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
@@ -157,14 +159,17 @@ const storeChildren = [
   createRoute({
     getParentRoute: () => storeRoute,
     path: "/pedidos",
-    // «?pedido=…» abre ese pedido (desde Inicio o desde la conversación de prueba); «?filtro=…»
-    // abre en ese filtro («Sale hoy» de Inicio).
+    // «?pedido=…» abre ese pedido (desde Inicio, Despachos o la conversación de prueba);
+    // «?filtro=…» abre en ese filtro.
     validateSearch: (s: Record<string, unknown>): { pedido?: string; filtro?: OrderFilter } => ({
       ...(typeof s.pedido === "string" ? { pedido: s.pedido } : {}),
       ...(FILTERS.some((f) => f.value === s.filtro) ? { filtro: s.filtro as OrderFilter } : {}),
     }),
     component: OrdersPage,
   }),
+  // Despachos y Caja (entrega 3): qué sale, cuándo y quién lo lleva, y el efectivo del día.
+  createRoute({ getParentRoute: () => storeRoute, path: "/despachos", component: DispatchPage }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/caja", component: CashPage }),
   customersRoute.addChildren([
     createRoute({ getParentRoute: () => customersRoute, path: "/", component: CustomersIndex }),
     createRoute({

@@ -7,11 +7,13 @@ import {
   saleOrder,
   stockRequest,
 } from "@gestoria/db"
-import { and, asc, count, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm"
+import { and, asc, count, eq, isNull, ne, sql } from "drizzle-orm"
+import { cashToReceiveIn } from "./caja.js"
 import { similarIn } from "./clientes.js"
 import type { Person } from "./cuenta.js"
+import { dueOn } from "./despachos.js"
 import { startOfDay, storeClockIn } from "./hora.js"
-import { missedSql, pad, paidWithoutStockIn, TO_DELIVER } from "./pedidos.js"
+import { missedSql, pad, paidWithoutStockIn } from "./pedidos.js"
 import { can, type StoreSeat } from "./permisos.js"
 import { setupIn } from "./primeros-pasos.js"
 import { collectedSinceIn, pendingNowIn } from "./sofi/reportes.js"
@@ -69,6 +71,18 @@ export type ToDoItem =
       /** Cuántas parejas más hay por mirar. */
       more: number
     }
+  /**
+   * El efectivo cobrado en la puerta que nadie recibió todavía, de quien lo trae (`courier` null:
+   * cobrado en la tienda): «Ir a Caja», donde se recibe con «Recibí». Solo para quien ve Caja.
+   */
+  | {
+      kind: "efectivo"
+      when: "hoy"
+      courierId: string | null
+      courier: string | null
+      cents: number
+      payments: number
+    }
   /** Pagado, pero no alcanza el stock de lo que lleva: «Ver pedido». */
   | { kind: "stock"; when: "hoy"; orderId: string; number: string; customer: string }
   /** Se acabó y alguien lo pidió: cuando entre, Sofi le avisa sola. «Registrar una entrada». */
@@ -84,7 +98,6 @@ export type ToDoItem =
 /**
  * Lo que espera de otras pantallas, que todavía no existen: no se dibuja hasta que lleguen.
  * - `chats`: las conversaciones que esperan a una persona («Abrir Bandeja», con la Bandeja).
- * Caja (el efectivo por recibir) y Despachos suman aquí su parte cuando lleguen.
  */
 export interface WaitingElsewhere {
   chats: { conversationId: string; customer: string | null; reason: string | null; at: Date }[]
@@ -212,6 +225,16 @@ export async function toDoIn(tx: Db, storeId: string, seat: StoreSeat): Promise<
   const items: ToDoItem[] = []
   if (can(seat, "pagos.confirmar")) items.push(...(await paymentsToConfirm(tx, storeId)))
   if (can(seat, "entregas")) items.push(...(await missedOrders(tx, storeId)))
+  if (can(seat, "caja"))
+    for (const group of await cashToReceiveIn(tx, storeId))
+      items.push({
+        kind: "efectivo",
+        when: "hoy",
+        courierId: group.courierId,
+        courier: group.name,
+        cents: group.cents,
+        payments: group.payments.length,
+      })
   if (can(seat, "ventas.atender")) {
     const similar = await similarIn(tx, storeId)
     if (similar.first)
@@ -223,22 +246,16 @@ export async function toDoIn(tx: Db, storeId: string, seat: StoreSeat): Promise<
   return items
 }
 
-/** Lo que sale hoy: lo de su día hasta hoy, sin lo que volvió sin entregar, que se cuenta aparte. */
+/**
+ * Lo que sale hoy: lo mismo que muestra Despachos hoy (`dueOn`: lo de hoy, lo atrasado y lo que no
+ * tiene día), sin lo que volvió sin entregar, que se cuenta aparte.
+ */
 async function leavesTodayIn(tx: Db, storeId: string, today: string) {
-  const [row] = await tx
-    .select({
-      orders: sql<number>`count(*) filter (where not ${missedSql("sale_order")})`,
-      missed: sql<number>`count(*) filter (where ${missedSql("sale_order")})`,
-    })
-    .from(saleOrder)
-    .where(
-      and(
-        eq(saleOrder.storeId, storeId),
-        eq(saleOrder.test, false),
-        inArray(saleOrder.state, TO_DELIVER),
-        lte(saleOrder.deliverOn, today),
-      ),
-    )
+  const [row] = await tx.execute<{ orders: string; missed: string }>(sql`
+    select count(*) filter (where not ${missedSql("o")}) as orders,
+      count(*) filter (where ${missedSql("o")}) as missed
+    from sale_order o
+    where o.store_id = ${storeId} and o.test = false and ${dueOn(sql`${today}::date`, today)}`)
   return { orders: Number(row?.orders ?? 0), missed: Number(row?.missed ?? 0) }
 }
 

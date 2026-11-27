@@ -44,6 +44,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {
   ArrowLeft,
+  Banknote,
   ChartColumn,
   CircleHelp,
   Copy,
@@ -58,6 +59,7 @@ import {
   ReceiptText,
   Settings,
   Store,
+  Truck,
   UserPlus,
   UserRound,
 } from "lucide-react"
@@ -303,8 +305,15 @@ export function Shell({
   const openAsk = useMemo(() => (canAsk ? () => setAsking(true) : null), [canAsk])
   // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
   const live = authClient.useSession().data?.user
+  const canDispatch = store?.permissions.includes("entregas") ?? false
+  const dispatch = useQuery({
+    queryKey: ["despachos-resumen", store?.id],
+    queryFn: () => api<{ missed: number }>(`/api/tiendas/${store?.id}/despachos/resumen`),
+    enabled: canDispatch,
+    refetchInterval: 120_000,
+  })
   const items: AppShellNavEntry[] = store
-    ? storeSections(store)
+    ? storeSections(store, dispatch.data?.missed ?? 0)
     : [{ label: "Tus tiendas", to: "/", icon: Store }]
   // `tienda` deja en la cuenta el enlace para volver a esta tienda, como «Mi perfil» de la
   // clínica; vacía, fuera de una tienda, olvida la de antes. Ya en la cuenta, se conserva.
@@ -670,18 +679,35 @@ export function useStoreContext() {
 
 /**
  * El menú del día (lienzo «gestorIA como odentIA», tablero 4): arriba lo diario, con Inicio
- * primero, y en «Gestión» lo que se mira de la tienda. Solo lo que ya existe: Bandeja, Despachos y
- * Caja se suman cuando lleguen sus pantallas. Configuración y Ayuda van al pie (`storeFooter`).
+ * primero y Despachos antes de Pedidos, y en «Gestión» lo que se mira de la tienda, con Caja. Solo
+ * lo que ya existe: la Bandeja se suma cuando llegue su pantalla, en su lugar. Configuración y
+ * Ayuda van al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no
+ * sale.
  */
-function storeSections(store: MyStore): AppShellNavEntry[] {
+function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
   const id = store.id
   // Soporte de gestorIA solo mira: sin pedidos, clientas ni conversaciones (`ventas.atender`).
   const attends = store.permissions.includes("ventas.atender")
   return [
+    // Inicio (tablero 5): lo que le toca a cada rol, para todo el equipo que atiende.
+    ...(attends ? [{ label: "Inicio", to: `/tiendas/${id}`, icon: House }] : []),
+    ...(store.permissions.includes("entregas")
+      ? [
+          {
+            label: "Despachos",
+            to: `/tiendas/${id}/despachos`,
+            icon: Truck,
+            ...(missed > 0
+              ? {
+                  badge: missed,
+                  badgeLabel: missed === 1 ? "1 no se entregó" : `${missed} no se entregaron`,
+                }
+              : {}),
+          },
+        ]
+      : []),
     ...(attends
       ? [
-          // Inicio (tablero 5): lo que le toca a cada rol, para todo el equipo que atiende.
-          { label: "Inicio", to: `/tiendas/${id}`, icon: House },
           { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
           // Del día a día (entrega 4): cada clienta con sus compras, para todo el equipo que atiende.
           { label: "Clientes", to: `/tiendas/${id}/clientes`, icon: UserRound },
@@ -691,6 +717,10 @@ function storeSections(store: MyStore): AppShellNavEntry[] {
       label: "Gestión",
       children: [
         { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
+        // Caja: lo cobrado del día y el efectivo de cada repartidor, solo Dueño y Administrador.
+        ...(store.permissions.includes("caja")
+          ? [{ label: "Caja", to: `/tiendas/${id}/caja`, icon: Banknote }]
+          : []),
         // Reportes y Argos: solo Dueño y Administrador.
         ...(store.permissions.includes("reportes.ver")
           ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
@@ -731,7 +761,11 @@ export function StoreLayout() {
   const inside = pathname.slice(`/tiendas/${id}`.length).replace(/\/$/, "")
   if (
     !store.permissions.includes("ventas.atender") &&
-    (inside === "" || inside === "/pedidos" || inside.startsWith("/clientes"))
+    (inside === "" ||
+      inside === "/pedidos" ||
+      inside.startsWith("/clientes") ||
+      inside === "/despachos" ||
+      inside === "/caja")
   )
     return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
   // El color de «Tu marca» pinta la app de todo el equipo, como el de cada clínica (los tonos para
