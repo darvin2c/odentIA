@@ -17,7 +17,7 @@ import type { Person } from "./cuenta.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
- * Las clientas de una tienda (entrega 4 de «gestorIA como odentIA», tablero 8; ADR 0221): la
+ * Las clientas de una tienda (entrega 4 de «gestorIA como odentIA», tablero 8; ADR 0223): la
  * ficha de cada una con sus compras, «¿Es la misma clienta?» con separar y «Repetir pedido».
  *
  * - La clienta es la persona: un pedido anotado o armado por Sofi se suma a su ficha

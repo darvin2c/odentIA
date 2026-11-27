@@ -1,5 +1,5 @@
 -- Las clientas (entrega 4, tablero 8): la ficha de cada una y lo que una persona decidió sobre dos
--- fichas. Los pedidos de antes quedan sin ficha: no se unen solos por el teléfono (ADR 0221).
+-- fichas. Los pedidos de antes quedan sin ficha: no se unen solos por el teléfono (ADR 0223).
 CREATE TABLE "customer" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"store_id" uuid NOT NULL,

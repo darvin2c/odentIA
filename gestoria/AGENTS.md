@@ -76,7 +76,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 
 ## Las clientas (entrega 4)
 
-- La clienta es la persona (ADR 0221): una ficha (`customer`) por clienta, y cada pedido lleva la
+- La clienta es la persona (ADR 0223): una ficha (`customer`) por clienta, y cada pedido lleva la
   suya desde `createOrderIn` (`customerForOrderIn` de `apps/api/src/clientes.ts`): la elegida al
   anotarlo, la de los pedidos anteriores del mismo chat o una nueva. Nunca se busca ni se une por
   el teléfono o el nombre: eso solo sugiere «¿Es la misma clienta?», que no frena ninguna venta.

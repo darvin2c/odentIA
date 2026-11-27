@@ -1,4 +1,4 @@
-# 0221 · La clienta única de gestorIA: una persona dice si dos fichas son la misma
+# 0223 · La clienta única de gestorIA: una persona dice si dos fichas son la misma
 
 Fecha: 2026-11-26 · Estado: aceptada · Entrega 4 del lienzo «gestorIA como odentIA» (tableros 2, 8
 y 12)

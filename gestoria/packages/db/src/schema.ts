@@ -997,7 +997,7 @@ export const storePaymentLink = pgTable(
  * Las clientas (entrega 4 de «gestorIA como odentIA», tablero 8): cada clienta es una ficha con
  * sus compras. La clienta es la persona: un pedido se suma a su ficha y nunca se abre otra a
  * sabiendas. Que dos fichas sean la misma lo decide una persona («¿Es la misma clienta?»), nunca
- * el teléfono ni el nombre: la base guarda lo que decidió y quién (ADR 0221).
+ * el teléfono ni el nombre: la base guarda lo que decidió y quién (ADR 0223).
  */
 
 /**

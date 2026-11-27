@@ -1,4 +1,4 @@
--- Las reglas de las clientas (entrega 4 de «gestorIA como odentIA», tablero 8; ADR 0221). Como en
+-- Las reglas de las clientas (entrega 4 de «gestorIA como odentIA», tablero 8; ADR 0223). Como en
 -- las migraciones de reglas anteriores, cada tabla nace cerrada a `gestoria_app`: se concede solo
 -- lo que la aplicación usa y cada tienda ve solo lo suyo. Qué rol puede hacer qué lo decide el
 -- servidor (`permisos.ts`), en cada pedido.

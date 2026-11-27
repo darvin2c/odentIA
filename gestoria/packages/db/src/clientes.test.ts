@@ -1,5 +1,5 @@
 /**
- * Las reglas de las clientas (entrega 4, tablero 8; ADR 0221), con el rol de la aplicación y una
+ * Las reglas de las clientas (entrega 4, tablero 8; ADR 0223), con el rol de la aplicación y una
  * base real: cada tienda ve solo sus fichas; una ficha queda dentro de otra solo si esa otra está
  * sola; la historia solo se agrega, a nombre de quien pide; Sofi abre fichas pero no decide quién
  * es quién; y un pedido no cambia de ficha. También, que ninguna tabla quede abierta.
