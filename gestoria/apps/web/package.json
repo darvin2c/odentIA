@@ -7,7 +7,9 @@
     "local": "vite dev",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "prototipo": "vite --config vite.prototipo.config.ts",
+    "build:prototipo": "vite build --config vite.prototipo.config.ts"
   },
   "dependencies": {
     "@odentia/contract": "workspace:*",
