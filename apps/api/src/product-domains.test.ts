@@ -1,5 +1,6 @@
 import type { Auth } from "@odentia/auth"
 import { signAccountEvent } from "@odentia/auth/account-events"
+import { helpAskAnswer } from "@odentia/contract"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import type { Storage } from "@odentia/services"
@@ -327,6 +328,39 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       expect((await send(contract(), usage, SECRET, "api.odentia.test")).status).not.toBe(200)
       expect((await contract().request("https://api.gestoria.test/api/contract/state")).status).toBe(404)
       expect(received).toEqual(["aviso"])
+    })
+
+    it("la Ayuda responde con ids de la guía solo a lo firmado", async () => {
+      // Una base de prueba que deja reservar y anotar la pregunta: la regla se prueba en services.
+      const rows = [{ id: "pregunta-1", total: 0 }]
+      const chain: unknown = new Proxy(() => chain, {
+        get: (_, key) => (key === "then" ? (resolve: (value: unknown) => void) => resolve(rows) : chain),
+        apply: () => chain,
+      })
+      const helpDb = { transaction: (run: (tx: unknown) => unknown) => run(chain), update: () => chain } as unknown as Db
+      const app = appWith(sessionOf("gestorIA"), { ownerDb: helpDb, appContractPeers: [{ app: "gestoria", secret: SECRET }] })
+      const question = JSON.stringify({
+        question: "¿Cómo anulo un pedido?",
+        screen: "/pedidos",
+        previous: null,
+        guide: [
+          {
+            id: "pedidos",
+            path: "/pedidos",
+            title: "Pedidos",
+            parent: null,
+            purpose: "Los pedidos de la tienda.",
+            terms: [],
+            faqs: [{ id: "pedido-anular", q: "¿Cómo anulo un pedido?", a: "Ábrelo y toca «Anular»." }],
+          },
+        ],
+      })
+      expect((await send(app, question, EVENTS_SECRET, "api.gestoria.test", "/api/contract/help")).status).toBe(401)
+      const ok = await send(app, question, SECRET, "api.gestoria.test", "/api/contract/help")
+      expect(ok.status).toBe(200)
+      const { data } = (await ok.json()) as { data: unknown }
+      expect(helpAskAnswer.safeParse(data).success).toBe(true)
+      expect((await send(app, JSON.stringify({ question: "hola" }), SECRET, "api.gestoria.test", "/api/contract/help")).status).toBe(400)
     })
   })
 })

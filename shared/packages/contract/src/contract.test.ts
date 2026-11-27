@@ -6,6 +6,11 @@ import {
   appEvent,
   CONTRACT_MAX_EVENT_BYTES,
   CONTRACT_MAX_RECEIPT_BYTES,
+  CONTRACT_PATHS,
+  HELP_GUIDE_MAX_OPTIONS,
+  HELP_GUIDE_MAX_TOPICS,
+  helpAskAnswer,
+  helpAskQuestion,
   MAX_TEAM_MEMBERS,
   stateQuestion,
 } from "./messages.js"
@@ -321,5 +326,67 @@ describe("lo nuevo del acuerdo (ADR 0213)", () => {
       support: [],
     })
     expect(parsed.paymentMethods).toEqual([])
+  })
+})
+
+describe("la app le pregunta a la Ayuda", () => {
+  const topic = {
+    id: "pedidos",
+    path: "/pedidos",
+    title: "Pedidos",
+    parent: null,
+    purpose: "Los pedidos de la tienda.",
+    terms: ["ventas"],
+    faqs: [{ id: "pedido-anular", q: "¿Cómo anulo un pedido?", a: "Ábrelo y toca «Anular»." }],
+  }
+  const question = { question: "¿cómo anulo?", screen: "/pedidos", previous: null, guide: [topic] }
+
+  it("lleva la pregunta, la pantalla, la anterior y la guía entera", () => {
+    expect(CONTRACT_PATHS.help).toBe("/api/contract/help")
+    expect(helpAskQuestion.safeParse(question).success).toBe(true)
+    expect(
+      helpAskQuestion.safeParse({ ...question, screen: null, previous: { question: "¿y?", where: "Pedidos" } }).success,
+    ).toBe(true)
+  })
+
+  it("rechaza una guía vacía, de más, con temas o preguntas repetidas, y una pregunta vacía o larga", () => {
+    const twice = { ...topic, id: "otro", faqs: topic.faqs }
+    for (const bad of [
+      { ...question, guide: [] },
+      { ...question, guide: Array.from({ length: HELP_GUIDE_MAX_TOPICS + 1 }, (_, i) => ({ ...topic, id: `t${i}`, faqs: [] })) },
+      { ...question, guide: [topic, topic] },
+      { ...question, guide: [topic, twice] },
+      { ...question, question: "  " },
+      { ...question, question: "x".repeat(501) },
+      { ...question, screen: "/".repeat(201) },
+      { question: "¿cómo anulo?", screen: null, guide: [topic] },
+    ])
+      expect(helpAskQuestion.safeParse(bad).success, JSON.stringify(bad).slice(0, 120)).toBe(false)
+  })
+
+  it("la guía suma como mucho lo que Jev mira en dos tandas, entre temas y preguntas frecuentes", () => {
+    const guide = (lastFaqs: number) => [
+      ...Array.from({ length: 7 }, (_, t) => ({
+        ...topic,
+        id: `t${t}`,
+        faqs: Array.from({ length: 70 }, (_, f) => ({ ...topic.faqs[0]!, id: `t${t}-f${f}` })),
+      })),
+      { ...topic, id: "ultimo", faqs: Array.from({ length: lastFaqs }, (_, f) => ({ ...topic.faqs[0]!, id: `u-f${f}` })) },
+    ]
+    expect(HELP_GUIDE_MAX_OPTIONS).toBe(498)
+    // 8 temas y 490 preguntas: 498.
+    expect(helpAskQuestion.safeParse({ ...question, guide: guide(0) }).success).toBe(true)
+    const over = helpAskQuestion.safeParse({ ...question, guide: guide(1) })
+    expect(over.success).toBe(false)
+    expect(over.error?.issues.map((issue) => issue.message)).toContain(
+      "La guía lleva como mucho 498 respuestas entre temas y preguntas frecuentes",
+    )
+  })
+
+  it("responde con ids de la guía, nunca frases", () => {
+    const answer = { via: "jev", verdict: "duda", shown: [], offered: ["faq:pedido-anular", "tema:pedidos"], written: null }
+    expect(helpAskAnswer.safeParse(answer).success).toBe(true)
+    expect(helpAskAnswer.safeParse({ ...answer, offered: ["¿Cómo anulo un pedido?"] }).success).toBe(false)
+    expect(helpAskAnswer.safeParse({ ...answer, via: "exacta" }).success).toBe(false)
   })
 })

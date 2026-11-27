@@ -16,7 +16,7 @@ interface ApiErrorLike {
   shape: ApiErrorShape
 }
 
-function isApiErrorLike(error: unknown): error is ApiErrorLike {
+export function isApiErrorLike(error: unknown): error is ApiErrorLike {
   if (typeof error !== "object" || error === null) return false
   const candidate = error as Partial<ApiErrorLike>
   return typeof candidate.status === "number" && typeof candidate.shape === "object" && candidate.shape !== null

@@ -6,6 +6,7 @@
  */
 import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
 import { formatMoney } from "@odentia/clinical"
+import { ASK_HELP_EVENT } from "@odentia/ui-patterns"
 
 /**
  * Lo que oye el lector de pantalla al buscar: «1 persona, 2 resultados», con
@@ -359,8 +360,6 @@ export function saveHiddenTypes(scope: string, types: readonly SearchType[]): vo
 export { looksLikeQuestion } from "@odentia/clinical"
 
 /** Pide la pregunta a Ayuda (el panel la abre y la envía). */
-export const ASK_HELP_EVENT = "odentia:preguntar-ayuda"
-
 export function askHelp(question: string): void {
   window.dispatchEvent(new CustomEvent(ASK_HELP_EVENT, { detail: { question } }))
 }

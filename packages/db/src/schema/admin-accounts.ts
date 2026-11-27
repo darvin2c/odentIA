@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
+  type AnyPgColumn,
+  bigint,
   char,
   check,
   foreignKey,
@@ -163,6 +165,83 @@ export const appContractRequest = adminSchema.table(
       .on(table.app, table.nextAttemptAt)
       .where(sql`status = 'pendiente'`),
     index("app_contract_request_account_idx").on(table.accountId, table.createdAt),
+  ],
+)
+
+const externalAppCheck = (column: AnyPgColumn) =>
+  sql`${column} IN (${sql.raw(SAAS_ACCOUNT_EXTERNAL_APPS.map((app) => `'${app}'`).join(","))})`
+
+/** Cómo se decidió una pregunta de una app a la Ayuda y qué decidió (los de `helpAskAnswer` del acuerdo). */
+export const APP_HELP_ASK_VIA = ["jev", "respaldo"] as const
+export const APP_HELP_ASK_VERDICTS = ["seguro", "duda", "ninguna", "datos", "redactada"] as const
+
+/**
+ * Una pregunta de una app que es otro sistema a la Ayuda (`CONTRACT_PATHS.help`): como
+ * `help_ask` de las clínicas, sin el texto de la pregunta ni la guía, solo la app, cómo se decidió
+ * y qué. Se reserva antes de decidir (el tope diario de cada app) y se completa al responder; si
+ * algo falla en medio, queda contada y sin respuesta. Sin `GRANT`: la escribe la conexión
+ * propietaria al responder el acuerdo.
+ */
+export const appHelpAsk = adminSchema.table(
+  "app_help_ask",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    app: text("app").notNull(),
+    via: text("via"),
+    verdict: text("verdict"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("app_help_ask_app_date_idx").on(table.app, table.createdAt),
+    check("app_help_ask_app_check", externalAppCheck(table.app)),
+    check(
+      "app_help_ask_via_check",
+      sql`${table.via} IS NULL OR ${table.via} IN (${sql.raw(APP_HELP_ASK_VIA.map((via) => `'${via}'`).join(","))})`,
+    ),
+    check(
+      "app_help_ask_verdict_check",
+      sql`${table.verdict} IS NULL OR ${table.verdict} IN (${sql.raw(APP_HELP_ASK_VERDICTS.map((verdict) => `'${verdict}'`).join(","))})`,
+    ),
+  ],
+)
+
+/** Para qué usó odentIA un modelo en nombre de una app (hoy, solo la Ayuda). */
+export const APP_AI_USAGE_ORIGINS = ["ayuda"] as const
+export type AppAiUsageOrigin = (typeof APP_AI_USAGE_ORIGINS)[number]
+
+/**
+ * Lo que odentIA paga a los proveedores de modelos por lo que le pide una app que es otro sistema
+ * (ADR 0031): como `ai_usage` de una clínica, pero por app y sin cuenta, porque la pregunta no dice
+ * de qué tienda es. Una fila por proveedor y modelo de cada operación; solo se agrega. Los tokens
+ * son nulos si el proveedor no los entregó, y el costo, en millonésimas de USD, si además no hay
+ * precio conocido: nunca se estima. Sin `GRANT`.
+ */
+export const appAiUsage = adminSchema.table(
+  "app_ai_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    app: text("app").notNull(),
+    origin: text("origin").$type<AppAiUsageOrigin>().notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    calls: integer("calls").notNull().default(1),
+    inputTokens: integer("input_tokens"),
+    cachedInputTokens: integer("cached_input_tokens"),
+    cacheWriteTokens: integer("cache_write_tokens"),
+    outputTokens: integer("output_tokens"),
+    audioSeconds: integer("audio_seconds"),
+    costMicros: bigint("cost_micros", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("app_ai_usage_app_date_idx").on(table.app, table.createdAt),
+    check("app_ai_usage_app_check", externalAppCheck(table.app)),
+    check(
+      "app_ai_usage_origin_check",
+      sql`${table.origin} IN (${sql.raw(APP_AI_USAGE_ORIGINS.map((origin) => `'${origin}'`).join(","))})`,
+    ),
+    check("app_ai_usage_calls_check", sql`${table.calls} >= 1`),
+    check("app_ai_usage_cost_check", sql`${table.costMicros} IS NULL OR ${table.costMicros} >= 0`),
   ],
 )
 

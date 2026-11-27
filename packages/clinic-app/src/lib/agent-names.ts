@@ -10,8 +10,6 @@ import { appWords } from "./product-words"
 export const RECEPTION_DEFAULT_NAME = "Sofi"
 export const CLINICAL_NAME = "Clío"
 export const ADMIN_NAME = "Argos"
-/** Quien responde en Ayuda: el botón sigue diciendo «Ayuda», porque dice para qué sirve. */
-export const HELP_NAME = "Ariadna"
 
 /** El porqué del nombre de Clío, con quien atiende en el producto de esta app. */
 export const clinicalNameReason = (): string =>

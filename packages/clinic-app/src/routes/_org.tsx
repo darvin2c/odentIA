@@ -53,7 +53,7 @@ import { AGENT_WORK_EVENTS, invalidateAgentWork, useAgentSummary } from "../lib/
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { ArgosPanel } from "../components/argos/argos-panel"
 import { ScheduleHost } from "../components/agenda/schedule-host"
-import { HelpButton } from "../components/help-panel"
+import { ClinicHelpButton } from "../components/help-panel"
 import { TwoFactorRequiredPage } from "../components/two-factor-required"
 import { HeaderHelpMenuItem } from "../components/header-more-menu"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
@@ -576,7 +576,7 @@ function OrgLayout() {
               utilities: (
                 <>
                   <GlobalSearchButton />
-                  <HelpButton />
+                  <ClinicHelpButton />
                   <WorkspaceNotifications />
                 </>
               ),

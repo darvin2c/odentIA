@@ -11,6 +11,8 @@ import { z } from "zod"
  * - **La app pregunta** (`POST` a `CONTRACT_PATHS.state`, también firmado): si la cuenta puede
  *   seguir y su tope, su plan, sus cargos y pagos (para «Plan y pagos»), los avisos que debe
  *   mostrar y las respuestas de soporte.
+ * - **La app le pregunta a la Ayuda** (`POST` a `CONTRACT_PATHS.help`, firmado): Ariadna, la misma
+ *   de las clínicas, responde con la guía que la app manda en cada pregunta, en ids de esa guía.
  * - **La app nunca se detiene por la administración**: si no responde, sigue con lo último que
  *   supo (`AccountState.at` dice de cuándo es). La app cuenta y la administración cobra: los
  *   precios son del plan de cada cuenta y la app nunca los calcula.
@@ -22,6 +24,8 @@ import { z } from "zod"
 export const CONTRACT_PATHS = {
   events: "/api/contract/events",
   state: "/api/contract/state",
+  /** La app le pregunta a Ariadna, la de la Ayuda, con su propia guía. */
+  help: "/api/contract/help",
 } as const
 
 /**
@@ -31,8 +35,10 @@ export const CONTRACT_PATHS = {
  */
 export const APP_CONTRACT_PATHS = { requests: "/acuerdo/pedidos" } as const
 
-/** Lo más que pesa un mensaje en cualquiera de los dos sentidos (salvo un aviso con su comprobante). */
+/** Lo más que pesa un mensaje en cualquiera de los dos sentidos (salvo un aviso con su comprobante o una pregunta a la Ayuda). */
 export const CONTRACT_MAX_BODY_BYTES = 64 * 1024
+/** Lo más que pesa una pregunta a la Ayuda (`CONTRACT_PATHS.help`): lleva la guía entera de la app. */
+export const CONTRACT_MAX_HELP_BYTES = 512 * 1024
 
 /**
  * El comprobante de pago que sube la app viaja dentro de su aviso (`pago.comprobante`), en
@@ -376,3 +382,100 @@ export const adminRequestResult = z.object({
   message: z.string().max(500).nullable(),
 })
 export type AdminRequestResult = z.infer<typeof adminRequestResult>
+
+/* ---------- La app le pregunta a Ariadna (la Ayuda) ---------- */
+
+/** Lo más que lleva la guía de una app en una pregunta. */
+export const HELP_GUIDE_MAX_TOPICS = 80
+/**
+ * Lo más que suman los temas y las preguntas frecuentes de la guía: lo que Jev mira en dos tandas
+ * (`HELP_SELECT_MAX_OPTIONS` de los servicios, 249 por tanda). Más que eso dispararía muchas
+ * preguntas a Jev por cada pregunta de la app.
+ */
+export const HELP_GUIDE_MAX_OPTIONS = 2 * 249
+
+const helpId = z.string().trim().min(1).max(80)
+
+/**
+ * Una pregunta frecuente de la guía de la app: su id es su nombre fijo, único en toda la guía, y
+ * no cambia al reescribir la pregunta (es lo que vuelve en la respuesta). `forms`, otras formas
+ * de preguntar exactamente lo mismo.
+ */
+export const helpGuideFaq = z.object({
+  id: helpId,
+  q: z.string().trim().min(1).max(300),
+  a: z.string().trim().min(1).max(2000),
+  forms: z.array(z.string().trim().min(1).max(300)).max(20).optional(),
+})
+
+/**
+ * Un tema de la guía de la app, uno por pantalla: su ruta, su nombre como en el menú, dónde
+ * cuelga (`parent`, nulo si está en la raíz), para qué sirve, con qué palabras la busca la gente
+ * y sus preguntas frecuentes.
+ */
+export const helpGuideTopic = z.object({
+  id: helpId,
+  path: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(120),
+  parent: z.string().trim().min(1).max(120).nullable(),
+  purpose: z.string().trim().min(1).max(1000),
+  terms: z.array(z.string().trim().min(1).max(120)).max(40),
+  faqs: z.array(helpGuideFaq).max(80),
+})
+export type HelpGuideTopic = z.infer<typeof helpGuideTopic>
+
+/**
+ * Lo que pregunta la app a la Ayuda (`POST` a `CONTRACT_PATHS.help`, firmado): la pregunta, la
+ * ruta de la pantalla donde está la persona, la anterior de esa conversación (con el nombre de la
+ * pantalla de su respuesta) y la guía vigente de la app, entera. La guía viaja con cada pregunta:
+ * la administración no guarda copia. Nada de la cuenta ni de la persona.
+ */
+export const helpAskQuestion = z.object({
+  question: z.string().trim().min(1).max(500),
+  screen: z.string().trim().max(200).nullable(),
+  previous: z
+    .object({
+      question: z.string().trim().min(1).max(500),
+      where: z.string().trim().max(200).nullable(),
+    })
+    .nullable(),
+  guide: z
+    .array(helpGuideTopic)
+    .min(1)
+    .max(HELP_GUIDE_MAX_TOPICS)
+    .refine(
+      (topics) => new Set(topics.map((topic) => topic.id)).size === topics.length,
+      "Cada tema va una sola vez",
+    )
+    .refine((topics) => {
+      const faqs = topics.flatMap((topic) => topic.faqs.map((faq) => faq.id))
+      return new Set(faqs).size === faqs.length
+    }, "Cada pregunta frecuente va una sola vez en toda la guía")
+    .refine(
+      (topics) => topics.reduce((sum, topic) => sum + 1 + topic.faqs.length, 0) <= HELP_GUIDE_MAX_OPTIONS,
+      `La guía lleva como mucho ${HELP_GUIDE_MAX_OPTIONS} respuestas entre temas y preguntas frecuentes`,
+    ),
+})
+export type HelpAskQuestion = z.infer<typeof helpAskQuestion>
+
+/** Una respuesta de la guía, por su id: `faq:<id de la pregunta frecuente>` o `tema:<id del tema>`. */
+const helpRef = z.string().regex(/^(faq|tema):.+$/, "Va como faq:<id> o tema:<id>")
+
+/**
+ * Lo que responde la Ayuda: solo ids de la guía que mandó la app, nunca frases; los textos los
+ * arma la app con su guía.
+ *
+ * - `via`: `jev` si decidió Jev; `respaldo` si respondieron las palabras (sin Jev, si falló o si
+ *   la pregunta solo traía datos de una persona y no se le preguntó).
+ * - `verdict`: `seguro` (se muestra `shown` tal cual, o `written` si la redactó uniendo las de
+ *   `shown`), `duda` (se ofrecen `offered` para elegir, de la más probable a la menos),
+ *   `ninguna` (no está en la guía) o `datos` (pregunta por las cifras de su cuenta).
+ */
+export const helpAskAnswer = z.object({
+  via: z.enum(["jev", "respaldo"]),
+  verdict: z.enum(["seguro", "duda", "ninguna", "datos"]),
+  shown: z.array(helpRef),
+  offered: z.array(helpRef),
+  written: z.string().nullable(),
+})
+export type HelpAskAnswer = z.infer<typeof helpAskAnswer>
