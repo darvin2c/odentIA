@@ -23,6 +23,7 @@ import { balancesIn } from "../saldo.js"
 import {
   moneyText as formatMoney,
   newTrace,
+  offeredIn,
   runTool,
   SOFI_TOOLS,
   type SofiOffer,
@@ -573,6 +574,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   const handoff = trace.handoff ?? (failure ? `Sofi no pudo responder: ${failure}` : null)
   const reply = trace.handoff ? SOFI_HANDOFF : (text ?? SOFI_FALLBACK)
   const cost = deps.model ? costMicros(deps.model.name, usage) : null
+  const offered = text && !trace.handoff ? offeredIn(trace, amountsIn(text, loaded.currency)) : null
   const detail = {
     tools: trace.tools,
     // Solo las cotizaciones cuyo total salió en la respuesta: las que el cliente vio.
@@ -583,10 +585,10 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
             .map(([key]) => key)
         : [],
     // La oferta que le hizo (lo más que cedió y su plazo): la siguiente no la mejora ni la alarga.
-    ...(text && !trace.handoff && trace.offeredCents !== null
+    ...(offered !== null
       ? {
           oferta: {
-            cedido: Math.max(loaded.offer?.cededCents ?? 0, trace.offeredCents),
+            cedido: Math.max(loaded.offer?.cededCents ?? 0, offered),
             vence: offerDeadline.toISOString(),
           },
         }

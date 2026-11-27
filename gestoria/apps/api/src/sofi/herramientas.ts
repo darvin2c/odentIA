@@ -70,8 +70,8 @@ export interface TurnTrace {
   quotes: Map<string, number>
   /** Pasó la conversación a una persona, con este motivo. */
   handoff: string | null
-  /** Lo más que cedió una cotización negociada de este turno: es la oferta que le hizo. */
-  offeredCents: number | null
+  /** Las cotizaciones negociadas de este turno: su total y lo que cede. De ahí sale la oferta. */
+  offers: { totalCents: number; cededCents: number }[]
 }
 
 export function newTrace(): TurnTrace {
@@ -81,8 +81,22 @@ export function newTrace(): TurnTrace {
     percents: new Set(),
     quotes: new Map(),
     handoff: null,
-    offeredCents: null,
+    offers: [],
   }
+}
+
+/**
+ * Lo que de verdad le ofreció en este turno, o null si no negoció. Sofi prueba opciones con
+ * cotizar antes de decirlas: cuenta lo más que cede una cotización cuyo total salió en su
+ * respuesta. Si no escribió ningún total (dijo «S/ 10 menos» sin el total), cuenta la que menos
+ * cede: así una prueba que no dijo no le deja mejorar la oferta después.
+ */
+export function offeredIn(trace: Pick<TurnTrace, "offers">, said: number[]): number | null {
+  if (trace.offers.length === 0) return null
+  const shown = trace.offers.filter((o) => said.includes(o.totalCents))
+  return shown.length
+    ? Math.max(...shown.map((o) => o.cededCents))
+    : Math.min(...trace.offers.map((o) => o.cededCents))
 }
 
 /**
@@ -560,7 +574,7 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
     )
     if (problem) return { ok: false, problemas: [problem] }
     if (q.negotiated)
-      ctx.trace.offeredCents = Math.max(ctx.trace.offeredCents ?? 0, q.marginUsedCents)
+      ctx.trace.offers.push({ totalCents: q.totalCents, cededCents: q.marginUsedCents })
     const money = (cents: number) => {
       ctx.trace.amounts.add(cents)
       return formatMoney(cents, ctx.currency)

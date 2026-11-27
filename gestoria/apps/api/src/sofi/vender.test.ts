@@ -4,7 +4,7 @@
  * ofrecer, y lo que no puede decir para vender («hablé con la tienda», «te la separo»).
  */
 import { describe, expect, it } from "vitest"
-import { offerProblem } from "./herramientas.js"
+import { offeredIn, offerProblem } from "./herramientas.js"
 import { claimsInvented } from "./revisar.js"
 import { customerStory, offerOf } from "./sofi.js"
 
@@ -105,5 +105,24 @@ describe("lo que no dice para vender", () => {
       ),
     ).toBe(false)
     expect(claimsInvented("Una persona del equipo revisa tu captura y te aviso")).toBe(false)
+  })
+})
+
+describe("lo que le ofreció en un turno", () => {
+  const trace = {
+    offers: [
+      { totalCents: 12900, cededCents: 1000 },
+      { totalCents: 10900, cededCents: 3000 },
+    ],
+  }
+
+  it("cuenta lo que dijo, no lo que solo probó con cotizar", () => {
+    expect(offeredIn(trace, [12900])).toBe(1000)
+    expect(offeredIn(trace, [12900, 10900])).toBe(3000)
+  })
+
+  it("sin un total dicho, cuenta lo que menos cede; sin negociar, nada", () => {
+    expect(offeredIn(trace, [1000])).toBe(1000)
+    expect(offeredIn({ offers: [] }, [12900])).toBeNull()
   })
 })
