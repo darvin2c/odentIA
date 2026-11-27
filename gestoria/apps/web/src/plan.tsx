@@ -4,18 +4,25 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
   toast,
 } from "@odentia/ui"
-import { Textarea } from "@odentia/ui/components/textarea"
-import { EmptyState, KpiCard, PageNotice, SubmitButton } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  KpiCard,
+  LoadingState,
+  PageNotice,
+  RadioChips,
+  SubmitButton,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, CreditCard, Upload } from "lucide-react"
-import { type FormEvent, useId, useRef, useState } from "react"
+import { useRef, useState } from "react"
+import { z } from "zod"
+import { MoneyInput } from "./campos"
 import { api } from "./lib/api"
 import { when } from "./lib/pedidos"
 import {
@@ -33,17 +40,8 @@ import {
   type SupportKind,
 } from "./lib/plan"
 import { money, moneyInput, readMoney } from "./lib/tienda"
-import {
-  FormAlert,
-  FormSheet,
-  fieldErrors,
-  MoneyField,
-  SELECT_CLASSES,
-  shrinkPhoto,
-  TextField,
-  useDirty,
-} from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { shrinkPhoto } from "./piezas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Plan y pagos» (lienzo B, paso B7): lo que la administración dice de la tienda (su plan, lo que
@@ -71,8 +69,8 @@ export function PlanPage() {
         title="Plan y pagos"
         subtitle="Tu plan con gestorIA, lo que se te cobró y tus pagos."
       />
-      {plan.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-      {plan.isError ? <ErrorBlock error={plan.error} onRetry={() => void plan.refetch()} /> : null}
+      {plan.isPending ? <LoadingState message="Cargando tu plan" /> : null}
+      {plan.isError ? <ErrorState error={plan.error} onRetry={() => void plan.refetch()} /> : null}
       {plan.data ? <PlanBody view={plan.data} /> : null}
     </>
   )
@@ -269,117 +267,126 @@ function ReceiptSheet({
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
   const owed = charge.amountCents - charge.paidCents
-  const [amount, setAmount] = useState(moneyInput(owed, charge.currency))
-  const [methodCode, setMethodCode] = useState(state.paymentMethods[0]?.code ?? "")
-  const [file, setFile] = useState<File | null>(null)
-  const [localError, setLocalError] = useState<Record<string, string>>({})
   const fileInput = useRef<HTMLInputElement>(null)
-  const methodId = useId()
-  const dirty = useDirty({ amount, methodCode, file: file?.name })
-  const method = state.paymentMethods.find((one) => one.code === methodCode)
-  const send = useMutation({
-    mutationFn: async (amountCents: number) => {
-      const form = new FormData()
-      form.set("chargeId", charge.id)
-      form.set("amountCents", String(amountCents))
-      form.set("methodCode", methodCode)
-      if (file)
-        form.set(
+  const schema = z.object({
+    methodCode: z.string().min(1, "Elige cómo pagaste"),
+    amountCents: z
+      .string()
+      .refine((text) => Boolean(readMoney(text, charge.currency)), "Escribe cuánto pagaste"),
+    file: z
+      .instanceof(File, { message: "Elige la foto o el PDF del comprobante" })
+      .nullable()
+      .refine((file) => file !== null, "Elige la foto o el PDF del comprobante"),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      methodCode: state.paymentMethods[0]?.code ?? "",
+      amountCents: moneyInput(owed, charge.currency),
+      file: null as File | null,
+    },
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const body = new FormData()
+      body.set("chargeId", charge.id)
+      body.set("amountCents", String(readMoney(value.amountCents, charge.currency)))
+      body.set("methodCode", value.methodCode)
+      if (value.file)
+        body.set(
           "archivo",
-          file.type === "application/pdf" ? file : await shrinkPhoto(file),
+          value.file.type === "application/pdf" ? value.file : await shrinkPhoto(value.file),
           "comprobante",
         )
-      return api(`/api/tiendas/${store.id}/plan/comprobante`, { method: "POST", form })
-    },
-    onSuccess: async () => {
+      await api(`/api/tiendas/${store.id}/plan/comprobante`, { method: "POST", form: body })
       await queryClient.invalidateQueries({ queryKey: PLAN_KEY(store.id) })
       toast.success("Comprobante subido: lo revisamos y confirmamos tu pago.")
       onClose()
     },
   })
-  const submit = () => {
-    const cents = readMoney(amount, charge.currency)
-    const problems: Record<string, string> = {}
-    if (!cents) problems.amountCents = "Escribe cuánto pagaste"
-    if (!file) problems.file = "Elige la foto o el PDF del comprobante"
-    setLocalError(problems)
-    if (cents && file) send.mutate(cents)
-  }
-  const errors = { ...fieldErrors(send.error), ...localError }
+  const surface = useFormSurface(form)
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title="Subir comprobante"
       description={`Del cobro del ${day(charge.periodStart)} al ${day(charge.periodEnd)}. Lo revisamos y confirmamos tu pago.`}
       onClose={onClose}
-      onSubmit={submit}
-      dirty={dirty}
-      footer={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={send.isPending}>
-            Subir comprobante
-          </SubmitButton>
-        </>
-      }
+      submitLabel="Subir comprobante"
     >
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor={methodId}>Cómo pagaste</FieldLabel>
-          <select
-            id={methodId}
-            value={methodCode}
-            onChange={(e) => setMethodCode(e.target.value)}
-            className={SELECT_CLASSES}
+      <form.AppField name="methodCode">
+        {(field) => {
+          const instructions = state.paymentMethods.find(
+            (one) => one.code === field.state.value,
+          )?.instructions
+          return (
+            <field.SelectField
+              label="Cómo pagaste"
+              options={state.paymentMethods.map((one) => ({ value: one.code, label: one.name }))}
+              description={
+                instructions ? (
+                  <span className="whitespace-pre-wrap">{instructions}</span>
+                ) : undefined
+              }
+            />
+          )
+        }}
+      </form.AppField>
+      <form.AppField name="amountCents">
+        {(field) => (
+          <field.Control
+            label="Cuánto pagaste"
+            description={`Falta pagar ${money(owed, charge.currency)}.`}
           >
-            {state.paymentMethods.map((one) => (
-              <option key={one.code} value={one.code}>
-                {one.name}
-              </option>
-            ))}
-          </select>
-          {method?.instructions ? (
-            <FieldDescription className="whitespace-pre-wrap">
-              {method.instructions}
-            </FieldDescription>
-          ) : null}
-          {errors.methodCode ? <FieldError>{errors.methodCode}</FieldError> : null}
-        </Field>
-        <MoneyField
-          label="Cuánto pagaste"
-          currency={charge.currency}
-          value={amount}
-          onChange={setAmount}
-          error={errors.amountCents}
-          help={`Falta pagar ${money(owed, charge.currency)}.`}
-        />
-        <Field>
-          <FieldLabel>Foto o PDF del comprobante</FieldLabel>
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
-            className="sr-only"
-            tabIndex={-1}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" type="button" onClick={() => fileInput.current?.click()}>
-              {file ? "Elegir otro" : "Elegir el archivo"}
-            </Button>
-            {file ? <span className="min-w-0 truncate text-sm">{file.name}</span> : null}
-          </div>
-          {errors.file ? (
-            <FieldError>{errors.file}</FieldError>
-          ) : (
-            <FieldDescription>JPG, PNG, WebP o PDF, hasta 1,5 MB.</FieldDescription>
-          )}
-        </Field>
-        <FormAlert error={send.error} />
-      </FieldGroup>
-    </FormSheet>
+            {(control) => (
+              <MoneyInput
+                control={control}
+                currency={charge.currency}
+                value={field.state.value}
+                onChange={field.handleChange}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      <form.AppField name="file">
+        {(field) => (
+          <field.Control
+            label="Foto o PDF del comprobante"
+            description="JPG, PNG, WebP o PDF, hasta 1,5 MB."
+          >
+            {(control) => (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  className="sr-only"
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    field.handleChange(e.target.files?.[0] ?? null)
+                    field.handleBlur()
+                  }}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    id={control.id}
+                    variant="outline"
+                    type="button"
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    {field.state.value ? "Elegir otro" : "Elegir el archivo"}
+                  </Button>
+                  {field.state.value ? (
+                    <span className="min-w-0 truncate text-sm">{field.state.value.name}</span>
+                  ) : null}
+                </div>
+              </>
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+    </FormDrawer>
   )
 }
 
@@ -435,6 +442,12 @@ function Payments({ state, view }: { state: Known; view: PlanView }) {
   )
 }
 
+const askSchema = z.object({
+  kind: z.enum(["pregunta", "problema", "cobro"]),
+  question: z.string().trim().min(1, "Escribe tu pregunta").max(500, "Máximo 500 caracteres"),
+  detail: z.string().max(4000, "Máximo 4000 caracteres"),
+})
+
 /**
  * Pedir ayuda al equipo de gestorIA sobre el plan o un cobro, y ver las respuestas de la tienda.
  * Lo de cada tarea está en la Ayuda, que también tiene «Pedir ayuda» para todo el equipo.
@@ -442,29 +455,24 @@ function Payments({ state, view }: { state: Known; view: PlanView }) {
 function Support({ view }: { view: PlanView }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
-  const [kind, setKind] = useState<SupportKind>("pregunta")
-  const [question, setQuestion] = useState("")
-  const [detail, setDetail] = useState("")
-  const kindId = useId()
-  const detailId = useId()
-  const ask = useMutation({
-    mutationFn: () =>
-      api(`/api/tiendas/${store.id}/plan/ayuda`, {
+  const form = useAppForm({
+    defaultValues: { kind: "pregunta" as SupportKind, question: "", detail: "" },
+    validators: { onSubmit: askSchema },
+    onSubmit: async ({ value, formApi }) => {
+      await api(`/api/tiendas/${store.id}/plan/ayuda`, {
         method: "POST",
-        body: { kind, question, detail: detail.trim() || undefined },
-      }),
-    onSuccess: async () => {
-      setQuestion("")
-      setDetail("")
+        body: {
+          kind: value.kind,
+          question: value.question.trim(),
+          detail: value.detail.trim() || undefined,
+        },
+      })
+      formApi.reset({ kind: value.kind, question: "", detail: "" })
       await queryClient.invalidateQueries({ queryKey: PLAN_KEY(store.id) })
       toast.success("Tu pregunta quedó anotada. Te respondemos aquí.")
     },
   })
-  const errors = fieldErrors(ask.error)
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    ask.mutate()
-  }
+  const surface = useFormSurface(form)
   const cases = view.state?.found ? view.state.support : []
   return (
     <section
@@ -482,44 +490,47 @@ function Support({ view }: { view: PlanView }) {
         </p>
       </div>
       {view.connected ? (
-        <form onSubmit={submit} className="flex flex-col gap-4">
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={kindId}>Sobre qué</FieldLabel>
-              <select
-                id={kindId}
-                value={kind}
-                onChange={(e) => setKind(e.target.value as SupportKind)}
-                className={SELECT_CLASSES}
-              >
-                {Object.entries(SUPPORT_KIND_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <TextField
-              label="Tu pregunta"
-              value={question}
-              onChange={setQuestion}
-              maxLength={500}
-              error={errors.question}
-              placeholder="Por ejemplo, ¿cómo subo el tope de gasto?"
-            />
-            <Field>
-              <FieldLabel htmlFor={detailId}>Detalle (opcional)</FieldLabel>
-              <Textarea
-                id={detailId}
-                value={detail}
-                maxLength={4000}
-                rows={3}
-                onChange={(e) => setDetail(e.target.value)}
+        <form noValidate onSubmit={surface.onSubmit} className="flex flex-col gap-4">
+          <form.AppField name="kind">
+            {(field) => (
+              <field.Group legend="Sobre qué">
+                {(control) => (
+                  <RadioChips
+                    id={control.id}
+                    value={field.state.value}
+                    options={Object.entries(SUPPORT_KIND_LABELS).map(([value, label]) => ({
+                      value: value as SupportKind,
+                      label,
+                    }))}
+                    onChange={(next) => field.handleChange(next)}
+                    onBlur={control.onBlur}
+                    aria-label="Sobre qué"
+                    aria-describedby={control.describedBy}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          <form.AppField name="question">
+            {(field) => (
+              <field.TextField
+                label="Tu pregunta"
+                maxLength={500}
+                placeholder="Por ejemplo, ¿cómo subo el tope de gasto?"
               />
-            </Field>
-          </FieldGroup>
-          <FormAlert error={ask.error} />
-          <SubmitButton type="submit" pending={ask.isPending} className="self-start">
+            )}
+          </form.AppField>
+          <form.AppField name="detail">
+            {(field) => (
+              <field.TextareaField label="Detalle (opcional)" maxLength={4000} rows={3} />
+            )}
+          </form.AppField>
+          {surface.error ? (
+            <p role="alert" className="text-sm text-danger">
+              {surface.error}
+            </p>
+          ) : null}
+          <SubmitButton type="submit" pending={surface.isSubmitting} className="self-start">
             Enviar
           </SubmitButton>
         </form>

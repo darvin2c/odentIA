@@ -7,7 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@odentia/ui"
-import { EmptyState } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import {
@@ -36,7 +36,7 @@ import {
 } from "./lib/despachos"
 import { dayName, nextDay, storeToday } from "./lib/pedidos"
 import { money } from "./lib/tienda"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * Despachos (entrega 3 del lienzo «gestorIA como odentIA», tablero 6): qué sale, cuándo y quién lo
@@ -165,7 +165,7 @@ export function DispatchPage() {
 
       {board.isPending ? <p className="text-sm text-muted-foreground">Cargando entregas…</p> : null}
       {board.isError ? (
-        <ErrorBlock error={board.error} onRetry={() => void board.refetch()} />
+        <ErrorState error={board.error} onRetry={() => void board.refetch()} />
       ) : null}
       {board.data && deliveries.length === 0 ? (
         <EmptyState

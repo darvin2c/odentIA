@@ -2,20 +2,35 @@ import {
   Button,
   Field,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
-  RadioGroup,
-  RadioGroupItem,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   toast,
 } from "@odentia/ui"
-import { Textarea } from "@odentia/ui/components/textarea"
-import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
+import {
+  DatePickerButton,
+  FormDrawer,
+  FormFieldGroup,
+  RadioChips,
+  SubmitButton,
+  useAppForm,
+  useFieldContext,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Plus, Trash2 } from "lucide-react"
-import { useId, useState } from "react"
+import { useCallback, useId, useSyncExternalStore } from "react"
+import { z } from "zod"
+import { MoneyInput } from "./campos"
 import { api } from "./lib/api"
 import { CASH_KEY } from "./lib/caja"
 import { type Courier, DISPATCH_KEY, noticeLink, noticeText, type Slot } from "./lib/despachos"
@@ -37,15 +52,7 @@ import {
   type PaymentMethod,
   readMoney,
 } from "./lib/tienda"
-import {
-  DateField,
-  fieldErrors,
-  MoneyField,
-  ReceiptImage,
-  SelectField,
-  shrinkPhoto,
-  TextField,
-} from "./piezas"
+import { ReceiptImage, shrinkPhoto } from "./piezas"
 import { useStoreContext } from "./tiendas"
 
 /**
@@ -53,6 +60,10 @@ import { useStoreContext } from "./tiendas"
  * 24), igual desde Despachos y desde el pedido: «Salió», «Entregado», «No se entregó», «Pasar a…»,
  * «Cambiar repartidor», el envío por agencia y «Avisar». Cada uno es la operación del pedido en el
  * servidor; aquí solo se elige y se dice lo que pasa.
+ *
+ * Cada paso es un formulario común (`FormDrawer` con `useAppForm`): en una ventana ancha se abre en
+ * la columna lateral, con la lista a la vista; lo que el servidor rechaza se dice en su campo.
+ * «Cambiar repartidor» reasigna: va siempre en cajón, para decidir antes de seguir.
  *
  * «Pasar a…» es la única forma de mover una entrega: sin arrastrar, con teclado y en el celular.
  */
@@ -101,6 +112,8 @@ export function useDeliveryOptions() {
     payments: query.data?.payments ?? [],
     slots: query.data?.slots ?? [],
     couriers: query.data?.couriers ?? [],
+    /** Todavía no llegan: el formulario espera para empezar con lo que ya tiene la entrega. */
+    isPending: query.isPending,
   }
 }
 
@@ -183,7 +196,79 @@ export function DeliveryStepDialog({
 
 /* ------------------------------------------------------------------------------- piezas */
 
-/** Hoy, mañana u otro día (desde hoy, el de la tienda). */
+/**
+ * Lo escrito en un formulario de `useAppForm`, al día: para lo que se dice mientras se llena (la
+ * suma de lo cobrado, el botón «Pasar a mañana») y lo que aparece según lo elegido.
+ */
+export function useFormValues<T>(form: {
+  store: {
+    readonly state: { values: T }
+    subscribe: (listener: () => void) => { unsubscribe: () => void }
+  }
+}): T {
+  const { store } = form
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const subscription = store.subscribe(listener)
+      return () => subscription.unsubscribe()
+    },
+    [store],
+  )
+  return useSyncExternalStore(subscribe, () => store.state.values)
+}
+
+/** «Hoy», «Mañana» y el calendario para otro día (desde hoy, el de la tienda). */
+function DayButtons({
+  today,
+  value,
+  onChange,
+  invalid,
+  describedBy,
+}: {
+  today: string
+  value: string
+  onChange: (day: string) => void
+  invalid?: boolean
+  describedBy?: string
+}) {
+  const tomorrow = nextDay(today)
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant={value === today ? "default" : "outline"}
+        aria-pressed={value === today}
+        onClick={() => onChange(today)}
+      >
+        Hoy
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant={value === tomorrow ? "default" : "outline"}
+        aria-pressed={value === tomorrow}
+        onClick={() => onChange(tomorrow)}
+      >
+        Mañana
+      </Button>
+      <DatePickerButton
+        value={value}
+        onChange={onChange}
+        min={today}
+        aria-label="Otro día"
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        className="min-w-44"
+      />
+    </div>
+  )
+}
+
+/**
+ * Hoy, mañana u otro día, fuera de un formulario de `useAppForm` (lo usa «Cambio o devolución»):
+ * con su nombre y su error.
+ */
 export function DayChoice({
   today,
   value,
@@ -197,81 +282,87 @@ export function DayChoice({
   error?: string
   label?: string
 }) {
-  const tomorrow = nextDay(today)
+  const id = useId()
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={value === today ? "default" : "outline"}
-          aria-pressed={value === today}
-          onClick={() => onChange(today)}
-        >
-          Hoy
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={value === tomorrow ? "default" : "outline"}
-          aria-pressed={value === tomorrow}
-          onClick={() => onChange(tomorrow)}
-        >
-          Mañana
-        </Button>
-      </div>
-      <DateField label={label} value={value} onChange={onChange} min={today} error={error} />
-    </div>
+    <FieldSet
+      data-invalid={error ? true : undefined}
+      aria-describedby={error ? `${id}-error` : undefined}
+    >
+      <FieldLegend variant="label">{label}</FieldLegend>
+      <DayButtons
+        today={today}
+        value={value}
+        onChange={onChange}
+        invalid={Boolean(error)}
+        describedBy={error ? `${id}-error` : undefined}
+      />
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+    </FieldSet>
+  )
+}
+
+/**
+ * Hoy, mañana u otro día dentro de un formulario: va dentro de `form.AppField`, que le da el dato,
+ * y dice su error debajo del grupo.
+ */
+export function DayField({ today, legend = "Día de entrega" }: { today: string; legend?: string }) {
+  const field = useFieldContext<string>()
+  return (
+    <FormFieldGroup legend={legend}>
+      {(control) => (
+        <DayButtons
+          today={today}
+          value={field.state.value}
+          onChange={(day) => field.handleChange(day)}
+          invalid={control.invalid}
+          describedBy={control.describedBy}
+        />
+      )}
+    </FormFieldGroup>
   )
 }
 
 const slotKey = (slot: Pick<Slot, "start" | "end"> | null) =>
   slot ? `${slot.start}-${slot.end}` : ""
 
-/** La franja: una de las de la tienda o «Sin franja». Sin franjas configuradas, no se muestra. */
-function SlotChoice({
-  slots,
-  value,
-  onChange,
-  error,
-}: {
-  slots: Slot[]
-  value: Slot | null
-  onChange: (slot: Slot | null) => void
-  error?: string
-}) {
-  // La que ya tiene, aunque la tienda la haya quitado, sigue como opción.
-  const options =
-    value && !slots.some((s) => slotKey(s) === slotKey(value)) ? [...slots, value] : slots
+/** «Sin franja» en el formulario. */
+const NO_SLOT = "sin"
+
+/** Las franjas para elegir: las de la tienda y la que ya tiene, aunque la tienda la haya quitado. */
+function slotOptions(slots: Slot[], current: Slot | null): Slot[] {
+  return current && !slots.some((s) => slotKey(s) === slotKey(current))
+    ? [...slots, current]
+    : slots
+}
+
+function slotOf(key: string, options: Slot[]): Slot | null {
+  return key === NO_SLOT ? null : (options.find((s) => slotKey(s) === key) ?? null)
+}
+
+/**
+ * La franja: una de las de la tienda o «Sin franja», en pastillas. Sin franjas configuradas, no se
+ * muestra. Va dentro de `form.AppField`.
+ */
+function SlotField({ options }: { options: Slot[] }) {
+  const field = useFieldContext<string>()
   if (options.length === 0) return null
   return (
-    <FieldSet>
-      <FieldLegend variant="label">Franja</FieldLegend>
-      <div className="flex flex-wrap gap-2">
-        {options.map((slot) => (
-          <Button
-            key={slotKey(slot)}
-            type="button"
-            size="sm"
-            variant={slotKey(slot) === slotKey(value) ? "default" : "outline"}
-            aria-pressed={slotKey(slot) === slotKey(value)}
-            onClick={() => onChange(slot)}
-          >
-            {slot.label}
-          </Button>
-        ))}
-        <Button
-          type="button"
-          size="sm"
-          variant={value === null ? "default" : "outline"}
-          aria-pressed={value === null}
-          onClick={() => onChange(null)}
-        >
-          Sin franja
-        </Button>
-      </div>
-      {error ? <p className="text-sm text-danger">{error}</p> : null}
-    </FieldSet>
+    <FormFieldGroup legend="Franja">
+      {(control) => (
+        <RadioChips
+          aria-label="Franja"
+          aria-describedby={control.describedBy}
+          invalid={control.invalid}
+          onBlur={control.onBlur}
+          value={field.state.value}
+          onChange={(key) => field.handleChange(key)}
+          options={[
+            ...options.map((slot) => ({ value: slotKey(slot), label: slot.label })),
+            { value: NO_SLOT, label: "Sin franja" },
+          ]}
+        />
+      )}
+    </FormFieldGroup>
   )
 }
 
@@ -287,74 +378,126 @@ function pickOf(value: string, name: string): CourierPick {
   return { userId: value.slice(2) }
 }
 
-/** El repartidor: una persona del equipo, uno externo que ya se usó, otro escrito o ninguno. */
-function useCourierChoice(target: Pick<DeliveryTarget, "courierId">, couriers: Courier[]) {
+/** Quién lo lleva ahora, como opción de la lista. */
+function courierInitial(target: Pick<DeliveryTarget, "courierId">, couriers: Courier[]): string {
   const own = couriers.find((c) => c.id !== null && c.id === target.courierId)
-  const initial = target.courierId
+  return target.courierId
     ? own
       ? own.team
         ? `u:${own.userId}`
         : `c:${own.id}`
       : `c:${target.courierId}`
     : ""
-  const [value, setValue] = useState(initial)
-  const [name, setName] = useState("")
-  return {
-    value,
-    setValue,
-    name,
-    setName,
-    changed: value !== initial || value === NEW,
-    pick: pickOf(value, name),
-    ready: value !== NEW || name.trim().length > 0,
-  }
 }
 
-function CourierField({
-  couriers,
-  current,
-  choice,
-  error,
-}: {
-  couriers: Courier[]
-  /** Quien lo lleva ahora, si ya no está en la lista (dejó de ser del equipo). */
-  current: { id: string | null; name: string | null }
-  choice: ReturnType<typeof useCourierChoice>
-  error?: string
-}) {
-  const listed = couriers.some((c) => c.id === current.id)
-  const options = [
+/** Una persona del equipo, uno externo que ya se usó, quien lo lleva ahora, otro escrito o ninguno. */
+function courierOptions(
+  couriers: Courier[],
+  current: Pick<DeliveryTarget, "courierId" | "courierName">,
+) {
+  const listed = couriers.some((c) => c.id === current.courierId)
+  return [
     { value: "", label: "Sin repartidor" },
     ...couriers.map((c) => ({
       value: c.team ? `u:${c.userId}` : `c:${c.id}`,
       label: c.team ? `${c.name} (del equipo)` : c.name,
     })),
-    ...(current.id && !listed
-      ? [{ value: `c:${current.id}`, label: current.name ?? "Quien lo lleva" }]
+    ...(current.courierId && !listed
+      ? [{ value: `c:${current.courierId}`, label: current.courierName ?? "Quien lo lleva" }]
       : []),
     { value: NEW, label: "Otro: escribe el nombre" },
   ]
+}
+
+const COURIER_NAME_HELP =
+  "Queda para la próxima vez. Cuando entre con su propia app, sus entregas siguen con su nombre."
+
+/** El repartidor en el formulario: lo elegido en la lista y, con «Otro», el nombre escrito. */
+interface CourierValue {
+  choice: string
+  name: string
+}
+
+/** «Otro: escribe el nombre» sin nombre. */
+function checkCourier(courier: CourierValue, ctx: z.RefinementCtx) {
+  if (courier.choice === NEW && courier.name.trim() === "")
+    ctx.addIssue({
+      code: "custom",
+      path: ["courier"],
+      message: "Escribe el nombre de quien lo lleva",
+    })
+}
+
+const courierShape = z.object({ choice: z.string(), name: z.string() })
+
+/** Lo que se le manda al servidor, solo si cambió quién lo lleva. */
+function courierBody(courier: CourierValue, initial: string) {
+  const changed = courier.choice !== initial || courier.choice === NEW
+  return changed ? { courier: pickOf(courier.choice, courier.name) } : {}
+}
+
+/**
+ * El repartidor y, con «Otro», su nombre: un solo dato del formulario (va dentro de
+ * `form.AppField`), con su error debajo de los dos.
+ */
+function CourierField({
+  couriers,
+  target,
+}: {
+  couriers: Courier[]
+  target: Pick<DeliveryTarget, "courierId" | "courierName">
+}) {
+  const field = useFieldContext<CourierValue>()
+  const value = field.state.value
+  const options = courierOptions(couriers, target)
+  const nameId = useId()
   return (
-    <FieldGroup className="gap-3">
-      <SelectField
-        label="Repartidor"
-        value={choice.value}
-        onChange={choice.setValue}
-        options={options}
-        error={choice.value === NEW ? undefined : error}
-      />
-      {choice.value === NEW ? (
-        <TextField
-          label="Nombre de quien lo lleva"
-          value={choice.name}
-          onChange={choice.setName}
-          maxLength={80}
-          error={error}
-          help="Queda para la próxima vez. Cuando entre con su propia app, sus entregas siguen con su nombre."
-          autoFocus
-        />
-      ) : null}
-    </FieldGroup>
+    <FormFieldGroup legend="Repartidor">
+      {(control) => (
+        <div className="flex flex-col gap-3">
+          <Select
+            items={Object.fromEntries(options.map((option) => [option.value, option.label]))}
+            value={value.choice}
+            onValueChange={(next) =>
+              field.handleChange({ ...value, choice: next == null ? "" : String(next) })
+            }
+          >
+            <SelectTrigger
+              aria-label="Repartidor"
+              aria-invalid={(control.invalid && value.choice !== NEW) || undefined}
+              aria-describedby={control.describedBy}
+              className="w-full"
+            >
+              <SelectValue placeholder="Sin repartidor" />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value} data-value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {value.choice === NEW ? (
+            <Field data-invalid={control.invalid || undefined}>
+              <FieldLabel htmlFor={nameId}>Nombre de quien lo lleva</FieldLabel>
+              <Input
+                id={nameId}
+                value={value.name}
+                maxLength={80}
+                autoFocus
+                aria-invalid={control.invalid || undefined}
+                aria-describedby={[`${nameId}-ayuda`, control.describedBy]
+                  .filter(Boolean)
+                  .join(" ")}
+                onChange={(event) => field.handleChange({ ...value, name: event.target.value })}
+              />
+              <FieldDescription id={`${nameId}-ayuda`}>{COURIER_NAME_HELP}</FieldDescription>
+            </Field>
+          ) : null}
+        </div>
+      )}
+    </FormFieldGroup>
   )
 }
 
@@ -372,16 +515,45 @@ function ShipDialog({
 }) {
   const parcel = target.deliveryType === "ParcelService"
   const known = target.agency && AGENCIES.includes(target.agency as (typeof AGENCIES)[number])
-  const [agency, setAgency] = useState(target.agency ? (known ? target.agency : NEW) : "")
-  const [otherAgency, setOtherAgency] = useState(known ? "" : (target.agency ?? ""))
-  const [tracking, setTracking] = useState(target.tracking ?? "")
   const action = useDeliveryAction(target.id, onClose)
-  const errors = fieldErrors(action.error)
-  const chosenAgency = agency === NEW ? otherAgency.trim() : agency
+  const chosenAgency = (value: { agency: string; otherAgency: string }) =>
+    value.agency === NEW ? value.otherAgency.trim() : value.agency
+  const form = useAppForm({
+    defaultValues: {
+      agency: target.agency ? (known ? target.agency : NEW) : "",
+      otherAgency: known ? "" : (target.agency ?? ""),
+      tracking: target.tracking ?? "",
+    },
+    validators: {
+      onSubmit: z
+        .object({ agency: z.string(), otherAgency: z.string(), tracking: z.string() })
+        .superRefine((value, ctx) => {
+          // Después, se anota al menos una de las dos cosas.
+          if (later && !chosenAgency(value) && !value.tracking.trim())
+            ctx.addIssue({
+              code: "custom",
+              path: ["tracking"],
+              message: "Anota la agencia o el número de envío",
+            })
+        }),
+    },
+    onSubmit: async ({ value }) => {
+      await action.mutateAsync({
+        path: later ? "envio" : "salio",
+        body: { agency: parcel ? chosenAgency(value) : "", tracking: value.tracking },
+        done: later ? "Envío anotado" : "En camino",
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: (key) =>
+      key === "agency" && form.state.values.agency === NEW ? "otherAgency" : undefined,
+  })
+  const otherAgency = useFormValues(form).agency === NEW
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
       open
-      variant="default"
       title={later ? `Envío por agencia · ${target.number}` : `El pedido ${target.number} salió`}
       description={
         later
@@ -390,56 +562,43 @@ function ShipDialog({
             ? "Pasa a «En camino». Anota con qué agencia va; el número de envío lo puedes anotar después."
             : "Pasa a «En camino». Si tiene número de envío, anótalo."
       }
-      confirmLabel={later ? "Guardar" : "Salió"}
+      submitLabel={later ? "Guardar" : "Salió"}
       cancelLabel="Volver"
-      pending={action.isPending}
-      confirmDisabled={later && !chosenAgency && !tracking.trim()}
-      error={action.isError && !errors.agency && !errors.tracking ? action.error.message : null}
-      onConfirm={() =>
-        action.mutate({
-          path: later ? "envio" : "salio",
-          body: { agency: parcel ? chosenAgency : "", tracking },
-          done: later ? "Envío anotado" : "En camino",
-        })
-      }
       onClose={onClose}
     >
       <FieldGroup className="gap-3">
         {parcel ? (
           <>
-            <SelectField
-              label="Agencia"
-              value={agency}
-              onChange={setAgency}
-              options={[
-                { value: "", label: "Elige la agencia" },
-                ...AGENCIES.map((a) => ({ value: a, label: a })),
-                { value: NEW, label: "Otra: escribe cuál" },
-              ]}
-              error={agency === NEW ? undefined : errors.agency}
-            />
-            {agency === NEW ? (
-              <TextField
-                label="¿Cuál agencia?"
-                value={otherAgency}
-                onChange={setOtherAgency}
-                maxLength={60}
-                error={errors.agency}
-                autoFocus
-              />
+            <form.AppField name="agency">
+              {(field) => (
+                <field.SelectField
+                  label="Agencia"
+                  options={[
+                    { value: "", label: "Elige la agencia" },
+                    ...AGENCIES.map((a) => ({ value: a, label: a })),
+                    { value: NEW, label: "Otra: escribe cuál" },
+                  ]}
+                />
+              )}
+            </form.AppField>
+            {otherAgency ? (
+              <form.AppField name="otherAgency">
+                {(field) => <field.TextField label="¿Cuál agencia?" maxLength={60} autoFocus />}
+              </form.AppField>
             ) : null}
           </>
         ) : null}
-        <TextField
-          label={later ? "Número de envío" : "Número de envío (opcional)"}
-          value={tracking}
-          onChange={setTracking}
-          maxLength={80}
-          error={errors.tracking}
-          help={parcel ? "El código de seguimiento que te da la agencia." : undefined}
-        />
+        <form.AppField name="tracking">
+          {(field) => (
+            <field.TextField
+              label={later ? "Número de envío" : "Número de envío (opcional)"}
+              maxLength={80}
+              description={parcel ? "El código de seguimiento que te da la agencia." : undefined}
+            />
+          )}
+        </form.AppField>
       </FieldGroup>
-    </ConfirmDialog>
+    </FormDrawer>
   )
 }
 
@@ -452,48 +611,74 @@ interface DoorLine {
 /**
  * «Entregado». Sin pago confirmado no se entrega (tablero 24): si falta cobrar, se anota aquí lo
  * cobrado, con cada medio, y tiene que ser todo lo que falta; un pago por confirmar se confirma
- * antes, en el pedido.
+ * antes, en este mismo paso.
  */
 function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
   const { store } = useStoreContext()
   const cur = store.currency
   const due = target.balance.dueCents
   const pending = target.balance.pendingCents
-  const methods = useDeliveryOptions().payments.filter(
+  const options = useDeliveryOptions()
+  const methods = options.payments.filter(
     (m) => m.collection === "al_recibir" && (m.isActive || m.name === target.paymentName),
   )
   const first = (methods.find((m) => m.name === target.paymentName) ?? methods[0])?.id ?? ""
-  const [lines, setLines] = useState<DoorLine[]>([
-    { key: 0, methodId: "", amount: moneyInput(due, cur) },
-  ])
-  const [voucher, setVoucher] = useState<File | null>(null)
   const action = useDeliveryAction(target.id, onClose)
-  const errors = fieldErrors(action.error)
-  const filled = lines.map((line) => ({
-    methodId: line.methodId || first,
-    amountCents: readMoney(line.amount, cur) ?? 0,
-  }))
-  const sum = filled.reduce((total, line) => total + line.amountCents, 0)
-  const card = filled.some((line) => methods.find((m) => m.id === line.methodId)?.typeCode === "48")
   const charge = due > 0
-  const id = useId()
-  const update = (key: number, patch: Partial<DoorLine>) =>
-    setLines((all) => all.map((line) => (line.key === key ? { ...line, ...patch } : line)))
-
-  const submit = async () => {
-    const body = charge ? { payments: filled } : {}
-    if (charge && voucher) {
-      const form = new FormData()
-      form.set("datos", JSON.stringify(body))
-      form.set("voucher", await shrinkPhoto(voucher))
-      action.mutate({ path: "entregado", form, done: "Entregado" })
-    } else action.mutate({ path: "entregado", body, done: "Entregado" })
-  }
+  const filledOf = (lines: DoorLine[]) =>
+    lines.map((line) => ({
+      methodId: line.methodId || first,
+      amountCents: readMoney(line.amount, cur) ?? 0,
+    }))
+  const sumOf = (lines: DoorLine[]) =>
+    filledOf(lines).reduce((total, line) => total + line.amountCents, 0)
+  const form = useAppForm({
+    // El medio de siempre llega con los medios de la tienda: sin tocar nada, el formulario lo toma.
+    defaultValues: {
+      lines: [{ key: 0, methodId: first, amount: moneyInput(due, cur) }] as DoorLine[],
+      voucher: null as File | null,
+    },
+    validators: {
+      onSubmit: z
+        .object({
+          lines: z.array(z.object({ key: z.number(), methodId: z.string(), amount: z.string() })),
+          voucher: z.custom<File | null>(),
+        })
+        .superRefine((value, ctx) => {
+          // Sin todo el pago no se entrega: lo anotado es justo lo que falta, sin el vuelto.
+          if (charge && sumOf(value.lines) !== due)
+            ctx.addIssue({
+              code: "custom",
+              path: ["lines", value.lines.length - 1, "amount"],
+              message: `Lo cobrado tiene que sumar ${money(due, cur)}.`,
+            })
+        }),
+    },
+    onSubmit: async ({ value }) => {
+      const body = charge ? { payments: filledOf(value.lines) } : {}
+      if (charge && value.voucher) {
+        const data = new FormData()
+        data.set("datos", JSON.stringify(body))
+        data.set("voucher", await shrinkPhoto(value.voucher))
+        await action.mutateAsync({ path: "entregado", form: data, done: "Entregado" })
+      } else await action.mutateAsync({ path: "entregado", body, done: "Entregado" })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: (key) =>
+      key === "collectedCents" ? `lines[${form.state.values.lines.length - 1}].amount` : undefined,
+  })
+  const lines = useFormValues(form).lines
+  const sum = sumOf(lines)
+  const card = filledOf(lines).some(
+    (line) => methods.find((m) => m.id === line.methodId)?.typeCode === "48",
+  )
 
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
       open
-      variant="default"
+      isLoading={charge && options.isPending}
       title={
         pending > 0
           ? `Antes de entregar · ${target.number}`
@@ -510,75 +695,87 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
               : `Anota lo que cobraste y con qué: queda a nombre de quien lo llevó.`
             : "Pasa a «Entregado»."
       }
-      confirmLabel={charge ? `Cobré ${money(sum, cur)} y entregué` : "Entregado"}
+      submitLabel={charge ? `Cobré ${money(sum, cur)} y entregué` : "Entregado"}
       cancelLabel="Volver"
-      pending={action.isPending}
-      confirmDisabled={pending > 0 || (charge && (sum !== due || methods.length === 0))}
-      error={action.isError && !errors.collectedCents ? action.error.message : null}
-      onConfirm={() => void submit().catch((error: Error) => toast.error(error.message))}
+      // Con un pago por confirmar, o sin un medio para cobrar en la puerta, todavía no se entrega.
+      submitDisabled={pending > 0 || (charge && methods.length === 0)}
       onClose={onClose}
     >
       {pending > 0 ? (
         <PendingPayments target={target} />
       ) : charge ? (
         <FieldGroup className="gap-3">
-          {methods.length === 0 ? (
+          {methods.length === 0 && !options.isPending ? (
             <p className="text-sm text-warning">
               La tienda no tiene un medio para cobrar al recibir. Agrégalo en Configuración, en
               Medios de pago.
             </p>
           ) : null}
-          {lines.map((line, i) => (
-            <div key={line.key} className="flex items-end gap-2">
-              <SelectField
-                className="min-w-0 flex-1"
-                label={lines.length > 1 ? `Medio ${i + 1}` : "Medio"}
-                value={line.methodId || first}
-                onChange={(methodId) => update(line.key, { methodId })}
-                options={methods.map((m) => ({ value: m.id, label: m.name }))}
-              />
-              <MoneyField
-                className="w-32"
-                label="Cobraste"
-                currency={cur}
-                value={line.amount}
-                onChange={(amount) => update(line.key, { amount })}
-              />
-              {lines.length > 1 ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Quitar el medio ${i + 1}`}
-                  onClick={() => setLines((all) => all.filter((one) => one.key !== line.key))}
-                >
-                  <Trash2 aria-hidden />
-                </Button>
-              ) : null}
-            </div>
-          ))}
-          {lines.length < 3 && methods.length > 1 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-fit"
-              onClick={() =>
-                setLines((all) => [
-                  ...all,
-                  {
-                    key: Math.max(...all.map((one) => one.key)) + 1,
-                    methodId:
-                      methods.find((m) => !all.some((one) => (one.methodId || first) === m.id))
-                        ?.id ?? first,
-                    amount: moneyInput(Math.max(0, due - sum), cur),
-                  },
-                ])
-              }
-            >
-              <Plus aria-hidden />
-              Agregar otro medio
-            </Button>
-          ) : null}
+          <form.AppField name="lines" mode="array">
+            {(linesField) => (
+              <>
+                {linesField.state.value.map((line, i) => (
+                  <div key={line.key} className="flex items-start gap-2">
+                    <form.AppField name={`lines[${i}].methodId`}>
+                      {(field) => (
+                        <field.SelectField
+                          className="min-w-0 flex-1"
+                          label={linesField.state.value.length > 1 ? `Medio ${i + 1}` : "Medio"}
+                          options={methods.map((m) => ({ value: m.id, label: m.name }))}
+                        />
+                      )}
+                    </form.AppField>
+                    <form.AppField name={`lines[${i}].amount`}>
+                      {(field) => (
+                        <field.Control label="Cobraste" className="w-32">
+                          {(control) => (
+                            <MoneyInput
+                              control={control}
+                              currency={cur}
+                              value={field.state.value}
+                              onChange={field.handleChange}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                    {linesField.state.value.length > 1 ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="mt-6"
+                        aria-label={`Quitar el medio ${i + 1}`}
+                        onClick={() => linesField.removeValue(i)}
+                      >
+                        <Trash2 aria-hidden />
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+                {linesField.state.value.length < 3 && methods.length > 1 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-fit"
+                    onClick={() => {
+                      const all = linesField.state.value
+                      linesField.pushValue({
+                        key: Math.max(...all.map((one) => one.key)) + 1,
+                        methodId:
+                          methods.find((m) => !all.some((one) => (one.methodId || first) === m.id))
+                            ?.id ?? first,
+                        amount: moneyInput(Math.max(0, due - sumOf(all)), cur),
+                      })
+                    }}
+                  >
+                    <Plus aria-hidden />
+                    Agregar otro medio
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </form.AppField>
           <p
             className={`text-sm ${sum === due ? "text-muted-foreground" : "text-warning"}`}
             role={sum === due ? undefined : "status"}
@@ -588,20 +785,26 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
               : sum < due
                 ? `Faltan ${money(due - sum, cur)}: sin todo el pago no se entrega.`
                 : `Es ${money(sum - due, cur)} más de lo que falta: anota solo lo que debía, sin el vuelto.`}
-            {errors.collectedCents ? ` ${errors.collectedCents}` : ""}
           </p>
           {card ? (
-            <Field>
-              <FieldLabel htmlFor={`${id}-voucher`}>Foto del voucher del POS (opcional)</FieldLabel>
-              <input
-                id={`${id}-voucher`}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="text-sm"
-                onChange={(e) => setVoucher(e.target.files?.[0] ?? null)}
-              />
-              <FieldDescription>Queda en el pedido; la clienta no la ve.</FieldDescription>
-            </Field>
+            <form.AppField name="voucher">
+              {(field) => (
+                <field.Control
+                  label="Foto del voucher del POS (opcional)"
+                  description="Queda en el pedido; la clienta no la ve."
+                >
+                  {(control) => (
+                    <input
+                      {...control.props}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="text-sm"
+                      onChange={(e) => field.handleChange(e.target.files?.[0] ?? null)}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           ) : null}
           <p className="text-xs text-muted-foreground">
             ¿Pagó con Yape o Plin al número de la tienda? Anota su captura en el pedido y
@@ -609,14 +812,14 @@ function DeliverDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
           </p>
         </FieldGroup>
       ) : null}
-    </ConfirmDialog>
+    </FormDrawer>
   )
 }
 
 /**
  * El pago que espera a una persona, en el mismo paso de entregar (tableros 6 y 24: «¿ya te
- * pagó?»): la captura y «Ya me pagó: confirmar», la misma revisión del pedido. Confirmado, la
- * ventana sigue abierta y pasa a entregar (o a cobrar lo que falte). «No coincide» pide motivo y se
+ * pagó?»): la captura y «Ya me pagó: confirmar», la misma revisión del pedido. Confirmado, el
+ * paso sigue abierto y pasa a entregar (o a cobrar lo que falte). «No coincide» pide motivo y se
  * dice en el pedido.
  */
 function PendingPayments({ target }: { target: DeliveryTarget }) {
@@ -682,7 +885,11 @@ function PendingPayments({ target }: { target: DeliveryTarget }) {
           )}
         </div>
       ))}
-      {confirm.isError ? <p className="text-sm text-danger">{confirm.error.message}</p> : null}
+      {confirm.isError ? (
+        <p role="alert" className="text-sm text-danger">
+          {confirm.error.message}
+        </p>
+      ) : null}
       <Button
         variant="outline"
         className="self-start"
@@ -704,86 +911,103 @@ function PendingPayments({ target }: { target: DeliveryTarget }) {
 function MissedDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
   const { store } = useStoreContext()
   const today = storeToday(store.timeZone)
-  const { slots, couriers } = useDeliveryOptions()
-  const [choice, setChoice] = useState<string>(MISSED_REASONS[0])
-  const [other, setOther] = useState("")
-  const [day, setDay] = useState(nextDay(today))
-  const [slot, setSlot] = useState<Slot | null>(target.slot)
-  const courier = useCourierChoice(target, couriers)
+  const { slots, couriers, isPending } = useDeliveryOptions()
+  const options = slotOptions(slots, target.slot)
   const action = useDeliveryAction(target.id, onClose)
-  const errors = fieldErrors(action.error)
-  const reason = choice === "otro" ? other.trim() : choice
-  const id = useId()
+  const reasonOf = (value: { choice: string; other: string }) =>
+    value.choice === "otro" ? value.other.trim() : value.choice
+  const form = useAppForm({
+    // Quien lo lleva llega con los repartidores de la tienda: sin tocar nada, el formulario lo toma.
+    defaultValues: {
+      choice: MISSED_REASONS[0] as string,
+      other: "",
+      day: nextDay(today),
+      slot: slotKey(target.slot) || NO_SLOT,
+      courier: { choice: courierInitial(target, couriers), name: "" },
+    },
+    validators: {
+      onSubmit: z
+        .object({
+          choice: z.string(),
+          other: z.string(),
+          day: z.string(),
+          slot: z.string(),
+          courier: courierShape,
+        })
+        .superRefine((value, ctx) => {
+          if (reasonOf(value).length < 3)
+            ctx.addIssue({
+              code: "custom",
+              path: ["other"],
+              message: "Escribe el motivo, con al menos 3 letras",
+            })
+          checkCourier(value.courier, ctx)
+        }),
+    },
+    onSubmit: async ({ value }) => {
+      const slot = slotOf(value.slot, options)
+      await action.mutateAsync({
+        path: "no-se-entrego",
+        body: {
+          reason: reasonOf(value),
+          deliverOn: value.day,
+          slot: slot ? { start: slot.start, end: slot.end } : null,
+          ...courierBody(value.courier, courierInitial(target, couriers)),
+        },
+        done: `Vuelve a salir ${dayName(value.day, today)}`,
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => ({ reason: "other", deliverOn: "day" })[key],
+  })
+  const values = useFormValues(form)
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
       open
-      variant="default"
+      isLoading={isPending}
       title={`No se entregó · ${target.number} ${target.customerName}`}
       description="Vuelve a «Por salir» ese día. El stock no se mueve y nada se anula."
-      confirmLabel="Guardar"
+      submitLabel="Guardar"
       cancelLabel="Volver"
-      pending={action.isPending}
-      confirmDisabled={reason.length < 3 || !day || !courier.ready}
-      error={action.isError && !errors.deliverOn && !errors.courier ? action.error.message : null}
-      onConfirm={() =>
-        action.mutate({
-          path: "no-se-entrego",
-          body: {
-            reason,
-            deliverOn: day,
-            slot: slot ? { start: slot.start, end: slot.end } : null,
-            ...(courier.changed ? { courier: courier.pick } : {}),
-          },
-          done: `Vuelve a salir ${dayName(day, today)}`,
-        })
-      }
       onClose={onClose}
     >
       <FieldGroup>
-        <FieldSet>
-          <FieldLegend variant="label">¿Qué pasó?</FieldLegend>
-          <RadioGroup
-            aria-label="¿Qué pasó?"
-            value={choice}
-            onValueChange={(value) => setChoice(String(value))}
-          >
-            {/* El id va con el número: un motivo con espacios no sirve de id. */}
-            {[...MISSED_REASONS, "otro"].map((option, i) => (
-              <Field key={option} orientation="horizontal">
-                <RadioGroupItem id={`${id}-motivo-${i}`} value={option} />
-                <FieldLabel htmlFor={`${id}-motivo-${i}`} className="font-normal">
-                  {option === "otro" ? "Otro motivo" : option}
-                </FieldLabel>
-              </Field>
-            ))}
-          </RadioGroup>
-          {choice === "otro" ? (
-            <TextField
-              label="Escribe el motivo"
-              value={other}
-              onChange={setOther}
-              maxLength={300}
-              error={errors.reason}
-              autoFocus
-            />
-          ) : null}
-        </FieldSet>
-        <DayChoice
-          today={today}
-          value={day}
-          onChange={setDay}
-          label="¿Cuándo va?"
-          error={errors.deliverOn}
-        />
-        <SlotChoice slots={slots} value={slot} onChange={setSlot} error={errors.slot} />
-        <CourierField
-          couriers={couriers}
-          current={{ id: target.courierId, name: target.courierName }}
-          choice={courier}
-          error={errors.courier}
-        />
+        <form.AppField name="choice">
+          {(field) => (
+            <field.Group legend="¿Qué pasó?">
+              {(control) => (
+                <RadioChips
+                  aria-label="¿Qué pasó?"
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  onChange={(choice) => field.handleChange(choice)}
+                  options={[
+                    ...MISSED_REASONS.map((reason) => ({ value: reason, label: reason })),
+                    { value: "otro", label: "Otro motivo" },
+                  ]}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        {values.choice === "otro" ? (
+          <form.AppField name="other">
+            {(field) => <field.TextField label="Escribe el motivo" maxLength={300} autoFocus />}
+          </form.AppField>
+        ) : null}
+        <form.AppField name="day">
+          {() => <DayField today={today} legend="¿Cuándo va?" />}
+        </form.AppField>
+        <form.AppField name="slot">{() => <SlotField options={options} />}</form.AppField>
+        <form.AppField name="courier">
+          {() => <CourierField couriers={couriers} target={target} />}
+        </form.AppField>
       </FieldGroup>
-    </ConfirmDialog>
+    </FormDrawer>
   )
 }
 
@@ -797,97 +1021,108 @@ function moveLabel(day: string, today: string): string {
 function MoveDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
   const { store } = useStoreContext()
   const today = storeToday(store.timeZone)
-  const { slots, couriers } = useDeliveryOptions()
-  const [day, setDay] = useState(
-    target.deliverOn && target.deliverOn >= today ? target.deliverOn : today,
-  )
-  const [slot, setSlot] = useState<Slot | null>(target.slot)
-  const courier = useCourierChoice(target, couriers)
+  const { slots, couriers, isPending } = useDeliveryOptions()
+  const options = slotOptions(slots, target.slot)
   const action = useDeliveryAction(target.id, onClose)
-  const errors = fieldErrors(action.error)
+  const form = useAppForm({
+    defaultValues: {
+      day: target.deliverOn && target.deliverOn >= today ? target.deliverOn : today,
+      slot: slotKey(target.slot) || NO_SLOT,
+      courier: { choice: courierInitial(target, couriers), name: "" },
+    },
+    validators: {
+      onSubmit: z
+        .object({ day: z.string(), slot: z.string(), courier: courierShape })
+        .superRefine((value, ctx) => checkCourier(value.courier, ctx)),
+    },
+    onSubmit: async ({ value }) => {
+      const slot = slotOf(value.slot, options)
+      await action.mutateAsync({
+        path: "pasar-a",
+        body: {
+          deliverOn: value.day,
+          slot: slot ? { start: slot.start, end: slot.end } : null,
+          ...courierBody(value.courier, courierInitial(target, couriers)),
+        },
+        done: `Sale ${dayName(value.day, today)}`,
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => (key === "deliverOn" ? "day" : undefined),
+  })
+  const values = useFormValues(form)
+  const slot = slotOf(values.slot, options)
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
       open
-      variant="default"
+      isLoading={isPending}
       title={`Pasar a… · ${target.number} ${target.customerName}`}
       description={
         target.deliverOn
           ? `Ahora sale ${dayName(target.deliverOn, today)}${target.slot ? `, ${target.slot.label}` : ""}. Elige cuándo va: nada se anula.`
           : "Elige cuándo sale: nada se anula."
       }
-      confirmLabel={`${moveLabel(day, today)}${slot ? `, ${slot.label}` : ""}`}
+      submitLabel={`${moveLabel(values.day, today)}${slot ? `, ${slot.label}` : ""}`}
       cancelLabel="Volver"
-      pending={action.isPending}
-      confirmDisabled={!day || !courier.ready}
-      error={
-        action.isError && !errors.deliverOn && !errors.slot && !errors.courier
-          ? action.error.message
-          : null
-      }
-      onConfirm={() =>
-        action.mutate({
-          path: "pasar-a",
-          body: {
-            deliverOn: day,
-            slot: slot ? { start: slot.start, end: slot.end } : null,
-            ...(courier.changed ? { courier: courier.pick } : {}),
-          },
-          done: `Sale ${dayName(day, today)}`,
-        })
-      }
       onClose={onClose}
     >
       <FieldGroup>
-        <DayChoice today={today} value={day} onChange={setDay} error={errors.deliverOn} />
-        <SlotChoice slots={slots} value={slot} onChange={setSlot} error={errors.slot} />
-        <CourierField
-          couriers={couriers}
-          current={{ id: target.courierId, name: target.courierName }}
-          choice={courier}
-          error={errors.courier}
-        />
+        <form.AppField name="day">{() => <DayField today={today} />}</form.AppField>
+        <form.AppField name="slot">{() => <SlotField options={options} />}</form.AppField>
+        <form.AppField name="courier">
+          {() => <CourierField couriers={couriers} target={target} />}
+        </form.AppField>
       </FieldGroup>
-    </ConfirmDialog>
+    </FormDrawer>
   )
 }
 
-/** «Cambiar repartidor». */
+/** «Cambiar repartidor»: reasigna la entrega, así que va en cajón aunque haya columna lateral. */
 function CourierDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
-  const { couriers } = useDeliveryOptions()
-  const courier = useCourierChoice(target, couriers)
+  const { couriers, isPending } = useDeliveryOptions()
   const action = useDeliveryAction(target.id, onClose)
-  const errors = fieldErrors(action.error)
+  const form = useAppForm({
+    defaultValues: { courier: { choice: courierInitial(target, couriers), name: "" } },
+    validators: {
+      onSubmit: z
+        .object({ courier: courierShape })
+        .superRefine((value, ctx) => checkCourier(value.courier, ctx)),
+    },
+    onSubmit: async ({ value }) => {
+      // Sin cambiar a nadie no hay nada que guardar: se cierra sin llamar al servidor.
+      const changed = courierBody(value.courier, courierInitial(target, couriers))
+      if (!("courier" in changed)) return onClose()
+      const pick = changed.courier
+      await action.mutateAsync({
+        path: "repartidor",
+        body: { courier: pick },
+        done: pick ? "Repartidor cambiado" : "Sin repartidor",
+      })
+    },
+  })
+  const surface = useFormSurface(form)
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
       open
-      variant="default"
+      dock={false}
+      isLoading={isPending}
       title={`Cambiar repartidor · ${target.number}`}
       description={
         target.courierName
           ? `Ahora lo lleva ${target.courierName}. Lo que cobre en la puerta queda a nombre de quien lo lleve.`
           : "Todavía no lo lleva nadie. Lo que cobre en la puerta queda a nombre de quien lo lleve."
       }
-      confirmLabel="Guardar"
+      submitLabel="Guardar"
       cancelLabel="Volver"
-      pending={action.isPending}
-      confirmDisabled={!courier.changed || !courier.ready}
-      error={action.isError && !errors.courier ? action.error.message : null}
-      onConfirm={() =>
-        action.mutate({
-          path: "repartidor",
-          body: { courier: courier.pick },
-          done: courier.pick ? "Repartidor cambiado" : "Sin repartidor",
-        })
-      }
       onClose={onClose}
     >
-      <CourierField
-        couriers={couriers}
-        current={{ id: target.courierId, name: target.courierName }}
-        choice={courier}
-        error={errors.courier}
-      />
-    </ConfirmDialog>
+      <form.AppField name="courier">
+        {() => <CourierField couriers={couriers} target={target} />}
+      </form.AppField>
+    </FormDrawer>
   )
 }
 
@@ -898,52 +1133,58 @@ function CourierDialog({ target, onClose }: { target: DeliveryTarget; onClose: (
 function NoticeDialog({ target, onClose }: { target: DeliveryTarget; onClose: () => void }) {
   const { store } = useStoreContext()
   const today = storeToday(store.timeZone)
-  const [text, setText] = useState(() =>
-    noticeText(target, today, (cents) => money(cents, store.currency)),
-  )
-  const link = noticeLink(target.customerPhone, text.trim(), store.country)
   const action = useDeliveryAction(target.id, onClose)
-  const id = useId()
+  const form = useAppForm({
+    defaultValues: { text: noticeText(target, today, (cents) => money(cents, store.currency)) },
+    validators: {
+      onSubmit: z.object({
+        text: z.string().trim().min(3, "Escribe el mensaje que le vas a enviar"),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await action.mutateAsync({
+        path: "avisado",
+        body: { text: value.text.trim() },
+        done: "Queda como enviado por usted",
+      })
+    },
+  })
+  const surface = useFormSurface(form)
+  const text = useFormValues(form).text
+  const link = noticeLink(target.customerPhone, text.trim(), store.country)
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
+      // Se abre antes de anotarlo: el navegador solo deja abrir otra ventana con el toque.
+      onSubmit={(event) => {
+        if (link && text.trim().length >= 3) window.open(link, "_blank", "noopener")
+        surface.onSubmit(event)
+      }}
       open
-      variant="default"
       title={`Avisar a ${target.customerName}`}
       description="Se abre el WhatsApp de este celular con el mensaje escrito; lo envías tú. En la historia del pedido queda «enviado por usted», no «entregado»."
-      confirmLabel="Abrir WhatsApp con el aviso"
+      submitLabel="Abrir WhatsApp con el aviso"
       cancelLabel="Volver"
-      pending={action.isPending}
-      confirmDisabled={!link || text.trim().length < 3}
-      error={action.isError ? action.error.message : null}
-      onConfirm={() => {
-        if (!link) return
-        // Se abre antes de anotarlo: el navegador solo deja abrir otra ventana con el toque.
-        window.open(link, "_blank", "noopener")
-        action.mutate({
-          path: "avisado",
-          body: { text: text.trim() },
-          done: "Queda como enviado por usted",
-        })
-      }}
+      // Sin un número que se pueda leer no hay a quién abrirle el WhatsApp.
+      submitDisabled={!link}
       onClose={onClose}
     >
-      <Field>
-        <FieldLabel htmlFor={`${id}-texto`}>El mensaje</FieldLabel>
-        <Textarea
-          id={`${id}-texto`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          maxLength={1000}
-          rows={4}
-        />
-        <FieldDescription>
-          {link
-            ? "Puedes cambiarlo antes de abrir el WhatsApp."
-            : target.customerPhone
-              ? "No se pudo leer su número con el país de la tienda: escríbelo con su código (+51…) en el pedido."
-              : "El pedido no tiene teléfono: escríbele desde su chat."}
-        </FieldDescription>
-      </Field>
-    </ConfirmDialog>
+      <form.AppField name="text">
+        {(field) => (
+          <field.TextareaField
+            label="El mensaje"
+            maxLength={1000}
+            rows={4}
+            description={
+              link
+                ? "Puedes cambiarlo antes de abrir el WhatsApp."
+                : target.customerPhone
+                  ? "No se pudo leer su número con el país de la tienda: escríbelo con su código (+51…) en el pedido."
+                  : "El pedido no tiene teléfono: escríbele desde su chat."
+            }
+          />
+        )}
+      </form.AppField>
+    </FormDrawer>
   )
 }
