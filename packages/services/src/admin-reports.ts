@@ -731,7 +731,7 @@ export async function revenueReport(
       (chargedByCurrency.get(clinic.currency) ?? 0) + clinic.chargedCents,
     )
   const marginHow =
-    "Es la misma cuenta de «Costo y margen»: lo facturado sin impuesto en lo que va del mes de cada clínica activa o en gracia, la cuota y lo que pasó del crédito, se haya pagado o no (sin demos, y la prueba no se cobra), frente a lo que nos costó: la IA que reportó cada proveedor, el espacio guardado y una parte estimada del servidor y los gastos fijos."
+    "Es la misma cuenta de «Costo y margen»: lo facturado sin impuesto en lo que va del mes de cada clínica activa o en gracia, la cuota y lo que pasó del crédito, se haya pagado o no (sin demos, y la prueba no se cobra), frente a lo que nos costó: la IA que reportó cada proveedor, el espacio guardado y una parte estimada del servidor y los gastos fijos, más la IA que regalamos por la Ayuda de cada app (gestorIA) en el mes."
 
   return {
     month: monthKey(current),

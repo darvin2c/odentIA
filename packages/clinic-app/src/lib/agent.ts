@@ -1,4 +1,5 @@
-import { ADMIN_NAME, CLINICAL_NAME, HELP_NAME, RECEPTION_DEFAULT_NAME, withReceptionNameIn } from "./agent-names"
+import { HELP_NAME } from "@odentia/ui-patterns"
+import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, withReceptionNameIn } from "./agent-names"
 import { appWords } from "./product-words"
 
 

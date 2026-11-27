@@ -1,5 +1,5 @@
 import { Button, cn, Input } from "@odentia/ui"
-import { SubmitButton, submitErrorMessage, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { openSupportRequest, SubmitButton, submitErrorMessage, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, CircleAlert, TriangleAlert } from "lucide-react"
@@ -10,7 +10,6 @@ import type { OwnAppState } from "../../../lib/crm"
 import { activeOrgTimeZone, useOrgLocale } from "../../../lib/locale"
 import { appWords } from "../../../lib/product-words"
 import { type OwnAppCheckState, ownAppChecks, ownAppHelpText } from "../../../lib/whatsapp"
-import { openSupportRequest } from "../../help-panel"
 
 const CHECK_ICON: Record<OwnAppCheckState, { icon: typeof Check; className: string; word: string }> = {
   ok: { icon: Check, className: "text-primary", word: "Hecho" },

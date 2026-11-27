@@ -1,5 +1,5 @@
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@odentia/ui"
-import { SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { openSupportRequest, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, ChevronDown } from "lucide-react"
@@ -17,7 +17,6 @@ import {
   ownAppUnfinished,
   WHATSAPP_FIELDS,
 } from "../../../lib/whatsapp"
-import { openSupportRequest } from "../../help-panel"
 import { CopyValue } from "../channel-panel"
 import { AccountField } from "./account-field"
 import { Note } from "./note"

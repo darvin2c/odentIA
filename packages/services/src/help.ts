@@ -507,7 +507,7 @@ async function writeFromParts(
  * cifras ni correos y, si puede ser el dato de una persona, no va. La pantalla
  * de su respuesta solo vale si es una de la guía.
  */
-function readPrevious(input: unknown, topics: readonly HelpTopic[]): HelpPrevious | null {
+export function readHelpPrevious(input: unknown, topics: readonly HelpTopic[]): HelpPrevious | null {
   if (!input || typeof input !== "object") return null
   const { question, where } = input as { question?: unknown; where?: unknown }
   if (typeof question !== "string") return null
@@ -585,7 +585,7 @@ export async function askHelp(
     ? { via: "exacta", selection: { verdict: "seguro", shown: [exact], offered: [], top: null }, why: "ninguna" }
     : forModel === null
       ? { via: "respaldo", selection: byWords(asked, topics), why: "dato" }
-      : await decideHelp(forModel, helpScreenName(screen, topics), topics, ready.texts, decider, writer, readPrevious(input.previous, topics))
+      : await decideHelp(forModel, helpScreenName(screen, topics), topics, ready.texts, decider, writer, readHelpPrevious(input.previous, topics))
   const { selection } = decided
   const first = selection.shown[0]
 

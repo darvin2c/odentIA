@@ -9,14 +9,14 @@
  * la sesión (D4): el texto de las preguntas no se guarda (D2).
  */
 import { Badge, Button, buttonVariants, cn, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, ScrollArea, toast } from "@odentia/ui"
-import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton, submitErrorMessage, useAppForm, useFormSubmit } from "@odentia/ui-patterns"
+import { AgentMark, BarList, ColumnChart, DetailDrawer, HELP_NAME, SubmitButton, submitErrorMessage, useAppForm, useFormSubmit } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi, Link } from "@tanstack/react-router"
 import { ArrowRight, Check, Download, LoaderCircle, Pin, Search } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
-import { ADMIN_NAME, HELP_NAME } from "../../lib/agent-names"
+import { ADMIN_NAME } from "../../lib/agent-names"
 import {
   ARGOS_ALLOWANCE_KEY,
   ARGOS_SCREEN_LINKS,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { appAiUsage } from "@odentia/db/schema/admin-accounts"
 import { aiUsage } from "@odentia/db/schema/agent"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { reportQuestion } from "@odentia/db/schema/reports"
@@ -282,5 +283,33 @@ describe("todas las clínicas", () => {
       [FOUNDER, false, true],
     ])
     expect(overview).toMatchObject({ founders: 1, chargedCents: 2900 })
+  })
+
+  it("la Ayuda de cada app va aparte, en el mes de Lima, como lo que regalamos, y suma en lo que nos costó", async () => {
+    // 15 de noviembre a mediodía en Lima: el mes va del 1 de noviembre 05:00 UTC al 1 de diciembre 05:00 UTC.
+    const now = new Date("2026-11-15T17:00:00Z")
+    const before = await getCostMarginOverview(ownerDb, now)
+    expect(before.apps).toEqual([])
+    const row = { app: "gestoria", origin: "ayuda" as const, provider: "jev", model: "jev-1.13.0" }
+    await ownerDb.insert(appAiUsage).values([
+      { ...row, calls: 3, costMicros: 1_200, createdAt: new Date("2026-11-01T05:00:00Z") },
+      { ...row, calls: 2, costMicros: null, createdAt: new Date("2026-11-20T12:00:00Z") },
+      // El 31 de octubre a las 23:59 en Lima es del mes anterior.
+      { ...row, calls: 9, costMicros: 9_000, createdAt: new Date("2026-11-01T04:59:00Z") },
+    ])
+    const overview = await getCostMarginOverview(ownerDb, now)
+    expect(overview.apps).toEqual([
+      {
+        app: "gestoria",
+        label: "Ayuda de gestorIA",
+        period: { start: new Date("2026-11-01T05:00:00Z"), end: new Date("2026-12-01T05:00:00Z") },
+        calls: 5,
+        costMicros: 1_200,
+        unpricedCalls: 2,
+      },
+    ])
+    const clinicsMicros = overview.clinics.reduce((sum, item) => sum + item.costMicros, 0)
+    expect(overview.costMicros).toBe(clinicsMicros + 1_200)
+    expect(overview.aiMicros).toBe(overview.clinics.reduce((sum, item) => sum + item.aiMicros, 0) + 1_200)
   })
 })
