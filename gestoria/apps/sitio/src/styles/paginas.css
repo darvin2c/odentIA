@@ -1,326 +1,330 @@
-/*
- * Lo propio de la web de gestorIA sobre el sistema de tasteskill (public/assets, sin editar): el
- * logo, el pie con sus grupos, la barra del celular y las páginas de texto (Contacto, Términos,
- * Privacidad y la 404). Solo tokens del sistema: --ink, --muted, --line, --action, --t-*, --s-*.
- */
+/* Las páginas internas (web v5): contacto, legales, 404 y las del producto. Mismo sistema del Inicio. */
 
-/* El logotipo: su alto manda, el ancho sale del dibujo. */
-.logo svg {
-  display: block;
-  height: 26px;
-  width: auto;
+.pagina {
+  padding-block: calc(var(--cabecera) + clamp(48px, 7vw, 96px)) clamp(80px, 9vw, 120px);
 }
-
-@media (max-width: 639px) {
-  .logo svg {
-    height: 22px;
-  }
+.pagina__cabeza {
+  max-width: 760px;
 }
-
-/* El pie: el título de cada grupo se distingue de sus enlaces por tamaño, peso, color pleno y una
-   línea debajo; los enlaces, por su subrayado, no solo por el color (WCAG 1.4.1). */
-.footer__col h3 {
-  margin: 0 0 var(--s-4);
-  padding-bottom: var(--s-3);
-  border-bottom: 1px solid var(--line);
-  font-family: var(--font-text);
-  font-size: 17px;
-  line-height: 24px;
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--ink);
+.pagina__cabeza h1 {
+  font-size: clamp(40px, 5.6vw, 72px);
+  letter-spacing: -0.045em;
 }
-
-.footer__col ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: var(--s-1);
+.pagina__cabeza p {
+  margin-top: 18px;
+  font-size: clamp(17px, 1.4vw, 19px);
+  color: var(--texto-2);
+  max-width: 36em;
 }
-
-.footer__col a,
-.footer__legal a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  font-size: 15px;
-  font-weight: 400;
-  color: var(--muted);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
-  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+.pagina__cabeza .since {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--texto-3);
 }
-
-.footer__col a:hover,
-.footer__legal a:hover {
-  color: var(--ink);
-  text-decoration-color: currentColor;
-}
-
-/* La barra del celular: tres pestañas como las de una app y el botón principal. */
-@media (max-width: 639px) {
-  .actionbar.barra {
-    grid-auto-flow: initial;
-    grid-template-columns: repeat(3, minmax(52px, 64px)) minmax(0, 1fr);
-    gap: var(--s-2);
-  }
-
-  .barra__tab {
-    position: relative;
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 2px;
-    height: 52px;
-    font-size: 13px;
-    line-height: 16px;
-    color: var(--muted);
-    text-decoration: none;
-  }
-
-  .barra__tab svg {
-    width: 22px;
-    height: 22px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linejoin: round;
-    stroke-linecap: round;
-  }
-
-  /* La parte que se lee: su pestaña en el color de la marca, con una raya que entra desde el centro. */
-  .barra__tab::before {
-    content: "";
-    position: absolute;
-    top: -8px;
-    left: 25%;
-    right: 25%;
-    height: 2px;
-    border-radius: 2px;
-    background: var(--action);
-    transform: scaleX(0);
-    transition: transform 240ms var(--ease);
-  }
-
-  .barra__tab[aria-current] {
-    color: var(--action);
-  }
-
-  .barra__tab[aria-current]::before {
-    transform: scaleX(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .barra__tab::before {
-    transition: none;
-  }
-}
-
-/* Las páginas de texto: Contacto, Términos, Privacidad y la 404. */
-.page,
-.not-found {
-  padding-top: calc(var(--nav) + var(--s-8));
-  padding-bottom: var(--s-9);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-6);
-}
-
-.crumbs ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.migas ol {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s-2);
-  font-size: var(--t-small);
-  color: var(--muted);
+  gap: 8px;
+  font-size: 14px;
+  color: var(--texto-3);
+  margin-bottom: 24px;
 }
-
-.crumbs li + li::before {
+.migas li + li::before {
   content: "/";
-  margin-right: var(--s-2);
+  margin-right: 8px;
+  color: var(--linea-2);
+}
+.migas a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.page-head {
+.contacto {
+  margin-top: 48px;
   display: grid;
-  gap: var(--s-3);
-  max-width: 62ch;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
 }
-
-.page-head h1,
-.not-found h1 {
-  margin: 0;
-  font-size: var(--t-h2);
+.contacto li {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 12px;
+  padding: 28px;
+  border-radius: 24px;
+  background: var(--papel-2);
+  border: 1px solid var(--linea);
 }
-
-.page-head p,
-.since {
-  margin: 0;
-  color: var(--muted);
+.contacto h2 {
+  font-size: 22px;
+  letter-spacing: -0.025em;
 }
-
-/* Lo que falta escribir en Términos y Privacidad: se ve marcado («[Por completar]»). */
-.pendiente {
-  padding: 1px 8px;
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 500;
-  box-shadow: inset 0 0 0 1px var(--line);
+.contacto p {
+  color: var(--texto-2);
+}
+.correo {
+  font-size: 18px;
+  word-break: break-all;
 }
 
 .legal {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+.toc {
+  position: sticky;
+  top: calc(var(--cabecera) + 24px);
+  padding: 20px;
+  border-radius: 18px;
+  background: var(--papel-2);
+}
+.toc h2 {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+}
+.toc li + li {
+  margin-top: 8px;
+}
+.toc a {
+  font-size: 14px;
+  color: var(--texto-2);
+}
+.toc a:hover {
+  color: var(--naranja);
+}
+.legal-body {
+  max-width: 720px;
+}
+.legal-body section + section {
+  margin-top: 40px;
+}
+.legal-body h2 {
+  font-size: 24px;
+  letter-spacing: -0.025em;
+  margin-bottom: 14px;
+}
+.legal-body p,
+.legal-body li {
+  color: var(--texto-2);
+  font-size: 16.5px;
+}
+.legal-body p + p,
+.legal-body p + ul,
+.legal-body ul + p {
+  margin-top: 12px;
+}
+.legal-body ul {
+  list-style: disc;
+  padding-left: 22px;
+}
+.legal-body li + li {
+  margin-top: 6px;
+}
+.pendiente {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #fff1cc;
+  color: #7a4f00;
+  font-weight: 500;
+}
+@media (max-width: 860px) {
+  .legal {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .toc {
+    position: static;
+  }
+}
+
+.no-existe {
+  min-height: 70vh;
+  padding-block: calc(var(--cabecera) + 96px) 96px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 18px;
+}
+.no-existe h1 {
+  font-size: clamp(40px, 6vw, 72px);
+}
+.no-existe p {
+  color: var(--texto-2);
+  font-size: 18px;
+}
+.fila-botones {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s-8);
-  align-items: flex-start;
+  gap: 12px;
+  margin-top: 8px;
 }
 
-.toc {
-  flex: 1 1 240px;
-  max-width: 280px;
+/* ---------------------------------------------------------------- páginas del producto */
+.p-heroe {
+  position: relative;
+  padding: calc(var(--cabecera) + clamp(56px, 8vw, 110px)) 0 clamp(64px, 8vw, 110px);
+  background:
+    radial-gradient(ellipse 60% 70% at 85% 10%, rgba(255, 178, 122, 0.35), transparent 70%),
+    linear-gradient(180deg, var(--durazno), var(--papel));
+  overflow: hidden;
 }
-
-.toc h2 {
-  margin: 0 0 var(--s-2);
-  font-size: var(--t-label);
-  font-weight: 500;
-  color: var(--muted);
-}
-
-.toc ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.p-heroe__marco {
   display: grid;
-  font-size: 15px;
-}
-
-.toc a {
-  min-height: 44px;
-  display: flex;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 48px;
   align-items: center;
 }
-
-.legal-body {
-  flex: 999 1 560px;
-  min-width: 0;
-  max-width: 62ch;
+.p-heroe h1 {
+  margin-top: 18px;
+  font-size: clamp(42px, 6vw, 80px);
+  letter-spacing: -0.048em;
+  line-height: 0.98;
+}
+.p-heroe .bajada {
+  margin-top: 22px;
+}
+.p-heroe .fila-botones {
+  margin-top: 32px;
+}
+.p-heroe__sofi {
+  width: min(320px, 60vw);
+  aspect-ratio: 1;
+  margin-inline: auto;
+}
+.p-bloques {
+  padding-block: clamp(64px, 8vw, 120px);
+}
+.p-bloques__lista {
+  margin-top: 40px;
   display: grid;
-  gap: var(--s-6);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
 }
-
-.legal-body section {
-  display: grid;
-  gap: var(--s-3);
-  scroll-margin-top: calc(var(--nav) + var(--s-4));
+.p-bloque {
+  padding: 28px;
+  border-radius: 24px;
+  background: var(--papel-2);
+  border: 1px solid var(--linea);
 }
-
-.legal-body h2 {
-  margin: 0;
-  font-size: var(--t-h3);
+.p-bloque__n {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--naranja);
 }
-
-.legal-body p,
-.legal-body ul {
-  margin: 0;
+.p-bloque h3 {
+  margin-top: 14px;
+  font-size: 22px;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
-
-.legal-body ul {
-  padding-left: 22px;
-  display: grid;
-  gap: var(--s-2);
+.p-bloque p {
+  margin-top: 10px;
+  color: var(--texto-2);
 }
-
-@media (max-width: 860px) {
-  .toc {
-    max-width: none;
-    padding: var(--s-4);
-    border: 1px solid var(--line);
-    border-radius: var(--r-md);
-  }
+.p-bloque .pronto {
+  margin-top: 14px;
 }
-
-.contact {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--s-5);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.contact li {
-  padding: var(--s-5);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+.p-rubros {
+  margin-top: 40px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s-3);
-}
-
-.contact h2 {
-  margin: 0;
-  font-size: var(--t-card);
-}
-
-.contact p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.contact .email {
-  font-size: var(--t-card);
-  overflow-wrap: anywhere;
-}
-
-.contact .btn {
-  margin-top: auto;
-}
-
-.not-found {
-  align-items: flex-start;
-  max-width: 62ch;
-}
-
-.not-found p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.not-found .t-label {
-  color: var(--action);
-}
-
-/* La línea legal del pie: la firma, Términos y Privacidad juntos, y la nota de las marcas. */
-.footer__legal-links {
-  display: inline-flex;
   flex-wrap: wrap;
-  gap: 0 var(--s-5);
+  gap: 10px;
 }
-
-/* Los grupos del pie: cuatro en fila desde la tableta, dos por fila en el celular. */
-@media (min-width: 640px) and (max-width: 1023px) {
-  .closing__links > .grid > .footer__col {
-    grid-column: auto / span 3;
+.p-rubros li {
+  padding: 12px 20px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--linea-2);
+  font-size: clamp(17px, 1.6vw, 22px);
+  font-weight: 540;
+  letter-spacing: -0.02em;
+}
+.p-rubros li:last-child {
+  background: var(--naranja);
+  color: #fff;
+  border-color: var(--naranja);
+}
+.p-faq {
+  margin-top: 40px;
+  max-width: 860px;
+}
+.mueve .p-bloque[data-aparece],
+.mueve .p-rubros li[data-aparece] {
+  transition-delay: calc(var(--i, 0) * 70ms);
+}
+@media (max-width: 860px) {
+  .p-heroe__marco {
+    grid-template-columns: 1fr;
+  }
+  .p-heroe__sofi {
+    width: min(200px, 50vw);
+    order: -1;
+    margin: 0;
   }
 }
 
-@media (max-width: 639px) {
-  .closing__links > .grid > .footer__col {
-    grid-column: auto / span 6;
-  }
+.p-bloques--suave {
+  background: var(--papel-2);
 }
-
-/* El nombre grande del cierre: a la medida del pie, para que no pise los grupos de abajo. */
-.closing .close__word {
-  font-size: clamp(56px, 10vw, 152px);
-  line-height: 1.05;
-  overflow: visible;
-  margin-bottom: var(--s-5);
+.p-bloque p + p {
+  margin-top: 6px;
+}
+.p-cuenta h3 {
+  font-size: clamp(30px, 3vw, 40px);
+  letter-spacing: -0.04em;
+}
+.p-cuenta .p-cuenta__paga {
+  padding-top: 10px;
+  margin-top: 12px;
+  border-top: 1px solid var(--linea);
+  color: var(--texto);
+}
+.p-dos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+.p-lista {
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border-radius: 24px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+  font-size: 16.5px;
+}
+.p-lista li {
+  display: flex;
+  gap: 12px;
+}
+.p-lista svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  color: var(--naranja);
+}
+.p-lista__boton {
+  margin-top: 10px;
+}
+.p-lista__boton .boton {
+  width: 100%;
+}
+.p-mas {
+  margin-top: 24px;
+}
+.p-faq--sola {
+  margin-top: 0;
+  margin-inline: auto;
+}
+@media (max-width: 860px) {
+  .p-dos {
+    grid-template-columns: 1fr;
+  }
 }

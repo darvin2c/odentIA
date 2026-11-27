@@ -1,40 +1,50 @@
 ---
-// El cierre y el pie de todas las páginas (web v3; close-word y footer-statement de tasteskill): la
-// llamada a crear la tienda, los grupos del mapa de la web y la línea legal. El título de cada grupo
-// es más grande, de peso medio, en tinta plena y con una línea debajo; sus enlaces van más chicos,
-// en peso normal y subrayados, para que no dependan solo del color (WCAG 1.4.1).
+// El cierre y el pie de todas las páginas (web v5): una banda oscura con la llamada a vender con
+// Sofi, que está ahí en grande para jugar con ella (se aplasta al tocarla), y debajo los grupos del
+// mapa de la web. El título de cada grupo es más grande, blanco, de peso medio y con una línea
+// debajo; sus enlaces van más chicos, en gris y subrayados, para que no dependan solo del color
+// (WCAG 1.4.1).
 import { cta, footerGroups, footerLinks, SIGNATURE } from "../lib/sitio"
+import Logo from "./Logo.astro"
 
 const year = new Date().getFullYear()
-// El Inicio pone en el cierre su paquete en 3D (`cierre`) en lugar del nombre grande, sobre fondo oscuro.
-const conVisual = Astro.slots.has("cierre")
+const flecha =
+  '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 ---
-<footer class:list={["closing footer--statement g2m", { "footer--noche": conVisual }]} id="contact" aria-labelledby="close-h">
-  <div class="wrap">
-    <div class="closing__cta close--word">
-      <div class="section-head--split">
-        <div>
-          <h2 id="close-h">Tu tienda en gestorIA, con Sofi en el chat</h2>
-          <p class="t-lead">USD 19 al mes, que vuelven como saldo.</p>
+<footer class="pie" aria-labelledby="cierre-h">
+  <div class="cierre">
+    <div class="cierre__fondo" aria-hidden="true"><span class="heroe__reticula"></span><span class="cierre__luz"></span></div>
+    <div class="marco cierre__marco">
+      <div class="cierre__texto" data-aparece>
+        <h2 id="cierre-h">¿Lista para vender <span class="acento">con Sofi?</span></h2>
+        <p>Escríbenos y te mostramos cómo vendería Sofi en tu tienda, con tus productos. USD 19 al mes, que vuelven como saldo.</p>
+        <div class="pie__botones">
+          <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
         </div>
-        <a class="btn btn--primary" href={cta.href}>{cta.label}<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"></path><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"></path></svg></a>
       </div>
-      {conVisual ? <slot name="cierre" /> : <p class="close__word" aria-hidden="true">gestorIA</p>}
+      <div class="cierre__juego">
+        <span class="cierre__sofi" data-sofi="feliz" data-sofi-escala="0.5" data-sofi-juego aria-hidden="true"></span>
+        <p class="cierre__pista" aria-hidden="true">Tócala</p>
+      </div>
     </div>
-    <div class="closing__links">
-      <div class="grid">
-        {footerGroups.map((group) => (
-          <nav class="span-3 footer__col" aria-label={group.title}>
-            <h3>{group.title}</h3>
-            <ul>{group.links.map((link) => <li><a href={link.href}>{link.label}</a></li>)}</ul>
-          </nav>
-        ))}
+  </div>
+  <div class="marco">
+    <div class="pie__grupos">
+      <div class="pie__marca">
+        <Logo class="pie__logo" />
+        <p>La vendedora con IA para tiendas que venden por WhatsApp, Instagram y Messenger. Hecha en el Perú.</p>
       </div>
-      <div class="footer__legal">
-        <span>© {year} {SIGNATURE}</span>
-        <span class="footer__legal-links">{footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}</span>
-        <span>WhatsApp, Instagram y Messenger son marcas de sus dueños.</span>
-      </div>
+      {footerGroups.map((group) => (
+        <nav class="pie__grupo" aria-label={group.title}>
+          <h3>{group.title}</h3>
+          <ul>{group.links.map((link) => <li><a href={link.href}>{link.label}</a></li>)}</ul>
+        </nav>
+      ))}
+    </div>
+    <div class="pie__legal">
+      <span>© {year} {SIGNATURE}</span>
+      <nav aria-label="Legal">{footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}</nav>
+      <span>WhatsApp, Instagram y Messenger son marcas de sus dueños.</span>
     </div>
   </div>
 </footer>

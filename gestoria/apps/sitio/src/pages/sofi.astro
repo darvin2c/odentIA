@@ -1,0 +1,115 @@
+---
+// Sofi (web v5): qué hace la vendedora con IA de gestorIA y qué no hace nunca. Lo que viene
+// («Pagar ahora», gestorIA Reparto) va como «pronto».
+import Acordeon from "../components/Acordeon.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { faqLd, MAS_PREGUNTAS, PREGUNTAS } from "../lib/contenido"
+import { SITE_URL } from "../lib/sitio"
+
+const hace = [
+  {
+    t: "Atiende al instante",
+    d: "Contesta tus chats de WhatsApp, Instagram y Messenger a la hora que sea, con tu catálogo y tu stock. Primero muestra el valor del producto.",
+  },
+  {
+    t: "Negocia sin bajar de tu mínimo",
+    d: "Si la clienta pide rebaja, hace una sola oferta y pone un plazo para pagar. Tu precio mínimo no se toca.",
+  },
+  {
+    t: "Cobra con tus medios",
+    d: "Anota el pedido con su envío y su total, y pide el pago con Yape, Plin, transferencia o un link de pago.",
+    pronto: "«Pagar ahora» con Yape o tarjeta",
+  },
+  {
+    t: "Avisa a la clienta",
+    d: "Apenas tu equipo confirma el pago, Sofi le avisa a la clienta que su pedido sale.",
+  },
+  {
+    t: "Coordina la entrega",
+    d: "Sin pago confirmado no se entrega. Con el pago confirmado, el pedido queda listo para salir.",
+    pronto: "gestorIA Reparto, la app del repartidor",
+  },
+  {
+    t: "Suma algo antes de que salga",
+    d: "Antes de que el pedido salga, ofrece algo más para el mismo envío.",
+  },
+]
+const nunca = [
+  ["Nunca baja de tu mínimo", "Lo pones tú, producto por producto."],
+  ["Nunca inventa un precio ni un stock", "Vende con lo que hay en tu catálogo."],
+  ["Nunca entrega sin pago confirmado", "Una captura la confirma una persona de tu equipo."],
+]
+const preguntas = [PREGUNTAS[0], PREGUNTAS[1], MAS_PREGUNTAS[0], PREGUNTAS[3]].filter(
+  (p) => p !== undefined,
+)
+const app = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Sofi de gestorIA",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  url: `${SITE_URL}/sofi`,
+  description:
+    "Vendedora con IA para WhatsApp, Instagram y Messenger: atiende, negocia sin bajar del precio mínimo y cobra antes de entregar.",
+  offers: { "@type": "Offer", price: "19", priceCurrency: "USD" },
+}
+---
+<Base
+  title="Sofi: vendedora con IA para WhatsApp, Instagram y Messenger"
+  description="Sofi atiende tus chats a toda hora con tu catálogo y tu stock, negocia sin bajar de tu precio mínimo y cobra antes de entregar. Es la vendedora de gestorIA."
+  ld={[app, faqLd(preguntas)]}
+>
+  <PaginaHeroe
+    etiqueta="Sofi"
+    titulo="Sofi, la vendedora con IA"
+    acento="de tu tienda."
+    bajada="Atiende tus chats de WhatsApp, Instagram y Messenger a toda hora, negocia sin bajar de tu precio mínimo y cobra antes de entregar. Tú empacas."
+    humor="curiosa"
+    segundo={{ href: "/#venta", label: "Mírala vender" }}
+  />
+  <section class="p-bloques" aria-labelledby="hace-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Lo que hace</p>
+        <h2 id="hace-h" class="titulo-2">Una venta entera, <span class="tenue">de la pregunta al envío.</span></h2>
+      </div>
+      <ol class="p-bloques__lista">
+        {hace.map((h, i) => (
+          <li class="p-bloque" data-aparece style={`--i:${i}`}>
+            <span class="p-bloque__n">{String(i + 1).padStart(2, "0")}</span>
+            <h3>{h.t}</h3>
+            <p>{h.d}</p>
+            {h.pronto && <p><span class="pronto">Pronto</span> {h.pronto}</p>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="nunca-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Lo que nunca hace</p>
+        <h2 id="nunca-h" class="titulo-2">Tus reglas <span class="acento">mandan.</span></h2>
+      </div>
+      <ul class="p-bloques__lista">
+        {nunca.map(([t, d], i) => (
+          <li class="p-bloque" data-aparece style={`--i:${i}`}>
+            <h3>{t}</h3>
+            <p>{d}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques" aria-labelledby="preg-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Preguntas</p>
+        <h2 id="preg-h" class="titulo-2">Sobre Sofi</h2>
+      </div>
+      <div class="p-faq"><Acordeon preguntas={preguntas} /></div>
+      <p class="p-mas"><a class="enlace" href="/preguntas">Ver todas las preguntas</a></p>
+    </div>
+  </section>
+</Base>

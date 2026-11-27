@@ -4,15 +4,15 @@
 import logotipo from "../assets/logotipo.svg?raw"
 
 interface Props {
-  /** La clase del enlace: `nav__logo` en la cabecera. */
+  /** Una clase más para el enlace (el pie lleva la suya). */
   class?: string
 }
 
-const { class: className = "nav__logo" } = Astro.props
+const { class: className = "" } = Astro.props
 // El enlace ya dice «gestorIA, inicio»: el dibujo no se lee dos veces.
 const svg = logotipo
   .replace(/ role="[^"]*"/, "")
   .replace(/ aria-label="[^"]*"/, "")
   .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
 ---
-<a class={`${className} logo`} href="/" aria-label="gestorIA, inicio"><Fragment set:html={svg} /></a>
+<a class={`logo ${className}`.trim()} href="/" aria-label="gestorIA, inicio"><Fragment set:html={svg} /></a>

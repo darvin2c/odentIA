@@ -1,5 +1,5 @@
 // Las direcciones de la web de gestorIA, la llamada a la acción y el mapa de sus páginas (lienzo B8;
-// web v3: el plan de páginas de la v2, entregado por partes).
+// el plan de páginas de la v2, entregado por partes: la v5 arma Sofi, Rubros, Precios y Preguntas).
 
 /** El dominio de gestorIA: la web en la raíz y la app en `app.` (ADR 0203). */
 export const DOMAIN = "gestoria24.com"
@@ -83,15 +83,14 @@ export const SITE_MAP = {
       label: "Sofi",
       hint: "Atiende, negocia y cobra",
       path: "/sofi",
-      lista: false,
-      hoy: "/#venta",
+      lista: true,
     },
     {
       label: "Cobros",
       hint: "El pago de cada pedido",
       path: "/cobros",
       lista: false,
-      hoy: "/#pedidos",
+      hoy: "/#cobro",
     },
     {
       label: "Entregas",
@@ -109,18 +108,18 @@ export const SITE_MAP = {
     },
     { label: "Catálogo", hint: "Tu vitrina con tu marca", path: "/catalogo", lista: false },
     { label: "Inventario", hint: "Stock por variante", path: "/inventario", lista: false },
-    { label: "Argos", hint: "Lo que te toca hoy", path: "/argos", lista: false },
+    { label: "Argos", hint: "Vigila tu tienda", path: "/argos", lista: false, hoy: "/#argos" },
   ],
   recursos: [
-    { label: "Rubros", path: "/rubros", lista: false, hoy: "/#rubros" },
-    { label: "Preguntas", path: "/preguntas", lista: false, hoy: "/#preguntas" },
+    { label: "Rubros", path: "/rubros", lista: true },
+    { label: "Preguntas", path: "/preguntas", lista: true },
     { label: "Cómo funciona", path: "/como-funciona", lista: false },
     { label: "Guías", path: "/guias", lista: false },
     { label: "Integraciones", path: "/integraciones", lista: false },
     { label: "Comparar", path: "/comparar", lista: false },
   ],
   empresa: [
-    { label: "Precios", path: "/precios", lista: false, hoy: "/#precio" },
+    { label: "Precios", path: "/precios", lista: true },
     { label: "Contacto", path: "/contacto", lista: true },
     { label: "Repartidores", path: "/repartidores", lista: false },
   ],

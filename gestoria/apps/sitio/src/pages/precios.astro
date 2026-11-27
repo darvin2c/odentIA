@@ -1,0 +1,102 @@
+---
+// Precios (web v5): el plan que definió el dueño. USD 19 al mes que vuelven como saldo, y el 1 % de
+// cada pedido que gestorIA genera sola, que sale de ese saldo. Los ejemplos son cuentas exactas en
+// dólares, sin tipo de cambio.
+import Acordeon from "../components/Acordeon.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { faqLd, type Pregunta } from "../lib/contenido"
+import { cta, SITE_URL } from "../lib/sitio"
+
+const ejemplos = [
+  { vende: "500", uno: 5, paga: 19, nota: "El 1 % sale de tu saldo y te sobra." },
+  { vende: "1,900", uno: 19, paga: 19, nota: "El 1 % usa justo tu saldo." },
+  { vende: "3,000", uno: 30, paga: 30, nota: "Tu saldo cubre 19 y pagas la diferencia: 11." },
+]
+const incluye = [
+  "Sofi en WhatsApp, Instagram y Messenger",
+  "Tu catálogo con precio mínimo por producto",
+  "Pedidos, pagos y entregas del día",
+  "La ficha de cada clienta",
+  "Tu equipo con su rol: Dueño, Administrador y Ventas",
+  "«Probar a Sofi» sin mover tu stock",
+]
+const preguntas: Pregunta[] = [
+  [
+    "¿Qué cuenta para el 1 %?",
+    "Cada pedido que gestorIA genera sola, como una venta que cerró Sofi en el chat. Lo que anota tu equipo no paga el 1 %.",
+  ],
+  [
+    "¿Y si el 1 % pasa de USD 19?",
+    "Pagas la diferencia, solo ese mes. Si gestorIA vende poco, no pagas más que los USD 19.",
+  ],
+  ["¿Hay cobro por persona del equipo?", "No. El plan es uno solo para la tienda."],
+]
+const oferta = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: "gestorIA",
+  description:
+    "Plan de gestorIA: USD 19 al mes que vuelven como saldo, más el 1 % de cada pedido que gestorIA genera sola.",
+  url: `${SITE_URL}/precios`,
+  offers: { "@type": "Offer", price: "19", priceCurrency: "USD", url: `${SITE_URL}/precios` },
+}
+const check =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+---
+<Base
+  title="Precios de gestorIA: USD 19 al mes que vuelven como saldo"
+  description="Un plan: USD 19 al mes que vuelven a tu tienda como saldo, y de ahí el 1 % de cada pedido que gestorIA genera sola. Pagas la diferencia solo si el saldo se acaba."
+  ld={[oferta, faqLd(preguntas)]}
+>
+  <PaginaHeroe
+    etiqueta="Precios"
+    titulo="USD 19 al mes,"
+    acento="que vuelven como saldo."
+    bajada="De ese saldo sale el 1 % de cada pedido que gestorIA genera sola. Pagas la diferencia solo si el saldo se acaba. Lo que anota tu equipo no paga el 1 %."
+    humor="feliz"
+    segundo={{ href: "/preguntas", label: "Ver las preguntas" }}
+  />
+  <section class="p-bloques" aria-labelledby="cuentas-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Haz la cuenta</p>
+        <h2 id="cuentas-h" class="titulo-2">Pagas cuando <span class="acento">vendes.</span></h2>
+        <p class="bajada">Tres meses de ejemplo, según lo que gestorIA vendió sola en cada uno.</p>
+      </div>
+      <ul class="p-bloques__lista">
+        {ejemplos.map((e, i) => (
+          <li class="p-bloque p-cuenta" data-aparece style={`--i:${i}`}>
+            <span class="p-bloque__n">gestorIA vendió sola</span>
+            <h3>USD {e.vende}</h3>
+            <p>El 1 %: <b>USD {e.uno}</b></p>
+            <p class="p-cuenta__paga">Pagas ese mes: <b>USD {e.paga}</b></p>
+            <p>{e.nota}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="incluye-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Lo que incluye</p>
+        <h2 id="incluye-h" class="titulo-2">Un solo plan, <span class="tenue">con todo.</span></h2>
+        <p class="bajada">Sin cobro por persona. ¿Dudas? <a class="enlace" href="/contacto">Escríbenos</a>.</p>
+      </div>
+      <ul class="p-lista" data-aparece>
+        {incluye.map((t) => <li><Fragment set:html={check} />{t}</li>)}
+        <li class="p-lista__boton"><a class="boton" href={cta.href}>{cta.label}</a></li>
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques" aria-labelledby="preg-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Preguntas</p>
+        <h2 id="preg-h" class="titulo-2">Sobre el precio</h2>
+      </div>
+      <div class="p-faq"><Acordeon preguntas={preguntas} /></div>
+    </div>
+  </section>
+</Base>

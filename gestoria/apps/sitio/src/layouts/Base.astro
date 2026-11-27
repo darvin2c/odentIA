@@ -1,29 +1,26 @@
 ---
-// El documento de cada página (web v3): título y descripción propios, la imagen al compartir el
-// enlace (WhatsApp la muestra), la cabecera, el pie con el cierre y, en el celular, la barra de abajo.
-//
-// El sistema visual es el de tasteskill 2.5.1 (design-taste-frontend): sus archivos van tal cual en
-// `public/assets/` y no se editan (su puerta los compara con los de la skill). Lo propio de gestorIA
-// va en el bloque `:root` de abajo (la paleta de la marca, #CC4604) y en `src/styles/`.
-import "@fontsource-variable/figtree"
-import "@fontsource-variable/gabarito"
-import BarraCelular from "../components/BarraCelular.astro"
+// El documento de cada página (web v5): título y descripción propios, la imagen al compartir el
+// enlace (WhatsApp la muestra), la cabecera, el contenido y el pie con su cierre. El sistema visual
+// es propio (src/styles/base.css): Geist, tinta cálida y el naranja de la marca (#CC4604).
+import "@fontsource-variable/geist"
+import "@fontsource-variable/geist-mono"
 import Footer from "../components/Footer.astro"
 import Header from "../components/Header.astro"
 import { SITE_URL } from "../lib/sitio"
+import "../styles/base.css"
 import "../styles/paginas.css"
 
 interface Props {
   title: string
   description: string
   noindex?: boolean
-  /** Los momentos de tasteskill que usa la página (`public/assets/moments/<id>`). */
-  moments?: string[]
   /** Datos estructurados propios de la página (schema.org), además del sitio. */
   ld?: Record<string, unknown>[]
+  /** El tono del héroe de la página: con uno oscuro, la cabecera empieza con letras blancas. */
+  tono?: "oscuro" | "claro"
 }
 
-const { title, description, noindex = false, moments = [], ld = [] } = Astro.props
+const { title, description, noindex = false, ld = [], tono = "claro" } = Astro.props
 // Al armar, la ruta es el archivo (/terminos.html); la dirección pública va sin .html.
 const path = Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/"
 const canonical = new URL(path, SITE_URL).toString()
@@ -44,7 +41,7 @@ const site = {
 const data = isHome ? [site, ...ld] : ld
 ---
 <!doctype html>
-<html lang="es" data-brand="gestoria" data-type="software" data-radius="round" data-ground="sage" data-buttons="tonal" data-motion>
+<html lang="es">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -63,65 +60,24 @@ const data = isHome ? [site, ...ld] : ld
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="gestorIA: Sofi vende por chat para tu tienda." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content="#ffffff" />
-    <meta name="site-kind" content="software" />
-    <meta name="page-type" content="software" />
+    <meta name="theme-color" content={tono === "oscuro" ? "#140d0a" : "#ffffff"} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
-    <link rel="stylesheet" href="/assets/system.css" />
-    <link rel="stylesheet" href="/assets/ui/cards.css" />
-    <link rel="stylesheet" href="/assets/motion/motion.css" />
-    <link rel="stylesheet" href="/assets/layout/layout.css" />
-    {/* La paleta de la marca (start.mjs brand): manda el naranja de gestorIA sobre la que repartió la skill. */}
-    <style is:inline>
-      :root {
-        --p-bg: #ffffff; --p-surface: #fbf3ee; --p-ink: #1d1512; --p-muted: #6b5d55;
-        --p-accent: #cc4604; --p-accent-ink: #ffffff; --p-action: #cc4604; --p-action-ink: #ffffff;
-        --p-inv-bg: #1d1512; --p-inv-surface: #2a221f; --p-inv-ink: #ffffff; --p-inv-muted: #a19d9b;
-        --p-inv-accent: #cc4604; --p-inv-accent-ink: #ffffff; --p-inv-action: #cc4604; --p-inv-action-ink: #ffffff;
-        --font-display: "Gabarito Variable", "Gabarito", system-ui, sans-serif;
-        --font-text: "Figtree Variable", "Figtree", system-ui, sans-serif;
-        --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-        --display-weight: 400;
-        --display-tracking: -0.03em;
-        --display-tracking-xl: -0.04em;
-        --ly-scale: 0.98;
-        --identity-ink: var(--p-ink);
-        --identity-accent: var(--p-accent);
-      }
-      /* El suelo claro de los marcos y del pie: el que repartió la skill (sage) chocaba con el naranja
-         de la marca; manda la marca, en un durazno claro hecho de #CC4604. */
-      html[data-ground] {
-        --ground-bg: #f6e2d4; --ground-surface: #fbefe6; --ground-ink: #2a1a12;
-        --ground-muted: #6b4f40; --ground-accent: #cc4604;
-      }
-    </style>
-    <script is:inline>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
-    {moments.length > 0 && (
-      <Fragment>
-        <script is:inline>document.documentElement.classList.add('mo-js');setTimeout(()=>document.documentElement.classList.add('mo-safe'),2500)</script>
-        <link rel="modulepreload" href="/assets/moments/moments.js" />
-        <link rel="modulepreload" href="/assets/moments/lib.js" />
-        {moments.map((id) => <link rel="modulepreload" href={`/assets/moments/${id}/moment.js`} />)}
-      </Fragment>
-    )}
+    {/* Con JavaScript y sin «reducir movimiento», lo que entra al bajar empieza escondido. */}
+    <script is:inline>
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("mueve")
+    </script>
     {data.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
   </head>
   <body>
-    <Header />
-    <main id="top">
+    <Header tono={tono} />
+    <main id="contenido">
       <slot />
     </main>
-    {Astro.slots.has("cierre") ? (
-      <Footer>
-        <slot name="cierre" slot="cierre" />
-      </Footer>
-    ) : (
-      <Footer />
-    )}
-    <BarraCelular />
-    <script type="module" src="/assets/system.js" is:inline></script>
-    <script type="module" src="/assets/motion/motion.js" is:inline></script>
-    <script type="module" src="/assets/layout/layout.js" is:inline></script>
+    <Footer />
+    <script>
+      import { iniciarSitio } from "../scripts/sitio"
+      iniciarSitio()
+    </script>
   </body>
 </html>

@@ -38,3 +38,23 @@ export const MENSAJES: readonly Mensaje[] = [
     hizo: "Anotó la captura: pago por confirmar",
   },
 ]
+
+/**
+ * Lo que sigue en la venta del Inicio (web v5), en la escena «de punta a punta»: el aviso de Sofi
+ * cuando el equipo confirma el pago y la oferta de sumar algo antes de que el pedido salga.
+ */
+export const DESPUES: readonly Mensaje[] = [
+  {
+    de: "sofi",
+    texto: "¡Listo, Valeria! Tu pago de S/ 120 está confirmado. Tu pedido sale hoy a Surco.",
+    hora: "9:52",
+    hizo: "Avisó a la clienta",
+  },
+  {
+    de: "sofi",
+    texto: "Antes de que salga: ¿te sumo unas medias blancas por S/ 15? Van en el mismo envío.",
+    hora: "9:52",
+    hizo: "Ofreció sumar algo",
+  },
+  { de: "clienta", texto: "¡Sí, súmalas!", hora: "9:53" },
+]
