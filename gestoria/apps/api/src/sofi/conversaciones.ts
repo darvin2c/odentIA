@@ -113,8 +113,12 @@ export async function saveAgentSettings(
   })
 }
 
+/**
+ * «Probar a Sofi» está en Configuración: sirve al ajustarla, no a diario. Por eso la abre y la
+ * escribe quien cambia la configuración (lienzo «gestorIA como odentIA», tablero 10).
+ */
 export async function newTestConversation(appDb: Db, person: Person, storeId: string) {
-  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const [row] = await tx
       .insert(conversation)
       .values({ storeId, channel: "prueba", createdBy: person.userId })
@@ -230,7 +234,7 @@ export async function writeAsCustomer(
   conversationId: string,
   input: z.infer<typeof customerMessageInput>,
 ): Promise<{ conversation: Awaited<ReturnType<typeof viewIn>>; result: AnswerResult }> {
-  await inStore(sofi.appDb, person, storeId, "ventas.atender", async (tx) => {
+  await inStore(sofi.appDb, person, storeId, "configuracion", async (tx) => {
     if (!z.uuid().safeParse(conversationId).success)
       throw new StoreError(404, "NOT_FOUND", "Esa conversación ya no está")
     const [conv] = await tx
