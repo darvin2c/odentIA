@@ -26,7 +26,7 @@ const OWNER = "semilla-rosa"
 const ADMIN = "semilla-mario"
 
 /** Una foto de ejemplo: un PNG de un color, hecho aquí, para no guardar imágenes en el repositorio. */
-function solidPng(rgb: [number, number, number], size = 240): Buffer {
+export function solidPng(rgb: [number, number, number], size = 240): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const length = Buffer.alloc(4)
     length.writeUInt32BE(data.length)
