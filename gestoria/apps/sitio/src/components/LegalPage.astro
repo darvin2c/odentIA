@@ -38,6 +38,8 @@ const { doc } = Astro.props
             {s.blocks.map((b) =>
               typeof b === "string" ? (
                 <p><Texto text={b} /></p>
+              ) : "h" in b ? (
+                <h3>{b.h}</h3>
               ) : (
                 <ul>{b.list.map((item) => <li><Texto text={item} /></li>)}</ul>
               ),
