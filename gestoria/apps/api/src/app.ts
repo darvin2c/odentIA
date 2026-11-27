@@ -19,6 +19,16 @@ import {
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
 import {
+  choicesInput,
+  deviceInput,
+  deviceState,
+  removeDevice,
+  saveChoices,
+  saveDevice,
+  storeChoices,
+  subscribeInput,
+} from "./avisos.js"
+import {
   addPhoto,
   catalog,
   createProduct,
@@ -169,6 +179,8 @@ export interface AppDeps {
   model?: ChatModel | null
   /** El acuerdo con la administración (B7); sin secreto, no se envía ni se pregunta. */
   contract?: ContractConfig
+  /** La clave pública VAPID de los avisos al celular (tablero 15); sin ella no se ofrecen. */
+  vapidPublicKey?: string
 }
 
 type Env = { Variables: { person: Person } }
@@ -855,6 +867,36 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/soporte/salir", async (c) => {
     await leaveSupport(deps.appDb, c.get("person"), c.req.param("id"))
     return c.body(null, 204)
+  })
+
+  // Los avisos al celular (tablero 15): la clave con que el navegador se suscribe y cada celular,
+  // que es de la persona (le llega lo de todas sus tiendas). Qué le llega sale de su rol al enviar.
+  app.get("/api/avisos/clave", (c) => c.json({ publicKey: deps.vapidPublicKey || null }))
+  app.post("/api/avisos/celular", async (c) => {
+    if (!deps.vapidPublicKey)
+      return c.json(
+        errorBody(c, "UNAVAILABLE", "Los avisos al celular todavía no están disponibles"),
+        503,
+      )
+    const input = await bodyOf(c, subscribeInput)
+    return c.json(await saveDevice(deps.appDb, deps.ownerDb, c.get("person"), input))
+  })
+  // ¿Este celular recibe hoy mis avisos? Otra persona pudo activarlos después en el mismo navegador.
+  app.post("/api/avisos/celular/estado", async (c) => {
+    const input = await bodyOf(c, deviceInput)
+    return c.json(await deviceState(deps.appDb, c.get("person"), input))
+  })
+  app.delete("/api/avisos/celular", async (c) => {
+    const input = await bodyOf(c, deviceInput)
+    return c.json(await removeDevice(deps.appDb, c.get("person"), input))
+  })
+  // Configuración › Avisos al celular: qué le llega de esta tienda, entre lo que su rol resuelve.
+  app.get("/api/tiendas/:id/avisos", async (c) =>
+    c.json(await storeChoices(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/avisos", async (c) => {
+    const input = await bodyOf(c, choicesInput)
+    return c.json(await saveChoices(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
 
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))

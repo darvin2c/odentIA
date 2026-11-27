@@ -10,6 +10,7 @@ const SALES = [
   "pagos.confirmar",
   "entregas",
   "ayuda.pedir",
+  "avisos.recibir",
 ]
 const ADMIN = [...SALES, "equipo.gestionar", "configuracion", "costos.ver", "reportes.ver"]
 const OWNER = [...ADMIN, "plan"]

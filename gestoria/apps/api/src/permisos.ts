@@ -15,7 +15,9 @@ import type { StoreRole } from "@gestoria/db"
  * entradas del kardex y el aviso del mínimo), que Ventas no ve. «reportes.ver» es Reportes y lo
  * que hizo y le toca a Argos (B5, tablero 13): solo Dueño y Administrador. «ayuda.pedir» es
  * escribirle al equipo de gestorIA desde la Ayuda: todo el equipo (decisión 6 del lienzo
- * «gestorIA como odentIA»); lo del cobro, solo con «plan».
+ * «gestorIA como odentIA»); lo del cobro, solo con «plan». «avisos.recibir» es recibir en el
+ * celular los avisos de lo que su rol resuelve y elegir cuáles (tablero 15): todo el equipo;
+ * qué avisos le llegan sale de los demás permisos (`avisos.ts`). Soporte no es del equipo: no.
  */
 export const STORE_PERMISSIONS = [
   "tienda.ver",
@@ -30,6 +32,7 @@ export const STORE_PERMISSIONS = [
   "pagos.confirmar",
   "entregas",
   "ayuda.pedir",
+  "avisos.recibir",
 ] as const
 export type StorePermission = (typeof STORE_PERMISSIONS)[number]
 
@@ -41,6 +44,7 @@ const SALES: readonly StorePermission[] = [
   "pagos.confirmar",
   "entregas",
   "ayuda.pedir",
+  "avisos.recibir",
 ]
 
 /**
