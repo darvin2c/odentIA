@@ -14,13 +14,13 @@ export interface Ruta {
 }
 
 function parse(): Ruta {
-  const raw = location.hash.replace(/^#/, "") || "/calzado/catalogo"
+  const raw = location.hash.replace(/^#/, "") || "/calzado/pedidos"
   const [pathPart, query = ""] = raw.split("?")
   const parts = (pathPart ?? "").split("/").filter(Boolean)
   const rubro = (parts[0] && parts[0] in RUBROS ? parts[0] : "calzado") as RubroId
   const rest = parts[0] && parts[0] in RUBROS ? parts.slice(1) : parts
   const q = new URLSearchParams(query)
-  return { rubro, path: `/${rest.join("/") || "catalogo"}`, ventas: q.get("ventas") === "1", q }
+  return { rubro, path: `/${rest.join("/") || "pedidos"}`, ventas: q.get("ventas") === "1", q }
 }
 
 let actual = parse()

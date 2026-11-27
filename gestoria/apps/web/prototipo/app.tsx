@@ -34,6 +34,12 @@ import { CREDITOS, RUBRO_IDS, RUBROS } from "./datos"
 import { ProductPage } from "./ficha/ficha"
 import { href, ir, useRuta } from "./ruta"
 import { reiniciar, useTienda } from "./tienda"
+import { ClientaPage } from "./pedidos/clienta"
+import { ComoAvanzaPage } from "./pedidos/como-avanza"
+import { InicioPage } from "./pedidos/inicio"
+import { PedidosPage } from "./pedidos/lista"
+import { reiniciarPedidos, teToca, usePedidos } from "./pedidos/modelo"
+import { RepartoPage } from "./pedidos/reparto"
 
 const HashLink: ShellLinkComponent = ({ to, className, children, title, onClick }) => (
   <a href={href(to)} className={className} title={title} onClick={onClick}>
@@ -94,6 +100,31 @@ function PrototypeBar() {
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
+      <span className="ml-2 text-white/60">Mirar</span>
+      <ToggleGroup
+        value={[ruta.path === "/clienta" ? "clienta" : ruta.path === "/reparto" ? "reparto" : "tienda"]}
+        onValueChange={(v) => {
+          if (v[0] === "clienta") ir("/clienta", { extra: "p=0165" })
+          else if (v[0] === "reparto") ir("/reparto")
+          else if (v[0]) ir("/pedidos")
+        }}
+        className="gap-0.5"
+        aria-label="Mirar el pedido desde"
+      >
+        {[
+          ["tienda", "La tienda"],
+          ["clienta", "La clienta"],
+          ["reparto", "El repartidor"],
+        ].map(([v, l]) => (
+          <ToggleGroupItem
+            key={v}
+            value={v!}
+            className="h-7 rounded-full px-3 text-[13px] text-white/75 hover:bg-white/10 hover:text-white data-pressed:bg-white data-pressed:text-[#18181b]"
+          >
+            {l}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
       <span className="ml-auto flex items-center gap-1">
         <Popover>
           <PopoverTrigger
@@ -127,7 +158,8 @@ function PrototypeBar() {
           className="text-white/75 hover:bg-white/10 hover:text-white"
           onClick={() => {
             reiniciar()
-            ir("/catalogo")
+            reiniciarPedidos()
+            ir("/pedidos")
           }}
         >
           <RotateCcw aria-hidden />
@@ -145,9 +177,9 @@ function Pending({ title }: { title: string }) {
       <EmptyState
         icon={Construction}
         title="Esta pantalla no es parte del prototipo"
-        description="El prototipo muestra el catálogo, la ficha del producto y las conversaciones de Sofi."
-        actionLabel="Ir al catálogo"
-        onAction={() => ir("/catalogo")}
+        description="El prototipo muestra Inicio, los pedidos, el catálogo, la ficha del producto y las conversaciones de Sofi."
+        actionLabel="Ir a Pedidos"
+        onAction={() => ir("/pedidos")}
       />
     </PageShell>
   )
@@ -169,10 +201,16 @@ export function App() {
   const rol = useTienda((s) => s.rol)
   const R = RUBROS[ruta.rubro]
   const owner = rol === "dueno"
+  const tocaPedidos = teToca(usePedidos(ruta.rubro)).length
   const items: AppShellNavEntry[] = [
     { label: "Inicio", to: "/inicio", icon: House },
     { label: "Despachos", to: "/despachos", icon: Truck },
-    { label: "Pedidos", to: "/pedidos", icon: ReceiptText },
+    {
+      label: "Pedidos",
+      to: "/pedidos",
+      icon: ReceiptText,
+      ...(tocaPedidos ? { badge: tocaPedidos, badgeLabel: "te necesitan" } : {}),
+    },
     { label: "Clientes", to: "/clientes", icon: UserRound },
     {
       label: "Conversaciones",
@@ -197,7 +235,12 @@ export function App() {
   const p = ruta.path
   const productId = /^\/catalogo\/(p[\w-]+)$/.exec(p)?.[1]
   let page: React.ReactNode
-  if (p === "/catalogo") page = <CatalogPage />
+  if (p === "/inicio") page = <InicioPage />
+  else if (p === "/pedidos") page = <PedidosPage />
+  else if (p === "/pedidos/como-avanza") page = <ComoAvanzaPage />
+  else if (p === "/clienta") page = <ClientaPage />
+  else if (p === "/reparto") page = <RepartoPage />
+  else if (p === "/catalogo") page = <CatalogPage />
   else if (p === "/catalogo/cargar") page = <BulkPage />
   else if (p === "/catalogo/camara") page = <CameraPage />
   else if (productId) page = <ProductPage key={`${ruta.rubro}-${productId}`} pid={productId} />

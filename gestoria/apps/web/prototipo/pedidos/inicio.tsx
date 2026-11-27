@@ -1,0 +1,194 @@
+import { Badge, cn, useIsMobile } from "@odentia/ui"
+import { KpiCard, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { BellRing, Bike, CreditCard, Megaphone, PackageCheck, Smartphone } from "lucide-react"
+import { useState } from "react"
+import { RUBROS } from "../datos"
+import { ir, useRuta } from "../ruta"
+import { useTienda } from "../tienda"
+import { AccionDrawer } from "./acciones"
+import { TeTocaPedidos } from "./lista"
+import { type Accion, cuentas, money, type Pedido, teToca, usePedidos } from "./modelo"
+import { ConRouter } from "./router"
+
+/** Los avisos que llegan al celular de quien atiende: pocos, y solo los que sirven. */
+function AvisosCelular({ list }: { list: Pedido[] }) {
+  const { rubro } = useRuta()
+  const R = RUBROS[rubro]
+  const urgente = list.find((p) => p.toca?.urgente)
+  const pagos = list.filter((p) =>
+    p.pagos.some((g) => g.medio === "link" && g.cuando.startsWith("Hoy")),
+  )
+  const items = [
+    ...(urgente ? [{ I: Bike, t: "Ahora", d: urgente.toca!.texto, ok: true }] : []),
+    ...pagos.map((p) => ({
+      I: CreditCard,
+      t: "Ahora",
+      d: `${p.clienta.split(" ")[0]} pagó ${money(cuentas(p).confirmado)} · pedido ${p.id}`,
+      ok: true,
+    })),
+    {
+      I: CreditCard,
+      t: "8:06 a. m.",
+      d: "Milagros pagó con su link · pedido 0162 · campaña «Vuelven las sandalias»",
+      ok: true,
+    },
+    {
+      I: Smartphone,
+      t: "9:12 a. m.",
+      d: "Llegó un Yape de Carla para confirmar · pedido 0164",
+      ok: true,
+    },
+    { I: PackageCheck, t: "8:00 a. m.", d: "Hoy salen 5 pedidos: 1 sin repartidor", ok: true },
+  ]
+  return (
+    <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4">
+      <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <BellRing className="size-4" aria-hidden />
+        Avisos a tu celular
+      </h2>
+      <ul className="flex flex-col gap-2">
+        {items.slice(0, 4).map((x, i) => (
+          <li key={i} className="flex items-start gap-3 rounded-xl bg-muted/60 p-2.5 text-sm">
+            <span
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-white"
+              style={{ background: R.store.color }}
+            >
+              <x.I className="size-4" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>gestorIA · {R.store.name}</span>
+                <span>{x.t}</span>
+              </span>
+              <span className="block leading-snug">{x.d}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">
+        Solo lo que pide a una persona o una venta pagada. Lo que avanza solo no suena. Se eligen en
+        Configuración › Avisos.
+      </p>
+    </section>
+  )
+}
+
+function Inicio() {
+  const { rubro } = useRuta()
+  const all = usePedidos(rubro)
+  const owner = useTienda((s) => s.rol === "dueno")
+  const isMobile = useIsMobile()
+  const [accion, setAccion] = useState<{ p: Pedido; a: Accion } | null>(null)
+  const R = RUBROS[rubro]
+  const vendido = all
+    .filter((p) => p.paso !== "anulado" && p.creado.startsWith("Jue 27"))
+    .reduce((a, p) => a + cuentas(p).total, 0)
+  const cobrado = all
+    .flatMap((p) => p.pagos)
+    .filter(
+      (g) =>
+        g.estado === "confirmado" && (g.cuando.startsWith("Jue 27") || g.cuando.startsWith("Hoy")),
+    )
+    .reduce((a, g) => a + g.monto, 0)
+  const salen = all.filter(
+    (p) => p.entrega.dia === "Hoy" && ["preparando", "por_salir", "en_camino"].includes(p.paso),
+  ).length
+  const campana = all.filter((p) => p.origen.k === "campana" && p.paso !== "anulado")
+  const toca = teToca(all).length
+  return (
+    <PageShell className="flex flex-col gap-6">
+      <PageHeader title="Inicio" subtitle={`Jueves 27 · ${R.store.name}`} />
+      <p className={cn("text-sm", toca ? "" : "text-muted-foreground")}>
+        {toca ? (
+          <>
+            <b>{toca === 1 ? "Una cosa te necesita." : `${toca} cosas te necesitan.`}</b> Lo demás
+            lo están moviendo Sofi, la pasarela y Kevin.
+          </>
+        ) : (
+          "Nada te espera. Todo avanza solo."
+        )}
+      </p>
+      <TeTocaPedidos
+        list={all}
+        onAbrir={(id) => ir("/pedidos", { extra: `p=${id}` })}
+        onAccion={(p, a) => setAccion({ p, a })}
+      />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {owner ? (
+          <KpiCard
+            title="Vendido hoy"
+            value={money(vendido)}
+            description={isMobile ? undefined : "Pedidos de hoy, sin anulados"}
+          />
+        ) : null}
+        {owner ? (
+          <KpiCard
+            title="Cobrado hoy"
+            value={money(cobrado)}
+            description={isMobile ? undefined : "Confirmado por la pasarela, Kevin o tu equipo"}
+          />
+        ) : null}
+        <KpiCard
+          title="Salen hoy"
+          value={salen}
+          description={isMobile ? undefined : "Preparando, por salir y en camino"}
+        />
+        <KpiCard
+          title="Te toca"
+          value={toca}
+          description={isMobile ? undefined : "Lo que espera a una persona"}
+        />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <AvisosCelular list={all} />
+        {owner && campana.length ? (
+          <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Megaphone className="size-4" aria-hidden />
+              Campaña «Vuelven las sandalias»
+              <Badge variant="soft">Argos</Badge>
+            </h2>
+            <p className="text-sm">
+              Argos eligió a 14 clientas que compraron sandalias y no vuelven hace meses. Sofi les
+              escribió: <b>{campana.length} compraron</b> por{" "}
+              {money(campana.reduce((a, p) => a + cuentas(p).total, 0))}.
+            </p>
+            <ul className="flex flex-col divide-y rounded-xl border text-sm">
+              {campana.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/50"
+                    onClick={() => ir("/pedidos", { extra: `p=${p.id}` })}
+                  >
+                    <span>
+                      {p.id} · {p.clienta}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {money(cuentas(p).total)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </div>
+      {accion ? (
+        <AccionDrawer
+          p={all.find((x) => x.id === accion.p.id) ?? accion.p}
+          accion={accion.a}
+          onClose={() => setAccion(null)}
+        />
+      ) : null}
+    </PageShell>
+  )
+}
+
+export function InicioPage() {
+  return (
+    <ConRouter>
+      <Inicio />
+    </ConRouter>
+  )
+}
