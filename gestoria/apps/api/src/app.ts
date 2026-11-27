@@ -358,7 +358,7 @@ export function createApp(deps: AppDeps) {
   })
 
   // Configuración › Datos de la tienda y Tu marca (lienzo «gestorIA como odentIA», tablero 10).
-  app.put("/api/tiendas/:id/datos", async (c) => {
+  app.patch("/api/tiendas/:id/datos", async (c) => {
     const input = await bodyOf(c, storeDataInput)
     return c.json({
       store: await setStoreData(deps.appDb, c.get("person"), c.req.param("id"), input),
@@ -367,7 +367,7 @@ export function createApp(deps: AppDeps) {
   app.get("/api/tiendas/:id/marca", async (c) =>
     c.json({ brand: await storeBrand(deps.appDb, c.get("person"), c.req.param("id")) }),
   )
-  app.put("/api/tiendas/:id/marca", async (c) => {
+  app.patch("/api/tiendas/:id/marca", async (c) => {
     const input = await bodyOf(c, brandInput)
     return c.json({
       brand: await setStoreBrand(deps.appDb, c.get("person"), c.req.param("id"), input),

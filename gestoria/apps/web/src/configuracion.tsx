@@ -109,7 +109,7 @@ function StoreDataForm({ store }: { store: MyStore }) {
   const save = useMutation({
     mutationFn: () =>
       api(`/api/tiendas/${store.id}/datos`, {
-        method: "PUT",
+        method: "PATCH",
         body: { name, country, timeZone },
       }),
     onSuccess: async () => {

@@ -198,7 +198,7 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
   const save = useMutation({
     mutationFn: () =>
       api<{ brand: BrandView }>(`/api/tiendas/${store.id}/marca`, {
-        method: "PUT",
+        method: "PATCH",
         body: {
           publicName: publicName.trim(),
           // El de gestorIA no se guarda: queda sin color propio.
@@ -208,6 +208,8 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
       }),
     onSuccess: async ({ brand: next }) => {
       queryClient.setQueryData(BRAND_KEY(store.id), { brand: next })
+      // Un link puesto no se quita (se cambia por otro): si se borró, vuelve el guardado.
+      setLink(next.link ?? "")
       // El color pinta la app de todo el equipo: llega con la tienda.
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
       toast.success("Tu marca quedó guardada")

@@ -387,21 +387,21 @@ describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
   it("Ventas ve la marca y no la cambia; el Dueño cambia los datos y queda anotado", async () => {
     expect((await call("lucia", "GET", `/api/tiendas/${storeId}/marca`)).status).toBe(200)
     const data = { name: "Calzados Rosa", country: "PE", timeZone: "America/Lima" }
-    expect((await call("lucia", "PUT", `/api/tiendas/${storeId}/datos`, data)).status).toBe(403)
+    expect((await call("lucia", "PATCH", `/api/tiendas/${storeId}/datos`, data)).status).toBe(403)
     expect((await upload("lucia", "logo", PNG)).status).toBe(403)
-    const bad = await call("rosa", "PUT", `/api/tiendas/${storeId}/datos`, {
+    const bad = await call("rosa", "PATCH", `/api/tiendas/${storeId}/datos`, {
       ...data,
       timeZone: "America/Narnia",
     })
     expect(bad.json.error.fields).toHaveProperty("timeZone")
-    const saved = await call("rosa", "PUT", `/api/tiendas/${storeId}/datos`, data)
+    const saved = await call("rosa", "PATCH", `/api/tiendas/${storeId}/datos`, data)
     expect(saved.json.store).toMatchObject({ country: "PE", timeZone: "America/Lima" })
     const events = await db.ownerDb.select().from(storeEvent).where(eq(storeEvent.storeId, storeId))
     expect(events.map((e) => e.action)).toContain("configuracion.tienda")
   })
 
   it("el color se guarda como se escribe en la base y el nombre del link rechaza los reservados", async () => {
-    const brand = (body: unknown) => call("rosa", "PUT", `/api/tiendas/${storeId}/marca`, body)
+    const brand = (body: unknown) => call("rosa", "PATCH", `/api/tiendas/${storeId}/marca`, body)
     const reserved = await brand({ publicName: "", brandColor: "", link: "4dm1n" })
     expect(reserved.status).toBe(400)
     expect(reserved.json.error.fields).toHaveProperty("link")
@@ -426,7 +426,7 @@ describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
       .insert(storeLink)
       .values({ name: "zapatos-ana", storeId: other!.id, createdBy: "u-ajena" })
     const brand = (link: string) =>
-      call("rosa", "PUT", `/api/tiendas/${storeId}/marca`, {
+      call("rosa", "PATCH", `/api/tiendas/${storeId}/marca`, {
         publicName: "",
         brandColor: "",
         link,
