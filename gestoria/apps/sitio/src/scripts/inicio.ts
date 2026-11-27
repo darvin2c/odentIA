@@ -293,7 +293,7 @@ function ventaEscena(): void {
   tl.fromTo(
     ".venta__pulso",
     { scale: 0.2, autoAlpha: 0.9 },
-    { scale: 2.6, autoAlpha: 0, duration: 0.6, ease: "power2.out" },
+    { scale: 2.6, autoAlpha: 0, duration: 0.6, ease: "power2.out", immediateRender: false },
     4.45,
   )
   // 6. Sale: el pedido se va con el paquete y se dibuja la ruta.
