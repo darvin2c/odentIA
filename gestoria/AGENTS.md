@@ -87,6 +87,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   preguntar. Un pedido no cambia de ficha. Sofi abre fichas, pero no las cambia ni anota
   decisiones (`0015_reglas_clientas.sql`).
 - Lo que debe una clienta no se calcula en Clientes: sale del saldo de cada pedido.
+- «Escribirle» lee cada teléfono en E.164 con lo común (`toE164` de `@odentia/ui-patterns`): el
+  que trae su código vale siempre; el anotado sin él, como del país de la tienda. Sin país, no se
+  adivina.
 
 ## Sofi y Argos (B5)
 

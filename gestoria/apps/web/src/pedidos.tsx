@@ -30,7 +30,13 @@ import { Link, useSearch } from "@tanstack/react-router"
 import { Copy, ImageOff, Link2, PackageCheck, Plus, ReceiptText, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
-import { CUSTOMER_KEY, CUSTOMERS_KEY, type CustomerList, purchasesText } from "./lib/clientes"
+import {
+  CUSTOMER_KEY,
+  CUSTOMERS_KEY,
+  type CustomerList,
+  channelsText,
+  purchasesText,
+} from "./lib/clientes"
 import {
   CHANNELS,
   dayName,
@@ -1654,7 +1660,13 @@ function CustomerMatches({
                 >
                   <span className="font-medium">{c.name}</span>
                   <span className="text-xs text-muted-foreground">
-                    {[c.phones[0], c.lastZone, purchasesText(c.purchases, c.lastPurchaseAt)]
+                    {/* Por dónde llegó la distingue de otra con el mismo nombre y sin teléfono. */}
+                    {[
+                      channelsText(c.channels),
+                      c.phones[0],
+                      c.lastZone,
+                      purchasesText(c.purchases, c.lastPurchaseAt),
+                    ]
                       .filter(Boolean)
                       .join(" · ")}
                   </span>
