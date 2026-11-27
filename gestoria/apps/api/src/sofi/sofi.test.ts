@@ -710,8 +710,10 @@ describe("Argos le encarga a Sofi lo de rutina", () => {
     const board = await call("rosa", "GET", `${base}/argos`)
     expect(board.status).toBe(200)
     expect(board.json.done.map((d: Json) => d.kind).sort()).toEqual(["gracias", "pago", "volvio"])
-    // Lo delicado viene al equipo: el pago por confirmar de la prueba no cuenta.
-    expect(board.json.toDo.filter((t: Json) => t.kind === "pago")).toEqual([])
+    // Lo que le toca al equipo está en Inicio: el pago por confirmar de la prueba no cuenta.
+    const home = await call("rosa", "GET", `${base}/inicio`)
+    expect(home.status).toBe(200)
+    expect(home.json.toDo.filter((t: Json) => t.kind === "pago")).toEqual([])
   })
 
   it("con Sofi apagada, Argos no le encarga nada", async () => {

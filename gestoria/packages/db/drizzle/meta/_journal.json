@@ -169,6 +169,20 @@
       "when": 1795786516332,
       "tag": "0023_reglas_tu_marca",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795789239755,
+      "tag": "0024_los_primeros_pasos",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795789246658,
+      "tag": "0025_reglas_primeros_pasos",
+      "breakpoints": true
     }
   ]
 }

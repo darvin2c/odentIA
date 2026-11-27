@@ -51,6 +51,7 @@ import {
   channelsText,
   purchasesText,
 } from "./lib/clientes"
+import { HOME_KEY } from "./lib/inicio"
 import {
   CHANNELS,
   type ChangePreview,
@@ -122,13 +123,17 @@ function StateBadge({
 
 export function OrdersPage() {
   const { store } = useStoreContext()
-  const [filter, setFilter] = useState<OrderFilter>("abiertos")
-  // «?pedido=…» llega desde Argos o desde la conversación de prueba: abre ese pedido.
-  const search = useSearch({ strict: false }) as { pedido?: string }
+  // «?pedido=…» llega desde la conversación de prueba: abre ese pedido. «?filtro=…», desde
+  // «Sale hoy» de Inicio: abre en ese filtro.
+  const search = useSearch({ strict: false }) as { pedido?: string; filtro?: OrderFilter }
+  const [filter, setFilter] = useState<OrderFilter>(search.filtro ?? "abiertos")
   const [open, setOpen] = useState<string | null>(search.pedido ?? null)
   useEffect(() => {
     if (search.pedido) setOpen(search.pedido)
   }, [search.pedido])
+  useEffect(() => {
+    if (search.filtro) setFilter(search.filtro)
+  }, [search.filtro])
   const [adding, setAdding] = useState(false)
   const list = useQuery({
     queryKey: [...ORDERS_KEY(store.id), filter],
@@ -274,14 +279,19 @@ function useOrderAction(storeId: string, orderId: string, onDone?: () => void) {
       }),
     onSuccess: async (data, vars) => {
       queryClient.setQueryData(["pedido", storeId, orderId], data.order)
-      await queryClient.invalidateQueries({ queryKey: ORDERS_KEY(storeId) })
+      // La lista y lo que le toca a cada uno en Inicio.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ORDERS_KEY(storeId) }),
+        queryClient.invalidateQueries({ queryKey: HOME_KEY(storeId) }),
+      ])
       if (vars.done) toast.success(vars.done)
       onDone?.()
     },
   })
 }
 
-function OrderSheet({ orderId, onClose }: { orderId: string; onClose: () => void }) {
+/** El pedido abierto, al lado: sus datos, sus pagos con su captura y lo que se puede hacer. */
+export function OrderSheet({ orderId, onClose }: { orderId: string; onClose: () => void }) {
   const { store } = useStoreContext()
   const detail = useQuery({
     queryKey: ["pedido", store.id, orderId],
@@ -517,7 +527,11 @@ function OrderBody({ order }: { order: OrderDetail }) {
         {(order.state === "por_salir" || order.state === "en_camino") && can("entregas") ? (
           <DeliveryActions order={order} />
         ) : null}
-        {notShipped && can("entregas") ? <MoveToDay order={order} /> : null}
+        {notShipped && can("entregas") ? (
+          <div className="flex flex-wrap gap-2 pt-1">
+            <MoveToDay order={order} />
+          </div>
+        ) : null}
       </Block>
 
       <Block title="Lo que pasó">
@@ -1173,8 +1187,14 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
   )
 }
 
-/** «Pasar a…»: otro día de entrega, sin anular nada. */
-function MoveToDay({ order }: { order: OrderDetail }) {
+/** «Pasar a…»: otro día de entrega, sin anular nada. También desde «Te toca» de Inicio. */
+export function MoveToDay({
+  order,
+  size,
+}: {
+  order: Pick<OrderDetail, "id" | "number" | "deliverOn">
+  size?: "sm"
+}) {
   const { store } = useStoreContext()
   const today = storeToday(store.timeZone)
   const [asking, setAsking] = useState(false)
@@ -1184,8 +1204,8 @@ function MoveToDay({ order }: { order: OrderDetail }) {
   const action = useOrderAction(store.id, order.id, () => setAsking(false))
   const errors = fieldErrors(action.error)
   return (
-    <div className="flex flex-wrap gap-2 pt-1">
-      <Button variant="outline" onClick={() => setAsking(true)}>
+    <>
+      <Button variant="outline" size={size} onClick={() => setAsking(true)}>
         <CalendarClock aria-hidden />
         Pasar a…
       </Button>
@@ -1214,7 +1234,7 @@ function MoveToDay({ order }: { order: OrderDetail }) {
       >
         <DayChoice today={today} value={day} onChange={setDay} error={errors.deliverOn} />
       </ConfirmDialog>
-    </div>
+    </>
   )
 }
 
