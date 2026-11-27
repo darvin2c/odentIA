@@ -18,12 +18,19 @@ import {
   toast,
 } from "@odentia/ui"
 import { Textarea } from "@odentia/ui/components/textarea"
-import { ConfirmDialog, EmptyState, SubmitButton, ViewTabs } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  EmptyState,
+  PersonAvatar,
+  SubmitButton,
+  ViewTabs,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useSearch } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import { Copy, ImageOff, Link2, PackageCheck, Plus, ReceiptText, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
+import { CUSTOMER_KEY, CUSTOMERS_KEY, type CustomerList, purchasesText } from "./lib/clientes"
 import {
   CHANNELS,
   dayName,
@@ -396,6 +403,17 @@ function OrderBody({ order }: { order: OrderDetail }) {
       </Block>
 
       <Block title="Entrega">
+        {order.customerId ? (
+          <Row label="Clienta">
+            <Link
+              className="underline"
+              to="/tiendas/$id/clientes/$customerId"
+              params={{ id: store.id, customerId: order.customerId }}
+            >
+              Ver su ficha
+            </Link>
+          </Row>
+        ) : null}
         <Row label="Forma">{order.deliveryName}</Row>
         {order.deliverOn ? <Row label="Día">{dayName(order.deliverOn)}</Row> : null}
         {order.address ? <Row label="Dirección">{order.address}</Row> : null}
@@ -1024,14 +1042,38 @@ interface LineDraft {
   quantity: string
   price: string
   gift: boolean
+  /** «Repetir pedido»: lo que llevó la vez anterior en esta línea. */
+  before?: string
 }
 
-function NewOrderSheet({
+/** La clienta elegida: su ficha (entrega 4). */
+export interface ChosenCustomer {
+  id: string
+  name: string
+  phone: string | null
+}
+
+/** Lo que trae «Repetir pedido»: la clienta y lo de su última compra, con los precios de hoy. */
+export interface OrderDraft {
+  customer: ChosenCustomer
+  number: string
+  channel: OrderChannel
+  lines: { variantId: string; quantity: number; text: string }[]
+  deliveryMethodId: string | null
+  zone: string | null
+  address: string
+  paymentMethodId: string | null
+}
+
+export function NewOrderSheet({
   onClose,
   onCreated,
+  draft,
 }: {
   onClose: () => void
   onCreated: (id: string) => void
+  /** «Repetir pedido» desde la ficha de la clienta. */
+  draft?: OrderDraft
 }) {
   const { store } = useStoreContext()
   const cur = store.currency
@@ -1054,22 +1096,33 @@ function NewOrderSheet({
   const deliveries = (lists.data?.deliveries ?? []).filter((d) => d.isActive)
   const payments = (lists.data?.payments ?? []).filter((p) => p.isActive)
 
+  const [chosen, setChosen] = useState<ChosenCustomer | null>(draft?.customer ?? null)
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
-  const [channel, setChannel] = useState<OrderChannel>("otro")
-  const nextKey = useRef(1)
-  const [lines, setLines] = useState<LineDraft[]>([
-    { key: 0, variantId: "", quantity: "1", price: "", gift: false },
-  ])
-  const [deliveryId, setDeliveryId] = useState("")
-  const [zone, setZone] = useState("")
+  const [channel, setChannel] = useState<OrderChannel>(draft?.channel ?? "otro")
+  const nextKey = useRef(draft?.lines.length || 1)
+  const [lines, setLines] = useState<LineDraft[]>(() =>
+    draft?.lines.length
+      ? draft.lines.map((l, key) => ({
+          key,
+          variantId: l.variantId,
+          quantity: String(l.quantity),
+          price: "",
+          gift: false,
+          before: l.text,
+        }))
+      : [{ key: 0, variantId: "", quantity: "1", price: "", gift: false }],
+  )
+  const [deliveryId, setDeliveryId] = useState(draft?.deliveryMethodId ?? "")
+  const [zone, setZone] = useState(draft?.zone ?? "")
   const [deliveryCost, setDeliveryCost] = useState("")
   const [deliveryCharged, setDeliveryCharged] = useState("")
-  const [address, setAddress] = useState("")
+  const [address, setAddress] = useState(draft?.address ?? "")
   const [deliverOn, setDeliverOn] = useState(localToday())
-  const [paymentId, setPaymentId] = useState("")
+  const [paymentId, setPaymentId] = useState(draft?.paymentMethodId ?? "")
   const [notes, setNotes] = useState("")
   const dirty = useDirty({
+    chosen,
     customerName,
     customerPhone,
     lines,
@@ -1078,6 +1131,24 @@ function NewOrderSheet({
     address,
     notes,
   })
+
+  // «Repetir pedido»: lo que ya no se vende o ya no está encendido queda por elegir, con lo que
+  // llevó la vez anterior a la vista.
+  const repeating = Boolean(draft)
+  useEffect(() => {
+    if (!repeating || !sellable.data) return
+    const ids = new Set(sellable.data.variants.filter((v) => v.stock > 0).map((v) => v.id))
+    setLines((all) =>
+      all.map((l) => (l.variantId && !ids.has(l.variantId) ? { ...l, variantId: "" } : l)),
+    )
+  }, [repeating, sellable.data])
+  useEffect(() => {
+    if (!repeating || !lists.data) return
+    const on = <T extends { id: string; isActive: boolean }>(rows: T[], id: string) =>
+      rows.some((row) => row.id === id && row.isActive)
+    setDeliveryId((id) => (id && !on(lists.data.deliveries, id) ? "" : id))
+    setPaymentId((id) => (id && !on(lists.data.payments, id) ? "" : id))
+  }, [repeating, lists.data])
 
   const delivery = deliveries.find((d) => d.id === deliveryId)
   const payment = payments.find((p) => p.id === paymentId)
@@ -1088,8 +1159,10 @@ function NewOrderSheet({
   // envía, para poner cada error y cada precio en su línea.
   const sent = lines.flatMap((l, i) => (l.variantId ? [i] : []))
   const body = {
-    customerName,
-    customerPhone,
+    // Con su ficha elegida, el pedido copia su nombre y su teléfono; si no, abre la suya.
+    customerId: chosen?.id ?? null,
+    customerName: chosen ? "" : customerName,
+    customerPhone: chosen ? "" : customerPhone,
     channel,
     address,
     notes,
@@ -1138,6 +1211,8 @@ function NewOrderSheet({
       queryClient.setQueryData(["pedido", store.id, data.order.id], data.order)
       await queryClient.invalidateQueries({ queryKey: ORDERS_KEY(store.id) })
       await queryClient.invalidateQueries({ queryKey: ["para-vender", store.id] })
+      await queryClient.invalidateQueries({ queryKey: CUSTOMERS_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CUSTOMER_KEY(store.id) })
       toast.success(`Pedido ${data.order.number} anotado`)
       onCreated(data.order.id)
     },
@@ -1162,7 +1237,7 @@ function NewOrderSheet({
 
   const submit = () => {
     const next: Record<string, string> = {}
-    if (!customerName.trim()) next.customerName = "Escribe el nombre del cliente"
+    if (!chosen && !customerName.trim()) next.customerName = "Escribe el nombre de la clienta"
     if (body.lines.length === 0) next.lines = "Agrega al menos un producto"
     if (!deliveryId) next.deliveryMethodId = "Elige cómo se entrega"
     if (!paymentId) next.paymentMethodId = "Elige cómo paga"
@@ -1184,8 +1259,12 @@ function NewOrderSheet({
     <FormSheet
       open
       wide
-      title="Anotar un pedido"
-      description="Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
+      title={draft ? `Nuevo pedido para ${draft.customer.name}` : "Anotar un pedido"}
+      description={
+        draft
+          ? `Lo mismo de su pedido ${draft.number}, con los precios de hoy. Cambia lo que haga falta.`
+          : "Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
+      }
       onClose={onClose}
       onSubmit={submit}
       dirty={dirty}
@@ -1205,26 +1284,44 @@ function NewOrderSheet({
       ) : null}
       <FieldGroup>
         <FieldSet>
-          <FieldLegend>Cliente</FieldLegend>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField
-              label="Nombre"
-              value={customerName}
-              onChange={setCustomerName}
-              maxLength={120}
-              error={errors.customerName}
-              autoFocus
+          <FieldLegend>Clienta</FieldLegend>
+          {chosen ? (
+            <ChosenCustomerRow
+              customer={chosen}
+              error={errors.customerId}
+              onChange={() => setChosen(null)}
             />
-            <TextField
-              label="Teléfono (opcional)"
-              value={customerPhone}
-              onChange={setCustomerPhone}
-              maxLength={30}
-              inputMode="text"
-              placeholder="+51 987 654 321"
-              error={errors.customerPhone}
-            />
-          </div>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <TextField
+                  label="Nombre"
+                  value={customerName}
+                  onChange={setCustomerName}
+                  maxLength={120}
+                  error={errors.customerName}
+                  autoFocus
+                />
+                <TextField
+                  label="Teléfono (opcional)"
+                  value={customerPhone}
+                  onChange={setCustomerPhone}
+                  maxLength={30}
+                  inputMode="text"
+                  placeholder="+51 987 654 321"
+                  error={errors.customerPhone}
+                />
+              </div>
+              <CustomerMatches
+                name={customerName}
+                phone={customerPhone}
+                onChoose={(customer) => {
+                  setChosen(customer)
+                  setLocalErrors(({ customerName: _, ...rest }) => rest)
+                }}
+              />
+            </>
+          )}
           <SelectField
             label="Por dónde llegó"
             value={channel}
@@ -1268,6 +1365,12 @@ function NewOrderSheet({
                     </Button>
                   ) : null}
                 </div>
+                {line.before ? (
+                  <p className="-mt-1 text-xs text-muted-foreground">
+                    La vez anterior: {line.before}.
+                    {line.variantId ? "" : " Ya no está a la venta o se agotó: elige otro."}
+                  </p>
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
                   <TextField
                     label="Cantidad"
@@ -1457,6 +1560,109 @@ function NewOrderSheet({
         <FormAlert error={create.error} />
       </FieldGroup>
     </FormSheet>
+  )
+}
+
+/** La clienta elegida: el pedido usa su ficha. «Cambiar» vuelve a buscarla o a escribirla. */
+function ChosenCustomerRow({
+  customer,
+  error,
+  onChange,
+}: {
+  customer: ChosenCustomer
+  error?: string
+  onChange: () => void
+}) {
+  return (
+    <Field data-invalid={error ? true : undefined}>
+      <div className="flex items-center gap-3 rounded-lg border p-3">
+        <PersonAvatar name={customer.name} className="size-9" decorative />
+        <span className="flex min-w-0 flex-1 flex-col text-sm">
+          <span className="truncate font-medium">{customer.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {customer.phone ?? "Sin teléfono"} · el pedido va a su ficha
+          </span>
+        </span>
+        <Button variant="ghost" size="sm" type="button" onClick={onChange}>
+          Cambiar
+        </Button>
+      </div>
+      {error ? <FieldError>{error}</FieldError> : null}
+    </Field>
+  )
+}
+
+/**
+ * Las clientas que ya están en Clientes y coinciden con lo escrito (tablero 8). Tocar una usa su
+ * ficha; si no es ninguna, su ficha se abre al anotar el pedido, en este mismo cajón. Solo
+ * sugiere: nunca la elige sola por el nombre o el teléfono.
+ */
+function CustomerMatches({
+  name,
+  phone,
+  onChoose,
+}: {
+  name: string
+  phone: string
+  onChoose: (customer: ChosenCustomer) => void
+}) {
+  const { store } = useStoreContext()
+  const titleId = useId()
+  const digits = phone.replace(/\D/g, "")
+  const text = digits.length >= 6 ? digits : name.trim().length >= 2 ? name.trim() : ""
+  const [debounced, setDebounced] = useState(text)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(text), 300)
+    return () => clearTimeout(timer)
+  }, [text])
+  const found = useQuery({
+    queryKey: [...CUSTOMERS_KEY(store.id), debounced],
+    queryFn: () =>
+      api<CustomerList>(
+        `/api/tiendas/${store.id}/clientes?buscar=${encodeURIComponent(debounced)}`,
+      ),
+    enabled: debounced !== "",
+    staleTime: 30_000,
+  })
+  const matches = debounced ? (found.data?.customers ?? []).slice(0, 5) : []
+  return (
+    <div aria-live="polite" className="flex flex-col gap-2">
+      {matches.length > 0 ? (
+        <>
+          <p id={titleId} className="text-sm font-medium">
+            ¿Es una de ellas?
+          </p>
+          <ul
+            aria-labelledby={titleId}
+            className="flex flex-col divide-y overflow-hidden rounded-lg border"
+          >
+            {matches.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => onChoose({ id: c.id, name: c.name, phone: c.phones[0] ?? null })}
+                  className="flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset"
+                >
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {[c.phones[0], c.lastZone, purchasesText(c.purchases, c.lastPurchaseAt)]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <FieldDescription>
+            Si no es ninguna, su ficha se abre al anotar el pedido.
+          </FieldDescription>
+        </>
+      ) : debounced && found.data ? (
+        <FieldDescription>
+          No está en Clientes: su ficha se abre al anotar el pedido.
+        </FieldDescription>
+      ) : null}
+    </div>
   )
 }
 

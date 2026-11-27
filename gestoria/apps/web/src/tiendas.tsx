@@ -637,15 +637,20 @@ export function useStoreContext() {
   return value
 }
 
-/** Cada destino de la tienda: sus pedidos, lo que vende, cómo cobra y entrega, y su equipo. */
+/**
+ * Cada destino de la tienda: sus pedidos, sus clientas, lo que vende, cómo cobra y entrega, y su
+ * equipo.
+ */
 function storeSections(store: MyStore) {
   const id = store.id
-  // Soporte de gestorIA solo mira: sin pedidos ni conversaciones (`ventas.atender`).
+  // Soporte de gestorIA solo mira: sin pedidos, clientas ni conversaciones (`ventas.atender`).
   const attends = store.permissions.includes("ventas.atender")
   return [
     ...(attends
       ? [
           { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
+          // Del día a día (entrega 4): cada clienta con sus compras, para todo el equipo que atiende.
+          { label: "Clientes", to: `/tiendas/${id}/clientes`, icon: UserRound },
           { label: "Sofi", to: `/tiendas/${id}/sofi`, icon: Bot },
         ]
       : []),
@@ -674,8 +679,11 @@ export function StoreLayout() {
   if (me.isPending) return <Opening message="Abriendo tu tienda…" />
   if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
   if (!store) return <NotYours me={me.data} id={id} />
-  // Quien solo mira (soporte) entra por el catálogo: los pedidos no son suyos.
-  if (!store.permissions.includes("ventas.atender") && pathname.endsWith("/pedidos"))
+  // Quien solo mira (soporte) entra por el catálogo: los pedidos y las clientas no son suyos.
+  if (
+    !store.permissions.includes("ventas.atender") &&
+    (pathname.endsWith("/pedidos") || pathname.includes("/clientes"))
+  )
     return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
   return (
     <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>

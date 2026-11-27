@@ -19,6 +19,7 @@ import {
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { CatalogPage } from "./catalogo"
+import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import {
   ForgotPasswordPage,
@@ -112,12 +113,20 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: los pedidos, Sofi, el catálogo (su producto), pagos y entregas,
-// Reportes y el equipo.
+// La tienda y sus secciones: los pedidos, las clientas, Sofi, el catálogo (su producto), pagos y
+// entregas, Reportes y el equipo.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
   component: StoreLayout,
+})
+// Clientes (entrega 4): la lista y, al lado, la ficha abierta. «?q=…» es lo que se busca.
+const customersRoute = createRoute({
+  getParentRoute: () => storeRoute,
+  path: "/clientes",
+  validateSearch: (s: Record<string, unknown>): { q?: string } =>
+    typeof s.q === "string" && s.q ? { q: s.q } : {},
+  component: CustomersLayout,
 })
 const storeChildren = [
   createRoute({
@@ -135,6 +144,14 @@ const storeChildren = [
       typeof s.pedido === "string" ? { pedido: s.pedido } : {},
     component: OrdersPage,
   }),
+  customersRoute.addChildren([
+    createRoute({ getParentRoute: () => customersRoute, path: "/", component: CustomersIndex }),
+    createRoute({
+      getParentRoute: () => customersRoute,
+      path: "/$customerId",
+      component: CustomerPage,
+    }),
+  ]),
   createRoute({ getParentRoute: () => storeRoute, path: "/sofi", component: SofiPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/reportes", component: ReportsPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
