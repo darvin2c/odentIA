@@ -10,12 +10,12 @@ export const REGISTER_URL = `${APP_URL}/register`
 export const CONTACT_EMAIL = `hola@${DOMAIN}`
 
 /**
- * ¿El botón principal es crear la tienda? Desde la web v3, sí: el usuario lo pidió así. Quien crea
- * su tienda arma el catálogo y prueba a Sofi; vender en sus propios chats llega cuando WhatsApp,
- * Instagram y Messenger de gestorIA estén conectados con Meta. Con `false`, el botón principal
- * vuelve a ser hablar con nosotros por WhatsApp.
+ * ¿Ya se puede abrir una tienda y vender en sus chats? Mientras WhatsApp, Instagram y Messenger de
+ * gestorIA esperan su conexión con Meta, no: quien crea una tienda arma el catálogo y prueba a Sofi,
+ * pero no vende en sus chats. Por eso el botón principal es hablar con nosotros. Abrir el registro lo
+ * decide el usuario: ese día esta línea pasa a `true` y el botón principal es «Crea tu tienda».
  */
-export const TIENDAS_ABIERTAS = true
+export const TIENDAS_ABIERTAS = false
 
 /** El mensaje ya escrito del WhatsApp de ventas: por él la administración sabe que es gestorIA. */
 export const SALES_TEXT = "Hola, quiero información de gestorIA"
@@ -145,7 +145,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = [
     title: "Tu tienda",
     links: [
       { href: LOGIN_URL, label: "Entrar" },
-      { href: REGISTER_URL, label: "Crea tu tienda" },
+      ...(TIENDAS_ABIERTAS ? [{ href: REGISTER_URL, label: "Crea tu tienda" }] : []),
     ],
   },
 ].filter((g) => g.links.length > 0)

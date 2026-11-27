@@ -6,8 +6,10 @@
 import { cta, footerGroups, footerLinks, SIGNATURE } from "../lib/sitio"
 
 const year = new Date().getFullYear()
+// El Inicio pone en el cierre su paquete en 3D (`cierre`) en lugar del nombre grande, sobre fondo oscuro.
+const conVisual = Astro.slots.has("cierre")
 ---
-<footer class="closing footer--statement g2m" id="contact" aria-labelledby="close-h">
+<footer class:list={["closing footer--statement g2m", { "footer--noche": conVisual }]} id="contact" aria-labelledby="close-h">
   <div class="wrap">
     <div class="closing__cta close--word">
       <div class="section-head--split">
@@ -17,7 +19,7 @@ const year = new Date().getFullYear()
         </div>
         <a class="btn btn--primary" href={cta.href}>{cta.label}<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"></path><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"></path></svg></a>
       </div>
-      <p class="close__word" aria-hidden="true">gestorIA</p>
+      {conVisual ? <slot name="cierre" /> : <p class="close__word" aria-hidden="true">gestorIA</p>}
     </div>
     <div class="closing__links">
       <div class="grid">

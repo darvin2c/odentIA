@@ -32,11 +32,8 @@ describe("el WhatsApp de ventas", () => {
 describe("el botón principal", () => {
   const wa = salesWhatsAppHref("+51987654321")
 
-  it("desde la web v3 es crear la tienda", () => {
-    expect(TIENDAS_ABIERTAS).toBe(true)
-  })
-
-  it("con las tiendas cerradas, es hablar con nosotros", () => {
+  it("mientras los chats esperan a Meta, es hablar con nosotros", () => {
+    expect(TIENDAS_ABIERTAS).toBe(false)
     expect(primaryCta(false, wa)).toEqual({
       href: wa,
       label: "Escríbenos por WhatsApp",

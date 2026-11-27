@@ -112,7 +112,13 @@ const data = isHome ? [site, ...ld] : ld
     <main id="top">
       <slot />
     </main>
-    <Footer />
+    {Astro.slots.has("cierre") ? (
+      <Footer>
+        <slot name="cierre" slot="cierre" />
+      </Footer>
+    ) : (
+      <Footer />
+    )}
     <BarraCelular />
     <script type="module" src="/assets/system.js" is:inline></script>
     <script type="module" src="/assets/motion/motion.js" is:inline></script>

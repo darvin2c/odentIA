@@ -199,8 +199,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   1 % de cada pedido que gestorIA genera sola. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
-- El botón principal es «Crea tu tienda» (el registro de la app) y «Entrar» lleva a su ingreso;
-  `TIENDAS_ABIERTAS` en false lo vuelve el WhatsApp de ventas (`vars.SALES_WHATSAPP`).
+- El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
+  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda» cuando el usuario lo
+  decida. «Entrar» lleva al ingreso de la app.
 - Las páginas del plan (web v3) están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
   la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
 - El diseño es el de tasteskill 2.5.1: sus archivos van tal cual en `public/assets/` (no se editan;

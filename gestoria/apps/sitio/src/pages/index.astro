@@ -1,30 +1,25 @@
 ---
-// El Inicio de gestorIA (web v3, dirección A del estudio: «Una venta contada por Sofi»). Una sola venta
-// de punta a punta con las pantallas reales de la tienda de ejemplo (Calzados Rosa), capturadas de
-// la app: el chat de «Probar a Sofi», el precio mínimo del catálogo, Pedidos y la ficha de la
-// clienta. Lo que todavía no existe (el carrito con «Pagar ahora», gestorIA Reparto, sumar algo antes
-// de que salga) se dice como «pronto» y nunca se muestra como pantalla.
-//
-// tasteskill 2.5.1 · tipo software · héroe split · nav-mega · close-word + footer-statement ·
-// ritmo surface-pairs · botones tonal · suelo sage · momentos pinned-chapters (#venta) y
-// word-highlight (#entrega).
+// El Inicio de gestorIA (web v4): una venta de Sofi de punta a punta, con el nivel de movimiento de
+// minitap.ai y sus técnicas adaptadas, nunca su código ni su marca.
+// - Héroe oscuro con el chat de WhatsApp como lo ve la clienta, en código, mensaje por mensaje.
+// - La venta en una escena fija que avanza con el scroll (GSAP + ScrollTrigger): el paquete en 3D
+//   (three.js) recibe la zapatilla, se cierra al confirmar el pago, se sella y sale.
+// - Lo que ve la tienda, con las capturas reales de la app (Calzados Rosa): Pedidos, el pedido por
+//   confirmar y la ficha de la clienta.
+// Lo que todavía no existe (el carrito con «Pagar ahora», gestorIA Reparto) se dice como «pronto».
+// Con «reducir movimiento» nada se fija ni se mueve: cada parte queda completa en su lugar.
 import { getImage, Image } from "astro:assets"
 import instagram from "../assets/iconos/instagram.svg"
-import isotipo from "../assets/isotipo.svg?raw"
 import messenger from "../assets/iconos/messenger.svg"
 import whatsapp from "../assets/iconos/whatsapp.svg"
-import chatFinalCorto from "../assets/pantallas/chat-final-corto.png"
-import chatOferta from "../assets/pantallas/chat-oferta.png"
-import chatPedido from "../assets/pantallas/chat-pedido.png"
-import chatPregunta from "../assets/pantallas/chat-pregunta.png"
+import isotipo from "../assets/isotipo.svg?raw"
 import clienta from "../assets/pantallas/clienta.png"
 import clientaCelular from "../assets/pantallas/clienta-celular.png"
-import pedidoPagado from "../assets/pantallas/pedido-pagado.png"
 import pedidoPorConfirmar from "../assets/pantallas/pedido-por-confirmar.png"
 import pedidos from "../assets/pantallas/pedidos.png"
 import pedidosCelular from "../assets/pantallas/pedidos-celular.png"
 import pedidosTableta from "../assets/pantallas/pedidos-tableta.png"
-import productoPrecioMinimo from "../assets/pantallas/producto-precio-minimo.png"
+import ChatWhatsApp from "../components/inicio/ChatWhatsApp.astro"
 import Base from "../layouts/Base.astro"
 import { cta, SITE_URL } from "../lib/sitio"
 import "../styles/inicio.css"
@@ -32,53 +27,41 @@ import "../styles/inicio.css"
 const PHONE = "(max-width: 639px)"
 const TABLET = "(min-width: 640px) and (max-width: 1023px)"
 
-/** Una pantalla con otra para el celular: cada una entera, en su proporción. */
-async function artDirected(wide: ImageMetadata, wideWidths: number[], phone: ImageMetadata, phoneWidths: number[]) {
-  const [w, p] = await Promise.all([
-    getImage({ src: wide, widths: wideWidths, format: "webp" }),
-    getImage({ src: phone, widths: phoneWidths, format: "webp" }),
-  ])
-  return {
-    wideSrcset: w.srcSet.attribute,
-    phoneSrcset: p.srcSet.attribute,
-    src: w.src,
-    width: wide.width,
-    height: wide.height,
-    phoneWidth: phone.width,
-    phoneHeight: phone.height,
-  }
-}
+const webp = (src: ImageMetadata, widths: number[]) => getImage({ src, widths, format: "webp" })
+const [pedidosW, pedidosT, pedidosC, clientaW, clientaC] = await Promise.all([
+  webp(pedidos, [960, 1280, 1920, 2560]),
+  webp(pedidosTableta, [720, 1440, 2160]),
+  webp(pedidosCelular, [360, 720, 1080]),
+  webp(clienta, [640, 960, 1280, 1920]),
+  webp(clientaCelular, [360, 720, 1080]),
+])
 
-const hero = await artDirected(chatOferta, [320, 640, 960], chatFinalCorto, [360, 720, 1080])
-const pedidosPic = await artDirected(pedidos, [960, 1280, 1920, 2560], pedidosCelular, [360, 720, 1080])
-const pedidosTabletaPic = await getImage({ src: pedidosTableta, widths: [720, 1440, 2160], format: "webp" })
-const clientaPic = await artDirected(clienta, [640, 960, 1280, 1920], clientaCelular, [360, 720, 1080])
-const ofertaPic = await artDirected(productoPrecioMinimo, [640, 960, 1280], chatOferta, [160, 320, 480])
+const marca = isotipo.replace(/ role="[^"]*"/, "").replace(/ aria-label="[^"]*"/, "")
 
-const steps = [
+const pasos = [
   {
-    title: "Sofi responde con tu catálogo",
-    text: "La clienta pregunta por la zapatilla blanca en 38. Sofi le da el precio y le cuenta el material y la horma, con lo que tú escribiste en el producto.",
-    img: chatPregunta,
-    alt: "El chat de Probar a Sofi: la clienta pregunta por la zapatilla blanca en 38 y Sofi responde que cuesta S/ 129, con su material y su horma",
+    titulo: "La clienta escribe",
+    texto: "Por WhatsApp, a las 9:41 o a medianoche. Sofi contesta al instante, con tu catálogo y tu stock.",
   },
   {
-    title: "Sofi negocia sobre tu precio mínimo",
-    text: "Tú pones el precio mínimo de cada producto. Si la clienta pide rebaja, Sofi hace una sola oferta, con hora para pagar, y nunca baja de ese mínimo.",
-    pic: ofertaPic,
-    alt: "La Zapatilla urbana en el catálogo de gestorIA, con precio de lista S/ 129 y precio mínimo S/ 100; en el celular, el chat donde Sofi la deja en S/ 120 con el envío de regalo",
+    titulo: "Sofi muestra el valor",
+    texto: "Precio, material y horma, con lo que tú escribiste del producto. Nunca inventa un precio ni un stock.",
   },
   {
-    title: "Sofi anota el pedido y pide el pago",
-    text: "Con el sí, Sofi anota el pedido con su envío y su total, y pide el pago con tus medios: Yape, link de pago o al recibir. Pronto: el carrito con «Pagar ahora».",
-    img: chatPedido,
-    alt: "El chat de Probar a Sofi: Sofi anota el pedido 0018 por S/ 120 con reparto gratis a Surco y pide el pago por Yape; la clienta manda su operación",
+    titulo: "Negocia sin bajar de tu mínimo",
+    texto: "Si la clienta pide rebaja, Sofi hace una sola oferta, con hora para pagar. Tu precio mínimo no se toca.",
   },
   {
-    title: "Tú confirmas el pago y el pedido sale",
-    text: "Una captura la confirma una persona del equipo; el link de pago, solo. Recién con el pago confirmado el pedido queda listo para salir. Pronto: gestorIA Reparto.",
-    img: pedidoPagado,
-    alt: "Un pedido en gestorIA: Pagado, por salir, con el pago por Yape confirmado por Rosa Quispe y la entrega por reparto en Lima hoy",
+    titulo: "Anota el pedido",
+    texto: "Con el sí, Sofi anota el pedido con su envío y su total, y pide el pago con tus medios.",
+  },
+  {
+    titulo: "Tu equipo confirma el pago",
+    texto: "Una captura de Yape la confirma una persona; el link de pago, solo. Pronto: «Pagar ahora» con Yape y tarjeta.",
+  },
+  {
+    titulo: "Sale con su pago confirmado",
+    texto: "Sin pago confirmado no se entrega. El pedido queda listo para salir hoy. Pronto: gestorIA Reparto.",
   },
 ]
 
@@ -93,6 +76,7 @@ const rubros = [
   "Mascotas",
   "Hogar",
   "Comida por encargo",
+  "Lo que tú vendas",
 ]
 
 const faqs = [
@@ -134,175 +118,204 @@ const faqLd = {
 <Base
   title="gestorIA: vendedora con IA para tiendas por chat"
   description="Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo, cobra y deja el pedido listo para salir. USD 19 al mes."
-  moments={["pinned-chapters", "word-highlight"]}
   ld={[app, faqLd]}
+  moments={["word-highlight"]}
 >
-  <section class="hero hero--split" data-enter aria-labelledby="hero-h">
-    <div class="wrap"><div class="hero-text grid hero__grid">
-      <div class="hero__text span-5">
+  <section class="hero v4-hero" data-enter aria-labelledby="hero-h">
+    <div class="v4-hero__fondo" aria-hidden="true"><span class="v4-hero__luz v4-hero__luz--a"></span><span class="v4-hero__luz v4-hero__luz--b"></span></div>
+    <div class="wrap v4-hero__wrap">
+      <div class="v4-hero__texto">
+        <p class="v4-hero__nota"><span class="v4-hero__punto" aria-hidden="true"></span>Para tiendas que venden por chat</p>
         <h1 id="hero-h">Vendedora con IA para tiendas por chat</h1>
-        <p class="hero__lead">Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra. Tú confirmas el pago y despachas. USD 19 al mes.</p>
+        <p class="v4-hero__lead">Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra. Tú confirmas el pago y despachas. USD 19 al mes.</p>
         <div class="btn-row">
           <a class="btn btn--primary" href={cta.href}>{cta.label}<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"></path><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"></path></svg></a>
           <a class="btn btn--secondary" href="#venta">Ver una venta</a>
         </div>
-        <dl class="hero-facts">
-          <div><dt>Atiende</dt><dd>A toda hora</dd></div>
-          <div><dt>Tu precio mínimo</dt><dd>Nunca lo baja</dd></div>
-          <div><dt>Entrega</dt><dd>Con pago confirmado</dd></div>
-        </dl>
+        <ul class="v4-canales" aria-label="Los chats donde vende Sofi">
+          <li><img src={whatsapp.src} width="22" height="22" alt="" />WhatsApp</li>
+          <li><img class="v4-canales__ig" src={instagram.src} width="22" height="22" alt="" />Instagram</li>
+          <li><img src={messenger.src} width="22" height="22" alt="" />Messenger</li>
+        </ul>
       </div>
-      <div class="hero__media span-6 start-7 pantalla-marco" data-enter-media>
-        <picture>
-          <source media={PHONE} srcset={hero.phoneSrcset} sizes="342px" width={hero.phoneWidth} height={hero.phoneHeight} />
-          <img class="pantalla pantalla--celular" src={hero.src} srcset={hero.wideSrcset} sizes="320px" width={hero.width} height={hero.height} alt="El chat de Probar a Sofi en el celular: la clienta pide la zapatilla en S/ 110 y Sofi le regala el envío y se la deja en S/ 120 si paga hasta mañana" fetchpriority="high" />
-        </picture>
-      </div>
-    </div></div>
-  </section>
-
-  <section class="section" id="venta" style="--h: 2; --hm: 2" data-moment="pinned-chapters" aria-labelledby="venta-h">
-    <div class="wrap mo-pc__grid">
-      <div class="mo-pc__text">
-        <h2 id="venta-h">Una venta con Sofi, paso a paso</h2>
-        <ol class="mo-pc__steps">
-          {steps.map((s) => (
-            <li class="mo-pc__step">
-              <h3>{s.title}</h3>
-              <p>{s.text}</p>
-              <figure class="mo-pc__visual mo-pc__visual--lit">
-                {s.pic ? (
-                  <picture>
-                    <source media={PHONE} srcset={s.pic.phoneSrcset} sizes="132px" width={s.pic.phoneWidth} height={s.pic.phoneHeight} />
-                    <img class="pantalla" src={s.pic.src} srcset={s.pic.wideSrcset} sizes="560px" width={s.pic.width} height={s.pic.height} alt={s.alt} loading="lazy" />
-                  </picture>
-                ) : (
-                  <Image class="pantalla pantalla--celular" src={s.img} alt={s.alt} widths={[160, 360, 720, 1080]} sizes={`${PHONE} 132px, 342px`} loading="lazy" />
-                )}
-              </figure>
-            </li>
-          ))}
-        </ol>
-      </div>
-      <div class="mo-pc__visuals frame"></div>
+      <div class="v4-hero__chat"><ChatWhatsApp /></div>
     </div>
   </section>
 
-  <section class="section" id="pedidos" aria-labelledby="pedidos-h">
-    <div class="wrap">
-      <div class="grid section-head--app">
-        <h2 id="pedidos-h" class="span-5">Tus pedidos, con el pago de cada uno</h2>
-        <p class="span-6 start-7 muted-lead solo-amplio">Cada pedido dice cuánto falta cobrar, si el pago está confirmado o por confirmar y qué sale hoy. Lo ves igual en el celular. <a class="link" href="#entrega">Ver la regla de las entregas</a></p>
-      </div>
-      <div class="app-shot">
-        <picture>
-          <source media={PHONE} srcset={pedidosPic.phoneSrcset} sizes="342px" width={pedidosPic.phoneWidth} height={pedidosPic.phoneHeight} />
-          <source media={TABLET} srcset={pedidosTabletaPic.srcSet.attribute} sizes="calc(100vw - 96px)" width={pedidosTableta.width} height={pedidosTableta.height} />
-          <img class="pantalla" src={pedidosPic.src} srcset={pedidosPic.wideSrcset} sizes="(min-width: 1440px) 1280px, calc(100vw - 96px)" width={pedidosPic.width} height={pedidosPic.height} alt="Pedidos de Calzados Rosa en gestorIA: 13 abiertos, 5 para entregar hoy y 2 con pago por confirmar; cada pedido con su total, su pago, su entrega y su estado" loading="lazy" />
-        </picture>
-      </div>
-    </div>
-  </section>
-
-  <section class="section statement ground-surface" id="entrega" style="--hm: 2" data-moment="word-highlight" aria-label="La regla de las entregas">
-    <div class="wrap">
-      <div class="grid">
-        <div class="span-5">
-          <p class="t-label">La regla de las entregas</p>
-          <p class="mo-wh__text">Sin pago confirmado, <strong>no se entrega.</strong> Sofi cobra antes de que el pedido salga.</p>
-          <p class="entrega__nota">Si la clienta paga al recibir, quien entrega anota lo que cobró y con qué medio, y recién lo da por entregado.</p>
+  <section class="v4-libre venta" id="venta" aria-labelledby="venta-h">
+    <div class="venta__pin">
+      <div class="wrap venta__wrap">
+        <div class="venta__texto">
+          <h2 id="venta-h" class="venta__h">Una venta con Sofi, de punta a punta</h2>
+          <ol class="venta__pasos">
+            {pasos.map((p, i) => (
+              <li class="paso" data-paso={i}>
+                <span class="paso__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+                <h3>{p.titulo}</h3>
+                <p>{p.texto}</p>
+              </li>
+            ))}
+          </ol>
+          <div class="venta__riel" aria-hidden="true">{pasos.map(() => <span><i></i></span>)}</div>
         </div>
-        <div class="span-6 start-7 entrega__shot">
-          <Image class="pantalla pantalla--celular" src={pedidoPorConfirmar} alt="El pedido 0008 de Carla Mendoza con el pago por Yape por confirmar: la tienda revisa su cuenta y toca «Confirmar pago» o «No coincide»; se ve lo que Sofi cedió y el margen que usó" widths={[240, 480, 720, 960]} sizes={`${PHONE} 220px, 300px`} loading="lazy" />
+        <div class="venta__escena" role="img" aria-label="La venta en un paquete: la zapatilla entra a la caja, la caja se cierra con el pago confirmado, se sella con la cinta naranja y sale">
+          <canvas class="venta__lienzo" data-paquete="venta"></canvas>
+          <span class="venta__pulso" aria-hidden="true"></span>
+          <div class="tarjeta tarjeta--burbuja" data-tarjeta="0">
+            <span>Hola, ¿tienen la zapatilla blanca en 38?</span>
+            <small>9:41 <svg viewBox="0 0 18 12"><path d="M1 6.5l3 3 6-7"></path><path d="M7 9.5l1 1 6-8"></path></svg></small>
+          </div>
+          <div class="tarjeta tarjeta--producto" data-tarjeta="1">
+            <span class="tarjeta__muestra"></span>
+            <div>
+              <b>Zapatilla urbana · blanca · 38</b>
+              <span class="tarjeta__precio">S/ 129</span>
+              <small>Cuero sintético · planta de goma · horma normal</small>
+            </div>
+            <em class="tarjeta__hizo">Buscó en el catálogo</em>
+          </div>
+          <div class="tarjeta tarjeta--precio" data-tarjeta="2">
+            <span class="tarjeta__rotulo">La oferta de Sofi</span>
+            <span class="tarjeta__cifra">S/ <span data-precio>129</span></span>
+            <div class="medidor" aria-hidden="true">
+              <span class="medidor__min"><i></i>Tu mínimo S/ 100</span>
+              <span class="medidor__barra"><span class="medidor__lleno" data-medidor></span></span>
+              <span class="medidor__lista">Lista S/ 129</span>
+            </div>
+            <em class="tarjeta__hizo">Una sola oferta: envío gratis, paga hasta mañana 10:58 a. m.</em>
+          </div>
+          <div class="tarjeta tarjeta--pedido" data-tarjeta="3">
+            <div class="tarjeta__fila"><b>Pedido 0018</b><span class="estado" data-estado>Pago por confirmar</span></div>
+            <small>Valeria Soto · WhatsApp</small>
+            <div class="tarjeta__fila"><span>1 × Zapatilla urbana blanca 38</span><span>S/ 120</span></div>
+            <div class="tarjeta__fila"><span>Reparto a Surco</span><span>Gratis</span></div>
+            <div class="tarjeta__fila tarjeta__total"><span>Total</span><span>S/ 120</span></div>
+          </div>
+          <div class="tarjeta tarjeta--ruta" data-tarjeta="5">
+            <svg class="ruta" viewBox="0 0 400 120" aria-hidden="true"><path data-ruta d="M10 100 C 120 100, 160 20, 390 24"></path></svg>
+            <b>Sale hoy · Reparto en Lima</b>
+            <small>Pronto: gestorIA Reparto, la app del repartidor</small>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="section" id="clientas" aria-labelledby="clientas-h">
+  <section class="section v4-tienda" id="pedidos" aria-labelledby="pedidos-h">
     <div class="wrap">
-      <div class="grid">
-        <div class="span-5 split__text">
-          <h2 id="clientas-h">Una ficha por clienta en gestorIA</h2>
-          <p class="t-lead">Sus compras, lo que debe y cómo prefiere recibir, escriba por el chat que escriba.</p>
-          <p>Sofi la lee para ofrecerle lo que le sirve. Si dos fichas parecen la misma clienta, gestorIA te avisa y lo decides tú: nunca las une por el teléfono.</p>
-          <p class="solo-amplio"><a class="link" href="#venta">Ver cómo vende Sofi</a></p>
-        </div>
-        <div class="span-6 start-7 frame frame--lit split__shot">
+      <div class="v4-cabeza">
+        <p class="v4-eyebrow">Lo que ve tu tienda</p>
+        <h2 id="pedidos-h">Tus pedidos, con el pago de cada uno</h2>
+        <p class="v4-sub">Cada pedido dice cuánto falta cobrar, si el pago está confirmado o por confirmar y qué sale hoy. Es la pantalla real de la app.</p>
+      </div>
+      <div class="tablero" data-tablero>
+        <div class="tablero__marco">
+          <div class="tablero__barra" aria-hidden="true"><i></i><i></i><i></i><span>app.gestoria24.com</span></div>
           <picture>
-            <source media={PHONE} srcset={clientaPic.phoneSrcset} sizes="294px" width={clientaPic.phoneWidth} height={clientaPic.phoneHeight} />
-            <img class="pantalla" src={clientaPic.src} srcset={clientaPic.wideSrcset} sizes="(min-width: 1024px) 640px, calc(100vw - 96px)" width={clientaPic.width} height={clientaPic.height} alt="La ficha de Andrea Castillo en Clientes: escribe por Instagram y WhatsApp, lleva 2 compras, una entregada y otra por pagar, y su dirección de reparto" loading="lazy" />
+            <source media={PHONE} srcset={pedidosC.srcSet.attribute} sizes="342px" width={pedidosCelular.width} height={pedidosCelular.height} />
+            <source media={TABLET} srcset={pedidosT.srcSet.attribute} sizes="calc(100vw - 96px)" width={pedidosTableta.width} height={pedidosTableta.height} />
+            <img class="tablero__img" src={pedidosW.src} srcset={pedidosW.srcSet.attribute} sizes="(min-width: 1440px) 1280px, calc(100vw - 96px)" width={pedidos.width} height={pedidos.height} alt="Pedidos de Calzados Rosa en gestorIA: 13 abiertos, 5 para entregar hoy y 2 con pago por confirmar; cada pedido con su total, su pago, su entrega y su estado" loading="lazy" />
           </picture>
         </div>
+        <span class="tablero__nota tablero__nota--a" data-nota>2 pagos por confirmar</span>
+        <span class="tablero__nota tablero__nota--b" data-nota>5 pedidos salen hoy</span>
       </div>
     </div>
   </section>
 
-  <section class="section" id="precio" aria-labelledby="precio-h">
-    <div class="wrap">
-      <div class="grid">
-        <div class="span-5 split__text">
-          <h2 id="precio-h">Un plan de USD 19 al mes</h2>
-          <p class="t-lead">Los USD 19 vuelven a tu tienda como saldo. De ahí sale el 1 % de cada pedido que gestorIA genera sola; pagas la diferencia solo si el saldo se acaba.</p>
-          <p class="solo-amplio">Lo que anota tu equipo no paga el 1 %: solo cuenta lo que vende gestorIA.</p>
-        </div>
-        <article class="card card--plan span-6 start-7 plan">
-          <div class="plan__head">
-            <span class="plan__mark" aria-hidden="true"><Fragment set:html={isotipo.replace(/ role="[^"]*"/, "").replace(/ aria-label="[^"]*"/, "")} /></span>
-            <h3>Tu tienda en gestorIA</h3>
-          </div>
-          <p class="price">USD 19 <span>al mes</span></p>
-          <p class="solo-amplio">Más el 1 % de cada pedido que gestorIA genera sola, pagado con tu saldo.</p>
-          <ul class="plan__list">
-            <li>Sofi en WhatsApp, Instagram y Messenger</li>
-            <li>Tu catálogo con precio mínimo por producto</li>
-            <li>Pedidos, pagos y entregas del día</li>
-            <li>La ficha de cada clienta</li>
-            <li>Tu equipo con su rol: Dueño, Administrador y Ventas</li>
-            <li>«Probar a Sofi» sin mover tu stock</li>
-          </ul>
-        </article>
+  <section class="section v4-regla" id="entrega" data-moment="word-highlight" aria-labelledby="entrega-h">
+    <div class="wrap v4-regla__wrap">
+      <div class="v4-regla__texto">
+        <p class="v4-eyebrow">La regla de las entregas</p>
+        <h2 id="entrega-h" class="v4-regla__frase mo-wh__text">Sin pago confirmado, <strong>no se entrega.</strong> Sofi cobra antes de que el pedido salga.</h2>
+        <p class="v4-sub">Si la clienta paga al recibir, quien entrega anota lo que cobró y con qué medio, y recién lo da por entregado.</p>
+      </div>
+      <div class="v4-regla__cel" data-cel>
+        <Image class="pantalla-cel" src={pedidoPorConfirmar} alt="El pedido 0008 de Carla Mendoza con el pago por Yape por confirmar: la tienda revisa su cuenta y toca «Confirmar pago» o «No coincide»; se ve lo que Sofi cedió y el margen que usó" widths={[260, 520, 780]} sizes={`${PHONE} 240px, 320px`} loading="lazy" />
       </div>
     </div>
   </section>
 
-  <section class="section faq-section" id="preguntas" aria-labelledby="preguntas-h">
-    <div class="wrap">
-      <div class="grid">
-        <div class="span-5 split__text">
-          <h2 id="preguntas-h">Preguntas de quien vende por chat</h2>
-          <p class="t-lead solo-amplio">Lo que más nos preguntan antes de abrir su tienda.</p>
-          <p class="solo-amplio"><a class="link" href="/contacto">Escribirnos</a></p>
-        </div>
-        <div class="faq span-6 start-7">
-          {faqs.map(([q, a]) => (
-            <div class="faq__item"><h3>{q}</h3><p>{a}</p></div>
-          ))}
-        </div>
+  <section class="section v4-clientas" id="clientas" aria-labelledby="clientas-h">
+    <div class="wrap v4-split">
+      <div class="v4-split__texto">
+        <p class="v4-eyebrow">La clienta, en una ficha</p>
+        <h2 id="clientas-h">Una ficha por clienta en gestorIA</h2>
+        <p class="v4-sub">Sus compras, lo que debe y cómo prefiere recibir, escriba por el chat que escriba. Si dos fichas parecen la misma clienta, gestorIA te avisa y lo decides tú: nunca las une por el teléfono.</p>
+        <ul class="v4-datos" data-datos>
+          <li>Instagram y WhatsApp</li>
+          <li>2 compras</li>
+          <li>Debe S/ 85.65</li>
+        </ul>
       </div>
-    </div>
-  </section>
-  <section class="section" id="rubros" aria-labelledby="rubros-h">
-    <div class="wrap">
-      <div class="grid">
-        <div class="span-5 split__text">
-          <h2 id="rubros-h">Para cualquier tienda que vende por chat</h2>
-          <p class="t-lead">Si vendes por chat y envías, Sofi vende con tu catálogo, sea lo que sea.</p>
-          <p class="solo-amplio">Cada producto lleva sus opciones, como talla, color o tamaño, su stock y su precio mínimo. Los rubros de al lado son ejemplos, no un límite.</p>
-        </div>
-        <div class="span-6 start-7 frame frame--lit canales" role="img" aria-label={`Sofi vende en WhatsApp, Instagram y Messenger. Ejemplos de rubros: ${rubros.join(", ")} y lo que tú vendas.`}>
-          <ul class="canales__list" aria-label="Los chats donde vende Sofi">
-            <li><img class="ic" src={whatsapp.src} width="96" height="96" alt="WhatsApp" loading="lazy" /><span aria-hidden="true">WhatsApp</span></li>
-            <li><img class="ic ic-ink" src={instagram.src} width="96" height="96" alt="Instagram" loading="lazy" /><span aria-hidden="true">Instagram</span></li>
-            <li><img class="ic" src={messenger.src} width="96" height="96" alt="Messenger" loading="lazy" /><span aria-hidden="true">Messenger</span></li>
-          </ul>
-          <ul class="rubros__list" aria-label="Ejemplos de rubros">
-            {rubros.map((r) => <li>{r}</li>)}
-            <li class="rubros__mas">y lo que tú vendas</li>
-          </ul>
-        </div>
+      <div class="v4-split__img" data-cortina>
+        <picture>
+          <source media={PHONE} srcset={clientaC.srcSet.attribute} sizes="300px" width={clientaCelular.width} height={clientaCelular.height} />
+          <img src={clientaW.src} srcset={clientaW.srcSet.attribute} sizes="(min-width: 1024px) 640px, calc(100vw - 96px)" width={clienta.width} height={clienta.height} alt="La ficha de Andrea Castillo en Clientes: escribe por Instagram y WhatsApp, lleva 2 compras, una entregada y otra por pagar, y su dirección de reparto" loading="lazy" />
+        </picture>
       </div>
     </div>
   </section>
 
+  <section class="section v4-libre v4-rubros" id="rubros" aria-labelledby="rubros-h">
+    <div class="wrap">
+      <p class="v4-eyebrow">Cualquier rubro</p>
+      <h2 id="rubros-h">Para cualquier tienda que vende por chat</h2>
+      <p class="v4-sub">Sofi vende con tu catálogo, sea lo que sea: cada producto con sus opciones, como talla, color o tamaño, su stock y su precio mínimo. Los rubros son ejemplos, no un límite.</p>
+    </div>
+    <div class="cinta-rubros" aria-label={`Ejemplos de rubros: ${rubros.join(", ")}`} role="img">
+      <div class="cinta-rubros__fila" data-fila="1">{[...rubros, ...rubros].map((r) => <span>{r}</span>)}</div>
+      <div class="cinta-rubros__fila cinta-rubros__fila--b" data-fila="-1">{[...rubros.slice(5), ...rubros, ...rubros.slice(0, 5)].map((r) => <span>{r}</span>)}</div>
+    </div>
+  </section>
+
+  <section class="section v4-precio" id="precio" aria-labelledby="precio-h">
+    <div class="wrap v4-split">
+      <div class="v4-split__texto">
+        <p class="v4-eyebrow">Precio</p>
+        <h2 id="precio-h">Un plan de USD 19 al mes</h2>
+        <p class="v4-sub">Los USD 19 vuelven a tu tienda como saldo. De ahí sale el 1 % de cada pedido que gestorIA genera sola; pagas la diferencia solo si el saldo se acaba. Lo que anota tu equipo no paga el 1 %.</p>
+      </div>
+      <article class="plan4">
+        <div class="plan4__cabeza">
+          <span class="plan4__marca" aria-hidden="true"><Fragment set:html={marca} /></span>
+          <h3>Tu tienda en gestorIA</h3>
+        </div>
+        <p class="plan4__precio">USD <span data-cuenta="19">19</span> <small>al mes</small></p>
+        <p class="plan4__mas">+ 1 % de cada pedido que gestorIA genera sola, pagado con tu saldo.</p>
+        <ul>
+          <li>Sofi en WhatsApp, Instagram y Messenger</li>
+          <li>Tu catálogo con precio mínimo por producto</li>
+          <li>Pedidos, pagos y entregas del día</li>
+          <li>La ficha de cada clienta</li>
+          <li>Tu equipo con su rol: Dueño, Administrador y Ventas</li>
+          <li>«Probar a Sofi» sin mover tu stock</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section class="section faq-section v4-preguntas" id="preguntas" aria-labelledby="preguntas-h">
+    <div class="wrap v4-split">
+      <div class="v4-split__texto">
+        <p class="v4-eyebrow">Preguntas</p>
+        <h2 id="preguntas-h">Preguntas de quien vende por chat</h2>
+        <p class="v4-sub solo-amplio">Lo que más nos preguntan antes de abrir su tienda. <a class="link" href="/contacto">Escribirnos</a></p>
+      </div>
+      <div class="faq">
+        {faqs.map(([q, a]) => (
+          <div class="faq__item"><h3>{q}</h3><p>{a}</p></div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <Fragment slot="cierre">
+    <div class="cierre3d" aria-hidden="true"><canvas class="cierre3d__lienzo" data-paquete="cierre"></canvas></div>
+  </Fragment>
 </Base>
+
+<script>
+  import { iniciar } from "../scripts/inicio"
+  iniciar()
+</script>
