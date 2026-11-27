@@ -1,13 +1,14 @@
 import { Button, cn, Input, Textarea } from "@odentia/ui"
 import { FormDrawer, RadioChips } from "@odentia/ui-patterns"
 import { Check, ImagePlus, Sparkles } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { foto, RUBROS } from "./datos"
 import { Swatch } from "./ficha/piezas"
 import { MoneyInput } from "./ficha/precio-card"
 import { crearProducto, type Propuesta, proponer } from "./ia"
 import { ir, useRuta } from "./ruta"
-import { agregarProducto } from "./tienda"
+import { VistaPrevia } from "./ficha/vista-previa"
+import { agregarProducto, useDb } from "./tienda"
 
 /** Una marca de lo propuesto, con «Aceptar» a un toque. */
 function Marca({ ok, onAccept }: { ok: boolean; onAccept: () => void }) {
@@ -49,6 +50,13 @@ export function AddFromPhotos({ onClose }: { onClose: () => void }) {
   const [ok, setOk] = useState<Set<string>>(new Set())
   const [resp, setResp] = useState<Record<string, string>>({})
   const [err, setErr] = useState<string | null>(null)
+  const [ver, setVer] = useState(false)
+  // Lo que quedaría si se guarda ahora: el mismo producto que crea «Guardar y abrir la ficha».
+  const previa = useMemo(
+    () => (pr ? crearProducto(pr, { name: f.name.trim() || pr.name, cat: f.cat, precio: f.precio ?? 0, tallas: f.tallas, texto: f.texto, datos: { ...resp }, aceptado: ok, extraFotos: propia }, R) : null),
+    [pr, f, resp, ok, propia, R],
+  )
+  const d = useDb()
   const nameId = useId()
   const priceId = useId()
 
@@ -89,6 +97,7 @@ export function AddFromPhotos({ onClose }: { onClose: () => void }) {
       }
       isSubmitting={step === "mirando"}
       error={err}
+      secondaryAction={step === "propuesta" ? { label: "Ver cómo queda", onClick: () => setVer(true) } : undefined}
       onSubmit={(e) => {
         e.preventDefault()
         if (step === "elegir") {
@@ -376,6 +385,17 @@ export function AddFromPhotos({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </div>
+      ) : null}
+      {ver && pr ? (
+        <VistaPrevia
+          open
+          title="Así quedaría en tu vitrina"
+          onClose={() => setVer(false)}
+          R={R}
+          tpl={d.tpl}
+          all={d.products}
+          p={previa!}
+        />
       ) : null}
     </FormDrawer>
   )

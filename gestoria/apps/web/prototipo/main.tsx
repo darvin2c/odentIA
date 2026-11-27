@@ -1,4 +1,5 @@
 import "./estilos.css"
+import "./vitrina/vitrina.css"
 import { BrandProvider, Toaster } from "@odentia/ui"
 import { applyTheme, readStoredTheme } from "@odentia/ui-patterns"
 import { StrictMode } from "react"

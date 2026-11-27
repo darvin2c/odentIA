@@ -44,7 +44,6 @@ import {
 import {
   HistoryDrawer,
   KardexDrawer,
-  PreviewDrawer,
   SearchDialog,
   ShortcutsDialog,
   StockReasonDialog,
@@ -62,7 +61,9 @@ import {
 } from "./lateral"
 import { irA, SofiDot } from "./piezas"
 import { PriceCard } from "./precio-card"
-import { SofiPanel } from "./sofi-panel"
+import { ProbarPanel } from "./probar"
+import { VistaPrevia } from "./vista-previa"
+import { nueva } from "../vitrina/compra"
 import { TextCard } from "./texto-card"
 import { VariantsCard } from "./variantes"
 
@@ -101,6 +102,8 @@ export function ProductPage({ pid }: { pid: string }) {
   const isMobile = useIsMobile()
   const wide = useMedia("(min-width: 1280px)")
   const [sofi, setSofi] = useState(() => window.matchMedia("(min-width: 1360px)").matches)
+  // La prueba como clienta: un carrito y una conversación que siguen mientras se edita la ficha.
+  const [compra, setCompra] = useState(() => nueva(d.products.find((x) => x.id === pid) ?? d.products[0]!))
   const [preview, setPreview] = useState(false)
   const [buscar, setBuscar] = useState(false)
   const [kardex, setKardex] = useState(false)
@@ -187,7 +190,7 @@ export function ProductPage({ pid }: { pid: string }) {
       type="button"
       onClick={() => setSofi(true)}
       className="group inline-flex min-h-9 max-w-full items-center gap-2.5 self-start rounded-full border bg-card py-1 pr-3.5 pl-1.5 text-left text-sm shadow-xs outline-none transition-colors hover:border-primary/40 focus-visible:ring-3 focus-visible:ring-ring/40"
-      aria-label="Ver lo que sabe Sofi y probarla"
+      aria-label="Probar como clienta: lo que sabe Sofi"
     >
       <SofiDot done={s.done} total={s.total} vendeSola={s.vendeSola} size={22} />
       <span className="min-w-0 truncate">
@@ -215,7 +218,7 @@ export function ProductPage({ pid }: { pid: string }) {
           </>
         )}
       </span>
-      <span className="shrink-0 font-semibold text-primary group-hover:underline">Ver</span>
+      <span className="shrink-0 font-semibold text-primary group-hover:underline">{isMobile ? "Probar" : "Probar como clienta"}</span>
     </button>
   )
 
@@ -438,13 +441,16 @@ export function ProductPage({ pid }: { pid: string }) {
 
       {docked ? (
         <aside
-          aria-label="Pregúntale a Sofi"
-          className="sticky top-(--notice-strip-h,0px) h-[calc(100svh-var(--notice-strip-h,0px))] w-[22rem] shrink-0 animate-in border-l duration-300 fade-in slide-in-from-right-4"
+          aria-label="Probar como clienta"
+          className="sticky top-(--notice-strip-h,0px) h-[calc(100svh-var(--notice-strip-h,0px))] w-[25.5rem] shrink-0 animate-in border-l duration-300 fade-in slide-in-from-right-4"
         >
-          <SofiPanel
+          <ProbarPanel
             p={p}
             R={R}
             tpl={d.tpl}
+            all={d.products}
+            c={compra}
+            set={setCompra}
             dirty={dirty}
             edit={edit}
             onClose={() => setSofi(false)}
@@ -460,15 +466,18 @@ export function ProductPage({ pid }: { pid: string }) {
           <DrawerContent
             className={cn(
               isMobile
-                ? "[--drawer-content-height:calc(100dvh-4rem)]"
-                : "data-[swipe-axis=x]:sm:[--drawer-content-width:24rem]",
+                ? "[--drawer-content-height:calc(100dvh-1.5rem)] [--drawer-inset:0.375rem]"
+                : "data-[swipe-axis=x]:sm:[--drawer-content-width:27rem]",
             )}
           >
-            <DrawerTitle className="sr-only">Pregúntale a Sofi</DrawerTitle>
-            <SofiPanel
+            <DrawerTitle className="sr-only">Probar como clienta</DrawerTitle>
+            <ProbarPanel
               p={p}
               R={R}
               tpl={d.tpl}
+              all={d.products}
+              c={compra}
+              set={setCompra}
               dirty={dirty}
               edit={edit}
               onClose={() => setSofi(false)}
@@ -500,7 +509,7 @@ export function ProductPage({ pid }: { pid: string }) {
         </div>
       ) : null}
 
-      <PreviewDrawer p={p} R={R} open={preview} onClose={() => setPreview(false)} />
+      <VistaPrevia p={p} R={R} tpl={d.tpl} all={d.products} open={preview} onClose={() => setPreview(false)} />
       <KardexDrawer p={p} saved={saved} R={R} open={kardex} onClose={() => setKardex(false)} />
       <HistoryDrawer
         items={historial}
