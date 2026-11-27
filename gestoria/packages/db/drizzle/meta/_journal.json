@@ -127,6 +127,20 @@
       "when": 1795749685873,
       "tag": "0017_reglas_saldo",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795755635689,
+      "tag": "0018_las_clientas",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795755660765,
+      "tag": "0019_reglas_clientas",
+      "breakpoints": true
     }
   ]
 }
