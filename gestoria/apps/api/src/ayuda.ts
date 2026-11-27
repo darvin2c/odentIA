@@ -140,7 +140,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "corregir-pedido",
         q: "¿Cómo corrijo un pedido que ya anoté?",
         a: [
-          "Lo acordado no se cambia: se anula el pedido con su motivo y se anota otro bien. Lo que salió del stock vuelve solo.",
+          "Lo acordado no se cambia: en el pedido, «Anular pedido» con su motivo, y se anota otro bien. Lo que salió del stock vuelve solo.",
           "Un pedido pagado lo anula solo quien puede confirmar pagos, y la devolución del dinero se hace fuera de gestorIA. Un pedido entregado ya no se anula.",
         ],
         needs: "ventas.atender",
