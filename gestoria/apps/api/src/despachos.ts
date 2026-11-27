@@ -41,6 +41,16 @@ const happenedOn = (action: string, day: string, timeZone: string) => sql`exists
   select 1 from order_event e where e.order_id = o.id and e.action = ${action}
     and (e.created_at at time zone ${timeZone})::date = ${day}::date)`
 
+/**
+ * Las entregas que salen en el tablero de un día: lo que todavía sale ese día, lo entregado ese día
+ * y lo que ese día no se entregó. Caja suma «Cobrar» con este mismo filtro: las dos dicen lo mismo.
+ */
+export const onBoard = (storeId: string, day: string, today: string, timeZone: string) => sql`(
+  o.store_id = ${storeId} and o.test = false and (
+    ${dueOn(sql`${day}::date`, today)}
+    or (o.state = 'entregado' and ${happenedOn("entregado", day, timeZone)})
+    or ${happenedOn("no_entregado", day, timeZone)}))`
+
 interface Row extends Record<string, unknown> {
   id: string
   number: number
@@ -94,10 +104,7 @@ export async function dispatchBoard(
         from order_event e
         where e.order_id = o.id and e.action = 'no_entregado'
         order by e.seq desc limit 1) missed on true
-      where o.store_id = ${storeId} and o.test = false and (
-        ${dueOn(sql`${chosen}::date`, today)}
-        or (o.state = 'entregado' and ${happenedOn("entregado", chosen, timeZone)})
-        or ${happenedOn("no_entregado", chosen, timeZone)})
+      where ${onBoard(storeId, chosen, today, timeZone)}
       order by o.slot_start nulls last, o.slot_end nulls last, o.number
       limit 300`)) as Row[]
     const balances = await balancesIn(

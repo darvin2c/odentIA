@@ -2,6 +2,7 @@ import { accountCopy, cashHandover, cashHandoverPayment, type Db } from "@gestor
 import { and, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { onBoard } from "./despachos.js"
 import { formatMoney } from "./dinero.js"
 import { addDays, startOfDay, storeClockIn } from "./hora.js"
 import { pad } from "./pedidos.js"
@@ -83,13 +84,12 @@ export async function cashBox(
     const from = startOfDay(timeZone, chosen)
     const to = startOfDay(timeZone, addDays(chosen, 1))
     const collected = await collectedBetween(tx, storeId, from, to)
-    // Lo que falta cobrar en las entregas del día: las mismas filas de Despachos, con su saldo.
+    // Lo que falta cobrar en las entregas del día: las mismas filas de Despachos (`onBoard`), con
+    // su saldo. Lo entregado ya no debe nada.
     const [due] = await tx.execute<{ orders: string; cents: string }>(sql`
       select count(*) filter (where b.due_cents > 0) as orders, coalesce(sum(b.due_cents), 0) as cents
       from sale_order o join order_balance b on b.order_id = o.id
-      where o.store_id = ${storeId} and o.test = false and o.state in ('por_salir', 'en_camino')
-        and (o.deliver_on = ${chosen}::date
-          or (${chosen}::date = ${today}::date and (o.deliver_on < ${chosen}::date or o.deliver_on is null)))`)
+      where ${onBoard(storeId, chosen, today, timeZone)} and o.state in ('por_salir', 'en_camino')`)
     // El efectivo que nadie recibió todavía, de cualquier día, por quien lo trae.
     const pending = await tx.execute<{
       id: string
@@ -184,6 +184,9 @@ export async function receiveCash(
 ) {
   return inStore(appDb, person, storeId, "caja", async (tx) => {
     const ids = [...new Set(input.paymentIds)]
+    // Se bloquean sus pedidos, no los pagos: la regla de la base solo deja tocar (y bloquear) un
+    // pago que espera revisión, y estos ya están confirmados. Si dos personas reciben el mismo
+    // efectivo a la vez, la clave de `cash_handover_payment` deja pasar a una (409 a la otra).
     const rows = await tx.execute<{
       id: string
       courier_id: string | null
@@ -198,7 +201,7 @@ export async function receiveCash(
           ids.map((id) => sql`${id}::uuid`),
           sql`, `,
         )})
-      for update of p`)
+      for update of o`)
     const found = [...rows]
     if (
       found.length !== ids.length ||

@@ -276,6 +276,22 @@ describe("Despachos", () => {
       ["Tarjeta con POS", 5400],
     ])
   })
+
+  it("lo que hoy no se entregó y va mañana sigue hoy en «No se entregó», con su «Cobrar»", async () => {
+    const carla = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ customerName: "Carla Mendoza" }))
+    ).json.order.id as string
+    await call("lucia", "POST", `${base}/pedidos/${carla}/salio`, {})
+    await call("lucia", "POST", `${base}/pedidos/${carla}/no-se-entrego`, {
+      reason: "Dirección errada",
+      deliverOn: addDays(today, 1),
+    })
+    const row = ((await board()).deliveries as Json[]).find((d) => d.id === carla)
+    expect(row?.missed).toMatchObject({ reason: "Dirección errada", resolved: false })
+    expect(row?.balance.dueCents).toBe(20400)
+    const tomorrow = await board(addDays(today, 1))
+    expect((tomorrow.deliveries as Json[]).some((d) => d.id === carla)).toBe(true)
+  })
 })
 
 describe("Caja", () => {
