@@ -43,14 +43,14 @@ import {
 import {
   type AgentChoices,
   allowedOffers,
-  DEFAULT_CHOICES,
+  choicesOf,
   hoursWords,
   OFFER_NAMES,
   styleFacts,
   styleWords,
   teamNow,
 } from "./opciones.js"
-import { amountsIn, checkReply } from "./revisar.js"
+import { amountsIn, checkReply, percentsIn } from "./revisar.js"
 import { answersForAgent } from "./saber.js"
 
 /**
@@ -87,8 +87,9 @@ export const SOFI_HANDOFF =
  */
 export const handoffLater = (back: string) =>
   `Te paso con una persona del equipo: te escribe por aquí ${back}.`
-export const fallbackLater = (back: string) =>
-  `Déjame revisarlo con el equipo y te escribo por aquí ${back}.`
+const handoffText = (back: string | null) => (back ? handoffLater(back) : SOFI_HANDOFF)
+const fallbackText = (back: string | null) =>
+  back ? `Déjame revisarlo con el equipo y te escribo por aquí ${back}.` : SOFI_FALLBACK
 
 /** Cuántas veces llama al modelo en un turno como mucho, y cuánto espera en total. */
 export const SOFI_MAX_STEPS = 8
@@ -196,6 +197,8 @@ interface Loaded {
   team: { open: boolean; back: string | null }
   facts: string
   factAmounts: number[]
+  /** Los porcentajes de «Lo que sabe»: se pueden repetir, como sus importes. */
+  factPercents: Set<number>
   history: (typeof conversationMessage.$inferSelect)[]
   paid: boolean
   /** Qué día es en la tienda, con su hora. */
@@ -348,25 +351,15 @@ async function load(
       return money(cents)
     }
     const display = agent?.displayName?.trim() || `Sofi, de ${shop!.name}`
-    const choices: AgentChoices = agent
-      ? {
-          tone: agent.tone,
-          address: agent.address,
-          emojis: agent.emojis,
-          offerShipping: agent.offerShipping,
-          offerDiscount: agent.offerDiscount,
-          offerGift: agent.offerGift,
-          offerSecond: agent.offerSecond,
-          handoffUpset: agent.handoffUpset,
-          handoffOverCents: agent.handoffOverCents,
-          teamHours: agent.teamHours,
-          afterHoursSells: agent.afterHoursSells,
-        }
-      : DEFAULT_CHOICES
+    const choices = choicesOf(agent)
     const answers = await answersForAgent(tx, storeId)
     // Lo que dicen sus respuestas («S/ 10 el envío a Lurín») se puede repetir aunque la haya leído
     // en otro turno, como antes el texto libre.
-    for (const a of answers) factAmounts.push(...amountsIn(a.answer, currency))
+    const factPercents = new Set<number>()
+    for (const a of answers) {
+      factAmounts.push(...amountsIn(a.answer, currency))
+      for (const percent of percentsIn(a.answer)) factPercents.add(percent)
+    }
     const team = teamNow(choices.teamHours, timeZone, now)
     const offers = allowedOffers(choices)
     const deliveryLines = deliveries.map((d) => {
@@ -448,6 +441,7 @@ async function load(
       answers,
       team,
       facts,
+      factPercents,
       factAmounts,
       history,
       paid: confirmed.length > 0,
@@ -515,9 +509,11 @@ async function waitForPerson(
   storeId: string,
   conversationId: string,
   reason: string,
+  /** Un aviso fijo para la clienta (fuera del horario: cuándo le responden). */
+  notice?: { text: string; detail: Record<string, unknown> },
 ): Promise<void> {
-  await withAgent(deps.appDb, SOFI_ACTOR, storeId, (tx) =>
-    tx
+  await withAgent(deps.appDb, SOFI_ACTOR, storeId, async (tx) => {
+    const taken = await tx
       .update(conversation)
       .set({ handler: "persona", waitingReason: reason, updatedAt: new Date() })
       .where(
@@ -526,8 +522,20 @@ async function waitForPerson(
           eq(conversation.storeId, storeId),
           eq(conversation.handler, "sofi"),
         ),
-      ),
-  )
+      )
+      .returning({ id: conversation.id })
+    // Si una persona la tomó a la vez, no se le escribe nada.
+    if (notice && taken.length > 0)
+      await tx.insert(conversationMessage).values({
+        storeId,
+        conversationId,
+        author: "sofi",
+        text: notice.text,
+        delivery: "sin_enviar",
+        detail: { paso: reason, ...notice.detail },
+        actorUserId: SOFI_ACTOR,
+      })
+  })
 }
 
 async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<AnswerResult> {
@@ -548,24 +556,9 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   // Fuera del horario del equipo, si la tienda no quiere que venda sola: le dice cuándo le
   // responden (un aviso fijo, sin modelo) y espera a una persona. La de prueba sigue, para probarla.
   if (!test && !loaded.team.open && !loaded.choices.afterHoursSells) {
-    const reason = "Fuera del horario del equipo"
-    await withAgent(deps.appDb, SOFI_ACTOR, storeId, async (tx) => {
-      await tx.insert(conversationMessage).values({
-        storeId,
-        conversationId: conv.id,
-        author: "sofi",
-        text: loaded.team.back ? handoffLater(loaded.team.back) : SOFI_HANDOFF,
-        delivery: "sin_enviar",
-        detail: {
-          paso: reason,
-          ...(loaded.team.back ? { fuera_de_horario: loaded.team.back } : {}),
-        },
-        actorUserId: SOFI_ACTOR,
-      })
-      await tx
-        .update(conversation)
-        .set({ handler: "persona", waitingReason: reason, updatedAt: new Date() })
-        .where(and(eq(conversation.id, conv.id), eq(conversation.storeId, storeId)))
+    await waitForPerson(deps, storeId, conv.id, "Fuera del horario del equipo", {
+      text: handoffText(loaded.team.back),
+      detail: loaded.team.back ? { fuera_de_horario: loaded.team.back } : {},
     })
     return { status: "fuera_de_horario" }
   }
@@ -646,7 +639,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
         const found = checkReply(draft, {
           currency: loaded.currency,
           amounts: new Set([...trace.amounts, ...loaded.factAmounts, ...said]),
-          percents: trace.percents,
+          percents: new Set([...trace.percents, ...loaded.factPercents]),
           paid: loaded.paid,
         })
         if (found.length === 0) {
@@ -681,20 +674,18 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   // Al pasar a una persona, el aviso fijo: no promete nada que no pase.
   const handoff = trace.handoff ?? (failure ? `Sofi no pudo responder: ${failure}` : null)
   const later = loaded.team.open ? null : loaded.team.back
-  const reply = trace.handoff
-    ? later
-      ? handoffLater(later)
-      : SOFI_HANDOFF
-    : (text ?? (later ? fallbackLater(later) : SOFI_FALLBACK))
+  const reply = trace.handoff ? handoffText(later) : (text ?? fallbackText(later))
+  // Los importes de la respuesta, una vez: de ahí salen lo que mostró y lo que ofreció.
+  const spoken = text ? amountsIn(text, loaded.currency) : []
   const cost = deps.model ? costMicros(deps.model.name, usage) : null
-  const offered = text && !trace.handoff ? offeredIn(trace, amountsIn(text, loaded.currency)) : null
+  const offered = text && !trace.handoff ? offeredIn(trace, spoken) : null
   const detail = {
     tools: trace.tools,
     // Solo las cotizaciones cuyo total salió en la respuesta: las que el cliente vio.
     quotes:
       text && !trace.handoff
         ? [...trace.quotes.entries()]
-            .filter(([, total]) => amountsIn(text, loaded.currency).includes(total))
+            .filter(([, total]) => spoken.includes(total))
             .map(([key]) => key)
         : [],
     // La oferta que le hizo (lo más que cedió y su plazo): la siguiente no la mejora ni la alarga.
@@ -716,9 +707,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       ? {
           ofrecio: [
             ...new Set(
-              trace.offers
-                .filter((o) => amountsIn(text, loaded.currency).includes(o.totalCents))
-                .flatMap((o) => o.kinds),
+              trace.offers.filter((o) => spoken.includes(o.totalCents)).flatMap((o) => o.kinds),
             ),
           ],
         }

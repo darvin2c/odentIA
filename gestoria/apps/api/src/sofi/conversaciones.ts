@@ -11,16 +11,20 @@ import { z } from "zod"
 import { agentStopIn } from "../acuerdo.js"
 import { agentName } from "../agente.js"
 import type { Person } from "../cuenta.js"
+import { storeClockIn } from "../hora.js"
 import { pad } from "../pedidos.js"
 import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
 import {
   choicesInput,
+  choicesOf,
+  closingOf,
   DEFAULT_CHOICES,
   hoursWords,
   hourWords,
   OFFER_NAMES,
   type OfferKind,
+  teamNow,
 } from "./opciones.js"
 import { type AnswerResult, answer, handoffLater, type SofiDeps } from "./sofi.js"
 
@@ -74,19 +78,9 @@ export async function agentSettings(
     const [row] = await tx.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))
     const settings = row
       ? {
+          ...choicesOf(row),
           enabled: row.enabled,
           displayName: row.displayName,
-          tone: row.tone,
-          address: row.address,
-          emojis: row.emojis,
-          offerShipping: row.offerShipping,
-          offerDiscount: row.offerDiscount,
-          offerGift: row.offerGift,
-          offerSecond: row.offerSecond,
-          handoffUpset: row.handoffUpset,
-          handoffOverCents: row.handoffOverCents,
-          teamHours: row.teamHours,
-          afterHoursSells: row.afterHoursSells,
           followPayment: row.followPayment,
           followThanks: row.followThanks,
           followRestock: row.followRestock,
@@ -107,10 +101,15 @@ export async function agentSettings(
     // Si la administración detuvo a Sofi (la cuenta no puede seguir o llegó a su tope).
     // El horario y el aviso fuera de él, en las mismas palabras que usa Sofi.
     const hours = settings.teamHours
+    const { timeZone, today } = await storeClockIn(tx, storeId)
     const words = hours
       ? {
           hours: hoursWords(hours),
-          afterHours: handoffLater(`mañana desde las ${hourWords(hours.from)}`),
+          // Lo que diría al cerrar hoy: el próximo día que atiende, como lo calcula Sofi.
+          afterHours: handoffLater(
+            teamNow(hours, timeZone, closingOf(hours, timeZone, today)).back ??
+              `desde las ${hourWords(hours.from)}`,
+          ),
         }
       : null
     return { settings, words, modelReady, tests, agentStop: await agentStopIn(tx, storeId) }

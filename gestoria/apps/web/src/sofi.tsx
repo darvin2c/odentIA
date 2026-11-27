@@ -1,7 +1,10 @@
 import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
+import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import {
   AgentMark,
   ConfirmDialog,
+  DetailField,
+  DetailList,
   EmptyState,
   ErrorState,
   FormDrawer,
@@ -30,7 +33,7 @@ import {
   SendHorizontal,
   Trash2,
 } from "lucide-react"
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react"
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import { MoneyInput, ToggleField } from "./campos"
 import { api } from "./lib/api"
@@ -63,7 +66,7 @@ import { StoreHeader, useStoreContext } from "./tiendas"
  */
 
 const SOFI_KEY = (storeId: string) => ["sofi", storeId]
-const KNOWS_KEY = (storeId: string) => ["sofi", storeId, "sabe"]
+const KNOWS_KEY = (storeId: string) => ["sofi-sabe", storeId]
 const CONFIG_KEY = (storeId: string) => ["configuracion", storeId]
 
 type Part = "habla" | "ofrece" | "persona" | "sabe" | "aprendio"
@@ -196,7 +199,7 @@ function Panel({
   changeLabel?: string
   children: ReactNode
 }) {
-  const id = title.replace(/\W+/g, "-").toLowerCase()
+  const id = useId()
   return (
     <section
       aria-labelledby={id}
@@ -309,22 +312,19 @@ function HowSheTalks({ overview }: { overview: SofiOverview }) {
           {tone.example}
         </p>
       </div>
-      <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-        <Fact label="Trata a la clienta de" value={settings.address === "tu" ? "Tú" : "Usted"} />
-        <Fact label="Emojis" value={settings.emojis === "ninguno" ? "Ninguno" : "Pocos"} />
-        <Fact label="Se presenta como" value={settings.displayName ?? `Sofi, de ${store.name}`} />
-      </dl>
+      <DetailList className="@lg:grid-cols-3">
+        <DetailField label="Trata a la clienta de">
+          {settings.address === "tu" ? "Tú" : "Usted"}
+        </DetailField>
+        <DetailField label="Emojis">
+          {settings.emojis === "ninguno" ? "Ninguno" : "Pocos"}
+        </DetailField>
+        <DetailField label="Se presenta como">
+          {settings.displayName ?? `Sofi, de ${store.name}`}
+        </DetailField>
+      </DetailList>
       {editing ? <TalkForm settings={settings} onClose={() => setEditing(false)} /> : null}
     </Panel>
-  )
-}
-
-function Fact({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-medium break-words">{value}</dd>
-    </div>
   )
 }
 
@@ -665,20 +665,16 @@ function WhenToPerson({ overview }: { overview: SofiOverview }) {
         </ul>
       </Panel>
       <Panel title="Horario de tu equipo" onChange={() => setEditing(true)}>
-        <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-          <Fact
-            label="Atienden"
-            value={words ? capitalize(words.hours) : "Sin horario: Sofi no dice cuándo responden"}
-          />
-          <Fact
-            label="Fuera de ese horario"
-            value={
-              settings.afterHoursSells
-                ? "Sofi sigue vendiendo: cobra con link y arma pedidos"
-                : "Sofi solo avisa cuándo le responden y te pasa el chat"
-            }
-          />
-        </dl>
+        <DetailList>
+          <DetailField label="Atienden">
+            {words ? capitalize(words.hours) : "Sin horario: Sofi no dice cuándo responden"}
+          </DetailField>
+          <DetailField label="Fuera de ese horario">
+            {settings.afterHoursSells
+              ? "Sofi sigue vendiendo: cobra con link y arma pedidos"
+              : "Sofi solo avisa cuándo le responden y te pasa el chat"}
+          </DetailField>
+        </DetailList>
         {words ? (
           <p className="rounded-lg bg-surface-muted p-3 text-sm">
             <span className="text-muted-foreground">Lo que es para una persona, avisa así: </span>«
@@ -866,42 +862,40 @@ function HandoffForm({ settings, onClose }: { settings: AgentSettings; onClose: 
   )
 }
 
-/** Los días del equipo: botones que se marcan y se desmarcan, con su nombre entero. */
+/** Los días del equipo, con el grupo de botones común: una parada de Tab y flechas. */
 function DaysField() {
   const field = useFieldContext<number[]>()
-  const days = field.state.value
   return (
     <FormFieldGroup legend="Días">
       {(control) => (
-        <div className="flex flex-wrap gap-1.5" aria-describedby={control.describedBy}>
-          {DAYS.map((day) => {
-            const on = days.includes(day.value)
-            return (
-              <button
-                key={day.value}
-                type="button"
-                aria-pressed={on}
-                aria-label={day.label}
-                onBlur={control.onBlur}
-                onClick={() =>
-                  field.handleChange(
-                    on
-                      ? days.filter((d) => d !== day.value)
-                      : [...days, day.value].sort((a, b) => a - b),
-                  )
-                }
-                className={cn(
-                  "min-h-11 min-w-12 rounded-full border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:min-h-9",
-                  on
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "bg-card hover:bg-surface-muted",
-                )}
-              >
-                {day.short}
-              </button>
+        <ToggleGroup
+          aria-label="Días"
+          aria-describedby={control.describedBy}
+          multiple
+          spacing={1}
+          className="flex-wrap"
+          value={field.state.value.map(String)}
+          onValueChange={(next: unknown[]) =>
+            field.handleChange(
+              next
+                .map(Number)
+                .filter((d) => d >= 1 && d <= 7)
+                .sort((a, b) => a - b),
             )
-          })}
-        </div>
+          }
+        >
+          {DAYS.map((day) => (
+            <ToggleGroupItem
+              key={day.value}
+              value={String(day.value)}
+              aria-label={day.label}
+              variant="outline"
+              className="min-h-11 min-w-12 rounded-full aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground sm:min-h-9"
+            >
+              {day.short}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       )}
     </FormFieldGroup>
   )

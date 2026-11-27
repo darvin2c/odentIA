@@ -8,7 +8,7 @@ import {
   type TeamHours,
 } from "@gestoria/db"
 import { z } from "zod"
-import { addDays, dayIn, weekdayOf } from "../hora.js"
+import { addDays, dayIn, startOfDay, weekdayOf } from "../hora.js"
 import { MAX_ORDER_CENTS, type Quote } from "../precio.js"
 
 /**
@@ -46,6 +46,14 @@ export const DEFAULT_CHOICES: AgentChoices = {
   handoffOverCents: null,
   teamHours: null,
   afterHoursSells: true,
+}
+
+/** Lo elegido, de la fila de `store_agent`; lo de siempre si la tienda no eligió nada. */
+export function choicesOf(row: AgentChoices | null | undefined): AgentChoices {
+  if (!row) return DEFAULT_CHOICES
+  const picked = {} as Record<string, unknown>
+  for (const key of Object.keys(DEFAULT_CHOICES)) picked[key] = row[key as keyof AgentChoices]
+  return picked as unknown as AgentChoices
 }
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Elige la hora")
@@ -112,7 +120,7 @@ export const styleFacts = (c: Pick<AgentChoices, "tone" | "address" | "emojis">)
 ]
 
 /** Cómo habla, en palabras de la tienda: lo que dice «Por qué» en la prueba. */
-export const TONE_NAMES: Record<AgentTone, string> = {
+const TONE_NAMES: Record<AgentTone, string> = {
   cercana: "cercana",
   formal: "amable y formal",
   directa: "directa",
@@ -160,13 +168,8 @@ export function offerKindsOf(
 
 /** Lo que la tienda no deja ofrecer en esta cotización, o null si todo está permitido. */
 export function offerNotAllowed(kinds: OfferKind[], choices: AgentChoices): OfferKind | null {
-  const allowed: Record<OfferKind, boolean> = {
-    envio: choices.offerShipping,
-    descuento: choices.offerDiscount,
-    regalo: choices.offerGift,
-    segundo: choices.offerSecond,
-  }
-  return kinds.find((kind) => !allowed[kind]) ?? null
+  const allowed = allowedOffers(choices)
+  return kinds.find((kind) => !allowed.includes(kind)) ?? null
 }
 
 /** Lo que dice cotizar cuando la tienda no deja esa oferta. */
@@ -216,6 +219,12 @@ export function daysWords(days: number[]): string {
 
 export const hoursWords = (h: TeamHours) =>
   `${daysWords(h.days)}, de ${hourWords(h.from)} a ${hourWords(h.to)}`
+
+/** El momento en que el equipo cierra ese día (para decir cuándo vuelve, visto desde ahí). */
+export function closingOf(hours: TeamHours, timeZone: string, day: string): Date {
+  const [h, m] = hours.to.split(":").map(Number) as [number, number]
+  return new Date(startOfDay(timeZone, day).getTime() + (h * 60 + m) * 60_000)
+}
 
 /** La hora de la tienda («HH:MM») en ese momento. */
 function timeIn(timeZone: string, at: Date): string {

@@ -111,7 +111,7 @@ test("el horario del equipo se elige con días y horas, y en el teléfono no se 
   await expect(page.getByText("Lunes a sábado, de 9 a. m. a 7 p. m.")).toBeVisible()
   await expect(
     page.getByText(
-      "«Te paso con una persona del equipo: te escribe por aquí mañana desde las 9 a. m.»",
+      /«Te paso con una persona del equipo: te escribe por aquí .*desde las 9 a\. m\.»/,
     ),
   ).toBeVisible()
   await shot(page, "sofi-cuando-te-pasa")

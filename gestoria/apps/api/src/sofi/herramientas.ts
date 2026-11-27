@@ -41,7 +41,7 @@ import {
   offerKindsOf,
   offerNotAllowed,
 } from "./opciones.js"
-import { amountsIn, percentsIn } from "./revisar.js"
+import { percentsIn } from "./revisar.js"
 import { noteGapIn } from "./saber.js"
 
 /**
@@ -915,9 +915,7 @@ async function readAnswers(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.le
   for (const a of found) {
     if (!ctx.trace.read.some((r) => r.id === a.id))
       ctx.trace.read.push({ id: a.id, question: a.question })
-    // Lo que dice la respuesta («S/ 10 el envío a Lurín», «el 10 %») se puede repetir.
-    for (const cents of amountsIn(a.answer, ctx.currency)) ctx.trace.amounts.add(cents)
-    for (const percent of percentsIn(a.answer)) ctx.trace.percents.add(percent)
+    // Sus importes y porcentajes ya se pueden repetir: los permite `load` de sofi.ts.
   }
   return {
     ok: true,

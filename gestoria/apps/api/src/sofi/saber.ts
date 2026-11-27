@@ -46,35 +46,42 @@ const notFound = () => new StoreError(404, "NOT_FOUND", "Esa pregunta ya no est�
 /** Lo que sabe Sofi, lo que aprendió y los productos sin descripción (de su ficha en Catálogo). */
 export async function knowledgeView(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const answers = await tx
-      .select({
-        id: storeAgentAnswer.id,
-        question: storeAgentAnswer.question,
-        answer: storeAgentAnswer.answer,
-        updatedAt: storeAgentAnswer.updatedAt,
-      })
-      .from(storeAgentAnswer)
-      .where(eq(storeAgentAnswer.storeId, storeId))
-      .orderBy(asc(storeAgentAnswer.createdAt))
-    // Lo que aprendió: cada pregunta abierta una vez, con cuántas conversaciones la hicieron.
-    const gaps = await tx
-      .select({
-        key: agentGap.questionKey,
-        question: sql<string>`(array_agg(${agentGap.question} order by ${agentGap.createdAt} desc))[1]`,
-        conversations: count(sql`distinct ${agentGap.conversationId}`),
-        lastAt: max(agentGap.createdAt),
-      })
-      .from(agentGap)
-      .where(and(eq(agentGap.storeId, storeId), isNull(agentGap.outcome)))
-      .groupBy(agentGap.questionKey)
-      .orderBy(desc(count(sql`distinct ${agentGap.conversationId}`)), desc(max(agentGap.createdAt)))
-      .limit(50)
-    const bare = await tx
-      .select({ id: product.id, name: product.name })
-      .from(product)
-      .where(and(eq(product.storeId, storeId), sql`char_length(btrim(${product.description})) = 0`))
-      .orderBy(asc(product.name))
-      .limit(20)
+    const [answers, gaps, bare] = await Promise.all([
+      tx
+        .select({
+          id: storeAgentAnswer.id,
+          question: storeAgentAnswer.question,
+          answer: storeAgentAnswer.answer,
+          updatedAt: storeAgentAnswer.updatedAt,
+        })
+        .from(storeAgentAnswer)
+        .where(eq(storeAgentAnswer.storeId, storeId))
+        .orderBy(asc(storeAgentAnswer.createdAt)),
+      // Lo que aprendió: cada pregunta abierta una vez, con cuántas conversaciones la hicieron.
+      tx
+        .select({
+          key: agentGap.questionKey,
+          question: sql<string>`(array_agg(${agentGap.question} order by ${agentGap.createdAt} desc))[1]`,
+          conversations: count(sql`distinct ${agentGap.conversationId}`),
+          lastAt: max(agentGap.createdAt),
+        })
+        .from(agentGap)
+        .where(and(eq(agentGap.storeId, storeId), isNull(agentGap.outcome)))
+        .groupBy(agentGap.questionKey)
+        .orderBy(
+          desc(count(sql`distinct ${agentGap.conversationId}`)),
+          desc(max(agentGap.createdAt)),
+        )
+        .limit(50),
+      tx
+        .select({ id: product.id, name: product.name })
+        .from(product)
+        .where(
+          and(eq(product.storeId, storeId), sql`char_length(btrim(${product.description})) = 0`),
+        )
+        .orderBy(asc(product.name))
+        .limit(20),
+    ])
     return {
       answers,
       gaps: gaps.map((g) => ({ ...g, lastAt: g.lastAt ?? null })),
