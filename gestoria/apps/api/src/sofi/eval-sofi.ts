@@ -643,10 +643,15 @@ async function judge(
     const json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as {
       versiones: (Judged & { etiqueta: string })[]
     }
-    for (const v of json.versiones) judged.set(v.etiqueta, v)
+    // La etiqueta puede volver como «1» o «VERSIÓN 1»: vale su número.
+    for (const v of json.versiones) judged.set(String(v.etiqueta).match(/\d+/)?.[0] ?? "", v)
   } catch {
     // Sin JSON: el caso queda sin juez y se dice en el resumen.
   }
+  if (judged.size < versions.length)
+    console.log(
+      `${item.id}: el juez no calificó todas las versiones: «${(reply.content ?? "").slice(0, 300)}»`,
+    )
   return { judged, cost }
 }
 
