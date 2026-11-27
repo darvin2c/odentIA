@@ -300,6 +300,12 @@ export interface DictationAsk {
   context: string
   pending: DictationPending[]
   /**
+   * Lo que una persona descartó en este dictado, sin número: no se corrige ni se quita. Si se vuelve
+   * a indicar es un registro nuevo (QA del 27 nov: «para la 16 mejor le propongo una resina o una
+   * corona», dicho tras descartar sus dos caminos, salía como un cambio a algo ya confirmado).
+   */
+  discarded?: readonly string[] | undefined
+  /**
    * Las preguntas vacías de las fichas empezadas en la atención (entrega 11):
    * van en el mensaje de la pausa, con sus reglas, solo si hay alguna. Sin
    * fichas, la pausa es la de siempre.
@@ -429,6 +435,9 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
     input.pending.length
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
+      : "",
+    input.discarded?.length
+      ? `Descartadas en este dictado (las quitó una persona; no se corrigen ni se quitan). Si lo nuevo vuelve a indicar una, con los mismos datos o con otros, es un registro nuevo, no una corrección:\n${input.discarded.map((label) => `- ${label}`).join("\n")}`
       : "",
     dictationFormsText(forms),
     newText(context, input.transcript),

@@ -229,4 +229,17 @@ describe("BudgetResponder", () => {
     expect(page).toContain("Elijo la opción B")
     expect(page).toContain("Aceptas")
   })
+
+  // QA del 27 nov (verificador, hallazgo 8): «Resina fotocurable… · Corona cerámica» no decía de qué pieza era
+  // cada línea. Cada una dice su pieza, en la opción y en su línea; si el nombre ya la dice, no se repite.
+  it("cada línea dice su pieza, en el resumen de la opción y en la lista", () => {
+    const base = twoOptions(true)
+    const resina = { ...plain.items[0]!, planItemId: "i3", optionId: "o2", title: "Resina fotocurable", toothNumber: 36, lineTotalCents: 18000 }
+    const corona = { ...plain.items[0]!, planItemId: "i4", optionId: "o2", title: "Corona cerámica", toothNumber: 16, lineTotalCents: 90000 }
+    const page = html({ ...base, items: [base.items[0]!, resina, corona] })
+    expect(page).toContain("Resina fotocurable · pieza 36 · Corona cerámica · pieza 16")
+    expect(page).toContain('font-medium">Corona cerámica · pieza 16')
+    expect(page).toContain("Endodoncia del molar 46")
+    expect(page).not.toContain("Endodoncia del molar 46 · pieza 46")
+  })
 })

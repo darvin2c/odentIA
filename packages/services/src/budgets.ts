@@ -1407,6 +1407,34 @@ export interface AssembledBudget {
   currency: string
   /** Lo que entró en esta atención. */
   added: number
+  /**
+   * Cada opción con su total, leídas en la misma lectura que lo de arriba: el cierre dice estas
+   * cifras y no las de otra consulta, que podía venir de antes de firmar (QA del 27 nov: decía
+   * S/ 180 o S/ 900 y al paciente le llegaba S/ 360 o S/ 1,080, con lo común que entró al firmar).
+   */
+  options: Array<Pick<BudgetOptionWithTotals, "id" | "position" | "label" | "name" | "totals" | "totalCents">>
+}
+
+/** Lo que el cierre dice del presupuesto, de una sola lectura (`loadBudget`). */
+function assembledOf(full: BudgetWithTotals, added: number): AssembledBudget {
+  const value = valueOptionOf(full.options)
+  return {
+    id: full.id,
+    budgetNumber: full.budgetNumber,
+    itemCount: value?.lineCount ?? full.items.length,
+    totals: full.totals,
+    totalCents: full.totalCents,
+    currency: full.currency,
+    added,
+    options: full.options.map(({ id, position, label, name, totals, totalCents }) => ({
+      id,
+      position,
+      label,
+      name,
+      totals,
+      totalCents,
+    })),
+  }
 }
 
 /**
@@ -1495,17 +1523,7 @@ export async function assembleEncounterBudget(
         encounterId,
       })
       await notifyBudget(tx, orgId)
-      const full = await loadBudget(tx, orgId, patientId, locked)
-      const value = valueOptionOf(full.options)
-      return {
-        id: full.id,
-        budgetNumber: full.budgetNumber,
-        itemCount: value?.lineCount ?? full.items.length,
-        totals: full.totals,
-        totalCents: full.totalCents,
-        currency: full.currency,
-        added: ready.length,
-      }
+      return assembledOf(await loadBudget(tx, orgId, patientId, locked), ready.length)
     }
   }
   // Lo indicado aquí ya entró al borrador al indicarlo (`quoteIndicatedNow`): no queda nada nuevo
@@ -1518,17 +1536,7 @@ export async function assembleEncounterBudget(
       where organization_id = ${orgId} and patient_id = ${patientId}::uuid and budget_id = ${draft.id}::uuid
         and source_encounter_id = ${encounterId}::uuid and status <> 'cancelado'`)
     if (mine && mine.n > 0) {
-      const full = await loadBudget(tx, orgId, patientId, draft)
-      const value = valueOptionOf(full.options)
-      return {
-        id: full.id,
-        budgetNumber: full.budgetNumber,
-        itemCount: value?.lineCount ?? full.items.length,
-        totals: full.totals,
-        totalCents: full.totalCents,
-        currency: full.currency,
-        added: mine.n,
-      }
+      return assembledOf(await loadBudget(tx, orgId, patientId, draft), mine.n)
     }
   }
   return null

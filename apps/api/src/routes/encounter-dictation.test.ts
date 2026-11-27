@@ -262,6 +262,34 @@ describe("el aviso de la pausa y «Lo que se dijo» dicen lo mismo", () => {
   })
 })
 
+// QA del 27 nov (verificador, hallazgo 1): descartar una propuesta y volver a dictarla decía «ya estaba
+// confirmado: cámbialo a mano». Lo descartado no es confirmado: la pausa siguiente se lo dice a Clío como
+// descartado (volver a indicarlo es un registro nuevo) y un número que no está en su lista no es «ya confirmado».
+describe("lo descartado no es confirmado", () => {
+  it("la pausa lleva lo descartado sin número, y una corrección a un número que no existe queda «no supe dónde va»", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, { drafts: [{ kind: "control", payload: { title: "Control de la resina", dueInDays: 30 }, sourceText: "control en un mes" }] }),
+    )
+    const first = await app.request(base, json({ transcript: "Le dejo control en un mes.", segmentId: crypto.randomUUID() }))
+    const items = ((await first.json()) as { data: { suggestions: Array<{ id: string; kind: string }> } }).data.suggestions
+    const control = items.find((item) => item.kind === "control")!
+    expect((await app.request(`${base}/${control.id}/discard`, json({}))).status).toBe(200)
+    const again = "Mejor le dejo control en quince días."
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, { corrections: [{ index: 3, changes: { dueInDays: 15 }, sourceText: again }] }),
+    )
+    const res = await app.request(base, json({ transcript: again, segmentId: crypto.randomUUID() }))
+    expect(res.status).toBe(201)
+    const asked = extract.mock.calls[1]?.[2] as { pending: Array<{ label: string }>; discarded?: string[] }
+    expect(asked.pending).toEqual([])
+    expect(asked.discarded?.some((label) => label.includes("Control de la resina"))).toBe(true)
+    const { data } = (await res.json()) as { data: { unusedKind: Record<string, string> } }
+    expect(data.unusedKind).toEqual({ [again]: "sin_lugar" })
+  })
+})
+
 describe("la pausa lee lo dicho antes desde el servidor", () => {
   it("tras recargar, la pausa siguiente lleva el final de lo dicho antes, y no lo que mande la pestaña", async () => {
     const app = buildApp("owner")

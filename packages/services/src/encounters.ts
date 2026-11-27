@@ -3015,7 +3015,7 @@ export async function checkEncounterClosing(
         ...sessions.continuing.map((session) => session.planItemId).filter((id) => completePlanItemIds.includes(id)),
         ...doneToday.map((link) => link.plan_item_id),
       ]),
-    ]),
+    ], row.id),
   }
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,

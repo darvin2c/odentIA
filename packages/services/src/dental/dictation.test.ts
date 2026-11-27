@@ -624,6 +624,20 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
     await enable(false)
   })
 
+  // QA del 27 nov (verificador, hallazgo 7): «la 46 la vemos en la próxima cita» volvía a proponer sus dos
+  // caminos, ya confirmados en el plan. La misma elección ya confirmada hoy no se propone otra vez; otra sí.
+  it("la misma elección, ya confirmada hoy, no se propone otra vez: se avisa como ya registrada", async () => {
+    await enable(true)
+    const { fx, choice, endodontics } = await twoPaths("elegida antes")
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    const again = await choice()
+    expect(again.suggestions).toEqual([])
+    expect(again.alreadyDone).toEqual(["Endodoncia elegida antes"])
+    expect(await endodontics()).toHaveLength(1)
+    await enable(false)
+  })
+
   // QA del 22 nov (H3, V-DIN-04): Rosa confirma los dos caminos de la 36 desde Clío antes de firmar
   // y al firmar se le carga la evaluación (S/ 50). La evaluación entraba al borrador como común a las
   // dos opciones y quedaba ahí ya cobrada: «Opción A S/ 700 · B S/ 200» con «debe S/ 50» (leería 750).

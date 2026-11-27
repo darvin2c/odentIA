@@ -14,11 +14,13 @@ import {
   discardDictationSuggestion,
   restoreDictationSuggestion,
   discardPendingDictation,
+  discardedByPerson,
   getAgentConfig,
   issueDictationPrescription,
   keepConfirmedDictation,
   keepIssuedPaper,
   listConfirmedDictation,
+  listDecidedDictation,
   listDictationSaid,
   listDictationSaidSources,
   listDictationSuggestions,
@@ -114,6 +116,8 @@ function unusedOf(
   extracted: { omitted: number; unused: string[]; outOfPlace?: ReadonlyArray<{ said: string; why: keyof typeof DICTATION_OUT_OF_PLACE }> | undefined },
   onConfirmed: ReadonlyArray<{ sourceText?: string | undefined }>,
   dropped: ReadonlyArray<{ said: string; why: string; targets: Array<{ responseId: string; fieldId: string; label: string }> }>,
+  /** Lo que Clío quiso corregir con un número que no estaba en su lista: no sabe dónde va. */
+  unknownTarget: ReadonlyArray<{ sourceText?: string | undefined }> = [],
 ): DictationUnusedItem[] {
   return unusedOnce([
     ...extracted.unused.map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
@@ -124,6 +128,7 @@ function unusedOf(
     }),
     ...(extracted.omitted > extracted.unused.length ? [{ said: null, why: "sin_lugar" } satisfies DictationUnusedItem] : []),
     ...onConfirmed.flatMap((item): DictationUnusedItem[] => (item.sourceText ? [{ said: item.sourceText, why: "ya_confirmada" }] : [])),
+    ...unknownTarget.flatMap((item): DictationUnusedItem[] => (item.sourceText ? [{ said: item.sourceText, why: "sin_lugar" }] : [])),
     ...dropped.map((item): DictationUnusedItem => ({ said: item.said, why: "no_propuesta", detail: item.why, ...(item.targets.length ? { targets: item.targets } : {}) })),
   ])
 }
@@ -222,6 +227,9 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           const pending = await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
           const confirmed = await listConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId)
           const list = [...pending, ...confirmed]
+          // Lo que una persona descartó, sin número (no lo que descartó el sistema): volver a dictarlo es
+          // un registro nuevo, no un cambio a algo confirmado (QA del 27 nov, verificador 1).
+          const discarded = (await listDecidedDictation(tx, orgId, at.data.id, at.data.encounterId, "descartada")).filter(discardedByPerson)
           // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
           const forms = await dictationFormQuestions(tx, orgId, at.data.encounterId, { open: openForms ?? [] })
           return {
@@ -231,6 +239,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             // Lo que ya proponen las pendientes: la segunda lectura no repite lo ya propuesto.
             formPending: pendingFormValues(pending, forms),
             pendingCount: pending.length,
+            discarded: discarded.map((item) => dictationModelLabel(item, dictation)),
             labels: [
               ...pending.map((item) => ({ label: dictationModelLabel(item, dictation) })),
               ...confirmed.map((item) => ({ label: `${dictationModelLabel(item, dictation)} · ya confirmada` })),
@@ -253,7 +262,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
                 extractDictation(
                   deps.db,
                   { secretsKey: deps.secretsKey, platform: deps.llm },
-                  { orgId, transcript, context: ready.context, pending: ready.labels, forms: ready.forms, formPending: ready.formPending },
+                  { orgId, transcript, context: ready.context, pending: ready.labels, discarded: ready.discarded, forms: ready.forms, formPending: ready.formPending },
                 ),
               { encounterId: at.data.encounterId },
             )
@@ -263,7 +272,10 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         // El número que usó el modelo es la posición en la lista que se le dio.
         const target = (index: number) => ready.list[index]?.id
         // Lo ya confirmado no se corrige por voz: si lo intentó, se avisa con la frase en vez de perderlo.
-        const onConfirmed = extracted.corrections.filter((item) => item.index >= ready.pendingCount)
+        const onConfirmed = extracted.corrections.filter((item) => item.index >= ready.pendingCount && target(item.index) !== undefined)
+        // Un número que no está en la lista no es algo confirmado (QA del 27 nov: lo descartado vuelto a
+        // dictar decía «ya estaba confirmado»): no supo dónde va, y la frase se puede intentar otra vez.
+        const unknownTarget = extracted.corrections.filter((item) => target(item.index) === undefined)
         const saved = await withOrgContext(deps.db, orgId, async (tx) => {
           const result = await saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, {
             drafts: extracted.drafts,
@@ -288,7 +300,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           // Una frase reintentada sale de «No lo usé» de su tramo, o vuelve con lo que se sabe ahora.
           // Lo de quien acompaña que quedó propuesto como lo de su familia ya no es «No lo usé».
           const proposed = new Set(result.outOfPlaceUsed ?? [])
-          const left = unusedOf({ ...extracted, outOfPlace: extracted.outOfPlace?.filter((item) => !proposed.has(item.said)) }, onConfirmed, result.droppedForms)
+          const left = unusedOf({ ...extracted, outOfPlace: extracted.outOfPlace?.filter((item) => !proposed.has(item.said)) }, onConfirmed, result.droppedForms, unknownTarget)
           // Si el reintento no dejó nada ni devolvió la frase, sigue en «No lo usé» con su motivo de antes.
           const used = result.suggestions.length + result.corrected.length + (result.added?.length ?? 0) + result.removed.length > 0
           if (retryOf) await settleDictationRetry(tx, orgId, at.data.encounterId, retryOf, transcript, left, used)

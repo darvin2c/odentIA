@@ -58,7 +58,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchBudgetDetail, PLAN_QUERY_KEYS, pendingTreatmentCounts, planKeysAfterDictation, totalsOf } from "../../lib/budgets"
+import { type FinalizedBudget, finalizedBudgetText, PLAN_QUERY_KEYS, pendingTreatmentCounts, planKeysAfterDictation } from "../../lib/budgets"
 import {
   type ConsentDocument,
   canFillFormInAttention,
@@ -383,68 +383,16 @@ function formatClock(iso: string): string {
       })
 }
 
-/** Resumen económico del cierre: qué quedó por cobrar y qué no. */
-/** El presupuesto que quedó armado al firmar, con lo indicado en esta atención. */
-interface FinalizedBudget {
-  id: string
-  budgetNumber: number
-  itemCount: number
-  /** Un total por moneda; con dos, `totalCents` es nulo. */
-  totals?: Array<{ currency: string; totalCents: number | null }>
-  totalCents: number | null
-  currency: string
-  added: number
-}
-
-/**
- * «Presupuesto listo: …» del cierre. Con caminos (varias opciones), cada uno
- * con su total y unidos con «o»: las opciones nunca se suman. El cierre no
- * trae las opciones; se leen del presupuesto. Mientras tanto no se dice un
- * total, para no mostrar una suma de caminos.
- */
+/** «Presupuesto listo: …» del cierre, con las cifras que trajo el cierre (`finalizedBudgetText`). */
 function FinalizedBudgetSummary({
-  patientId,
   budget,
   locale,
 }: {
-  patientId: string
   budget: FinalizedBudget
   locale: string | undefined
 }): React.JSX.Element {
-  const detailQuery = useQuery({
-    queryKey: ["budget", patientId, budget.id],
-    queryFn: () => fetchBudgetDetail(patientId, budget.id),
-  })
-  const detail = detailQuery.data?.data
-  const money = (cents: number, currency: string) => (locale ? formatMoney(cents, currency, locale) : "…")
-  const options = detail?.options ?? []
-  if (detail && options.length > 1) {
-    const count = options.length === 2 ? "dos" : options.length === 3 ? "tres" : String(options.length)
-    const words = [...options]
-      .sort((a, b) => a.position - b.position)
-      .map(
-        (option) =>
-          `${option.name?.trim() || option.label} ${moneyTotalsText(totalsOf(option, detail.currency), money, "con un precio por definir")}`,
-      )
-    return (
-      <p className="text-sm">
-        Presupuesto listo con {count} opciones: {words.join(" o ")}. Nunca se suman.
-      </p>
-    )
-  }
-  const treatments = budget.itemCount === 1 ? "1 tratamiento" : `${budget.itemCount} tratamientos`
-  return (
-    <p className="text-sm">
-      Presupuesto listo: {treatments}
-      {detail && locale && (budget.totalCents != null || budget.totals?.length)
-        ? ` por ${moneyTotalsText(
-            budget.totals?.length ? budget.totals : [{ currency: budget.currency, totalCents: budget.totalCents }],
-            money,
-            "un precio por definir",
-          )}`
-        : ""}
-    </p>
-  )
+  const format = locale ? (cents: number, currency: string) => formatMoney(cents, currency, locale) : null
+  return <p className="text-sm">{finalizedBudgetText(budget, format)}</p>
 }
 
 /** Lo aceptado que va después de lo que sigue en curso y ya tiene su cita. */
@@ -1517,6 +1465,8 @@ export function EncounterEditor({
       setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedFreed(result.data.freedAppointments ?? [])
       setFinalizedBilling(result.data.billing)
+      // Lo que entró al firmar cambia el presupuesto que otras pantallas ya tenían leído.
+      if (result.data.budget) void queryClient.invalidateQueries({ queryKey: ["budget", patientId] })
       // «Debe en total» cuenta lo que este cierre acaba de cargar.
       if (canReadFinance) void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
@@ -3689,7 +3639,7 @@ export function EncounterEditor({
               aria-label="Presupuesto listo"
               className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3"
             >
-              <FinalizedBudgetSummary patientId={patientId} budget={finalizedBudget} locale={orgLocale} />
+              <FinalizedBudgetSummary budget={finalizedBudget} locale={orgLocale} />
               {budgetSent ? (
                 <p role="status" className="text-sm font-medium">
                   Enviado. Queda «Entregado · espera respuesta» en su Plan.

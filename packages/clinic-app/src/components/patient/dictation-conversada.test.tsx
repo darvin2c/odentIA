@@ -709,6 +709,39 @@ describe("el foco queda donde sigue", () => {
     await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Confirmar: Endodoncia · 46"))
   })
 
+  // QA del 27 nov (verificador, hallazgo 2): «una resina o si no una incrustación», sin incrustación en los
+  // servicios, dejaba el camino B sin opciones ni buscador. Se busca como en las demás tarjetas por revisar.
+  it("un camino que no se parece a ningún servicio se busca en sus servicios y se elige", async () => {
+    const { DictationBlockSuggestions } = await import("./dictation-suggestions")
+    const save = mutation()
+    const item = suggestion({
+      id: "p-16",
+      kind: "plan",
+      status: "por_revisar",
+      summary: "Pieza 16 · dos caminos, el paciente elige",
+      payload: { service: "resina", serviceId: "srv-1", serviceName: "Resina fotocurable", priceCents: 18000, currency: "PEN", toothNumber: 16, options: [{ service: "incrustación" }] },
+    })
+    route.mockImplementation(async (url: string) =>
+      url.includes("/api/services")
+        ? { data: [{ id: "srv-9", name: "Incrustación cerámica", priceCents: 90000, currency: "PEN", scope: "tooth", isActive: true }], total: 1 }
+        : url.includes("specialt")
+          ? { data: [] }
+          : { data: {} },
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <DictationBlockSuggestions session={sessionWith({ suggestions: [item], save })} kind="plan" />
+      </QueryClientProvider>,
+    )
+    const camino = screen.getByRole("group", { name: "Elige la prestación del camino B" })
+    expect(within(camino).getByText("Dijiste «incrustación»: elige cuál es.")).toBeTruthy()
+    const search = within(camino).getByLabelText("Buscar la prestación del camino B")
+    fireEvent.change(search, { target: { value: "incrust" } })
+    fireEvent.click(await screen.findByRole("option", { name: /Incrustación cerámica/ }))
+    expect(save.mutate).toHaveBeenCalledWith({ item, patch: { option1ServiceId: "srv-9" }, confirm: false })
+  })
+
   it("cambiado quién habló, vuelve a ese turno", async () => {
     renderSaid([
       segment({

@@ -72,6 +72,15 @@ function lineGuideRows(guide: PatientGuide | null | undefined): Array<[string, s
 /** Lo que ya se hizo o se está haciendo: no se deja para después. */
 const executed = (status: string) => status === "realizado" || status === "en_curso"
 
+/**
+ * El nombre de una línea con su pieza (odentIA; sin pieza, solo el nombre), como en su PDF: con dos
+ * caminos, «Resina… · Corona…» no decía qué era cada línea (QA del 27 nov, verificador 8).
+ */
+const lineName = (item: { title: string; toothNumber: number | null }) =>
+  item.toothNumber != null && !new RegExp(`(?<!\\d)${item.toothNumber}(?!\\d)`).test(item.title)
+    ? `${item.title} · pieza ${item.toothNumber}`
+    : item.title
+
 /** «Opción A» en medio de una frase: «la opción A», con su letra como se llama. */
 const midLabel = (label: string) => label.charAt(0).toLocaleLowerCase("es") + label.slice(1)
 
@@ -221,7 +230,7 @@ export function BudgetResponder({
                       option.isRecommended ? `La recomienda tu ${appWords().clinician.one}` : null,
                       budget.items
                         .filter((item) => item.optionId === option.id)
-                        .map((item) => item.title)
+                        .map(lineName)
                         .join(" · "),
                     ]
                       .filter(Boolean)
@@ -289,7 +298,7 @@ export function BudgetResponder({
                     htmlFor={isOpen ? id : undefined}
                     className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center"
                   >
-                    <span className="font-medium">{item.title}</span>
+                    <span className="font-medium">{lineName(item)}</span>
                     {detail ? <span className="text-muted-foreground">{detail}</span> : null}
                   </label>
                   <span className="whitespace-nowrap font-medium tabular-nums">

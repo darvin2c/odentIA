@@ -213,6 +213,19 @@ describe("una corrección cambia solo lo que corrige y el repaso no lo vuelve a 
   })
 })
 
+// QA del 27 nov (verificador, hallazgo 6): la corrección de las indicaciones perdió la dosis que se dijo.
+describe("una corrección conserva lo que se dijo con ella", () => {
+  it("«no es paracetamol, le indiqué ibuprofeno de 400»: queda la dosis y lo que no corrige", async () => {
+    await enable(true)
+    const { segment, notes } = await session()
+    const [note] = (await segment({ drafts: [{ kind: "nota", payload: { indications: "Paracetamol si tiene dolor." } }] })).suggestions
+    const said = "Me corrijo: no es paracetamol, le indiqué ibuprofeno de 400"
+    await segment({ drafts: [], corrections: [{ suggestionId: note!.id, changes: { indications: "Ibuprofeno si tiene dolor." }, said }], transcript: said })
+    expect((await notes())[0]?.payload["indications"]).toBe("Ibuprofeno de 400 si tiene dolor.")
+    await enable(false)
+  })
+})
+
 describe("varias consultas pendientes de antes de este cambio", () => {
   it("al confirmarlas, el tiempo no se junta con «;»: queda el último con lo de antes", async () => {
     await enable(true)

@@ -542,6 +542,8 @@ function PlanChoices({ session, item, busy, onChosen }: { session: DictationSess
   // La recomendada la dice el odontólogo (al dictar o con un toque): sin eso, ninguna va marcada.
   const recommended = item.payload["recommended"] === true
   const isRecommended = (index: number) => recommended && index === 0
+  const chooseService = (index: number, serviceId: string) => save(index === 0 ? { serviceId } : { [`option${index}ServiceId`]: serviceId })
+  const tooth = typeof item.payload["toothNumber"] === "number" ? item.payload["toothNumber"] : null
   return (
     <div className="flex flex-col gap-2 sm:pl-8">
       {resolved && !blocked ? <p className="text-muted-foreground">{recommended ? "Toca la que recomiendas" : "Sin recomendada: si recomiendas una, tócala"}</p> : null}
@@ -574,11 +576,17 @@ function PlanChoices({ session, item, busy, onChosen }: { session: DictationSess
                     size="sm"
                     className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8"
                     disabled={disabled}
-                    onClick={() => save(index === 0 ? { serviceId: candidate.id } : { [`option${index}ServiceId`]: candidate.id })}
+                    onClick={() => chooseService(index, candidate.id)}
                   >
                     {candidate.name} · {price(candidate.priceCents, candidate.currency)}
                   </Button>
                 ))}
+                {/* Lo dicho que no se parece a ningún servicio («incrustación») se busca como en las demás
+                    tarjetas por revisar: sin esto el camino quedaba sin salida (QA del 27 nov, verificador 2). */}
+                <Field className="w-full">
+                  <FieldLabel htmlFor={`dictado-${item.id}-camino-${index}`}>Buscar la prestación del camino {LETTER[index]}</FieldLabel>
+                  <ServicePicker id={`dictado-${item.id}-camino-${index}`} value="" disabled={disabled} place={tooth} onChange={(chosen) => chooseService(index, chosen.id)} />
+                </Field>
               </fieldset>
             )}
           </li>

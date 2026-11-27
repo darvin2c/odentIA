@@ -120,6 +120,23 @@ it("R3: con el borrador de ayer, lo indicado hoy ya entró al indicarlo y al fir
   expect(signed.budget).toMatchObject({ id: resina.budgetId, added: 1, itemCount: 2, totalCents: 108000 })
 })
 
+// QA del 27 nov (verificador, hallazgo 4): el cierre decía «Opción A S/ 180 o Opción B S/ 900» con una
+// lectura de antes de firmar, y al paciente le llegó S/ 360 o S/ 1,080 con lo común. El cierre trae cada
+// opción con su total de la misma lectura que arma el presupuesto: lo que se ve es lo que se envía.
+it("al firmar, el cierre trae cada opción con el total que se envía, con lo común sumado en las dos", async () => {
+  const { f, service, indicate, draft } = await setup()
+  await indicate((await service("Endodoncia", 65000)).id, 36)
+  const exo = await indicate((await service("Exodoncia", 15000)).id, 36)
+  await f.run((tx) => placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exo.id, path: "nuevo" }))
+  await indicate((await service("Resina", 18000)).id, 24)
+  await f.ready(f.encounter.id)
+  const signed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const sent = (await draft())!
+  const shown = [...(signed.budget?.options ?? [])].sort((a, b) => a.position - b.position)
+  expect(shown.map((option) => option.totalCents)).toEqual(totals(sent))
+  expect(shown.map((option) => option.totalCents)).toEqual([83000, 33000])
+})
+
 it("R3: sin nada indicado hoy, el borrador de ayer no se ofrece al firmar", async () => {
   const setupResult = await setup()
   const { f } = setupResult

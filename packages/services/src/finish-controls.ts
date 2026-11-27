@@ -32,6 +32,34 @@ function addDays(day: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10)
 }
 
+/**
+ * Desde qué día cuentan los controles de lo que termina en una atención, en la zona de la clínica:
+ * el de la visita si empezó antes de hoy (una cita pasada que se registra después, o la firma pasada
+ * la medianoche), si no hoy. Una sola regla para lo que el cierre muestra (`finishingControlsOf`), lo
+ * que se crea (`createFinishControls`) y lo que se cambia o quita al firmar
+ * (`applyFinishingControlChanges`): con dos, firmar a las 00:10 mostraba un día y creaba otro (QA del 27 nov).
+ */
+async function controlDays(
+  tx: Db,
+  orgId: string,
+  encounterId: string | null,
+): Promise<{ timezone: string; today: string; from: string }> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const today = dayKeyIn(new Date(), timezone)
+  const [visit] = encounterId
+    ? await tx.select({ startedAt: encounter.startedAt }).from(encounter).where(and(eq(encounter.organizationId, orgId), eq(encounter.id, encounterId))).limit(1)
+    : []
+  const visitDay = visit ? dayKeyIn(visit.startedAt, timezone) : null
+  return { timezone, today, from: visitDay && visitDay < today ? visitDay : today }
+}
+
+/** El día de un control: su plazo desde `from`, nunca antes de mañana. */
+function controlDay(days: { today: string; from: string }, afterDays: number): string {
+  const planned = addDays(days.from, afterDays)
+  const tomorrow = addDays(days.today, 1)
+  return planned < tomorrow ? tomorrow : planned
+}
+
 /** Los controles de su servicio, para un tratamiento. */
 async function controlsOfItem(
   tx: Db,
@@ -118,17 +146,11 @@ export async function createFinishControls(
   if (!item) return
   const controls = await controlsOfItem(tx, orgId, item.serviceId)
   if (controls.length === 0) return
-  const { timezone } = await findOrgLocale(tx, orgId)
-  const today = dayKeyIn(new Date(), timezone)
   // Desde el día de la visita (la de una cita pasada que se registra después), nunca antes de mañana.
-  const [visit] = encounterId
-    ? await tx.select({ startedAt: encounter.startedAt }).from(encounter).where(and(eq(encounter.organizationId, orgId), eq(encounter.id, encounterId))).limit(1)
-    : []
-  const from = visit && dayKeyIn(visit.startedAt, timezone) < today ? dayKeyIn(visit.startedAt, timezone) : today
-  const tomorrow = addDays(today, 1)
+  const days = await controlDays(tx, orgId, encounterId)
+  const { timezone } = days
   for (const control of controls) {
-    const planned = addDays(from, control.afterDays)
-    const day = planned < tomorrow ? tomorrow : planned
+    const day = controlDay(days, control.afterDays)
     const dueAt = zonedTimeToUtc(day, CONTROL_MINUTES, timezone)
     // Ya lo tiene por este tratamiento (se terminó dos veces): nada.
     const [mine] = await tx
@@ -334,6 +356,8 @@ export async function finishingControlsOf(
   tx: Db,
   orgId: string,
   planItemIds: readonly string[],
+  /** La atención que se firma: sus controles cuentan desde el día de su visita, como al crearlos. */
+  encounterId: string | null,
 ): Promise<FinishingControl[]> {
   if (planItemIds.length === 0) return []
   const items = await tx
@@ -345,8 +369,7 @@ export async function finishingControlsOf(
         inArray(treatmentPlanItem.id, [...planItemIds]),
       ),
     )
-  const { timezone } = await findOrgLocale(tx, orgId)
-  const today = dayKeyIn(new Date(), timezone)
+  const days = await controlDays(tx, orgId, encounterId)
   const byKey = new Map<string, { control: FinishControl; ids: string[] }>()
   for (const item of items)
     for (const control of await controlsOfItem(tx, orgId, item.serviceId)) {
@@ -360,7 +383,7 @@ export async function finishingControlsOf(
     out.push({
       key,
       title: await titleWithPlaces(tx, orgId, control.title, ids),
-      dueDay: addDays(today, control.afterDays),
+      dueDay: controlDay(days, control.afterDays),
       afterDays: control.afterDays,
     })
   return out.sort((a, b) => a.afterDays - b.afterDays)
@@ -381,8 +404,9 @@ export async function applyFinishingControlChanges(
 ): Promise<void> {
   if (changes.length === 0) return
   const { orgId, actorUserId, patientId } = scope
-  const { timezone } = await findOrgLocale(tx, orgId)
-  const today = dayKeyIn(new Date(), timezone)
+  // Se busca en el día con que se creó (`controlDays`), también si se firma pasada la medianoche.
+  const days = await controlDays(tx, orgId, scope.encounterId)
+  const { timezone, today } = days
   const open = await tx
     .select({
       id: clinicalFollowUp.id,
@@ -400,12 +424,12 @@ export async function applyFinishingControlChanges(
       ),
     )
   for (const change of changes) {
-    const [days, ...rest] = change.key.split("|")
+    const [afterDays, ...rest] = change.key.split("|")
     const base = rest.join("|")
-    const due = addDays(today, Number(days))
+    const due = controlDay(days, Number(afterDays))
     const target = open.find(
       (row) =>
-        row.afterDays === Number(days) &&
+        row.afterDays === Number(afterDays) &&
         baseOf(row.title) === base &&
         dayKeyIn(row.dueAt, timezone) === due,
     )

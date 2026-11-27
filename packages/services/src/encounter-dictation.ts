@@ -1876,6 +1876,46 @@ export function correctedNoteText(old: string, now: string): string {
     .join(" ")
 }
 
+/** Lo que el sistema descarta solo, con su motivo: no lo descartó una persona. */
+const REPLACED_NOTE = "Lo que dijo después lo reemplaza."
+const IN_CHOICE_NOTE = "La incluye la elección de caminos."
+
+/**
+ * ¿Lo descartó una persona? Lo que lo dicho después reemplazó o una elección de caminos incluyó lo
+ * descartó el sistema, y una respuesta de ficha no se vuelve a indicar. Lo descartado por una persona
+ * se le dice a Clío en la pausa: volver a dictarlo es un registro nuevo (QA del 27 nov, verificador 1).
+ */
+export function discardedByPerson(item: Pick<DictationSuggestion, "kind" | "status" | "note">): boolean {
+  return item.status === "descartada" && item.kind !== "ficha" && item.note !== REPLACED_NOTE && item.note !== IN_CHOICE_NOTE
+}
+
+/** Una palabra dicha seguida de su cantidad: «ibuprofeno de 400», «amoxicilina 500 mg». */
+const SAID_AMOUNT = /(\p{L}{4,})\s+((?:de\s+)?\d+(?:[.,]\d+)?(?:\s*(?:mg|mcg|g|ml|ui|%)(?![\p{L}\p{N}]))?)/giu
+
+/**
+ * La cantidad dicha junto a lo que trae una corrección no se pierde (QA del 27 nov, verificador 6: «no es
+ * paracetamol, le indiqué ibuprofeno de 400» quedó «Ibuprofeno si tiene dolor.»). Si la frase que corrige
+ * dice una palabra que antes no estaba, seguida de su cantidad, y el texto corregido trae esa palabra sin la
+ * cantidad, la cantidad va detrás de ella, como se dijo. Lo que ya decía el texto no se toca.
+ */
+export function withSaidAmounts(old: string, now: string, said: string | undefined): string {
+  if (!said) return now
+  const had = new Set(normalizeForSearch(old).split(" "))
+  let out = now
+  for (const match of said.matchAll(SAID_AMOUNT)) {
+    const word = normalizeForSearch(match[1] ?? "")
+    const amount = (match[2] ?? "").trim()
+    const digits = /\d+(?:[.,]\d+)?/u.exec(amount)?.[0]
+    if (!word || !digits || had.has(word) || NOTE_FILLER.has(word)) continue
+    if (new RegExp(`(?<![\\d.,])${digits.replace(/[.,]/gu, "[.,]")}(?![\\d])`, "u").test(out)) continue
+    const token = [...out.matchAll(/\p{L}+/gu)].find((found) => normalizeForSearch(found[0]) === word)
+    if (token?.index === undefined) continue
+    const end = token.index + token[0].length
+    out = `${out.slice(0, end)} ${amount}${out.slice(end)}`
+  }
+  return out
+}
+
 /**
  * Lo nuevo de la consulta, sumado a la que ya estaba pendiente (mesa del 20 nov 2026): una pausa
  * que no habla de un campo no lo toca; lo que ya dice no se repite; el relato, la evolución y lo
@@ -2365,7 +2405,11 @@ export async function saveDictationSegment(
       const real = Object.fromEntries(
         Object.entries(changes)
           .filter(([key, value]) => isReal(key, value))
-          .map(([key, value]) => [key, NOTE_ONE_LINE.has(key) ? value : correctedNoteText(textOf(stored[key]), textOf(value))]),
+          .map(([key, value]) => {
+            const text = NOTE_ONE_LINE.has(key) ? textOf(value) : correctedNoteText(textOf(stored[key]), textOf(value))
+            // Y lo dicho al corregir que Clío dejó fuera («ibuprofeno de 400» sin «de 400»), con su palabra.
+            return [key, withSaidAmounts(textOf(stored[key]), text, said)]
+          }),
       )
       const extra = Object.fromEntries(Object.entries(changes).filter(([key, value]) => !isReal(key, value)))
       const merged = Object.keys(extra).length ? mergeNote(stored, extra, corrects) : null
@@ -2997,11 +3041,16 @@ export async function saveDictationSegment(
       // Al revés: la elección ya confirmada hoy incluye esta prestación en esa pieza («endodoncia o
       // exodoncia de la 36», confirmada, y luego «endodoncia de la 36»). Ya es uno de sus caminos en el
       // plan y el presupuesto: confirmarla otra vez la dejaría dos veces. No se propone; se avisa.
-      if (!entry.choice && entry.place.tooth !== null) {
+      // La misma elección, ya confirmada hoy, tampoco: con la misma regla que entre las pendientes (QA del
+      // 27 nov, verificador 7: «la 46 la vemos en la próxima cita» volvía a proponer sus dos caminos).
+      if (entry.place.tooth !== null) {
         confirmedChoices ??= (await listDecidedDictation(tx, orgId, patientId, encounterId, "confirmada"))
           .filter((item) => isPlanChoice(item.kind, item.payload))
           .map((item) => planEntry(item.id, item.payload))
-        if (confirmedChoices.some((item) => item.names.some((name) => entry.names.includes(name)) && covers(item.place, entry.place))) {
+        const inPlan = entry.choice
+          ? confirmedChoices.some((item) => covers(item.place, entry.place) && entry.names.every((name) => item.names.includes(name)))
+          : confirmedChoices.some((item) => item.names.some((name) => entry.names.includes(name)) && covers(item.place, entry.place))
+        if (inPlan) {
           const name = String(ready.payload["serviceName"] ?? ready.payload["service"] ?? "").trim()
           if (name && !alreadyDone.includes(name)) alreadyDone.push(name)
           continue
@@ -3017,7 +3066,7 @@ export async function saveDictationSegment(
           if (!row) continue
           await tx
             .update(encounterDictationSuggestion)
-            .set({ status: "descartada", note: "La incluye la elección de caminos.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+            .set({ status: "descartada", note: IN_CHOICE_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
             .where(eq(encounterDictationSuggestion.id, row.id))
           pendingPlans.splice(pendingPlans.indexOf(loose), 1)
         }
@@ -3794,7 +3843,7 @@ async function confirmHealthRow(
   if (!data) {
     const [settled] = await tx
       .update(encounterDictationSuggestion)
-      .set({ status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "descartada", note: REPLACED_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
       .where(eq(encounterDictationSuggestion.id, row.id))
       .returning()
     if (!settled) throw new Error("No se pudo confirmar lo que dijo de su salud")
@@ -3871,7 +3920,7 @@ async function confirmHealthRow(
       .set(
         left
           ? { payload: withMeta(left, parts.meta), updatedAt: new Date() }
-          : { status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+          : { status: "descartada", note: REPLACED_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
       )
       .where(eq(encounterDictationSuggestion.id, older.id))
   }
@@ -4021,7 +4070,7 @@ export async function confirmSaidStopped(
       .set(
         left
           ? { payload: withMeta(left, parts.meta), updatedAt: new Date() }
-          : { status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+          : { status: "descartada", note: REPLACED_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
       )
       .where(eq(encounterDictationSuggestion.id, older.id))
   }

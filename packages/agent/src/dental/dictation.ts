@@ -108,6 +108,9 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
     // Revisión del 26 nov: «profilaxis con destartraje» salía como dos cobros.
     "Lo que nombra como una sola prestación con lo que la acompaña («profilaxis con destartraje») es una sola, en las indicaciones y en lo que se hizo hoy, con todas sus palabras en `service`: no la partas en dos; el sistema la busca entera en los servicios. Dos dichas con «y» («la profilaxis y el destartraje») son dos.",
+    // QA del 27 nov (verificador, hallazgo 7): «hoy hice la primera sesión: apertura, pulpectomía y medicación
+    // intraconducto» salía como tres procedimientos sueltos, uno cobrado aparte del tratamiento del plan.
+    "Los pasos de una sesión de un tratamiento («hoy hice la primera sesión de la endodoncia: apertura, pulpectomía y medicación intraconducto») son esa sesión: un solo procedimiento con el tratamiento en `service` («endodoncia») y su pieza, no uno por paso; los pasos quedan en la evolución de la consulta.",
     homeCarePrompt("«que use enjuague», «dieta blanda», «hilo dental todas las noches»"),
     // Revisión del 26 nov: la primera dicha salía «recomendada» al paciente sin que nadie la recomendara.
     "Si dice dos o tres tratamientos para lo mismo, para que el paciente elija («una resina, o si no una corona»), es una sola indicación: en `service` la primera que nombró y las demás en `alternatives`, en el orden en que las dijo. Si dijo cuál recomienda («le recomiendo la corona», «lo mejor sería la resina»), esa va en `service`, con `recommended`; si no lo dijo, `recommended` no va: no elijas tú cuál conviene. Si ya eligió una, es una indicación sin alternativas.",

@@ -1010,7 +1010,9 @@ export function EncounterPlanPanel({
                                   variant="link"
                                   size="sm"
                                   className="h-auto min-h-11 px-1 py-0 text-xs sm:min-h-0"
-                                  onClick={() => openWide({ id: "plan", itemId: item.id })}
+                                  // Sin el tratamiento: con él se abría encima su Recorrido, que no tiene
+                                  // «Planificar…» (QA del 27 nov, verificador 5).
+                                  onClick={() => openWide({ id: "plan" })}
                                 >
                                   Abrir el Plan
                                 </Button>
