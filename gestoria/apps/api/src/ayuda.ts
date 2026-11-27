@@ -332,7 +332,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo me entero de un pago o de una entrega aunque gestorIA esté cerrada?",
         a: [
           "Instala gestorIA en tu celular y activa los avisos: en Pedidos, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
-          "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre el pedido para resolverlo, y el siguiente del mismo tipo reemplaza al anterior.",
+          "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre lo que toca resolver, y el siguiente del mismo tipo reemplaza al anterior.",
           "En Avisos al celular eliges qué te llega, y vale en todos tus celulares. «Apagar en este celular» los apaga solo en ese celular; al cerrar sesión también se apagan en él.",
         ],
         needs: "avisos.recibir",

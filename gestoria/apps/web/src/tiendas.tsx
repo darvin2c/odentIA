@@ -83,7 +83,7 @@ import {
   type TeamMember,
 } from "./lib/api"
 import { device } from "./lib/avisos"
-import { CONFIG_PATH, configGroupsFor } from "./lib/configuracion"
+import { configGroupsFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
 import { AskForHelpSheet } from "./pedir-ayuda"
@@ -706,9 +706,11 @@ function storeSections(store: MyStore): AppShellNavEntry[] {
  * avisos al celular: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
  */
 function storeFooter(store: MyStore): AppShellNavItem[] {
+  // Abre el primer apartado que ve: a Ventas, sus avisos al celular, no «Datos de la tienda».
+  const first = configGroupsFor(store)[0]?.items[0]
   return [
-    ...(configGroupsFor(store).length > 0
-      ? [{ label: "Configuración", to: `/tiendas/${store.id}${CONFIG_PATH}`, icon: Settings }]
+    ...(first
+      ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
       : []),
     { label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp },
   ]
