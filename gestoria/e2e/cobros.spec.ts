@@ -75,9 +75,12 @@ test("Yape con su QR y la transferencia con su CCI revisado", async ({ page }) =
   await shot(page, "cobros-yape-1440")
   await yape.getByRole("button", { name: "Guardar" }).click()
   await expect(yape).toBeHidden()
-  const rows = page.getByRole("list").filter({ hasText: "Yape" })
-  await expect(rows.getByText("987 654 321 · Rosa Quispe M. · con tu QR")).toBeVisible()
-  await expect(rows.getByText("Tú o Ventas, con la captura")).toBeVisible()
+  // Los otros recorridos dejan sus propios medios en la tienda: se mira la fila de este Yape.
+  const row = page
+    .getByRole("listitem")
+    .filter({ hasText: "987 654 321 · Rosa Quispe M. · con tu QR" })
+  await expect(row).toHaveCount(1)
+  await expect(row.getByText("Tú o Ventas, con la captura")).toBeVisible()
 
   await page.getByRole("button", { name: "Agregar otra forma de cobro" }).click()
   const transfer = surface(page, "Agregar forma de cobro")
