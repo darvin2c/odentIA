@@ -6,6 +6,7 @@
 import {
   accountCopy,
   customer,
+  orderBalance,
   orderEvent,
   saleOrder,
   store,
@@ -14,7 +15,7 @@ import {
   storeMember,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
-import { eq, inArray, sql } from "drizzle-orm"
+import { eq, inArray, isNotNull, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
@@ -742,6 +743,27 @@ describe("la tienda de ejemplo", () => {
         { name: "Jorge Paredes", state: "por_salir", action: "no_entregado" },
       ]),
     )
+
+    // Cambios y devoluciones: el cambio de Andrea sale mañana; la devolución de Mariela ya volvió y
+    // quedó anotado lo que se le devolvió.
+    const exchanges = await db.ownerDb
+      .select({
+        name: saleOrder.customerName,
+        state: saleOrder.state,
+        total: saleOrder.totalCents,
+        refunded: orderBalance.refundedCents,
+        over: orderBalance.overCents,
+      })
+      .from(saleOrder)
+      .innerJoin(orderBalance, eq(orderBalance.orderId, saleOrder.id))
+      .where(isNotNull(saleOrder.exchangeOfId))
+    expect(exchanges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Andrea Castillo", state: "por_salir", total: 1000 }),
+        expect.objectContaining({ name: "Mariela Ríos", state: "entregado", over: 0 }),
+      ]),
+    )
+    expect(exchanges.find((e) => e.name === "Mariela Ríos")!.refunded).toBeGreaterThan(0)
 
     // Ya en el equipo, sembrar otra vez no le deja otra invitación y le suma su pregunta en la
     // Ayuda, que muestra a cada persona solo las suyas.
