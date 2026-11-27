@@ -38,6 +38,7 @@ export interface BrandView {
 
 /** Lo que el servidor dice del nombre del link mientras se escribe (`checkLinkName`). */
 export type LinkCheck =
+  // Cada estado aparte: así TypeScript sabe que solo «ocupado» trae sugerencia.
   | { name: string; state: "libre" }
   | { name: string; state: "tuyo" }
   | { name: string; state: "vigente" }
@@ -52,7 +53,7 @@ export const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+x
 /** La portada es una foto: sin SVG. */
 export const COVER_TYPES = ["image/png", "image/jpeg", "image/webp"]
 /** Lo más que pesa lo que se elige (se achica antes de subir), como en `ImageAdjust`. */
-export const MAX_PICK_BYTES = 20 * 1024 * 1024
+const MAX_PICK_BYTES = 20 * 1024 * 1024
 
 /** Qué tiene mal un archivo para ser el logo o la portada, dicho a la persona; null si vale. */
 export function pickProblem(file: { type: string; size: number }, kind: "logo" | "portada") {
@@ -71,8 +72,7 @@ export function pickProblem(file: { type: string; size: number }, kind: "logo" |
  */
 export function colorChoices(fromLogo: string[], chosen: string): string[] {
   const base = fromLogo.length > 0 ? fromLogo : [GESTORIA_COLOR]
-  const all = base.includes(chosen) ? base : [chosen, ...base]
-  return [...new Set(all)]
+  return [...new Set([chosen, ...base])]
 }
 
 /** Las iniciales de la tienda, para cuando no tiene logo: «Calzados Rosa» → «CR». */

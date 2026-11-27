@@ -207,19 +207,16 @@ const IMAGE_NAMES: Record<StoreImageKind, string> = {
 export type ImageChange = Uint8Array | "quitar"
 
 /** Mira una imagen por su contenido antes de abrir la transacción: tamaño y tipo. */
-export function checkedImage(kind: StoreImageKind, bytes: Uint8Array) {
+function checkedImage(kind: StoreImageKind, bytes: Uint8Array) {
+  const problem = (code: string, message: string) =>
+    new StoreError(400, code, message, { [kind]: message })
   if (bytes.length === 0 || bytes.length > MAX_PHOTO_BYTES)
-    throw new StoreError(
-      400,
+    throw problem(
       "PHOTO_TOO_LARGE",
       `${IMAGE_NAMES[kind]} pesa demasiado. Prueba con una más chica.`,
-      { [kind]: `${IMAGE_NAMES[kind]} pesa demasiado. Prueba con una más chica.` },
     )
   const contentType = imageType(bytes)
-  if (!contentType)
-    throw new StoreError(400, "PHOTO_TYPE", "Sube una imagen en JPG, PNG o WebP", {
-      [kind]: "Sube una imagen en JPG, PNG o WebP",
-    })
+  if (!contentType) throw problem("PHOTO_TYPE", "Sube una imagen en JPG, PNG o WebP")
   return { contentType, content: Buffer.from(bytes) }
 }
 
@@ -306,7 +303,7 @@ export async function saveStoreBrand(
 const SUGGESTION_TRIES = 6
 
 /** Otros nombres para sugerir cuando el pedido ya es de otra tienda: «calzadosrosa-lima». */
-export function linkSuggestions(name: string, timeZone: string, country: string | null): string[] {
+function linkSuggestions(name: string, timeZone: string, country: string | null): string[] {
   const city = (timeZone.split("/").at(-1) ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
   const tails = [city, "tienda", "oficial", country?.toLowerCase() ?? "", "store", "1"]
   return tails

@@ -22,8 +22,8 @@ describe("lo que se elige en Tu marca", () => {
     expect(pickProblem({ type: "image/png", size: 21 * 1024 * 1024 }, "logo")).toMatch(/20 MB/)
   })
 
-  it("los colores son los del logo, con el elegido primero si no está; sin logo, el de gestorIA", () => {
-    expect(colorChoices(["#be185d", "#fbcfe8"], "#be185d")).toEqual(["#be185d", "#fbcfe8"])
+  it("los colores son los del logo, con el elegido primero; sin logo, el de gestorIA", () => {
+    expect(colorChoices(["#fbcfe8", "#be185d"], "#be185d")).toEqual(["#be185d", "#fbcfe8"])
     expect(colorChoices(["#be185d"], "#123456")).toEqual(["#123456", "#be185d"])
     expect(colorChoices([], GESTORIA_COLOR)).toEqual([GESTORIA_COLOR])
   })

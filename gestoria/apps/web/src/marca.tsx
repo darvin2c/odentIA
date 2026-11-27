@@ -22,6 +22,7 @@ import {
   useFormSurface,
   ViewTabs,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Check,
@@ -122,7 +123,7 @@ function useSavedImage(storeId: string, kind: "logo" | "portada", version: numbe
     enabled: version !== null,
     staleTime: Number.POSITIVE_INFINITY,
   })
-  return useBlobUrl(version === null ? null : (blob.data ?? null))
+  return useBlobUrl(blob.data ?? null)
 }
 
 function useBlobUrl(blob: Blob | null): string | null {
@@ -139,6 +140,15 @@ function useBlobUrl(blob: Blob | null): string | null {
   return url
 }
 
+/** Lo que se ve de una imagen de Tu marca: la nueva, ninguna (se quita) o la guardada. */
+function shownImage(
+  draft: { kind: "igual" | "quitar" | "nuevo" },
+  fresh: string | null,
+  saved: string | null,
+): string | null {
+  return draft.kind === "nuevo" ? fresh : draft.kind === "quitar" ? null : saved
+}
+
 async function loadImage(source: string): Promise<HTMLImageElement> {
   const image = new Image()
   image.decoding = "async"
@@ -147,31 +157,53 @@ async function loadImage(source: string): Promise<HTMLImageElement> {
   return image
 }
 
+/** Lado mayor del logo que se sube: nítido en el catálogo y liviano. */
+const LOGO_SIDE = 1024
+
+/** El tamaño que tendrá un recorte al pasarlo a `LOGO_SIDE`. */
+function sizeAt(width: number, height: number) {
+  const scale = Math.min(1, LOGO_SIDE / Math.max(width, height))
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
 /**
- * Lo elegido, listo para mostrarlo y recortarlo. Un SVG se dibuja a 1024 px por su lado mayor y
- * pasa a PNG aquí mismo: lo que se guarda es siempre una imagen, nunca el SVG (puede llevar
- * código). Lo demás se usa tal cual.
+ * Lo elegido, listo para subir: la imagen tal como se guardará (hasta 1024 px, con
+ * `renderAdjustedImage`), así lo que se ve, sus colores y lo guardado son lo mismo. Un SVG se
+ * dibuja antes a 1024 px: se guarda siempre una imagen, nunca el SVG (puede llevar código). Es la
+ * misma cuenta que `rasterize` de `ImageAdjust`, que lo común aún no exporta.
  */
-async function rasterOf(file: Blob): Promise<{ source: string; width: number; height: number }> {
-  const url = URL.createObjectURL(file)
+async function prepareLogo(file: Blob): Promise<{ blob: Blob; width: number; height: number }> {
+  const owned: string[] = []
+  const own = (blob: Blob) => {
+    const url = URL.createObjectURL(blob)
+    owned.push(url)
+    return url
+  }
   try {
-    const image = await loadImage(url)
-    if (file.type !== "image/svg+xml")
-      return { source: url, width: image.naturalWidth, height: image.naturalHeight }
-    const naturalWidth = image.naturalWidth || 1024
-    const naturalHeight = image.naturalHeight || 1024
-    const scale = 1024 / Math.max(naturalWidth, naturalHeight)
-    const canvas = document.createElement("canvas")
-    canvas.width = Math.round(naturalWidth * scale)
-    canvas.height = Math.round(naturalHeight * scale)
-    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height)
-    URL.revokeObjectURL(url)
-    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
-    if (!png) throw new Error("svg")
-    return { source: URL.createObjectURL(png), width: canvas.width, height: canvas.height }
-  } catch (error) {
-    URL.revokeObjectURL(url)
-    throw error
+    let source = own(file)
+    let image = await loadImage(source)
+    if (file.type === "image/svg+xml") {
+      const naturalWidth = image.naturalWidth || LOGO_SIDE
+      const naturalHeight = image.naturalHeight || LOGO_SIDE
+      const canvas = document.createElement("canvas")
+      // Un dibujo no pierde nada al agrandarse: se dibuja a 1024 px por su lado mayor.
+      const scale = LOGO_SIDE / Math.max(naturalWidth, naturalHeight)
+      canvas.width = Math.round(naturalWidth * scale)
+      canvas.height = Math.round(naturalHeight * scale)
+      canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height)
+      const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
+      if (!png) throw new Error("svg")
+      source = own(png)
+      image = await loadImage(source)
+    }
+    const area = { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight }
+    const { blob } = await renderAdjustedImage({ shape: "logo", source, area }, LOGO_SIDE)
+    return { blob, ...sizeAt(area.width, area.height) }
+  } finally {
+    for (const url of owned) URL.revokeObjectURL(url)
   }
 }
 
@@ -190,9 +222,9 @@ async function colorsOf(source: string): Promise<string[]> {
   return dominantColors(context.getImageData(0, 0, canvas.width, canvas.height).data, 4, 3)
 }
 
-/** El logo nuevo, aún sin guardar: lo elegido (ya en imagen y recortado), su nombre y su tamaño. */
+/** El logo nuevo, aún sin guardar: la imagen que se subirá, su nombre y su tamaño. */
 interface NewLogo {
-  source: string
+  blob: Blob
   fileName: string
   width: number
   height: number
@@ -201,10 +233,7 @@ interface NewLogo {
 /** Quién recibe lo que se pega con Ctrl + V: el logo o la portada. */
 type Pickers = RefObject<{ logo?: (file: File) => void; portada?: (file: File) => void }>
 type LogoDraft = { kind: "igual" } | { kind: "quitar" } | ({ kind: "nuevo" } & NewLogo)
-type CoverDraft =
-  | { kind: "igual" }
-  | { kind: "quitar" }
-  | { kind: "nuevo"; file: File; url: string }
+type CoverDraft = { kind: "igual" } | { kind: "quitar" } | { kind: "nuevo"; file: File }
 
 const CODE_PROBLEM = "El código del color tiene 6 cifras, como #BE185D."
 
@@ -212,10 +241,30 @@ const brandSchema = z.object({
   publicName: z.string().max(80, "Máximo 80 caracteres"),
   link: z.string(),
   color: z.string(),
-  code: z.string().refine((value) => normalizeBrandColor(value) !== null, CODE_PROBLEM),
   logo: z.any(),
   cover: z.any(),
 })
+
+interface BrandValues {
+  publicName: string
+  link: string
+  color: string
+  logo: LogoDraft
+  cover: CoverDraft
+}
+
+/**
+ * Lo que «Guardar» manda, sin las imágenes: el nombre sin espacios de más, el color (el de
+ * gestorIA no se guarda) y el link (vacío, queda el guardado: un link puesto no se quita). Con
+ * esto mismo se sabe si hay cambios.
+ */
+function payloadOf(values: BrandValues, savedLink: string | null) {
+  return {
+    publicName: values.publicName.trim(),
+    brandColor: values.color === GESTORIA_COLOR ? "" : values.color,
+    link: linkFromText(values.link) || savedLink || "",
+  }
+}
 
 function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
   const canEdit = store.permissions.includes("configuracion")
@@ -228,32 +277,25 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
   const [previewOpen, setPreviewOpen] = useState(false)
   const coverZone = useRef<HTMLDivElement>(null)
 
+  const defaults: BrandValues = {
+    publicName: brand.publicName ?? "",
+    link: brand.link ?? "",
+    color: saved,
+    logo: { kind: "igual" },
+    cover: { kind: "igual" },
+  }
+  const savedPayload = JSON.stringify(payloadOf(defaults, brand.link))
   const form = useAppForm({
-    defaultValues: {
-      publicName: brand.publicName ?? "",
-      link: brand.link ?? "",
-      // `color` pinta la vista previa; `code` es lo escrito, que vale cuando tiene 6 cifras.
-      color: saved,
-      code: saved.toUpperCase(),
-      logo: { kind: "igual" } as LogoDraft,
-      cover: { kind: "igual" } as CoverDraft,
-    },
+    defaultValues: defaults,
     validators: { onSubmit: brandSchema },
     onSubmit: async ({ value }) => {
       const body = new FormData()
-      body.set("publicName", value.publicName.trim())
-      // El de gestorIA no se guarda: queda sin color propio.
-      body.set("brandColor", value.color === GESTORIA_COLOR ? "" : value.color)
-      const link = linkFromText(value.link)
-      if (link) body.set("link", link)
-      if (value.logo.kind === "nuevo") {
-        const { blob } = await renderAdjustedImage({
-          shape: "logo",
-          source: value.logo.source,
-          area: { x: 0, y: 0, width: value.logo.width, height: value.logo.height },
-        })
-        body.set("logo", blob, "logo")
-      } else if (value.logo.kind === "quitar") body.append("quitar", "logo")
+      for (const [key, text] of Object.entries(payloadOf(value, brand.link)))
+        if (text) body.set(key, text)
+      if (!body.has("brandColor")) body.set("brandColor", "")
+      if (!body.has("publicName")) body.set("publicName", "")
+      if (value.logo.kind === "nuevo") body.set("logo", value.logo.blob, "logo")
+      else if (value.logo.kind === "quitar") body.append("quitar", "logo")
       if (value.cover.kind === "nuevo")
         body.set("portada", await shrinkPhoto(value.cover.file), "portada")
       else if (value.cover.kind === "quitar") body.append("quitar", "portada")
@@ -262,15 +304,22 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
         form: body,
       })
       // El color pinta la app de todo el equipo: llega con la tienda.
-      await queryClient.invalidateQueries({ queryKey: ["yo"] })
-      await queryClient.invalidateQueries({ queryKey: ["configuracion-resumen", store.id] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["yo"] }),
+        queryClient.invalidateQueries({ queryKey: ["configuracion-resumen", store.id] }),
+      ])
       queryClient.setQueryData(BRAND_KEY(store.id), { brand: next })
       toast.success("Tu marca quedó guardada")
     },
   })
   const { onSubmit, isSubmitting, error } = useFormSurface(form, {
-    fieldMap: { brandColor: "code", portada: "cover" },
+    fieldMap: { brandColor: "color", portada: "cover" },
   })
+  // Las imágenes nuevas, aún sin guardar, como URL del navegador (se liberan solas).
+  const logoDraft = useStore(form.store, (state) => state.values.logo)
+  const coverDraft = useStore(form.store, (state) => state.values.cover)
+  const newLogo = useBlobUrl(logoDraft.kind === "nuevo" ? logoDraft.blob : null)
+  const newCover = useBlobUrl(coverDraft.kind === "nuevo" ? coverDraft.file : null)
 
   // Pegar una imagen (Ctrl + V) la pone de logo, o de portada si se está en la portada.
   const pickers: Pickers = useRef({})
@@ -294,197 +343,180 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
       {(values) => {
         const shownName = values.publicName.trim() || brand.storeName
         const palette = brandPalette(values.color)
-        const logoSource =
-          values.logo.kind === "nuevo"
-            ? values.logo.source
-            : values.logo.kind === "quitar"
-              ? null
-              : savedLogo
-        const coverUrl =
-          values.cover.kind === "nuevo"
-            ? values.cover.url
-            : values.cover.kind === "quitar"
-              ? null
-              : savedCover
+        const logoSource = shownImage(values.logo, newLogo, savedLogo)
+        const coverUrl = shownImage(values.cover, newCover, savedCover)
         const dirty =
-          values.publicName.trim() !== (brand.publicName ?? "") ||
-          (linkFromText(values.link) || null) !== (brand.link ?? null) ||
-          values.color !== saved ||
+          JSON.stringify(payloadOf(values, brand.link)) !== savedPayload ||
           values.logo.kind !== "igual" ||
           values.cover.kind !== "igual"
-        const pickColor = (hex: string) => {
-          form.setFieldValue("color", hex)
-          form.setFieldValue("code", hex.toUpperCase())
-        }
+        const pickColor = (hex: string) => form.setFieldValue("color", hex)
         const preview = (
           <ClientPreview
             store={store}
             palette={palette}
             name={shownName}
-            logo={values.logo.kind === "nuevo" ? values.logo : logoSource}
+            logo={logoSource}
             cover={coverUrl}
             link={linkFromText(values.link) || linkFromText(brand.storeName)}
           />
         )
         return (
-          <form
-            noValidate
-            onSubmit={onSubmit}
-            aria-label="Tu marca"
-            className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
-          >
-            <DraftGuard dirty={dirty && canEdit} />
-            <div className="flex min-w-0 flex-col gap-5">
-              <Section title="Logo">
-                <form.AppField name="logo">
-                  {(field) => (
-                    <LogoField
-                      name={shownName}
-                      palette={palette}
-                      saved={savedLogo}
-                      draft={field.state.value}
-                      canEdit={canEdit}
-                      pickers={pickers}
-                      onPicked={(logo) => field.handleChange({ kind: "nuevo", ...logo })}
-                      onRemove={() =>
-                        field.handleChange(brand.logo ? { kind: "quitar" } : { kind: "igual" })
-                      }
-                      onAdjust={() => setAdjusting(true)}
-                      error={field.state.meta.errors[0]}
-                    />
-                  )}
-                </form.AppField>
-              </Section>
-
-              <Section
-                title="Color de tu marca"
-                description="Pinta los botones y enlaces de tu catálogo y tu gestorIA."
-              >
-                <ColorPicker
-                  canEdit={canEdit}
-                  chosen={values.color}
-                  logoSource={logoSource}
-                  onPick={pickColor}
-                  other={
-                    <form.AppField
-                      name="code"
-                      validators={{
-                        onBlur: ({ value }) =>
-                          normalizeBrandColor(value) ? undefined : CODE_PROBLEM,
-                      }}
-                    >
-                      {() => (
-                        <OtherColor
-                          id={`${id}-codigo`}
-                          chosen={values.color}
-                          canEdit={canEdit}
-                          onPick={pickColor}
-                          onValid={(hex) => form.setFieldValue("color", hex)}
-                        />
-                      )}
-                    </form.AppField>
-                  }
-                />
-              </Section>
-
-              <Section
-                title="Portada"
-                description="Va arriba en tu catálogo y en la vista previa de tu link."
-              >
-                <div ref={coverZone}>
-                  <form.AppField name="cover">
+          // El ancho que manda es el de la página, no el de la ventana: con la columna lateral
+          // abierta (Ajustar), la vista previa pasa a «Ver cómo queda».
+          <div className="@container">
+            <form
+              noValidate
+              onSubmit={onSubmit}
+              aria-label="Tu marca"
+              className="grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_22rem]"
+            >
+              <DraftGuard dirty={dirty && canEdit} />
+              <div className="flex min-w-0 flex-col gap-5">
+                <Section title="Logo">
+                  <form.AppField name="logo">
                     {(field) => (
-                      <CoverField
-                        url={coverUrl}
+                      <LogoField
+                        name={shownName}
+                        palette={palette}
+                        shown={logoSource}
+                        draft={field.state.value}
                         canEdit={canEdit}
                         pickers={pickers}
-                        onPicked={(file, url) => field.handleChange({ kind: "nuevo", file, url })}
+                        onPicked={(logo) => field.handleChange({ kind: "nuevo", ...logo })}
                         onRemove={() =>
-                          field.handleChange(brand.cover ? { kind: "quitar" } : { kind: "igual" })
+                          field.handleChange(brand.logo ? { kind: "quitar" } : { kind: "igual" })
                         }
+                        onAdjust={() => setAdjusting(true)}
                         error={field.state.meta.errors[0]}
                       />
                     )}
                   </form.AppField>
-                </div>
-              </Section>
+                </Section>
 
-              <Section title="Tu nombre y tu link">
-                <div className="flex flex-col gap-5">
-                  <form.AppField name="publicName">
-                    {(field) => (
-                      <field.TextField
-                        label="Nombre que ve la clienta"
-                        id={`${id}-nombre`}
-                        placeholder={brand.storeName}
-                        maxLength={80}
-                        disabled={!canEdit}
-                        description={`Si lo dejas vacío, es el de la tienda: ${brand.storeName}.`}
-                      />
-                    )}
-                  </form.AppField>
-                  <form.AppField name="link">
-                    {() => (
-                      <LinkField
-                        store={store}
-                        id={`${id}-link`}
-                        saved={brand.link}
-                        placeholder={linkFromText(brand.storeName)}
-                        canEdit={canEdit}
-                      />
-                    )}
-                  </form.AppField>
-                </div>
-              </Section>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="min-h-11 xl:hidden"
-                onClick={() => setPreviewOpen(true)}
-              >
-                <Eye aria-hidden />
-                Ver cómo queda
-              </Button>
-
-              {canEdit && dirty ? (
-                <section
-                  aria-label="Cambios sin guardar"
-                  className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl bg-foreground p-3 pl-4 text-background shadow-lg"
+                <Section
+                  title="Color de tu marca"
+                  description="Pinta los botones y enlaces de tu catálogo y tu gestorIA."
                 >
-                  <span className="mr-auto text-sm font-medium">Tienes cambios sin guardar</span>
-                  {error ? (
-                    <span
-                      role="alert"
-                      className="basis-full text-sm text-background/90 sm:order-first"
-                    >
-                      <CircleAlert aria-hidden className="mr-1.5 inline size-4" />
-                      {error}
-                    </span>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="min-h-11 border-background/30 bg-transparent text-background hover:bg-background/10 hover:text-background"
-                    disabled={isSubmitting}
-                    onClick={() => form.reset()}
+                  <ColorPicker
+                    canEdit={canEdit}
+                    chosen={values.color}
+                    logoSource={logoSource}
+                    onPick={pickColor}
+                    other={
+                      <form.AppField name="color">
+                        {() => <OtherColor id={`${id}-codigo`} canEdit={canEdit} />}
+                      </form.AppField>
+                    }
+                  />
+                </Section>
+
+                <Section
+                  title="Portada"
+                  description="Va arriba en tu catálogo y en la vista previa de tu link."
+                >
+                  {/* Tocarla la deja enfocada: lo que se pegue después va a la portada. */}
+                  <div ref={coverZone} tabIndex={-1} className="outline-none">
+                    <form.AppField name="cover">
+                      {(field) => (
+                        <CoverField
+                          url={coverUrl}
+                          canEdit={canEdit}
+                          pickers={pickers}
+                          onPicked={(file) => field.handleChange({ kind: "nuevo", file })}
+                          onRemove={() =>
+                            field.handleChange(brand.cover ? { kind: "quitar" } : { kind: "igual" })
+                          }
+                          error={field.state.meta.errors[0]}
+                        />
+                      )}
+                    </form.AppField>
+                  </div>
+                </Section>
+
+                <Section title="Tu nombre y tu link">
+                  <div className="flex flex-col gap-5">
+                    <form.AppField name="publicName">
+                      {(field) => (
+                        <field.TextField
+                          label="Nombre que ve la clienta"
+                          id={`${id}-nombre`}
+                          placeholder={brand.storeName}
+                          maxLength={80}
+                          disabled={!canEdit}
+                          description={`Si lo dejas vacío, es el de la tienda: ${brand.storeName}.`}
+                        />
+                      )}
+                    </form.AppField>
+                    <form.AppField name="link">
+                      {() => (
+                        <LinkField
+                          store={store}
+                          id={`${id}-link`}
+                          saved={brand.link}
+                          placeholder={linkFromText(brand.storeName)}
+                          canEdit={canEdit}
+                        />
+                      )}
+                    </form.AppField>
+                  </div>
+                </Section>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 @4xl:hidden"
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  <Eye aria-hidden />
+                  Ver cómo queda
+                </Button>
+
+                {canEdit && dirty ? (
+                  <section
+                    aria-label="Cambios sin guardar"
+                    className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl bg-foreground p-3 pl-4 text-background shadow-lg"
                   >
-                    Descartar
-                  </Button>
-                  <SubmitButton type="submit" className="min-h-11" pending={isSubmitting}>
-                    Guardar
-                  </SubmitButton>
-                </section>
-              ) : null}
-            </div>
+                    <span className="w-full text-sm font-medium sm:mr-auto sm:w-auto">
+                      Tienes cambios sin guardar
+                    </span>
+                    {error ? (
+                      <span
+                        role="alert"
+                        className="basis-full text-sm text-background/90 sm:order-first"
+                      >
+                        <CircleAlert aria-hidden className="mr-1.5 inline size-4" />
+                        {error}
+                      </span>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11 flex-1 border-background/30 bg-transparent text-background hover:bg-background/10 hover:text-background sm:flex-none"
+                      disabled={isSubmitting}
+                      onClick={() => form.reset()}
+                    >
+                      Descartar
+                    </Button>
+                    <SubmitButton
+                      type="submit"
+                      className="min-h-11 flex-1 sm:flex-none"
+                      pending={isSubmitting}
+                    >
+                      Guardar
+                    </SubmitButton>
+                  </section>
+                ) : null}
+              </div>
 
-            <aside
-              aria-label="Así lo ve tu clienta"
-              className="sticky top-4 hidden flex-col gap-3 xl:flex"
-            >
-              {preview}
-            </aside>
+              <aside
+                aria-label="Así lo ve tu clienta"
+                className="sticky top-14 hidden flex-col gap-3 @4xl:flex"
+              >
+                {preview}
+              </aside>
+            </form>
 
+            {/* Fuera del formulario: un envío dentro de un cajón no debe guardar Tu marca. */}
             <DetailDrawer
               open={previewOpen}
               onClose={() => setPreviewOpen(false)}
@@ -500,7 +532,7 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
                   open={adjusting}
                   name={shownName}
                   logo={field.state.value}
-                  savedSource={savedLogo}
+                  source={logoSource}
                   onClose={() => setAdjusting(false)}
                   onDone={(next) => {
                     field.handleChange({ kind: "nuevo", ...next })
@@ -509,7 +541,7 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
                 />
               )}
             </form.AppField>
-          </form>
+          </div>
         )
       }}
     </form.Subscribe>
@@ -573,7 +605,7 @@ const CHECKERBOARD =
 function LogoField({
   name,
   palette,
-  saved,
+  shown,
   draft,
   canEdit,
   pickers,
@@ -584,7 +616,8 @@ function LogoField({
 }: {
   name: string
   palette: BrandPalette
-  saved: string | null
+  /** El logo que se ve ahora: el nuevo o el guardado. */
+  shown: string | null
   draft: LogoDraft
   canEdit: boolean
   pickers: Pickers
@@ -598,19 +631,19 @@ function LogoField({
   const input = useRef<HTMLInputElement>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [savedSize, setSavedSize] = useState<{ width: number; height: number } | null>(null)
+  const [shownSize, setShownSize] = useState<{ width: number; height: number } | null>(null)
   useEffect(() => {
-    if (!saved) return
+    if (!shown) return
     let live = true
-    loadImage(saved)
+    loadImage(shown)
       .then((image) => {
-        if (live) setSavedSize({ width: image.naturalWidth, height: image.naturalHeight })
+        if (live) setShownSize({ width: image.naturalWidth, height: image.naturalHeight })
       })
       .catch(() => {})
     return () => {
       live = false
     }
-  }, [saved])
+  }, [shown])
 
   const choose = async (file: File) => {
     const bad = pickProblem(file, "logo")
@@ -618,8 +651,7 @@ function LogoField({
     if (bad) return
     setBusy(true)
     try {
-      const raster = await rasterOf(file)
-      onPicked({ ...raster, fileName: file.name || "Imagen pegada" })
+      onPicked({ ...(await prepareLogo(file)), fileName: file.name || "Imagen pegada" })
     } catch {
       setProblem("No se pudo abrir esa imagen. Prueba con otra.")
     } finally {
@@ -629,20 +661,19 @@ function LogoField({
   pickers.current.logo = (file) => void choose(file)
 
   const { over, handlers } = useDrop((file) => void choose(file), canEdit && !busy)
-  const shown = draft.kind === "nuevo" ? draft.source : draft.kind === "quitar" ? null : saved
   const size =
-    draft.kind === "nuevo" ? { width: draft.width, height: draft.height } : shown ? savedSize : null
+    draft.kind === "nuevo" ? { width: draft.width, height: draft.height } : shown ? shownSize : null
   const small = size !== null && Math.max(size.width, size.height) < MIN_LOGO_SIDE
-  const pickButton = (label: string, variant: "secondary" | "outline" = "outline") => (
+  const pickButton = (label: string, first: boolean) => (
     <Button
       type="button"
-      variant={variant}
+      variant={first ? "secondary" : "outline"}
       className="min-h-11"
       disabled={!canEdit || busy}
       onClick={() => input.current?.click()}
       aria-describedby={`${id}-ayuda`}
     >
-      {label === "Elegir imagen" ? <ImagePlus aria-hidden /> : null}
+      {first ? <ImagePlus aria-hidden /> : null}
       {busy ? "Abriendo…" : label}
     </Button>
   )
@@ -674,34 +705,36 @@ function LogoField({
         )}
       >
         {shown ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
-            <span
-              className={cn(
-                "flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border p-1",
-                CHECKERBOARD,
-              )}
-            >
-              <LogoImage logo={draft.kind === "nuevo" ? draft : shown} className="size-full" />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate text-sm font-semibold">{name}</span>
-              <span className="truncate text-xs text-muted-foreground">
-                {draft.kind === "nuevo" ? draft.fileName : "Tu logo de ahora"}
-                {size ? ` · ${size.width} × ${size.height}` : ""}
+          <div className="flex flex-col gap-3 rounded-lg border bg-card p-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span
+                className={cn(
+                  "flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border p-1",
+                  CHECKERBOARD,
+                )}
+              >
+                <img src={shown} alt="" className="size-full object-contain" />
               </span>
-              {canEdit ? (
-                <span className="text-xs text-muted-foreground">
-                  {over ? "Suéltalo para cambiarlo" : "Suelta otro aquí para cambiarlo"}
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-sm font-semibold">{name}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {draft.kind === "nuevo" ? draft.fileName : "Tu logo de ahora"}
+                  {size ? ` · ${size.width} × ${size.height}` : ""}
                 </span>
-              ) : null}
+                {canEdit ? (
+                  <span className="text-xs text-muted-foreground">
+                    {over ? "Suéltalo para cambiarlo" : "Suelta otro aquí para cambiarlo"}
+                  </span>
+                ) : null}
+              </div>
             </div>
             {canEdit ? (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 border-t pt-3">
                 <Button type="button" variant="outline" className="min-h-11" onClick={onAdjust}>
                   <Crop aria-hidden />
                   Ajustar
                 </Button>
-                {pickButton("Cambiar")}
+                {pickButton("Cambiar", false)}
                 <Button type="button" variant="ghost" className="min-h-11" onClick={onRemove}>
                   Quitar
                 </Button>
@@ -726,7 +759,7 @@ function LogoField({
                 PNG, JPG, WebP o SVG · desde {MIN_LOGO_SIDE} px
               </p>
             </div>
-            {canEdit ? pickButton("Elegir imagen", "secondary") : null}
+            {canEdit ? pickButton("Elegir imagen", true) : null}
           </div>
         )}
       </div>
@@ -751,29 +784,23 @@ function LogoField({
   )
 }
 
-/** El logo como se verá: el nuevo (ya recortado) o el guardado. */
-function LogoImage({ logo, className }: { logo: NewLogo | string; className?: string }) {
-  const source = typeof logo === "string" ? logo : logo.source
-  return <img src={source} alt="" className={cn("object-contain", className)} />
-}
-
 /** «Ajustar»: el recorte común (`ImageAdjust`, modo logo), en la columna lateral. */
 function AdjustLogo({
   open,
   name,
   logo,
-  savedSource,
+  source,
   onClose,
   onDone,
 }: {
   open: boolean
   name: string
   logo: LogoDraft
-  savedSource: string | null
+  /** El logo que se ve ahora (el nuevo o el guardado): es el que se recorta. */
+  source: string | null
   onClose: () => void
   onDone: (logo: NewLogo) => void
 }) {
-  const source = logo.kind === "nuevo" ? logo.source : savedSource
   const [value, setValue] = useState<ImageAdjustValue | null>(null)
   const [baking, setBaking] = useState(false)
   useEffect(() => {
@@ -793,19 +820,19 @@ function AdjustLogo({
         event.preventDefault()
         if (!value) return
         setBaking(true)
-        // El recorte queda hecho aquí: lo que muestra `ImageAdjust` se libera al cerrarlo.
-        renderAdjustedImage(value, 1024, { png: true })
-          .then(async ({ blob }) => {
-            const next = URL.createObjectURL(blob)
-            const image = await loadImage(next)
+        // El recorte queda hecho aquí, tal como se subirá.
+        renderAdjustedImage(value, LOGO_SIDE)
+          .then(({ blob }) =>
             onDone({
-              source: next,
+              blob,
               fileName: logo.kind === "nuevo" ? logo.fileName : "Tu logo, ajustado",
-              width: image.naturalWidth,
-              height: image.naturalHeight,
-            })
+              ...sizeAt(value.area.width, value.area.height),
+            }),
+          )
+          .catch(() => {
+            toast.error("No se pudo recortar el logo. Prueba otra vez o elige otra imagen.")
+            onClose()
           })
-          .catch(() => onClose())
           .finally(() => setBaking(false))
       }}
     >
@@ -927,44 +954,58 @@ function ColorPicker({
 }
 
 /** «Otro color»: la paleta del navegador o el código de la marca. */
-function OtherColor({
-  id,
-  chosen,
-  canEdit,
-  onPick,
-  onValid,
-}: {
-  id: string
-  chosen: string
-  canEdit: boolean
-  onPick: (hex: string) => void
-  onValid: (hex: string) => void
-}) {
+/**
+ * «Otro color»: la paleta del navegador o el código de la marca. Lo escrito a medias se queda
+ * aquí; al campo llega solo un color válido, y al salir se dice si el código no vale.
+ */
+function OtherColor({ id, canEdit }: { id: string; canEdit: boolean }) {
   const field = useFieldContext<string>()
+  const [text, setText] = useState(field.state.value.toUpperCase())
+  const [wrong, setWrong] = useState(false)
+  // Lo elegido con un toque o en la paleta se ve escrito.
+  useEffect(() => {
+    setText((current) =>
+      normalizeBrandColor(current) === field.state.value
+        ? current
+        : field.state.value.toUpperCase(),
+    )
+  }, [field.state.value])
   return (
     <FormField
       label="Otro color"
       id={id}
-      description="Toca el cuadro para elegir en la paleta, o escribe el código de tu marca."
+      description={
+        wrong
+          ? CODE_PROBLEM
+          : "Toca el cuadro para elegir en la paleta, o escribe el código de tu marca."
+      }
     >
       {(control: FieldControl) => (
         <div className="flex flex-wrap items-center gap-3">
           <input
             type="color"
             aria-label="Elegir en la paleta"
-            value={chosen}
+            value={field.state.value}
             disabled={!canEdit}
-            onChange={(event) => onPick(event.target.value.toLowerCase())}
+            onChange={(event) => field.handleChange(event.target.value.toLowerCase())}
             className="h-11 w-16 cursor-pointer rounded-lg border border-input-border bg-card p-0.5"
           />
           <Input
             {...control.props}
-            value={field.state.value}
+            aria-invalid={wrong || undefined}
+            value={text}
             disabled={!canEdit}
             onChange={(event) => {
-              field.handleChange(event.target.value)
+              setText(event.target.value)
               const valid = normalizeBrandColor(event.target.value)
-              if (valid) onValid(valid)
+              if (valid) {
+                setWrong(false)
+                field.handleChange(valid)
+              }
+            }}
+            onBlur={() => {
+              setWrong(normalizeBrandColor(text) === null)
+              control.onBlur()
             }}
             autoComplete="off"
             spellCheck={false}
@@ -1021,7 +1062,7 @@ function CoverField({
   url: string | null
   canEdit: boolean
   pickers: Pickers
-  onPicked: (file: File, url: string) => void
+  onPicked: (file: File) => void
   onRemove: () => void
   error?: unknown
 }) {
@@ -1032,7 +1073,7 @@ function CoverField({
     const bad = pickProblem(file, "portada")
     setProblem(bad)
     if (bad) return
-    onPicked(file, URL.createObjectURL(file))
+    onPicked(file)
   }
   pickers.current.portada = choose
   const { over, handlers } = useDrop(choose, canEdit)
@@ -1225,7 +1266,7 @@ function ClientPreview({
   store: MyStore
   palette: BrandPalette
   name: string
-  logo: NewLogo | string | null
+  logo: string | null
   cover: string | null
   link: string
 }) {
@@ -1246,7 +1287,7 @@ function ClientPreview({
           size,
         )}
       >
-        <LogoImage logo={logo} className="size-full p-0.5" />
+        <img src={logo} alt="" className="size-full object-contain p-0.5" />
       </span>
     ) : (
       <span
@@ -1281,7 +1322,7 @@ function ClientPreview({
             <div className="relative h-28 shrink-0" style={{ backgroundColor: light.soft }}>
               {cover ? <img src={cover} alt="" className="size-full object-cover" /> : null}
             </div>
-            <div className="-mt-7 flex flex-col gap-1 px-4">
+            <div className="relative z-10 -mt-7 flex flex-col gap-1 px-4">
               {mark("size-14 text-lg")}
               <p
                 className="mt-1 truncate font-serif text-lg font-bold"

@@ -25,8 +25,11 @@ import { combinations, makeSku } from "./catalogo.js"
 const OWNER = "semilla-rosa"
 const ADMIN = "semilla-mario"
 
-/** Una foto de ejemplo: un PNG de un color, hecho aquí, para no guardar imágenes en el repositorio. */
-export function solidPng(rgb: [number, number, number], size = 240): Buffer {
+/**
+ * Un PNG hecho aquí, para no guardar imágenes en el repositorio: `rows` son las filas de píxeles
+ * sin el byte de filtro; `channels`, 3 (RGB) o 4 (RGBA).
+ */
+export function pngOf(size: number, channels: 3 | 4, rows: Buffer[]): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const length = Buffer.alloc(4)
     length.writeUInt32BE(data.length)
@@ -39,16 +42,25 @@ export function solidPng(rgb: [number, number, number], size = 240): Buffer {
   header.writeUInt32BE(size, 0)
   header.writeUInt32BE(size, 4)
   header.writeUInt8(8, 8) // 8 bits por canal
-  header.writeUInt8(2, 9) // RGB
-  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3)])
-  for (let x = 0; x < size; x++) row.set(rgb, 1 + x * 3)
-  const pixels = Buffer.concat(Array.from({ length: size }, () => row))
+  header.writeUInt8(channels === 4 ? 6 : 2, 9) // RGBA o RGB
+  const pixels = Buffer.concat(rows.map((row) => Buffer.concat([Buffer.from([0]), row])))
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
     chunk("IDAT", deflateSync(pixels)),
     chunk("IEND", Buffer.alloc(0)),
   ])
+}
+
+/** Una foto de ejemplo: un PNG de un color. */
+export function solidPng(rgb: [number, number, number], size = 240): Buffer {
+  const row = Buffer.alloc(size * 3)
+  for (let x = 0; x < size; x++) row.set(rgb, x * 3)
+  return pngOf(
+    size,
+    3,
+    Array.from({ length: size }, () => row),
+  )
 }
 
 /** Hace tantos días, para que el kardex de ejemplo quede siempre en el pasado. */

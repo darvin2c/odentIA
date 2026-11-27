@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, STORE_ID, type Who } from "./entorno"
+import { ACCOUNT, STORE_ID, surface, type Who } from "./entorno"
 
 /**
  * El menú del día y Configuración en un navegador (lienzo «gestorIA como odentIA», tableros 4 y
@@ -220,10 +220,13 @@ test("Tu marca: se suelta o se pega el logo, sus colores se eligen con un toque 
   await expect(page.getByText(/se verá borroso en el catálogo/)).toBeVisible()
   // Ajustar: el recorte común, en la columna lateral.
   await page.getByRole("button", { name: "Ajustar" }).click()
-  await page.getByRole("button", { name: "Usar así" }).click()
+  const adjust = surface(page, "Ajustar el logo")
+  await expect(adjust.getByRole("button", { name: "Usar así" })).toBeEnabled()
+  await adjust.getByRole("button", { name: "Usar así" }).click()
+  await expect(adjust).toHaveCount(0)
   await expect(page.getByText(/pegado\.png · 200 × 200/)).toBeVisible()
   // El link se mira al escribirlo: los reservados se dicen ahí, sin esperar a guardar.
-  const link = page.getByLabel("Tu link")
+  const link = page.getByRole("textbox", { name: "Tu link" })
   await link.fill("Admin")
   await expect(link).toHaveValue("admin")
   await expect(page.getByText(/Ese nombre está reservado/)).toBeVisible()

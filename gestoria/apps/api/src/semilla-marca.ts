@@ -1,7 +1,6 @@
-import { crc32, deflateSync } from "node:zlib"
 import { type Db, store, storeImage, storeLink } from "@gestoria/db"
 import { eq } from "drizzle-orm"
-import { solidPng } from "./semilla-catalogo.js"
+import { pngOf, solidPng } from "./semilla-catalogo.js"
 
 type Rgb = [number, number, number]
 
@@ -10,36 +9,18 @@ type Rgb = [number, number, number]
  * aquí para no guardar imágenes en el repositorio. Sus dos colores son los que «Tu marca» sugiere.
  */
 export function badgePng(outer: Rgb, inner: Rgb, size = 640): Buffer {
-  const chunk = (type: string, data: Buffer) => {
-    const length = Buffer.alloc(4)
-    length.writeUInt32BE(data.length)
-    const body = Buffer.concat([Buffer.from(type, "ascii"), data])
-    const crc = Buffer.alloc(4)
-    crc.writeUInt32BE(crc32(body) >>> 0)
-    return Buffer.concat([length, body, crc])
-  }
-  const header = Buffer.alloc(13)
-  header.writeUInt32BE(size, 0)
-  header.writeUInt32BE(size, 4)
-  header.writeUInt8(8, 8) // 8 bits por canal
-  header.writeUInt8(6, 9) // RGBA
   const center = size / 2
   const rows = Array.from({ length: size }, (_, y) => {
-    const row = Buffer.alloc(1 + size * 4)
+    const row = Buffer.alloc(size * 4)
     for (let x = 0; x < size; x++) {
       const r = Math.hypot(x + 0.5 - center, y + 0.5 - center) / center
       // Sello: borde de color, un anillo claro y el centro de color.
       const color = r > 1 ? null : r > 0.78 ? outer : r > 0.66 ? inner : r > 0.3 ? outer : inner
-      if (color) row.set([...color, 255], 1 + x * 4)
+      if (color) row.set([...color, 255], x * 4)
     }
     return row
   })
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", header),
-    chunk("IDAT", deflateSync(Buffer.concat(rows))),
-    chunk("IEND", Buffer.alloc(0)),
-  ])
+  return pngOf(size, 4, rows)
 }
 
 /**
