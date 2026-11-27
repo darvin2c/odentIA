@@ -41,13 +41,15 @@ describe("lo que la guía de la Ayuda cita de esta app", () => {
     for (const text of quoted) expect(screens.includes(text), `«${text}»`).toBe(true)
   })
 
-  it("cada pantalla a la que lleva existe, y la Ayuda también", () => {
+  it("cada pantalla a la que lleva existe; la Ayuda es el panel de la cabecera, sin página", () => {
     const routes = Object.entries(web).find(([file]) => file.endsWith("/main.tsx"))?.[1] ?? ""
     const paths = [...section("HELP_SCREENS", /\r?\n\} as const/).matchAll(/path: "([^"]+)"/g)].map(
       ([, path]) => path as string,
     )
     expect(paths.length).toBeGreaterThan(3)
-    for (const path of [...paths, "/ayuda"])
-      expect(routes.includes(`path: "${path}"`), path).toBe(true)
+    for (const path of paths) expect(routes.includes(`path: "${path}"`), path).toBe(true)
+    expect(routes.includes('path: "/ayuda"')).toBe(false)
+    const shell = Object.entries(web).find(([file]) => file.endsWith("/tiendas.tsx"))?.[1] ?? ""
+    expect(shell.includes("<StoreHelpButton")).toBe(true)
   })
 })

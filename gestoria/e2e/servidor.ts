@@ -21,6 +21,8 @@ import {
   type AdminRequest,
   APP_CONTRACT_PATHS,
   CONTRACT_PATHS,
+  type HelpAskAnswer,
+  type HelpAskQuestion,
 } from "@odentia/contract"
 import { signMessage } from "@odentia/contract/signing"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
@@ -90,13 +92,34 @@ function stateOf(account: string): AccountState {
   }
 }
 
+/**
+ * La administración responde como toda su API (`{ data: … }`). Ariadna, de mentira: si la
+ * pregunta es una de la guía que llegó con ella, esa; si no, no está en la guía.
+ */
 const adminFetch: typeof fetch = async (input, init) => {
   const url = new URL(String(input))
+  const body = String(init?.body ?? "{}")
   if (url.pathname === CONTRACT_PATHS.state) {
-    const { account } = JSON.parse(String(init?.body ?? "{}")) as { account: string }
-    return Response.json(stateOf(account))
+    const { account } = JSON.parse(body) as { account: string }
+    return Response.json({ data: stateOf(account) })
   }
-  return Response.json({ received: true, repeated: false })
+  if (url.pathname === CONTRACT_PATHS.help) {
+    const asked = JSON.parse(body) as HelpAskQuestion
+    const faq = asked.guide
+      .flatMap((topic) => topic.faqs)
+      .find((one) => one.q === asked.question.trim())
+    const reply: HelpAskAnswer = {
+      askId: randomUUID(),
+      via: "respaldo",
+      verdict: faq ? "seguro" : "ninguna",
+      shown: faq ? [`faq:${faq.id}`] : [],
+      offered: [],
+      written: null,
+    }
+    return Response.json({ data: reply })
+  }
+  if (url.pathname === CONTRACT_PATHS.helpFeedback) return Response.json({ data: { ok: true } })
+  return Response.json({ data: { received: true, repeated: false } })
 }
 
 const contract = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
