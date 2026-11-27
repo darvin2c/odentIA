@@ -163,7 +163,8 @@ export function chargeOf(balance: Balance): { tone: ChargeTone; cents: number } 
 export function dayCountText(day: DispatchDay, today: string): string {
   const parts: string[] = []
   if (day.day < today) {
-    parts.push(day.delivered === 1 ? "1 entregado" : `${day.delivered} entregados`)
+    if (day.delivered > 0)
+      parts.push(day.delivered === 1 ? "1 entregado" : `${day.delivered} entregados`)
   } else {
     if (day.pending > 0) parts.push(`${day.pending} por salir`)
     if (day.delivered > 0) parts.push(`${day.delivered} entregados`)

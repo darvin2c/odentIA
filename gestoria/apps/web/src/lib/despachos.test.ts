@@ -114,6 +114,10 @@ describe("la fila", () => {
     expect(dayCountText({ day: "2026-11-28", pending: 0, delivered: 0, missed: 0 }, today)).toBe(
       "Nada",
     )
+    // Un día que pasó sin entregas no dice «0 entregados».
+    expect(dayCountText({ day: "2026-11-24", pending: 0, delivered: 0, missed: 0 }, today)).toBe(
+      "Nada",
+    )
   })
 })
 
