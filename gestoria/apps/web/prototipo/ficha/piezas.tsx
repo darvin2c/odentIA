@@ -1,0 +1,296 @@
+import {
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  cn,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  useIsMobile,
+} from "@odentia/ui"
+import { Check, ChevronDown, Sparkles, X } from "lucide-react"
+import { type ReactNode, useEffect, useId, useState } from "react"
+import type { Color } from "../datos"
+
+/** La muestra de un color; partida en diagonal si es bicolor. */
+export function Swatch({
+  color,
+  className,
+  hex,
+  hex2,
+}: {
+  color?: Pick<Color, "hex" | "hex2">
+  className?: string
+  hex?: string
+  hex2?: string
+}) {
+  const a = hex ?? color?.hex ?? "#ccc"
+  const b = hex2 ?? color?.hex2
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-block size-4 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.14)]",
+        className,
+      )}
+      style={{ background: b ? `linear-gradient(135deg, ${a} 50%, ${b} 50%)` : a }}
+    />
+  )
+}
+
+/** El anillo de lo que Sofi sabe: se completa con su animación cuando cambia. */
+export function SofiDot({
+  done,
+  total,
+  vendeSola,
+  size = 18,
+}: {
+  done: number
+  total: number
+  vendeSola: boolean
+  size?: number
+}) {
+  const r = size / 2 - 2
+  const c = 2 * Math.PI * r
+  const pct = total ? done / total : 0
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      aria-hidden
+      className="-rotate-90 shrink-0"
+    >
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke="var(--border)"
+        strokeWidth="2.5"
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke={vendeSola ? "var(--success)" : "var(--warning)"}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - pct)}
+        style={{ transition: "stroke-dashoffset 600ms cubic-bezier(.2,.9,.3,1), stroke 300ms" }}
+      />
+    </svg>
+  )
+}
+
+/**
+ * La marca discreta de lo que propone la IA (✦). Al tocarla dice de dónde salió y deja aceptarlo
+ * o descartarlo. Nada propuesto se guarda solo.
+ */
+export function Propuesto({
+  porque,
+  onAccept,
+  onDiscard,
+  label = "Propuesta de la IA",
+  disabled,
+}: {
+  porque: string
+  onAccept: () => void
+  onDiscard: () => void
+  label?: string
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        disabled={disabled}
+        render={
+          <button
+            type="button"
+            className="inline-flex h-5 items-center gap-1 rounded-full bg-primary-soft px-1.5 text-[11px] font-semibold text-primary-soft-foreground outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--primary-soft),var(--primary)_14%)] focus-visible:ring-3 focus-visible:ring-ring/40"
+            aria-label={`${label}: ${porque}`}
+          />
+        }
+      >
+        <Sparkles className="size-3" aria-hidden />
+        IA
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 gap-3 rounded-2xl p-3">
+        <div className="flex items-start gap-2">
+          <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+          <div className="flex flex-col gap-0.5">
+            <p className="text-sm font-semibold">{label}</p>
+            <p className="text-sm text-muted-foreground">{porque}</p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setOpen(false)
+              onDiscard()
+            }}
+          >
+            <X aria-hidden />
+            Descartar
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setOpen(false)
+              onAccept()
+            }}
+          >
+            <Check aria-hidden />
+            Aceptar
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/** Lleva a un campo de la ficha: abre su sección, lo muestra y lo ilumina un momento. */
+export function irA(target: string) {
+  window.dispatchEvent(new CustomEvent("ficha:abrir", { detail: target }))
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const el = document.getElementById(target)
+      if (!el) return
+      el.scrollIntoView({ behavior: "smooth", block: "center" })
+      el.classList.remove("destello")
+      void el.offsetWidth
+      el.classList.add("destello")
+      const input = el.matches("input,textarea,button,[tabindex]")
+        ? el
+        : el.querySelector<HTMLElement>("input,textarea,[role=radio],[role=grid],button")
+      setTimeout(() => input?.focus({ preventScroll: true }), 380)
+    }),
+  )
+}
+
+/**
+ * Una sección de la ficha. En el escritorio, una tarjeta abierta; en el celular, una tarjeta que se
+ * pliega y, cerrada, dice en una línea lo que tiene.
+ */
+export function Seccion({
+  id,
+  title,
+  summary,
+  action,
+  children,
+  defaultOpen = false,
+  contains = [],
+  className,
+  lateral = false,
+}: {
+  id: string
+  title: string
+  summary?: ReactNode
+  action?: ReactNode
+  children: ReactNode
+  defaultOpen?: boolean
+  /** Los campos que viven dentro: «llévame a…» la abre. */
+  contains?: string[]
+  className?: string
+  /** En la columna angosta: más compacta. */
+  lateral?: boolean
+}) {
+  const isMobile = useIsMobile()
+  const headingId = useId()
+  const [open, setOpen] = useState(defaultOpen)
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const t = (e as CustomEvent<string>).detail
+      if (t === id || contains.includes(t) || contains.some((c) => t.startsWith(c))) setOpen(true)
+    }
+    window.addEventListener("ficha:abrir", onOpen)
+    return () => window.removeEventListener("ficha:abrir", onOpen)
+  }, [id, contains])
+
+  if (!isMobile)
+    return (
+      <section
+        id={id}
+        aria-labelledby={headingId}
+        className={cn(
+          "elevated flex min-w-0 scroll-mt-24 flex-col rounded-xl border bg-card",
+          lateral ? "gap-3 p-4" : "gap-4 p-5",
+          className,
+        )}
+      >
+        <div
+          className={cn("flex items-center justify-between gap-3", lateral ? "min-h-7" : "min-h-8")}
+        >
+          <h2 id={headingId} className={cn("font-semibold", lateral ? "text-sm" : "text-base")}>
+            {title}
+          </h2>
+          {action}
+        </div>
+        {children}
+      </section>
+    )
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      render={
+        <section
+          id={id}
+          aria-labelledby={headingId}
+          className={cn("elevated min-w-0 scroll-mt-20 rounded-xl border bg-card", className)}
+        />
+      }
+    >
+      <CollapsibleTrigger className="flex min-h-14 w-full items-center gap-3 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30">
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span id={headingId} className="text-[15px] font-semibold">
+            {title}
+          </span>
+          {summary && !open ? (
+            <span className="truncate text-sm text-muted-foreground">{summary}</span>
+          ) : null}
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-5 shrink-0 text-muted-foreground transition-transform duration-200",
+            open && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-250 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
+        <div className="flex flex-col gap-4 px-4 pb-4">
+          {action ? <div className="flex justify-end">{action}</div> : null}
+          {children}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** Un subtítulo dentro de una sección: separa sin poner otra caja. */
+export function Sub({
+  children,
+  action,
+  id,
+}: {
+  children: ReactNode
+  action?: ReactNode
+  id?: string
+}) {
+  return (
+    <div
+      id={id}
+      className="flex min-h-7 scroll-mt-24 items-center justify-between gap-2 border-t pt-4 first:border-t-0 first:pt-0"
+    >
+      <h3 className="text-sm font-semibold">{children}</h3>
+      {action}
+    </div>
+  )
+}
