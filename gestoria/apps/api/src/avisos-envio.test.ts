@@ -268,7 +268,10 @@ describe("el envío", () => {
       },
     ])
     const deliveries = await collectPushes(db.ownerDb)
-    expect(titlesFor(deliveries, "lucia")).toEqual(["Carla Mendoza pide hablar con una persona"])
+    for (const who of ["rosa", "kevin"] as const)
+      expect(titlesFor(deliveries, who)).toEqual(["Carla Mendoza pide hablar con una persona"])
+    // Lucía los apagó al elegir: lo que elige manda.
+    expect(titlesFor(deliveries, "lucia")).toEqual([])
     expect(await collectPushes(db.ownerDb)).toEqual([])
   })
 
@@ -308,5 +311,19 @@ describe("el envío", () => {
     ).toEqual({ active: false })
     await orderWith("comprobante", SOFI_ACTOR, { monto: 7000, medio: "Yape" })
     expect(await collectPushes(db.ownerDb)).toEqual([])
+  })
+
+  it("al volver a activarlos no llega lo que pasó mientras estuvieron apagados", async () => {
+    await orderWith("no_entregado", people.kevin.id, { motivo: "No contestó", dia: "vie, 28 nov" })
+    expect(
+      (await call("rosa", "POST", "/api/avisos/celular", { endpoint: endpointOf("rosa"), keys }))
+        .status,
+    ).toBe(200)
+    const again = await collectPushes(db.ownerDb)
+    expect(again.map((delivery) => delivery.message.title)).toEqual(["Listo"])
+    await orderWith("comprobante", SOFI_ACTOR, { monto: 3000, medio: "Yape" })
+    expect(titlesFor(await collectPushes(db.ownerDb), "rosa")).toEqual([
+      "Carla Mendoza envió su Yape de S/ 30",
+    ])
   })
 })

@@ -515,8 +515,11 @@ export async function collectPushes(ownerDb: Db, now: Date = new Date()): Promis
       const waitingIds = waiting.map((chat) => chat.id)
       const chatsArray = sql`${`{${waitingIds.join(",")}}`}::uuid[]`
 
-      // La primera vez: desde aquí. Lo que ya estaba no se avisa.
-      if (!seat.hasChoice || seat.lastEventSeq === null) {
+      // La primera vez: desde aquí. Lo que ya estaba no se avisa. También si todos sus celulares
+      // son nuevos: quien los apagó y vuelve a activarlos semanas después no recibe lo de antes,
+      // porque mientras no tuvo ninguno el sistema no avanzó su cursor.
+      const startsNow = devicesOf(seat.userId).every((device) => !device.welcomedAt)
+      if (!seat.hasChoice || seat.lastEventSeq === null || startsNow) {
         await tx.execute(sql`insert into push_choice (store_id, user_id, last_event_seq, chats_seen)
           values (${seat.storeId}, ${seat.userId},
             (select coalesce(max(seq), 0) from order_event where store_id = ${seat.storeId}),
