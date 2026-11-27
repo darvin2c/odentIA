@@ -2,8 +2,8 @@ import type { Db } from "@gestoria/db"
 import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
-import type { Person } from "../cuenta.js"
 import { agentReturnsIn } from "../cambios.js"
+import type { Person } from "../cuenta.js"
 import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
 
@@ -46,9 +46,11 @@ export async function storeReport(
     const since = from.toISOString()
     const at = now.toISOString()
     // Vendido y cobrado: los pagos confirmados del periodo, por pedido, menos lo que la tienda
-    // devolvió en el periodo (un cambio que costó menos o una devolución, tablero 17).
+    // devolvió en el periodo (un cambio que costó menos o una devolución, tablero 17). Lo que se
+    // cobra de un cambio suma a lo vendido, pero el cambio no es otro pedido.
     const [sold] = await tx.execute<{ cents: string; orders: string }>(sql`
-      select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders
+      select coalesce(sum(p.amount_cents), 0) as cents,
+        count(distinct p.order_id) filter (where o.exchange_of_id is null) as orders
       from order_payment p join sale_order o on o.id = p.order_id
       where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
         and p.reviewed_at >= ${since}`)

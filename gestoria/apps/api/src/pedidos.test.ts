@@ -1296,10 +1296,16 @@ describe("cambiar o devolver después de entregar (Andrea, tablero 17)", () => {
     expect([await stock(v.s38), await stock(v.s39)]).toEqual([s38, s39])
     await call("lucia", "POST", `${base}/pedidos/${change.id}/salio`, {})
     expect([await stock(v.s38), await stock(v.s39)]).toEqual([s38, s39 - 1])
+    const report = async () => (await call("rosa", "GET", `${base}/reportes?periodo=mes`)).json
+    const sold = (await report()).sold
     const done = await call("lucia", "POST", `${base}/pedidos/${change.id}/entregado`, {
       collectedCents: 1000,
     })
     expect(done.status).toBe(200)
+    // Lo cobrado del cambio suma a lo vendido, pero el cambio no es otro pedido.
+    const soldAfter = (await report()).sold
+    expect(soldAfter.cents - sold.cents).toBe(1000)
+    expect(soldAfter.orders).toBe(sold.orders)
     expect(done.json.order.returns[0].returnedAt).not.toBeNull()
     expect((done.json.order.events as Json[]).find((e) => e.action === "entregado")).toMatchObject({
       detail: { volvio: ["Sandalia de verano 38"] },
