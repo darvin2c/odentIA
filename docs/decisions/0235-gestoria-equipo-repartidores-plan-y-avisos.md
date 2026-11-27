@@ -8,8 +8,8 @@ y 11 (sobre el repartidor del ADR 0228 y los avisos del ADR 0229)
 La invitación al equipo era un correo y un enlace para copiar: no decía a quién ni si ya se le
 mandó. Los repartidores de fuera eran solo un nombre escrito en Despachos, sin celular ni lo que se
 les paga, y no había cómo dejar de usarlos. «Plan y pagos» mostraba tres cifras sueltas («incluye
-USD 5 de uso», «Gasto USD 24.60») y media página de formulario de ayuda, que ya está arriba en
-«Pedir ayuda». La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la entrada.
+USD 5 de uso», «Gasto USD 24.60») y media página de formulario de ayuda, que ya está arriba, en
+la Ayuda. La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la entrada.
 
 ## Decisión y motivo
 
@@ -33,7 +33,8 @@ USD 5 de uso», «Gasto USD 24.60») y media página de formulario de ayuda, que
   cuándo cierra el mes, con qué se paga y el tope. gestorIA no suma ni calcula impuestos o precios:
   el total de cada cobro es el de la administración, en «Por pagar». Los movimientos por pedido (el
   1 % del tablero 18) no los manda el acuerdo hoy: la pantalla dice qué se verá, sin inventar
-  filas. Cambiar el tope sigue siendo pedirlo con «Pedir ayuda».
+  filas. Cambiar el tope sigue siendo pedirlo a gestorIA: «Pedir otro tope» abre la Ayuda con
+  el mensaje a soporte ya escrito, que la persona completa y envía.
 - **La tarjeta para instalar y activar los avisos va en Inicio**, la entrada de la tienda.
 
 ## Alternativas descartadas

@@ -87,8 +87,8 @@ const NOTICE_WORDS: Record<string, Partial<Record<Level, string>>> = {
 
 /** Lo que se hace con el aviso: aquí, pedirlo a soporte. */
 const NOTICE_ACTIONS: Record<string, string> = {
-  elegir_plan: "Para elegir tu plan, escríbenos en «Pedir ayuda».",
-  cambiar_tope: "Para subir el tope, escríbenos en «Pedir ayuda».",
+  elegir_plan: "Para elegir tu plan, escríbenos desde la «Ayuda», arriba.",
+  cambiar_tope: "Para subir el tope, toca «Pedir otro tope».",
 }
 
 export function noticeText(notice: AccountState["notices"][number]): string {

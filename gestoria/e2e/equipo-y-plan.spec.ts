@@ -129,11 +129,18 @@ test("Plan y pagos: este mes en una frase, lo que hay por pagar y qué se verá 
   await expect(
     page.getByText("Aquí verás cada pedido que cuenta para tu cobro", { exact: true }),
   ).toBeVisible()
-  // Se pregunta con «Pedir ayuda» de arriba: la página no lleva su propio formulario.
+  // Se pregunta desde la Ayuda de arriba: la página no lleva su propio formulario. «Pedir otro
+  // tope» abre la Ayuda con el mensaje a soporte ya escrito; no se envía solo.
   await expect(page.getByLabel("Tu pregunta")).toHaveCount(0)
   await page.getByRole("button", { name: /^Pedir (otro|un) tope$/ }).click()
-  await expect(surface(page, "Pedir ayuda")).toBeVisible()
-  await page.keyboard.press("Escape")
+  const help = surface(page, "Ayuda")
+  const asking = help.getByRole("region", { name: "Escribir a soporte de gestorIA" })
+  const message = asking.getByLabel("Tu mensaje para gestorIA")
+  await expect(message).toHaveValue(/^Quiero (cambiar|poner) (mi|un) tope del mes/)
+  await shot(page, "plan-pedir-tope-escritorio")
+  await message.fill("")
+  await help.getByRole("button", { name: "Cerrar", exact: true }).click()
+  await expect(help).toHaveCount(0)
   await noSideScroll(page)
   await shot(page, "plan-escritorio")
   await page.setViewportSize(PHONE)

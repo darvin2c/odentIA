@@ -660,7 +660,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Dónde veo mi plan y lo que se me cobró?",
         a: [
           "En Configuración, en «Plan y pagos» (también se abre desde el nombre de la tienda, arriba en el menú): arriba, tu cuota, cuánto te queda de saldo y si lo pasaste, cuándo cierra tu mes y tu tope. Debajo, lo que tienes por pagar, con «Subir comprobante», y lo que se te cobró y pagaste antes.",
-          "Para cambiar tu tope o preguntar por un cobro, «Pedir ayuda», arriba en cualquier pantalla; en «Plan y pagos» ves las respuestas de toda la tienda.",
+          "Para cambiar tu tope, «Pedir otro tope» (o «Pedir un tope», si no tienes): se abre la Ayuda con tu mensaje a soporte de gestorIA ya escrito, lo completas y lo envías. Para preguntar por un cobro, escribe a soporte desde la «Ayuda», arriba en cualquier pantalla. En «Plan y pagos» ves las respuestas de toda la tienda.",
         ],
         needs: "plan",
         screen: "plan",

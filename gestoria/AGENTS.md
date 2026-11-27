@@ -244,7 +244,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Arriba, la cuota, el saldo usado y lo que pasó del saldo, tal como lo manda la administración
   (`budget`): gestorIA no suma, no calcula impuestos ni precios; el total de cada cobro es el suyo. Los movimientos por pedido llegan cuando el
   acuerdo los mande (tablero 18): hasta entonces, un `EmptyState` que dice qué se verá, sin filas
-  inventadas. Se pregunta con «Pedir ayuda» de la cabecera, no con un formulario en la página.
+  inventadas. Se pregunta desde la Ayuda de la cabecera, escribiendo a soporte, no con un
+  formulario en la página; «Pedir otro tope» abre la Ayuda con ese mensaje ya escrito
+  (`openSupportRequest` de `@odentia/ui-patterns`), que la persona completa y envía.
   El comprobante de un cargo sale en su aviso (`pago.comprobante`), mirado por su contenido.
 - Lo enviado se borra de la bandeja a la semana (`purgeOutbox`), menos el último `cuenta.abierta`.
 - Lo que pide la administración (ADR 0214) llega a `/acuerdo/pedidos` y se aplica en
