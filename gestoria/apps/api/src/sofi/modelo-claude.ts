@@ -34,7 +34,8 @@ import {
  * - Si Claude se niega (`stop_reason: "refusal"`), Sonnet y Opus reintentan en el servidor con el
  *   modelo que Anthropic elige (`fallbacks: "default"`); si igual se niega, es un error y Sofi pasa
  *   la conversación a una persona, como con cualquier otro fallo del modelo.
- * - Un error de red, un 429 o un 5xx se reintenta una vez (lo hace el SDK); lo demás no.
+ * - Un error de red, un 429 o un 5xx se reintenta una vez (lo hace el SDK), y también una
+ *   conexión que se corta a mitad de la respuesta; lo demás no.
  */
 
 export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
@@ -236,22 +237,33 @@ export function claudeModel(options: ClaudeOptions = {}): ChatModel {
   return {
     name: `${model}@${effort}`,
     async complete(request) {
-      let message: BetaMessage
-      try {
-        message = await client.beta.messages
+      const once = () =>
+        client.beta.messages
           .stream(claudeParams(model, effort, maxTokens, request), {
             ...(request.signal ? { signal: request.signal } : {}),
           })
           .finalMessage()
+      let message: BetaMessage
+      try {
+        try {
+          message = await once()
+        } catch (error) {
+          // El SDK reintenta lo que falla antes de responder; una conexión cortada a mitad de la
+          // respuesta, no. Leer no tiene efectos afuera: se intenta una vez más.
+          const cut =
+            !(error instanceof Anthropic.APIError) || error instanceof Anthropic.APIConnectionError
+          if (!cut || error instanceof Anthropic.APIUserAbortError || request.signal?.aborted)
+            throw error
+          message = await once()
+        }
       } catch (error) {
-        if (error instanceof ModelError) throw error
+        if (error instanceof Anthropic.APIUserAbortError) throw error
         if (error instanceof Anthropic.APIError && error.status !== undefined)
           // Solo el mensaje del proveedor, nunca la petición.
           throw new ModelError(
             `El proveedor respondió ${error.status}: ${String(error.message).slice(0, 200)}`,
             error.status ?? null,
           )
-        if (error instanceof Anthropic.APIUserAbortError) throw error
         throw new ModelError(
           `No se pudo hablar con Claude: ${error instanceof Error ? error.message.slice(0, 120) : "error"}`,
           null,

@@ -623,18 +623,26 @@ async function judge(
   item: { id: string; que: string },
   versions: { label: string; t: Transcript }[],
 ): Promise<{ judged: Map<string, Judged>; cost: number }> {
-  const reply = await model.complete({
-    messages: [
-      { role: "system", content: JUDGE_RULES },
-      {
-        role: "user",
-        content: [
-          `CASO: ${item.que}`,
-          ...versions.map((v) => `--- VERSIÓN ${v.label} ---\n${transcriptText(v.t)}`),
-        ].join("\n\n"),
-      },
-    ],
-  })
+  let reply: Awaited<ReturnType<ChatModel["complete"]>>
+  try {
+    reply = await model.complete({
+      messages: [
+        { role: "system", content: JUDGE_RULES },
+        {
+          role: "user",
+          content: [
+            `CASO: ${item.que}`,
+            ...versions.map((v) => `--- VERSIÓN ${v.label} ---\n${transcriptText(v.t)}`),
+          ].join("\n\n"),
+        },
+      ],
+    })
+  } catch (error) {
+    // Un caso que falla queda sin juez y se dice; no se pierde lo ya juzgado.
+    const why = error instanceof Error ? error.message.slice(0, 160) : String(error)
+    console.log(`${item.id}: el juez falló: ${why}`)
+    return { judged: new Map(), cost: 0 }
+  }
   const cost = costMicros(model.name, reply.usage) ?? 0
   const judged = new Map<string, Judged>()
   try {

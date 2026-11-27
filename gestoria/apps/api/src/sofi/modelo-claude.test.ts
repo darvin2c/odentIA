@@ -32,6 +32,8 @@ type Step =
       usage?: Record<string, number>
     }
   | { status: number }
+  /** Empieza a responder y corta la conexión a la mitad. */
+  | { cut: true }
 
 let server: Server
 let baseURL = ""
@@ -39,7 +41,7 @@ let seen: Seen[] = []
 let steps: Step[] = []
 
 /** El mensaje, como eventos SSE de la API de mensajes. */
-function sse(step: Exclude<Step, { status: number }>, requested: string): string {
+function sse(step: Exclude<Step, { status: number } | { cut: true }>, requested: string): string {
   const events: [string, unknown][] = []
   const usage: Record<string, number> = {
     input_tokens: 100,
@@ -134,6 +136,13 @@ beforeAll(async () => {
       const step = steps.shift()
       if (!step) {
         res.writeHead(500).end()
+        return
+      }
+      if ("cut" in step) {
+        const partial = sse({ content: [{ type: "text", text: "Cuesta" }] }, String(body.model))
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        res.write(partial.slice(0, partial.indexOf("event: content_block_delta")))
+        setTimeout(() => res.destroy(), 20)
         return
       }
       if ("status" in step) {
@@ -348,6 +357,17 @@ describe("el adaptador de Claude", () => {
   it("una respuesta cortada no sale", async () => {
     steps.push({ content: [{ type: "text", text: "Cuesta S/" }], stop: "max_tokens" })
     await expect(model().complete({ messages: SOFI })).rejects.toThrow("cortada")
+  })
+
+  it("una conexión cortada a mitad de la respuesta se intenta una vez más", async () => {
+    steps.push({ cut: true }, { content: [{ type: "text", text: "Cuesta S/ 129." }] })
+    expect((await model().complete({ messages: SOFI })).content).toBe("Cuesta S/ 129.")
+    expect(seen).toHaveLength(2)
+
+    seen = []
+    steps.push({ cut: true }, { cut: true }, { content: [{ type: "text", text: "no debería" }] })
+    await expect(model().complete({ messages: SOFI })).rejects.toBeInstanceOf(ModelError)
+    expect(seen).toHaveLength(2)
   })
 
   it("un 500 se reintenta una vez; un 400 no", async () => {
