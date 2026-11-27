@@ -727,6 +727,10 @@ export function EncounterEditor({
   const keepOpen = Object.entries(sessionAnswers)
     .flatMap(([id, answer]) => (answer === "otra" ? [id] : []))
     .sort()
+  // «Sí, terminar» antes de sus sesiones también: el cierre muestra los controles que dejará al firmar.
+  const completeNow = Object.entries(sessionAnswers)
+    .flatMap(([id, answer]) => (answer === "terminar" ? [id] : []))
+    .sort()
   // La salud para la franja de arriba (lo que dijo y nadie revisó, el embarazo): la misma lectura
   // y la misma caché que el aviso «Pregúntale a…».
   const stripHealth = useQuery({
@@ -734,8 +738,8 @@ export function EncounterEditor({
     queryFn: () => fetchPatientHealth(patientId),
   })
   const closingQuery = useQuery({
-    queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
-    queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
+    queryKey: ["encounter-closing", patientId, encounterId, keepOpen, completeNow],
+    queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen, completeNow),
     enabled: canWrite,
     placeholderData: keepPreviousData,
   })
@@ -1425,8 +1429,8 @@ export function EncounterEditor({
         // dictado puede llegar hoy a sus sesiones previstas.
         const shown = new Set((closingQuery.data?.data.sessions?.finishing ?? []).map((session) => session.planItemId))
         const fresh = await queryClient.fetchQuery({
-          queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
-          queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
+          queryKey: ["encounter-closing", patientId, encounterId, keepOpen, completeNow],
+          queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen, completeNow),
           staleTime: 0,
         })
         askedSessions = fresh.data.sessions

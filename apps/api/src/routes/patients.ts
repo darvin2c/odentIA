@@ -470,7 +470,7 @@ const voidEncounterInput = reasonInput
     budgets: z.array(z.object({ id: z.uuid(), status: z.string().max(20) }).strict()).max(20).optional(),
   })
   .strict()
-/** `/closing?addSession=a,b`: lo marcado «Falta otra sesión» en el cierre. */
+/** `/closing?addSession=a,b&complete=c`: lo marcado «Falta otra sesión» y «Sí, terminar» en el cierre. */
 const closingQuery = z.array(z.uuid()).max(52)
 
 const finalizeInput = z
@@ -509,6 +509,8 @@ const finalizeInput = z
       .nullish(),
     // Los controles que esta visita cumple; sin él, todos los que tocan.
     followUpIds: z.array(z.uuid()).max(50).nullish(),
+    // Los controles abiertos que el cierre sugirió quitar y quien firma quitó.
+    dropFollowUpIds: z.array(z.uuid()).max(50).optional(),
     // El anestésico de la línea de anestesia, solo para el máximo que guarda la atención firmada.
     anesthetic: z.string().max(60).nullish(),
     // La consulta que el cierre trajo marcada; null si quien firma la desmarcó.
@@ -1757,9 +1759,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // «Falta otra sesión» ya elegido en el cierre: el odontograma que se anuncia no lo cuenta como terminado.
     const parsed = closingQuery.safeParse((c.req.query("addSession") ?? "").split(",").filter(Boolean))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    // «Sí, terminar» antes de sus sesiones: el cierre anuncia los controles que dejará.
+    const complete = closingQuery.safeParse((c.req.query("complete") ?? "").split(",").filter(Boolean))
+    if (!complete.success) return validationError(c, complete.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
+        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data, complete.data),
       ),
     )
   })

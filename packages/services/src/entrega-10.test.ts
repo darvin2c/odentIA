@@ -240,6 +240,48 @@ it("B5: el cierre dice el control que va a quedar y quien firma lo cambia de fec
   })
 })
 
+it("B5 con «Sí, terminar» en la sesión 1 de 2: el cierre muestra los controles de su servicio y al firmar quedan como se dejaron", async () => {
+  const f = await clinicalFixture()
+  await withGuide(f, {
+    controls: [
+      { afterDays: 30, title: "Control de la endodoncia" },
+      { afterDays: 365, title: "Control radiográfico" },
+    ],
+  })
+  const endo = await accepted(f, 46, 2)
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  // Sin responder, sigue en curso: nada que anunciar.
+  const plain = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))
+  expect(plain.controls.finishing).toEqual([])
+  // Con «Sí, terminar», los mismos que si llegara a sus previstas.
+  const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id, [], [endo.id]))
+  expect(closing.controls.finishing.map((row) => row.title)).toEqual([
+    "Control de la endodoncia · pieza 46",
+    "Control radiográfico · pieza 46",
+  ])
+  const month = closing.controls.finishing.find((row) => row.afterDays === 30)!
+  const year = closing.controls.finishing.find((row) => row.afterDays === 365)!
+  await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, f.encounter.id, {
+      completePlanItemIds: [endo.id],
+      finishControlChanges: [{ key: month.key, remove: true }],
+    }),
+  )
+  const rows = await ownerDb
+    .select()
+    .from(clinicalFollowUp)
+    .where(and(eq(clinicalFollowUp.patientId, f.patient.id), sql`${clinicalFollowUp.finishAfterDays} is not null`))
+  const lima = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(date)
+  // Lo creado es lo mostrado: el del mes, quitado; el del año, con su título y su día.
+  expect(rows.map((row) => [row.title, row.status, lima(row.dueAt)]).sort()).toEqual(
+    [
+      ["Control de la endodoncia · pieza 46", "cancelado", month.dueDay],
+      [year.title, "pendiente", year.dueDay],
+    ].sort(),
+  )
+})
+
 it("B5: quitar en el cierre un control que va a quedar lo deja cancelado; la próxima atención lo lista entre los abiertos si se queda", async () => {
   const f = await clinicalFixture()
   await withGuide(f, {

@@ -240,6 +240,11 @@ export interface ClosingOpenControl {
   dueAt: string
   status: string
   scheduledAt: string | null
+  /**
+   * Se indicó para la próxima sesión de un tratamiento trabajado hoy («vuelva para la segunda
+   * sesión»): si termina con esta firma, el cierre sugiere quitarlo y quien firma decide.
+   */
+  forSession?: { planItemId: string; title: string; session: number }
 }
 
 /** Lo que quien firma cambió de un control que va a quedar. */
@@ -451,8 +456,18 @@ function post<T>(url: string, body?: unknown): Promise<{ data: T }> {
 }
 
 /** `addSession`: lo marcado «Falta otra sesión», para que lo anunciado (el odontograma) no lo dé por terminado. */
-export function fetchEncounterClosing(patientId: string, encounterId: string, addSession: readonly string[] = []) {
-  const query = addSession.length ? `?addSession=${addSession.map(encodeURIComponent).join(",")}` : ""
+export function fetchEncounterClosing(
+  patientId: string,
+  encounterId: string,
+  addSession: readonly string[] = [],
+  /** «Sí, terminar» ya elegido: el cierre anuncia los controles que dejará. */
+  complete: readonly string[] = [],
+) {
+  const params = [
+    ...(addSession.length ? [`addSession=${addSession.map(encodeURIComponent).join(",")}`] : []),
+    ...(complete.length ? [`complete=${complete.map(encodeURIComponent).join(",")}`] : []),
+  ]
+  const query = params.length ? `?${params.join("&")}` : ""
   return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing${query}`)
 }
 
