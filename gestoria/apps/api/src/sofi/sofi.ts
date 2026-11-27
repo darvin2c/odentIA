@@ -16,6 +16,7 @@ import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm"
 import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { conversationCustomerOrdersIn } from "../clientes.js"
+import { deliveryPriceOf } from "../entregas.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { storeClockIn } from "../hora.js"
 import { type LinkDeps, pad } from "../pedidos.js"
@@ -316,16 +317,25 @@ async function load(
     }
     const display = agent?.displayName?.trim() || `Sofi, de ${shop!.name}`
     const deliveryLines = deliveries.map((d) => {
+      // Lo que cobra la tienda sale de la regla del envío (con el flete, si lo cobra antes). Por
+      // zona, el pago al recibir y el envío gratis dependen de la zona: los dice ver_envio.
+      const price = deliveryPriceOf(d, { zone: null, listCents: null })
+      const zoned = d.cost === "por_zona"
       const cost =
-        d.cost === "gratis"
-          ? "gratis"
-          : d.cost === "fijo"
-            ? say(d.priceCents ?? 0)
-            : d.cost === "por_zona"
-              ? `por zona: ${d.zones.map((z) => `${z.name} ${say(z.priceCents)}`).join("; ")}`
-              : "se acuerda en el chat (pregunta a una persona si no lo sabes)"
-      const free = d.freeFromCents ? `; gratis desde ${say(d.freeFromCents)} de compra` : ""
-      return `- ${d.id} · ${d.name} (${DELIVERY_WORDS[d.type]}) · ${cost}${free}${d.eta ? ` · llega: ${d.eta}` : ""} · ${d.acceptsPayOnDelivery ? "acepta pago al recibir" : "no acepta pago al recibir"}${d.details ? ` · ${d.details}` : ""}`
+        d.cost === "se_acuerda"
+          ? "se acuerda en el chat (pregunta a una persona si no lo sabes)"
+          : zoned
+            ? `por zona (el distrito dice la zona: usa ver_envio): ${d.zones.map((z) => `${z.name} ${say(z.priceCents)}`).join("; ")}`
+            : price.ok && price.listCents > 0
+              ? say(price.listCents)
+              : "gratis"
+      const free = !zoned && d.freeFromCents ? `; gratis desde ${say(d.freeFromCents)} de compra` : ""
+      const door = zoned
+        ? "pago al recibir según la zona (ver_envio)"
+        : d.acceptsPayOnDelivery
+          ? "acepta pago al recibir"
+          : "no acepta pago al recibir"
+      return `- ${d.id} · ${d.name} (${DELIVERY_WORDS[d.type]}) · ${cost}${free}${d.eta ? ` · llega: ${d.eta}` : ""} · ${door}${d.agencies.length ? ` · agencias: ${d.agencies.join(", ")}` : ""}${d.freight === "al_recoger" ? " · el flete lo paga la clienta al recoger en la agencia" : ""}${d.details ? ` · ${d.details}` : ""}`
     })
     const paymentLines = payments.map(
       (p, i) =>

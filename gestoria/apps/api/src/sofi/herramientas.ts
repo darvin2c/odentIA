@@ -8,6 +8,7 @@ import {
   productVariant,
   saleOrder,
   stockRequest,
+  storeDeliveryMethod,
   storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
@@ -17,6 +18,16 @@ import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
+import { districtFromWords, districtName } from "../distritos.js"
+import {
+  deliveryPriceOf,
+  deliveryToDistrictIn,
+  FAILED_TRIP_WORDS,
+  freeFromOf,
+  leadWords,
+  payOnDeliveryOf,
+  slotWords,
+} from "../entregas.js"
 import { momentWords } from "../hora.js"
 import {
   addReceiptIn,
@@ -174,7 +185,17 @@ const lineSchema = z.object({
 const quoteSchema = z.object({
   lineas: z.array(lineSchema).min(1).max(10),
   entrega_id: z.string().describe("El id de la forma de entrega elegida"),
-  zona: z.string().optional().describe("Con envío por zona: el nombre exacto de la zona"),
+  distrito: z
+    .string()
+    .max(80)
+    .optional()
+    .describe(
+      "Con envío por zona: el distrito de entrega, como lo dijo la clienta («Lince», «SJL»)",
+    ),
+  zona: z
+    .string()
+    .optional()
+    .describe("Con envío por zona y sin distrito: el nombre exacto de la zona"),
   costo_envio: amount
     .optional()
     .describe("Con envío «se acuerda en el chat»: cuánto cuesta el envío"),
@@ -203,6 +224,9 @@ const SCHEMAS = {
     monto: amount.describe("El monto que se ve en la captura"),
     operacion: z.string().max(60).optional().describe("El número de operación de la captura"),
   }),
+  ver_envio: z.object({
+    distrito: z.string().min(1).max(80).describe("El distrito, como lo dijo la clienta"),
+  }),
   ver_pedidos: z.object({}),
   avisar_cuando_vuelva: z.object({ variante_id: z.string() }),
   pasar_a_persona: z.object({
@@ -223,6 +247,8 @@ const DESCRIPTIONS: Record<SofiToolName, string> = {
     "Crea el link de pago del pedido (primera forma de cobro). Si la tienda no tiene link, te lo dice.",
   anotar_pago:
     "Anota la captura de un pago (Yape o transferencia) con el monto y el número de operación. Queda por confirmar: una persona del equipo lo revisa. Nunca lo das por pagado.",
+  ver_envio:
+    "Lo que cuesta el envío a un distrito de Lima o del Callao y cuándo llega: su zona, el precio, el día, la franja, si se paga al recibir, desde qué compra es gratis y qué pasa si no hay nadie para recibir. Úsala cuando pregunten por el envío o antes de cotizar con reparto.",
   ver_pedidos: "Los pedidos de esta conversación, con su estado y su total.",
   avisar_cuando_vuelva:
     "Anota que el cliente quiere que le avises cuando vuelva una variante agotada.",
@@ -286,6 +312,27 @@ function centsOf(value: number | undefined, currency: string): number | null {
   return Math.round(value * 10 ** fractionDigits(currency))
 }
 
+/** Si esa forma de entrega cobra por zona: solo entonces importa el distrito. */
+async function byZone(tx: Db, storeId: string, methodId: string): Promise<boolean> {
+  if (!z.uuid().safeParse(methodId).success) return false
+  const [method] = await tx
+    .select({ cost: storeDeliveryMethod.cost })
+    .from(storeDeliveryMethod)
+    .where(and(eq(storeDeliveryMethod.storeId, storeId), eq(storeDeliveryMethod.id, methodId)))
+  return method?.cost === "por_zona"
+}
+
+/** El código del distrito que nombró la clienta; si no se entiende, que pregunte. */
+function districtCode(words: string): string {
+  const found = districtFromWords(words)
+  if (!found)
+    throw new ToolProblem(
+      `No reconozco el distrito «${words}»: pregúntale en qué distrito de Lima o del Callao recibe`,
+      "DISTRITO",
+    )
+  return found.code
+}
+
 class ToolProblem extends Error {
   constructor(
     message: string,
@@ -300,7 +347,7 @@ export function quoteKey(input: OrderInput, totalCents: number): string {
   return JSON.stringify([
     input.lines.map((l) => [l.variantId, l.quantity, l.unitCents, l.gift]),
     input.deliveryMethodId,
-    input.zone,
+    input.district ?? input.zone,
     input.deliveryListCents,
     input.deliveryCents,
     totalCents,
@@ -376,6 +423,9 @@ async function toOrderInput(
     })),
     deliveryMethodId: args.entrega_id,
     zone: args.zona ?? null,
+    district: args.distrito && (await byZone(tx, ctx.storeId, args.entrega_id))
+      ? districtCode(args.distrito)
+      : null,
     deliveryListCents: centsOf(args.costo_envio, ctx.currency),
     deliveryCents: centsOf(args.envio_cobrado, ctx.currency),
     paymentMethodId: await paymentMethodFor(tx, ctx.storeId, args.pago_id),
@@ -598,6 +648,12 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
             : "gratis"
           : money(q.deliveryCents),
       ...(q.deliveryListCents > 0 ? { envio_sin_negociar: money(q.deliveryListCents) } : {}),
+      ...(result.zone ? { zona: result.zone.name } : {}),
+      ...(result.freeFromCents !== null &&
+      q.deliveryCents > 0 &&
+      q.subtotalCents < result.freeFromCents
+        ? { para_envio_gratis: `Si suma ${money(result.freeFromCents - q.subtotalCents)} más` }
+        : {}),
       ...(q.discountCents > 0 ? { descuento: money(q.discountCents) } : {}),
       ...(absorbed > 0 ? { envio_que_pone_la_tienda: money(absorbed) } : {}),
       ...(q.giftCents > 0 ? { regalo_valorado_en: money(q.giftCents) } : {}),
@@ -837,12 +893,82 @@ async function handOff(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.pasar_
   return { ok: true, nota: "Una persona del equipo seguirá la conversación" }
 }
 
+/**
+ * El envío a un distrito (tablero 7): la zona de cada reparto encendido que llega ahí, con su
+ * precio, el día en la hora de la tienda, sus franjas, el pago al recibir y el envío gratis. Las
+ * reglas son las de `entregas.ts`; aquí solo se dicen.
+ */
+async function deliveryTo(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.ver_envio>) {
+  const code = districtCode(args.distrito)
+  return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
+    const { found, anywhere, failedTrip } = await deliveryToDistrictIn(
+      tx,
+      ctx.storeId,
+      code,
+      ctx.now,
+    )
+    const name = districtName(code)
+    if (found.length === 0 && anywhere.length === 0)
+      return {
+        ok: true,
+        distrito: name,
+        reparto:
+          "No hay reparto a ese distrito. Ofrece el recojo en tienda o la agencia, si están.",
+      }
+    const money = (cents: number) => {
+      ctx.trace.amounts.add(cents)
+      return formatMoney(cents, ctx.currency)
+    }
+    return {
+      ok: true,
+      distrito: name,
+      opciones: found.map(({ method, zone, dayText }) => {
+        const freeFrom = freeFromOf(method, zone)
+        return {
+          entrega_id: method.id,
+          forma: method.name,
+          zona: zone.name,
+          precio: money(zone.priceCents),
+          llega: dayText,
+          regla: leadWords(zone),
+          ...(zone.slots.length ? { franjas: zone.slots.map(slotWords) } : {}),
+          pago_al_recibir: payOnDeliveryOf(method, zone) ? "sí" : "no: paga antes",
+          ...(freeFrom !== null ? { gratis_desde: money(freeFrom) } : {}),
+        }
+      }),
+      ...(anywhere.length
+        ? {
+            a_cualquier_distrito: anywhere.map((method) => {
+              const price = deliveryPriceOf(method, { zone: null, listCents: null })
+              return {
+                entrega_id: method.id,
+                forma: method.name,
+                precio:
+                  method.cost === "se_acuerda"
+                    ? "se acuerda en el chat"
+                    : price.ok
+                      ? price.listCents === 0
+                        ? "gratis"
+                        : money(price.listCents)
+                      : "se acuerda en el chat",
+                ...(method.eta ? { llega: method.eta } : {}),
+                pago_al_recibir: method.acceptsPayOnDelivery ? "sí" : "no: paga antes",
+              }
+            }),
+          }
+        : {}),
+      si_no_hay_nadie: FAILED_TRIP_WORDS[failedTrip],
+    }
+  })
+}
+
 const RUN: Record<SofiToolName, (ctx: SofiToolContext, args: never) => Promise<unknown>> = {
   buscar_productos: search,
   cotizar: quote,
   armar_pedido: createOrder,
   link_de_pago: paymentLink,
   anotar_pago: receipt,
+  ver_envio: deliveryTo,
   ver_pedidos: orders,
   avisar_cuando_vuelva: notifyBack,
   pasar_a_persona: handOff,
