@@ -163,6 +163,8 @@ export async function supportStoresOf(
       name: store.name,
       currency: store.currency,
       timeZone: store.timeZone,
+      country: store.country,
+      brandColor: store.brandColor,
       until: storeSupportAccess.expiresAt,
     })
     .from(storeSupportAccess)

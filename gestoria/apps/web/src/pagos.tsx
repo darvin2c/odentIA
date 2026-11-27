@@ -17,7 +17,6 @@ import { ConfirmDialog, EmptyState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
-import { StoreTimeSection } from "./hora"
 import { api } from "./lib/api"
 import {
   COLLECTIONS,
@@ -48,9 +47,10 @@ import {
 import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
- * «Pagos y entregas» (lienzo B, tablero 6): con qué le pagan a la tienda y cómo llega el pedido.
- * Igual que «Medios de pago» de odentIA: un nombre libre y un tipo de una lista estándar. Lo que
- * se apaga, Sofi deja de ofrecerlo. Ventas lo ve sin cambiarlo.
+ * Configuración › Medios de pago y › Formas de entrega y zonas (lienzo B, tablero 6; «gestorIA como
+ * odentIA», tablero 10): con qué le pagan a la tienda y cómo llega el pedido. Igual que «Medios de
+ * pago» de odentIA: un nombre libre y un tipo de una lista estándar. Lo que se apaga, Sofi deja de
+ * ofrecerlo. Los cambia quien tiene `configuracion`; soporte los mira sin cambiarlos.
  */
 
 interface Lists {
@@ -60,7 +60,15 @@ interface Lists {
 
 const LISTS_KEY = (storeId: string) => ["pagos-y-entregas", storeId]
 
-export function PaymentsPage() {
+export function PaymentMethodsPage() {
+  return <PaymentsAndDeliveries part="pagos" />
+}
+
+export function DeliveriesPage() {
+  return <PaymentsAndDeliveries part="entregas" />
+}
+
+function PaymentsAndDeliveries({ part }: { part: "pagos" | "entregas" }) {
   const { store } = useStoreContext()
   const canEdit = store.permissions.includes("configuracion")
   const lists = useQuery({
@@ -72,66 +80,77 @@ export function PaymentsPage() {
 
   return (
     <>
-      <StoreHeader
-        title="Pagos y entregas"
-        subtitle="Con qué te pagan y cómo llega el pedido. Lo que apagues, Sofi deja de ofrecerlo."
-      />
+      {part === "pagos" ? (
+        <StoreHeader
+          title="Medios de pago"
+          subtitle="Con qué te pagan. Lo que apagues, Sofi deja de ofrecerlo."
+        />
+      ) : (
+        <StoreHeader
+          title="Formas de entrega y zonas"
+          subtitle="Cómo llega el pedido y cuánto cuesta. Lo que apagues, Sofi deja de ofrecerlo."
+        />
+      )}
       {lists.isError ? (
         <ErrorBlock error={lists.error} onRetry={() => void lists.refetch()} />
       ) : null}
-      <Section
-        title="Medios de pago"
-        action={canEdit ? "Agregar medio" : null}
-        onAdd={() => setPayment("new")}
-        loading={lists.isPending}
-      >
-        {lists.data?.payments.length === 0 ? (
-          <EmptyState
-            icon={CreditCard}
-            title="Todavía no hay medios de pago"
-            description="Agrega Yape, Plin, tu cuenta para transferencias o el efectivo al recibir. Sofi cobra primero por link, después con la captura y al final al recibir."
-          />
-        ) : (
-          <ul className="flex flex-col divide-y">
-            {lists.data?.payments.map((method) => (
-              <PaymentRow
-                key={method.id}
-                method={method}
-                canEdit={canEdit}
-                onEdit={() => setPayment(method)}
+      {part === "pagos" ? (
+        <>
+          <Section
+            title="Medios de pago"
+            action={canEdit ? "Agregar medio" : null}
+            onAdd={() => setPayment("new")}
+            loading={lists.isPending}
+          >
+            {lists.data?.payments.length === 0 ? (
+              <EmptyState
+                icon={CreditCard}
+                title="Todavía no hay medios de pago"
+                description="Agrega Yape, Plin, tu cuenta para transferencias o el efectivo al recibir. Sofi cobra primero por link, después con la captura y al final al recibir."
               />
-            ))}
-          </ul>
-        )}
-      </Section>
-      <PaymentLinkSection storeId={store.id} canEdit={canEdit} />
-      <Section
-        title="Formas de entrega"
-        action={canEdit ? "Agregar forma" : null}
-        onAdd={() => setDelivery("new")}
-        loading={lists.isPending}
-      >
-        {lists.data?.deliveries.length === 0 ? (
-          <EmptyState
-            icon={Truck}
-            title="Todavía no hay formas de entrega"
-            description="Agrega tu reparto, el recojo en tienda o el envío por agencia, cada uno con su costo y cuándo llega."
-          />
-        ) : (
-          <ul className="flex flex-col divide-y">
-            {lists.data?.deliveries.map((method) => (
-              <DeliveryRow
-                key={method.id}
-                method={method}
-                currency={store.currency}
-                canEdit={canEdit}
-                onEdit={() => setDelivery(method)}
-              />
-            ))}
-          </ul>
-        )}
-      </Section>
-      <StoreTimeSection key={store.timeZone} store={store} />
+            ) : (
+              <ul className="flex flex-col divide-y">
+                {lists.data?.payments.map((method) => (
+                  <PaymentRow
+                    key={method.id}
+                    method={method}
+                    canEdit={canEdit}
+                    onEdit={() => setPayment(method)}
+                  />
+                ))}
+              </ul>
+            )}
+          </Section>
+          <PaymentLinkSection storeId={store.id} canEdit={canEdit} />
+        </>
+      ) : (
+        <Section
+          title="Formas de entrega"
+          action={canEdit ? "Agregar forma" : null}
+          onAdd={() => setDelivery("new")}
+          loading={lists.isPending}
+        >
+          {lists.data?.deliveries.length === 0 ? (
+            <EmptyState
+              icon={Truck}
+              title="Todavía no hay formas de entrega"
+              description="Agrega tu reparto, el recojo en tienda o el envío por agencia, cada uno con su costo y cuándo llega."
+            />
+          ) : (
+            <ul className="flex flex-col divide-y">
+              {lists.data?.deliveries.map((method) => (
+                <DeliveryRow
+                  key={method.id}
+                  method={method}
+                  currency={store.currency}
+                  canEdit={canEdit}
+                  onEdit={() => setDelivery(method)}
+                />
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
       {payment ? (
         <PaymentForm
           storeId={store.id}

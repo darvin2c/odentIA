@@ -108,14 +108,14 @@ async function call(who: Who, method: string, path: string, body?: unknown) {
 const ids = { yape: "", reparto: "", t38: "", t39: "", medias: "", ajena: "" }
 
 async function newTest() {
-  const created = await call("lucia", "POST", `${base}/sofi/pruebas`)
+  const created = await call("rosa", "POST", `${base}/sofi/pruebas`)
   expect(created.status).toBe(201)
   return created.json.id as string
 }
 
 async function write(conversationId: string, text: string, ...script: Step[]) {
   steps.push(...script)
-  const sent = await call("lucia", "POST", `${base}/conversaciones/${conversationId}/cliente`, {
+  const sent = await call("rosa", "POST", `${base}/conversaciones/${conversationId}/cliente`, {
     text,
   })
   expect(sent.status).toBe(200)
@@ -598,7 +598,17 @@ describe("lo que escribe el cliente mientras Sofi responde", () => {
 })
 
 describe("lo que pone el dueño y lo que ve cada rol", () => {
-  it("Ventas prueba a Sofi pero no la configura ni ve Reportes", async () => {
+  it("Ventas no prueba a Sofi, no la configura ni ve Reportes", async () => {
+    // «Probar a Sofi» vive en Configuración: es de quien la ajusta.
+    expect((await call("lucia", "POST", `${base}/sofi/pruebas`)).status).toBe(403)
+    const test = await call("rosa", "POST", `${base}/sofi/pruebas`)
+    const written = await call(
+      "lucia",
+      "POST",
+      `${base}/conversaciones/${test.json.id as string}/cliente`,
+      { text: "Hola" },
+    )
+    expect(written.status).toBe(403)
     const save = await call("lucia", "PATCH", `${base}/sofi`, {
       enabled: true,
       followPayment: true,

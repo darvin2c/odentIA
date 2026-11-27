@@ -53,7 +53,11 @@ export function SofiPage() {
               label="En pausa"
               action={
                 store.permissions.includes("plan") ? (
-                  <Link to="/tiendas/$id/plan" params={{ id: store.id }} className="underline">
+                  <Link
+                    to="/tiendas/$id/configuracion/plan"
+                    params={{ id: store.id }}
+                    className="underline"
+                  >
                     Ver tu plan
                   </Link>
                 ) : undefined

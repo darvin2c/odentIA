@@ -77,6 +77,11 @@ const CONSTRAINT_ERRORS: Record<string, () => StoreError> = {
       "HAS_ORDERS",
       "Este producto ya está en pedidos: no se borra. Quita sus variantes para dejar de venderlo.",
     ),
+  // El nombre del link es de una sola tienda, aunque cada una vea solo los suyos.
+  store_link_pkey: () =>
+    new StoreError(409, "LINK_TAKEN", "Ese nombre ya lo usa otra tienda", {
+      link: "Ese nombre ya lo usa otra tienda. Prueba con otro.",
+    }),
 }
 
 /** El error de la base como `StoreError`, si es una regla conocida; si no, null. */
@@ -129,6 +134,8 @@ export async function myStores(appDb: Db, person: Person) {
         name: store.name,
         currency: store.currency,
         timeZone: store.timeZone,
+        country: store.country,
+        brandColor: store.brandColor,
         role: storeMember.role,
       })
       .from(storeMember)
@@ -312,6 +319,8 @@ export async function storeSummary(appDb: Db, person: Person, storeId: string) {
         name: store.name,
         currency: store.currency,
         timeZone: store.timeZone,
+        country: store.country,
+        brandColor: store.brandColor,
       })
       .from(store)
       .where(eq(store.id, storeId))

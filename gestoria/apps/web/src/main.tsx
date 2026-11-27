@@ -16,11 +16,12 @@ import {
   redirect,
   useRouter,
 } from "@tanstack/react-router"
-import { StrictMode } from "react"
+import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { HelpPage } from "./ayuda"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
+import { ConfigFrame, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import {
   ForgotPasswordPage,
@@ -31,7 +32,8 @@ import {
 } from "./entrada"
 import { ApiError, SignedOut } from "./lib/api"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
-import { PaymentsPage } from "./pagos"
+import { BrandPage } from "./marca"
+import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
 import { ProductPage } from "./producto"
@@ -114,13 +116,31 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: los pedidos, las clientas, Sofi, el catálogo (su producto), pagos y
-// entregas, Reportes, el equipo, el plan y la Ayuda.
+// La tienda y sus secciones: el menú del día (los pedidos, las clientas, el catálogo y su
+// producto, Reportes), y al pie Configuración y la Ayuda.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
   component: StoreLayout,
 })
+
+/** Un apartado de Configuración, dentro de su armazón (los grupos a la izquierda). */
+const inConfig = (Page: ComponentType) => () => (
+  <ConfigFrame>
+    <Page />
+  </ConfigFrame>
+)
+
+/** Lo que estaba en el menú del día y se mudó a Configuración: la dirección de antes lleva ahí. */
+const moved = (from: string, to: string) =>
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: from,
+    beforeLoad: ({ params }) => {
+      throw redirect({ href: `/tiendas/${(params as { id: string }).id}${to}`, replace: true })
+    },
+  })
+
 // Clientes (entrega 4): la lista y, al lado, la ficha abierta. «?q=…» es lo que se busca.
 const customersRoute = createRoute({
   getParentRoute: () => storeRoute,
@@ -153,7 +173,6 @@ const storeChildren = [
       component: CustomerPage,
     }),
   ]),
-  createRoute({ getParentRoute: () => storeRoute, path: "/sofi", component: SofiPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/reportes", component: ReportsPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
   createRoute({
@@ -161,13 +180,46 @@ const storeChildren = [
     path: "/catalogo/$productId",
     component: ProductPage,
   }),
+  // Configuración (tablero 10): cada apartado con su dirección, en el orden de su menú.
   createRoute({
     getParentRoute: () => storeRoute,
-    path: "/pagos-y-entregas",
-    component: PaymentsPage,
+    path: "/configuracion",
+    component: inConfig(StoreDataPage),
   }),
-  createRoute({ getParentRoute: () => storeRoute, path: "/equipo", component: TeamPage }),
-  createRoute({ getParentRoute: () => storeRoute, path: "/plan", component: PlanPage }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/marca",
+    component: inConfig(BrandPage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/equipo",
+    component: inConfig(TeamPage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/sofi",
+    component: inConfig(SofiPage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/medios-de-pago",
+    component: inConfig(PaymentMethodsPage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/entregas",
+    component: inConfig(DeliveriesPage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/plan",
+    component: inConfig(PlanPage),
+  }),
+  moved("/sofi", "/configuracion/sofi"),
+  moved("/pagos-y-entregas", "/configuracion/medios-de-pago"),
+  moved("/equipo", "/configuracion/equipo"),
+  moved("/plan", "/configuracion/plan"),
   createRoute({
     getParentRoute: () => storeRoute,
     path: "/ayuda",

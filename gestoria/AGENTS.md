@@ -52,10 +52,23 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El stock no lo escribe la aplicación: solo cambia con un movimiento del kardex, que la base pone
   al día (ADR 0206). Un ajuste a mano pide motivo escrito. Nunca `on conflict do nothing` al
   agregar un movimiento. Las ventas de B4 usan `recordSale` y `cancelSale` (`apps/api/src/stock.ts`).
-- Ventas ve el catálogo, el stock y la configuración (`catalogo.ver`, `tienda.ver`), sin cambiarlos
-  (`configuracion`). Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
+- Ventas ve el catálogo y el stock (`catalogo.ver`), sin cambiarlos (`configuracion`); la API le
+  da lo de la tienda que necesita para vender (`tienda.ver`), pero no ve Configuración. Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
   `costos.ver`: la API no se lo devuelve a Ventas.
 - Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
+
+## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
+
+- El menú del día lleva solo pantallas que existen (Pedidos y, en «Gestión», Catálogo y Reportes);
+  al pie, Configuración y Ayuda. Una pantalla nueva entra en su lugar del tablero 4, no antes.
+- Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`: cada apartado
+  lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
+  quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo. Sus nombres y
+  rutas son los de `HELP_SCREENS` de la Ayuda.
+- «Tu marca» (`apps/api/src/marca.ts`): el color pinta la app con `brandColorCss` de
+  `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
+  link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
+  los bloquea `linkNameProblem`.
 
 ## Los pedidos (B4)
 

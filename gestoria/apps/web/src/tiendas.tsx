@@ -17,8 +17,10 @@ import {
   Input,
   toast,
 } from "@odentia/ui"
+import { brandColorCss } from "@odentia/ui/lib/brand-color"
 import {
   AppShell,
+  type AppShellNavEntry,
   type AppShellNavItem,
   Brand,
   type CountryCode,
@@ -41,7 +43,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {
-  Bot,
   ChartColumn,
   CircleHelp,
   Copy,
@@ -53,11 +54,10 @@ import {
   Package,
   Plus,
   ReceiptText,
+  Settings,
   Store,
-  Truck,
   UserPlus,
   UserRound,
-  Users,
 } from "lucide-react"
 import {
   createContext,
@@ -82,6 +82,7 @@ import {
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
+import { CONFIG_PATH, configGroupsFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
 import { AskForHelpSheet } from "./pedir-ayuda"
@@ -102,7 +103,7 @@ async function signOut() {
  * El enlace del router con lo que le pasan el armazón y el selector (`aria-current`, `title`,
  * `onClick`). `exact`: el armazón decide cuál es el destino activo, no cada prefijo de la ruta.
  */
-function RouterLink({
+export function RouterLink({
   to,
   search,
   children,
@@ -241,7 +242,10 @@ function StoreSwitcher({ me, store }: { me: Me; store: MyStore }) {
                 label: "Plan y pagos",
                 icon: <CreditCard aria-hidden />,
                 onSelect: () =>
-                  void navigate({ to: "/tiendas/$id/plan", params: { id: store.id } }),
+                  void navigate({
+                    to: "/tiendas/$id/configuracion/plan",
+                    params: { id: store.id },
+                  }),
               },
             ]
           : []
@@ -297,7 +301,7 @@ export function Shell({
   const openAsk = useMemo(() => (canAsk ? () => setAsking(true) : null), [canAsk])
   // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
   const live = authClient.useSession().data?.user
-  const items: AppShellNavItem[] = store
+  const items: AppShellNavEntry[] = store
     ? storeSections(store)
     : [{ label: "Tus tiendas", to: "/", icon: Store }]
   // `tienda` deja en la cuenta el enlace para volver a esta tienda, como «Mi perfil» de la
@@ -336,10 +340,7 @@ export function Shell({
               },
             ]
       }
-      // La Ayuda, al pie del menú y para todos (tablero 19), como en las clínicas.
-      footerItems={
-        store ? [{ label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp }] : undefined
-      }
+      footerItems={store ? storeFooter(store) : undefined}
       brand={<Brand />}
       brandIcon={<Brand compact />}
       switcher={store ? <StoreSwitcher me={me} store={store} /> : undefined}
@@ -666,10 +667,11 @@ export function useStoreContext() {
 }
 
 /**
- * Cada destino de la tienda: sus pedidos, sus clientas, lo que vende, cómo cobra y entrega, y su
- * equipo.
+ * El menú del día (lienzo «gestorIA como odentIA», tablero 4): arriba lo diario y, en «Gestión», lo
+ * que se mira de la tienda. Solo lo que ya existe: Inicio, Bandeja, Despachos y Caja se suman
+ * cuando lleguen sus pantallas. Configuración y Ayuda van al pie (`storeFooter`).
  */
-function storeSections(store: MyStore) {
+function storeSections(store: MyStore): AppShellNavEntry[] {
   const id = store.id
   // Soporte de gestorIA solo mira: sin pedidos, clientas ni conversaciones (`ventas.atender`).
   const attends = store.permissions.includes("ventas.atender")
@@ -679,17 +681,31 @@ function storeSections(store: MyStore) {
           { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
           // Del día a día (entrega 4): cada clienta con sus compras, para todo el equipo que atiende.
           { label: "Clientes", to: `/tiendas/${id}/clientes`, icon: UserRound },
-          { label: "Sofi", to: `/tiendas/${id}/sofi`, icon: Bot },
         ]
       : []),
-    { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
-    { label: "Pagos y entregas", to: `/tiendas/${id}/pagos-y-entregas`, icon: Truck },
-    // Reportes y Argos: solo Dueño y Administrador.
-    ...(store.permissions.includes("reportes.ver")
-      ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
+    {
+      label: "Gestión",
+      children: [
+        { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
+        // Reportes y Argos: solo Dueño y Administrador.
+        ...(store.permissions.includes("reportes.ver")
+          ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
+          : []),
+      ],
+    },
+  ]
+}
+
+/**
+ * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas, hoy,
+ * ninguno: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
+ */
+function storeFooter(store: MyStore): AppShellNavItem[] {
+  return [
+    ...(configGroupsFor(store).length > 0
+      ? [{ label: "Configuración", to: `/tiendas/${store.id}${CONFIG_PATH}`, icon: Settings }]
       : []),
-    { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
-    // «Plan y pagos» (solo el Dueño) va en el selector de la tienda, como en las clínicas.
+    { label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp },
   ]
 }
 
@@ -713,8 +729,12 @@ export function StoreLayout() {
     (pathname.endsWith("/pedidos") || pathname.includes("/clientes"))
   )
     return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
+  // El color de «Tu marca» pinta la app de todo el equipo, como el de cada clínica (los tonos para
+  // que se lea salen de la misma cuenta). Sin color, el naranja de gestorIA.
+  const brandCss = brandColorCss(store.brandColor)
   return (
     <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
+      {brandCss ? <style>{brandCss}</style> : null}
       <Shell me={me.data} store={store}>
         <Outlet />
       </Shell>

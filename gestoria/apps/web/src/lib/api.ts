@@ -11,6 +11,10 @@ export interface MyStore {
   currency: string
   /** La hora de la tienda (IANA, «America/Lima»): con ella se cuenta «hoy». */
   timeZone: string
+  /** ISO 3166-1 alfa-2, si lo dijo. */
+  country: string | null
+  /** El color de «Tu marca» (`#be185d`): pinta la app de todo el equipo. Null: el de gestorIA. */
+  brandColor: string | null
   /** «support»: soporte de gestorIA con una entrada aceptada, solo a mirar. */
   role: StoreRole | "support"
   permissions: string[]
