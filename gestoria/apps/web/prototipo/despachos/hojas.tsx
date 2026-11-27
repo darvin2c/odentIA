@@ -127,7 +127,11 @@ export function Foto({ e, className }: { e: Ent; className?: string }) {
   )
 }
 
+/** Con la etapa «Pagado», el cobro «Pagado» sobra: no se repite. */
+export const mostrarCobro = (e: Ent) => !(e.etapa === "pagado" && e.cobro.tono === "ok")
+
 export function Cobro({ e, className, corto }: { e: Ent; className?: string; corto?: boolean }) {
+  if (!mostrarCobro(e)) return null
   return (
     <span
       className={cn(
@@ -238,7 +242,7 @@ export function PasarHoja({
       onSubmit={(ev) => {
         ev.preventDefault()
         pasar(rubro, e.p, fecha, franja, quien, sofi)
-        toast.success(`Pasó al ${largo(fecha)}${franja ? `, ${franja}` : ""}.`, {
+        toast.success(`Pasó al ${largo(fecha)}${franja ? `, ${franja}` : ""}`.replace(/\.?$/, "."), {
           description: sofi ? "Sofi le avisó a la clienta." : "No se le avisó a la clienta.",
         })
         onClose()

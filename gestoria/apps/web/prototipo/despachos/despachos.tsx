@@ -36,7 +36,7 @@ import {
 } from "./gestos"
 import { ScheduleSnapPager as Pager } from "@odentia/ui-patterns"
 import { PedidoCajon } from "./cajon"
-import { Cobro, FaltaHoja, Foto } from "./hojas"
+import { Cobro, FaltaHoja, Foto, mostrarCobro } from "./hojas"
 import {
   CUPO,
   corto,
@@ -666,7 +666,7 @@ function Tarjeta({
           </span>
           <span className="truncate text-muted-foreground">
             <Cobro e={e} corto className="font-normal" />
-            {x.repartidor ? ` · ${x.repartidor}` : ""}
+            {x.repartidor ? `${mostrarCobro(e) ? " · " : ""}${x.repartidor}` : ""}
           </span>
         </span>
       </button>

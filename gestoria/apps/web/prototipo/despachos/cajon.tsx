@@ -36,7 +36,7 @@ import {
   trasPagar,
 } from "../pedidos/modelo"
 import { ir, useRuta } from "../ruta"
-import { elegirSolo, Foto, listo, PasarHoja, pasar, SofiAvisa, textoAviso } from "./hojas"
+import { elegirSolo, Foto, listo, mostrarCobro, PasarHoja, pasar, SofiAvisa, textoAviso } from "./hojas"
 import {
   CUPO,
   corto,
@@ -267,6 +267,7 @@ export function PedidoCajon({
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={ETAPA[e.etapa].tono}>{ETAPA[e.etapa].label}</Badge>
               <span
+                hidden={!mostrarCobro(e)}
                 className={cn(
                   "text-sm font-medium",
                   e.cobro.tono === "ok"
@@ -460,8 +461,11 @@ function Asignar({
   const todas = entregasDe(pedidosDe(rubro)).filter((y) => y.p.id !== e.p.id)
   const franja = e.p.entrega.franja
   const salen = REPARTIDORES.filter((r) => !(faltas[e.fecha] ?? []).includes(r))
-  const [rep, setRep] = useState<string>(salen[0] ?? "Kevin")
   const lleva = (r: string) => ocupadas(todas, e.fecha, franja, r)
+  // Viene elegido el más libre.
+  const [rep, setRep] = useState<string>(
+    [...salen].sort((a, b) => lleva(a) - lleva(b))[0] ?? "Kevin",
+  )
   const id = useId()
   return (
     <div className="flex flex-col gap-2">
@@ -615,7 +619,7 @@ function PasarPie({
           className="h-11 flex-1 whitespace-nowrap"
           onClick={() => {
             pasar(rubro, e.p, fecha, franja, quien, sofi)
-            toast.success(`Pasó al ${largo(fecha)}${franja ? `, ${franja}` : ""}.`, {
+            toast.success(`Pasó al ${largo(fecha)}${franja ? `, ${franja}` : ""}`.replace(/\.?$/, "."), {
               description: sofi ? "Sofi le avisó a la clienta." : "No se le avisó a la clienta.",
             })
             onHecho()
