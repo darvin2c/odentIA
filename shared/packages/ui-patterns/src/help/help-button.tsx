@@ -327,7 +327,12 @@ function LatestInView({ at, onOpen }: { at: string; onOpen: boolean }) {
     const first = opening.current
     opening.current = false
     if (first && !onOpen) return
-    document.getElementById(LATEST_ID)?.scrollIntoView({ block: "start" })
+    const latest = document.getElementById(LATEST_ID)
+    // Solo se mueve el panel: `scrollIntoView` también movía la página de al lado cuando la
+    // ventana es la que se desplaza (gestorIA).
+    let box = latest?.parentElement ?? null
+    while (box && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement
+    if (latest && box) box.scrollTop += latest.getBoundingClientRect().top - box.getBoundingClientRect().top
   }, [at])
   return null
 }
