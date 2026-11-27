@@ -82,6 +82,7 @@ import {
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
+import { device } from "./lib/avisos"
 import { CONFIG_PATH, configGroupsFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
@@ -92,8 +93,12 @@ export function useMe() {
   return useQuery({ queryKey: ["yo"], queryFn: () => api<Me>("/api/yo") })
 }
 
-/** Cierra la sesión de la cuenta en este navegador. La entrada sigue recordando quién era. */
+/**
+ * Cierra la sesión de la cuenta en este navegador. La entrada sigue recordando quién era. Antes,
+ * este celular deja de recibir los avisos de quien sale (tablero 15); nunca frena el cierre.
+ */
 async function signOut() {
+  await device.forgetOnSignOut()
   forgetToken()
   await authClient.signOut().catch(() => undefined)
   window.location.assign("/login")
@@ -697,8 +702,8 @@ function storeSections(store: MyStore): AppShellNavEntry[] {
 }
 
 /**
- * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas, hoy,
- * ninguno: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
+ * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas ve solo sus
+ * avisos al celular: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
  */
 function storeFooter(store: MyStore): AppShellNavItem[] {
   return [

@@ -43,6 +43,7 @@ import {
   Truck,
 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { InstallCard } from "./avisos"
 import { api } from "./lib/api"
 import {
   CUSTOMER_KEY,
@@ -151,6 +152,9 @@ export function OrdersPage() {
           onClick: () => setAdding(true),
         }}
       />
+      {/* Instalar y activar los avisos al celular (tablero 15). Pedidos es hoy la entrada de la
+          tienda: cuando llegue Inicio, la tarjeta pasa allí. */}
+      <InstallCard />
       <ViewTabs
         label="Qué pedidos ver"
         value={filter}

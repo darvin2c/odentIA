@@ -29,6 +29,7 @@ export const HELP_SCREENS = {
     path: "/configuracion/entregas",
     opens: "configuracion",
   },
+  avisos: { label: "Avisos al celular", path: "/configuracion/avisos", opens: "avisos.recibir" },
   plan: { label: "Plan y pagos", path: "/configuracion/plan", opens: "plan" },
 } as const satisfies Record<string, { label: string; path: `/${string}`; opens: StorePermission }>
 export type HelpScreen = keyof typeof HELP_SCREENS
@@ -274,8 +275,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "configuracion",
         q: "¿Dónde se ajusta la tienda y por qué hay quien no ve Configuración?",
         a: [
-          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega y el plan. Se ajusta una vez y lo usan las demás pantallas.",
-          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración no ve Configuración, ni el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega, tus avisos al celular y el plan. Se ajusta una vez y lo usan las demás pantallas.",
+          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración ve ahí solo sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
         ],
         needs: "configuracion",
         screen: "datos",
@@ -325,6 +326,17 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         ],
         needs: "configuracion",
         screen: "pagos",
+      },
+      {
+        id: "avisos-al-celular",
+        q: "¿Cómo me entero de un pago o de una entrega aunque gestorIA esté cerrada?",
+        a: [
+          "Instala gestorIA en tu celular y activa los avisos: en Pedidos, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
+          "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre el pedido para resolverlo, y el siguiente del mismo tipo reemplaza al anterior.",
+          "En Avisos al celular eliges qué te llega, y vale en todos tus celulares. «Apagar en este celular» los apaga solo en ese celular; al cerrar sesión también se apagan en él.",
+        ],
+        needs: "avisos.recibir",
+        screen: "avisos",
       },
       {
         id: "invitar",

@@ -63,6 +63,18 @@ export const CONFIG_GROUPS: readonly ConfigGroup[] = [
     ],
   },
   {
+    // Lo de cada persona (tablero 15): todo el equipo elige qué le llega al celular.
+    label: "Para ti",
+    items: [
+      {
+        label: "Avisos al celular",
+        path: `${CONFIG_PATH}/avisos`,
+        needs: "avisos.recibir",
+        support: false,
+      },
+    ],
+  },
+  {
     label: "Tu cuenta gestorIA",
     items: [{ label: "Plan y pagos", path: `${CONFIG_PATH}/plan`, needs: "plan", support: false }],
   },

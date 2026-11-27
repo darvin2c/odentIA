@@ -14,6 +14,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { ChevronLeft } from "lucide-react"
 import { type ReactNode, useEffect, useState } from "react"
 import type { Me, MyStore } from "./lib/api"
+import { device } from "./lib/avisos"
 import { ACCOUNT_API, authClient, forgetToken, forgetUser, safeNext } from "./lib/cuenta"
 import { Shell, useMe } from "./tiendas"
 
@@ -117,6 +118,7 @@ function AccountFrame({ children }: { children: (me: Me) => ReactNode }) {
 
 /** Cierra la sesión de este navegador y lleva a la entrada; la entrada olvida a quien cerró su cuenta. */
 async function leaveClosedAccount() {
+  await device.forgetOnSignOut()
   forgetToken()
   forgetUser()
   await authClient.signOut().catch(() => undefined)
