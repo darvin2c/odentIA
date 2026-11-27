@@ -713,6 +713,7 @@ html:not(.mueve) .ag-heroe__pista {
   padding-block: calc(var(--cabecera) + 20px) 30px;
 }
 .dia__marco {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: clamp(32px, 5vw, 72px);
@@ -820,10 +821,14 @@ html:not(.mueve) .dia__barra {
   .mueve .dia__reloj .titulo-2 {
     display: none;
   }
+  .dia__escena {
+    position: static;
+  }
   .dia__sofi {
-    top: -86px;
-    width: 90px;
-    height: 90px;
+    top: 0;
+    right: 0;
+    width: 84px;
+    height: 84px;
   }
   .evento {
     padding: 10px 12px;

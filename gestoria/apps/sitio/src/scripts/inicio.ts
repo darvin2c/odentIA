@@ -7,7 +7,7 @@
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 import { CHAT_VIVO } from "../lib/venta"
-import { reduceMovimiento, scrollSuave } from "./sitio"
+import { desde, reduceMovimiento, scrollSuave } from "./sitio"
 import type { Humor, Sofi } from "./sofi"
 
 gsap.registerPlugin(ScrollTrigger)
@@ -194,7 +194,7 @@ function trabajo(sofi: Sofi) {
         cual === "pensando" ? "Pensando" : cual === "esperando" ? "Esperando" : "Listo"
   }
   for (const i of pasos.keys()) marcar(i, "esperando")
-  const tl = gsap.timeline({ scrollTrigger: { trigger: caja, start: "top 70%" } })
+  const tl = gsap.timeline({ scrollTrigger: { trigger: caja, start: desde("top 70%", "top 80%") } })
   tl.from([...caja.children], { y: 50, opacity: 0, duration: 1.1, stagger: 0.12, ease: "expo.out" })
   for (const [i, p] of pasos.entries()) {
     tl.call(() => {
@@ -217,7 +217,7 @@ function trabajo(sofi: Sofi) {
       v: fin,
       duration: 1.6,
       ease: "power3.out",
-      scrollTrigger: { trigger: caja, start: "top 70%" },
+      scrollTrigger: { trigger: caja, start: desde("top 70%") },
       onUpdate: () => {
         b.textContent = String(Math.round(n.v))
       },
@@ -231,22 +231,36 @@ function decides() {
   if (!g) return
   const cajas = $$(".decides__caja", g)
   const apilado = matchMedia("(max-width: 860px)").matches
-  const desde = (x: number) => ({
+  const desdeX = (x: number) => ({
     x: apilado ? 0 : x,
     y: apilado ? 40 : 0,
     opacity: 0,
     duration: 1.1,
     ease: "expo.out",
   })
+  if (apilado) {
+    for (const caja of cajas) {
+      gsap
+        .timeline({ scrollTrigger: { trigger: caja, start: "top 94%" } })
+        .from(caja, { y: 40, opacity: 0, duration: 0.9, ease: "expo.out" })
+        .from($$(".lista-ok li", caja), { x: -12, opacity: 0, duration: 0.45, stagger: 0.05 }, 0.15)
+    }
+    gsap.from("[data-puente]", {
+      scaleY: 0,
+      duration: 0.6,
+      scrollTrigger: { trigger: "[data-puente]", start: "top 94%" },
+    })
+    return
+  }
   gsap
     .timeline({ scrollTrigger: { trigger: g, start: "top 72%" } })
-    .from(cajas[0] ?? [], desde(-60))
+    .from(cajas[0] ?? [], desdeX(-60))
     .from(
       "[data-puente]",
       { [apilado ? "scaleY" : "scaleX"]: 0, duration: 0.8, ease: "power2.inOut" },
       "-=0.5",
     )
-    .from(cajas[1] ?? [], desde(60), "-=0.3")
+    .from(cajas[1] ?? [], desdeX(60), "-=0.3")
     .from(
       $$(".lista-ok li", g),
       { x: -12, opacity: 0, duration: 0.5, stagger: 0.05, ease: "expo.out" },
@@ -309,7 +323,7 @@ export function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   }
   ScrollTrigger.create({
     trigger: mapaEl,
-    start: "top 70%",
+    start: desde("top 70%"),
     end: "bottom 45%",
     onUpdate: (st) => encender(Math.min(total, Math.floor(st.progress * (total + 0.999)))),
     onLeave: () => sofi?.mirar(null),
@@ -493,7 +507,7 @@ export function venta(sofi: Sofi | null) {
     opacity: 0,
     duration: 1.4,
     ease: "expo.out",
-    scrollTrigger: { trigger: seccion, start: "top 70%" },
+    scrollTrigger: { trigger: seccion, start: desde("top 70%") },
   })
 }
 
@@ -508,7 +522,9 @@ function cobro(sofi: Sofi | null) {
   const sofiEl = $(".cobro__sofi", escena)
   if (sofi && sofiEl) sofi.humor(sofiEl, "atenta")
   const apilado = matchMedia("(max-width: 900px)").matches
-  const tl = gsap.timeline({ scrollTrigger: { trigger: escena, start: "top 68%" } })
+  const tl = gsap.timeline({
+    scrollTrigger: { trigger: escena, start: desde("top 68%", "top 80%") },
+  })
   tl.from(a, { x: -60, rotateY: 14, opacity: 0, duration: 1.2, ease: "expo.out" })
     .from(
       linea,
@@ -538,7 +554,7 @@ function argos() {
     duration: 1,
     stagger: 0.18,
     ease: "expo.out",
-    scrollTrigger: { trigger: ".argos__lista", start: "top 85%" },
+    scrollTrigger: { trigger: ".argos__lista", start: desde("top 85%") },
   })
   gsap.fromTo(
     "[data-vitrina]",
@@ -562,7 +578,7 @@ function rubros() {
     duration: 1.1,
     stagger: 0.1,
     ease: "expo.out",
-    scrollTrigger: { trigger: "[data-rubros-tarjetas]", start: "top 82%" },
+    scrollTrigger: { trigger: "[data-rubros-tarjetas]", start: desde("top 82%") },
   })
   const cintas = $$("[data-cinta]")
   const tweens = cintas.map((c) => {
@@ -606,7 +622,7 @@ function precio() {
   const cifra = $("[data-cuenta]")
   if (!plan || !cifra) return
   const n = { v: 0 }
-  const tl = gsap.timeline({ scrollTrigger: { trigger: plan, start: "top 75%" } })
+  const tl = gsap.timeline({ scrollTrigger: { trigger: plan, start: desde("top 75%") } })
   tl.from(plan, { y: 60, scale: 0.96, opacity: 0, duration: 1.3, ease: "expo.out" })
     .to(
       n,
@@ -632,7 +648,7 @@ export function cierre() {
     opacity: 0,
     duration: 1.4,
     ease: "elastic.out(1, 0.6)",
-    scrollTrigger: { trigger: ".cierre", start: "top 70%" },
+    scrollTrigger: { trigger: ".cierre", start: desde("top 70%") },
   })
 }
 

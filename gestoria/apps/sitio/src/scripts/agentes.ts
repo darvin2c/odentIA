@@ -4,7 +4,7 @@
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 import { cargarSofi, chatVivo, cierre, mapa, prepararScroll, trazarMapa, venta } from "./inicio"
-import { reduceMovimiento } from "./sitio"
+import { desde, reduceMovimiento } from "./sitio"
 import type { Sofi } from "./sofi"
 
 gsap.registerPlugin(ScrollTrigger)
@@ -94,7 +94,7 @@ function oficio() {
         duration: 1,
         stagger: 0.1,
         ease: "expo.out",
-        scrollTrigger: { trigger: pista, start: "top 80%" },
+        scrollTrigger: { trigger: pista, start: desde("top 80%") },
       })
     },
   })
@@ -107,7 +107,7 @@ function regla(sofi: Sofi) {
   if (!g || !punto) return
   const sofiEl = $(".regla-g__sofi", g)
   gsap
-    .timeline({ scrollTrigger: { trigger: g, start: "top 70%" } })
+    .timeline({ scrollTrigger: { trigger: g, start: desde("top 70%", "top 75%") } })
     .fromTo(punto, { left: "100%" }, { left: "34.5%", duration: 1.2, ease: "power2.in" })
     .call(() => {
       if (sofiEl) sofi.humor(sofiEl, "decidida")
@@ -142,7 +142,7 @@ export function iniciarSofi() {
     duration: 1.2,
     stagger: 0.12,
     ease: "back.out(1.6)",
-    scrollTrigger: { trigger: ".humores__lista", start: "top 80%" },
+    scrollTrigger: { trigger: ".humores__lista", start: desde("top 80%") },
   })
   cierre()
 }
@@ -224,7 +224,7 @@ function dia(sofi: Sofi) {
 
 /** Lo que hace Argos: cada tarjeta con su animación al verse. */
 function poderes() {
-  const en = (sel: string) => ({ trigger: sel, start: "top 78%" })
+  const en = (sel: string) => ({ trigger: sel, start: desde("top 78%") })
   gsap.from(".poder", {
     y: 60,
     opacity: 0,
@@ -295,7 +295,7 @@ function equipo() {
   if (!e) return
   const apilado = window.innerWidth < 860
   gsap
-    .timeline({ scrollTrigger: { trigger: e, start: "top 75%" } })
+    .timeline({ scrollTrigger: { trigger: e, start: desde("top 75%") } })
     .from($$(".equipo__agente", e), {
       y: 40,
       opacity: 0,

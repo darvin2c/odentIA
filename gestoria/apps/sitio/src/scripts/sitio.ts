@@ -10,6 +10,14 @@ export function scrollSuave(): Lenis | null {
   return lenis
 }
 
+/**
+ * Dónde empieza la entrada de un bloque: en computadora, la que pide la escena; en el celular, apenas
+ * asoma, para que nunca se vea un bloque vacío esperando su animación. Las escenas que cuentan algo
+ * paso a paso piden un poco más (`celular`), para que se vean enteras mientras ocurren.
+ */
+export const desde = (computadora: string, celular = "top 94%"): string =>
+  window.matchMedia("(max-width: 860px)").matches ? celular : computadora
+
 export const reduceMovimiento = (): boolean =>
   matchMedia("(prefers-reduced-motion: reduce)").matches
 
