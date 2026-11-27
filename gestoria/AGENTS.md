@@ -40,6 +40,15 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Una invitación se acepta solo entrando con la cuenta del correo invitado; el enlace no basta.
   No cambia lo que dice: se anula y se hace otra. Cada cambio del equipo queda en `store_event`
   con quién lo hizo.
+- Equipo y repartidores (`apps/web/src/equipo.tsx`; ADR 0235): la invitación lleva nombre y celular
+  (E.164) y sale por el WhatsApp del celular de quien invita. Lo envía la persona: se anota solo que
+  se abrió (`shared_at`) y se dice «enviada por ti», nunca que llegó.
+- El repartidor de fuera lleva su celular y lo que la tienda le paga por entrega
+  (`apps/api/src/equipo-repartidores.ts`, `equipo.gestionar`): es un dato de la tienda, gestorIA no
+  le paga ni lo suma a ninguna cifra, y Ventas y soporte no lo ven. «Sacar» deja «sin repartidor»
+  lo que no salió (`unassignCourierIn`), con su línea en cada pedido. El link de un solo uso y la
+  cuenta del repartidor son de gestorIA Reparto (tablero 23): no se ofrece un link que no lleva a
+  nada.
 
 ## La configuración de la tienda (B3)
 
@@ -232,6 +241,10 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
   conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.
 - «Plan y pagos» es del Dueño (`plan`). Los textos los escribe gestorIA; la administración manda datos.
+  Arriba, la cuota, el saldo usado y lo que pasó del saldo, tal como lo manda la administración
+  (`budget`): gestorIA no suma, no calcula impuestos ni precios; el total de cada cobro es el suyo. Los movimientos por pedido llegan cuando el
+  acuerdo los mande (tablero 18): hasta entonces, un `EmptyState` que dice qué se verá, sin filas
+  inventadas. Se pregunta con «Pedir ayuda» de la cabecera, no con un formulario en la página.
   El comprobante de un cargo sale en su aviso (`pago.comprobante`), mirado por su contenido.
 - Lo enviado se borra de la bandeja a la semana (`purgeOutbox`), menos el último `cuenta.abierta`.
 - Lo que pide la administración (ADR 0214) llega a `/acuerdo/pedidos` y se aplica en
@@ -271,7 +284,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - No es otra bandeja: avisa lo nuevo de los pedidos (`order_event`, cursor por persona y tienda) y
   de los chats que esperan, y abre la pantalla que lo resuelve. Se anota antes de enviar y nunca
   se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan.
-- La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda.
+- La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda:
+  Inicio (`inicio.tsx`). En Avisos al celular, cada persona elige los suyos; soporte no.
 
 ## La web pública (B8)
 
