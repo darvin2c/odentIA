@@ -1,20 +1,18 @@
+import { Badge, Button, FieldGroup, toast } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  Input,
-  toast,
-} from "@odentia/ui"
-import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
+  ConfirmDialog,
+  ErrorState,
+  FormDrawer,
+  LoadingState,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
+import { z } from "zod"
 import { api } from "./lib/api"
 import { when } from "./lib/pedidos"
-import { FormAlert, FormSheet, fieldErrors, useDirty } from "./piezas"
 
 /**
  * «Link de pago» en Pagos y entregas (tablero 14): la tienda conecta su propia cuenta de
@@ -72,9 +70,9 @@ export function PaymentLinkSection({ storeId, canEdit }: { storeId: string; canE
       </div>
       <div className="px-5 py-4 text-sm">
         {status.isPending ? (
-          <p className="text-muted-foreground">Cargando…</p>
+          <LoadingState message="Mirando si está conectado…" />
         ) : status.isError ? (
-          <FormAlert error={status.error} />
+          <ErrorState error={status.error} onRetry={() => void status.refetch()} />
         ) : !status.data.available ? (
           <p className="text-muted-foreground">
             El link de pago todavía no está disponible en gestorIA. Mientras tanto, cobra con
@@ -120,7 +118,7 @@ export function PaymentLinkSection({ storeId, canEdit }: { storeId: string; canE
         confirmLabel="Desconectar"
         cancelLabel="Volver"
         pending={remove.isPending}
-        error={remove.isError ? remove.error.message : null}
+        error={remove.isError ? submitErrorMessage(remove.error) : null}
         onConfirm={() => remove.mutate()}
         onClose={() => setRemoving(false)}
       />
@@ -130,91 +128,69 @@ export function PaymentLinkSection({ storeId, canEdit }: { storeId: string; canE
 
 function ConnectSheet({ storeId, onClose }: { storeId: string; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [accessToken, setAccessToken] = useState("")
-  const [webhookSecret, setWebhookSecret] = useState("")
-  const dirty = useDirty({ accessToken, webhookSecret })
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (value: { accessToken: string; webhookSecret: string }) =>
       api<LinkStatus>(`/api/tiendas/${storeId}/link-de-pago`, {
         method: "PATCH",
-        body: { provider: "mercadopago", accessToken, webhookSecret },
+        body: { provider: "mercadopago", ...value },
       }),
-    onSuccess: async (data) => {
+  })
+  const form = useAppForm({
+    defaultValues: { accessToken: "", webhookSecret: "" },
+    validators: {
+      // Lo demás del token (largo, sin espacios) lo dice el servidor, que además lo prueba con
+      // Mercado Pago: aquí solo que no se envíe vacío.
+      onSubmit: z.object({
+        accessToken: z.string().trim().min(1, "Pega el «Access token» completo"),
+        webhookSecret: z.string(),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const data = await save.mutateAsync(value)
       queryClient.setQueryData(KEY(storeId), data)
       toast.success("Mercado Pago conectado")
       onClose()
     },
   })
-  const errors = fieldErrors(save.error)
-  const tokenId = useId()
-  const secretId = useId()
+  const surface = useFormSurface(form)
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title="Conectar Mercado Pago"
       description="Con la cuenta de la tienda: el dinero de cada link llega directo a ella."
       onClose={onClose}
-      onSubmit={() => save.mutate()}
-      dirty={dirty}
-      footer={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={save.isPending}>
-            Conectar
-          </SubmitButton>
-        </>
-      }
+      submitLabel="Conectar"
     >
       <FieldGroup>
         <p className="text-sm text-muted-foreground">
           En Mercado Pago, entra a «Tus integraciones», abre tu aplicación y copia sus credenciales
           de producción.
         </p>
-        <Field data-invalid={errors.accessToken ? true : undefined}>
-          <FieldLabel htmlFor={tokenId}>Access token</FieldLabel>
-          <Input
-            id={tokenId}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={accessToken}
-            onChange={(e) => setAccessToken(e.target.value)}
-            aria-invalid={errors.accessToken ? true : undefined}
-            autoFocus
-          />
-          {errors.accessToken ? (
-            <FieldError>{errors.accessToken}</FieldError>
-          ) : (
-            <FieldDescription>
-              Empieza con «APP_USR-». Lo comprobamos con Mercado Pago antes de guardarlo, y se
-              guarda cifrado: nadie lo vuelve a ver.
-            </FieldDescription>
+        <form.AppField name="accessToken">
+          {(field) => (
+            <field.TextField
+              label="Access token"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+              description="Empieza con «APP_USR-». Lo comprobamos con Mercado Pago antes de guardarlo, y se guarda cifrado: nadie lo vuelve a ver."
+            />
           )}
-        </Field>
-        <Field data-invalid={errors.webhookSecret ? true : undefined}>
-          <FieldLabel htmlFor={secretId}>Clave secreta de las notificaciones (opcional)</FieldLabel>
-          <Input
-            id={secretId}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={webhookSecret}
-            onChange={(e) => setWebhookSecret(e.target.value)}
-            aria-invalid={errors.webhookSecret ? true : undefined}
-          />
-          {errors.webhookSecret ? (
-            <FieldError>{errors.webhookSecret}</FieldError>
-          ) : (
-            <FieldDescription>
-              En «Webhooks» de tu aplicación. Con ella, además, cada aviso de pago se comprueba con
-              su firma. Sin ella también funciona: el pago siempre se consulta a Mercado Pago.
-            </FieldDescription>
+        </form.AppField>
+        <form.AppField name="webhookSecret">
+          {(field) => (
+            <field.TextField
+              label="Clave secreta de las notificaciones (opcional)"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              description="En «Webhooks» de tu aplicación. Con ella, además, cada aviso de pago se comprueba con su firma. Sin ella también funciona: el pago siempre se consulta a Mercado Pago."
+            />
           )}
-        </Field>
-        <FormAlert error={save.error} />
+        </form.AppField>
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
 }

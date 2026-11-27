@@ -59,6 +59,11 @@ export async function seedDemoNewStore(tx: Db): Promise<void> {
 /**
  * Una tienda que ya vende no es nueva: como las de antes de los primeros pasos (su migración), no
  * ve la lista. Calzados Rosa no probó a Sofi en la demo, pero ya tiene sus pedidos.
+ *
+ * «Lo que falta» de Configuración (tablero 3 de «gestorIA · Configuración, de nuevo») sí lo dice,
+ * porque mira lo guardado y no la lista de Inicio: a Calzados Rosa le falta conectar la pasarela y
+ * probar a Sofi, y soporte le pide mirar la tienda; Tortas Carmen ve lo de una tienda que empieza
+ * (su catálogo, su marca, la pasarela, sus entregas y Sofi).
  */
 export async function seedDemoSetupDone(tx: Db, storeId: string): Promise<void> {
   await tx.insert(storeSetup).values({ storeId, finishedAt: new Date() }).onConflictDoNothing()

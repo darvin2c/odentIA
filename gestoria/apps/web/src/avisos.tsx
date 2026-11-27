@@ -12,12 +12,14 @@ import {
 import { Switch } from "@odentia/ui/components/switch"
 import {
   canOfferInstall,
+  ErrorState,
   isAppleMobile,
   isInstalled,
   notificationPermission,
   offerInstall,
   PushBlockedError,
   pushSupport,
+  submitErrorMessage,
   subscribeInstall,
   subscribePermission,
 } from "@odentia/ui-patterns"
@@ -26,8 +28,7 @@ import { BellRing, Share } from "lucide-react"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { ApiError, api } from "./lib/api"
 import { device, dismissInstallCard, installCardDismissed, type PushChoices } from "./lib/avisos"
-import { FormAlert } from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * Los avisos al celular (lienzo «gestorIA como odentIA», tablero 15): gestorIA se instala desde el
@@ -318,7 +319,10 @@ export function DeviceNoticesPage() {
       </section>
 
       {choices.isError ? (
-        <ErrorBlock error={choices.error} onRetry={() => void choices.refetch()} />
+        <ErrorState
+          error={choices.error instanceof Error ? choices.error : "No se pudo cargar"}
+          onRetry={() => void choices.refetch()}
+        />
       ) : (
         <section className="elevated max-w-xl rounded-xl border bg-card p-5">
           <FieldSet>
@@ -347,7 +351,11 @@ export function DeviceNoticesPage() {
                 ))}
               </FieldGroup>
             )}
-            <FormAlert error={save.error} />
+            {save.isError ? (
+              <p role="alert" className="text-sm text-danger">
+                {submitErrorMessage(save.error)}
+              </p>
+            ) : null}
             {!store.permissions.includes("reportes.ver") ? (
               <p className="text-sm text-muted-foreground">
                 El Dueño y el Administrador reciben además «Lo de dinero».

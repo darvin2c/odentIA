@@ -96,8 +96,24 @@ export interface CatalogItem {
   listPriceCents: number
   minPriceCents: number | null
   options: ProductOption[]
+  /** Cuál de las opciones es el color (sus filas en la cuadrícula); null si no tiene. */
+  colorOption: number | null
+  rubro: "calzado" | "ropa" | "cosmetica" | "tecnologia" | "hogar" | null
+  colors: { value: string; hex: string | null; hex2: string | null }[]
+  state: "disponible" | "agotado" | "encargo" | "cupo" | "preventa" | "liquidacion" | "no_se_vende"
+  /** Qué tan lista está para Sofi (`readinessOf` del servidor, la misma de la ficha). */
+  readiness: {
+    level: "basica" | "falta_poco" | "lista"
+    sellsAlone: boolean
+    complete: boolean
+    done: number
+    total: number
+    neededMissing: number
+  }
   variantCount: number
   stock: number
+  /** Cuántas variantes están en 0. */
+  soldOut: number
   fromCents: number
   toCents: number
   photoId: string | null

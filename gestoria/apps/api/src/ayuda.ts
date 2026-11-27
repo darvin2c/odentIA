@@ -79,8 +79,24 @@ export const HELP_SCREENS = {
     path: "/catalogo",
     opens: "catalogo.ver",
     purpose:
-      "Los productos de la tienda con sus variantes, fotos, precios, precio mínimo, promociones y stock.",
-    terms: ["catálogo", "productos", "stock", "inventario", "kardex", "tallas", "fotos", "precio"],
+      "Los productos de la tienda y la ficha de cada uno, que se guarda sola: fotos, colores y tallas con su stock en una cuadrícula, precio, mínimo, margen, promociones, estado, datos del rubro y lo que Sofi no supo.",
+    terms: [
+      "catálogo",
+      "productos",
+      "ficha",
+      "stock",
+      "inventario",
+      "kardex",
+      "tallas",
+      "colores",
+      "fotos",
+      "precio",
+      "margen",
+      "promoción",
+      "por encargo",
+      "preventa",
+      "código de barras",
+    ],
   },
   caja: {
     label: "Caja",
@@ -98,12 +114,21 @@ export const HELP_SCREENS = {
       "Lo vendido y cobrado, lo que falta cobrar, lo más vendido, lo que se acaba y lo que hicieron Sofi y Argos.",
     terms: ["reportes", "cuánto vendí", "ventas del mes", "cifras", "estadísticas", "Argos"],
   },
-  // Configuración, al pie del menú: cada apartado lo abre quien puede cambiarlo.
-  datos: {
-    label: "Datos de la tienda",
+  // Configuración, al pie del menú: abre en «Lo que falta» y cada apartado lo abre quien puede
+  // cambiarlo.
+  configuracion: {
+    label: "Lo que falta",
     path: "/configuracion",
     opens: "configuracion",
-    purpose: "El nombre de la tienda, su país y su hora: la entrada de Configuración.",
+    purpose:
+      "La entrada de Configuración: lo que le falta a la tienda para vender, con su botón para hacerlo, y cómo está cada parte.",
+    terms: ["lo que falta", "configuración", "ajustes", "empezar a vender", "pendiente"],
+  },
+  datos: {
+    label: "Datos de la tienda",
+    path: "/configuracion/datos",
+    opens: "configuracion",
+    purpose: "El nombre de la tienda, su país y su hora.",
     terms: [
       "configuración",
       "datos de la tienda",
@@ -122,7 +147,7 @@ export const HELP_SCREENS = {
     terms: ["marca", "logo", "color", "portada", "link de la tienda"],
   },
   equipo: {
-    label: "Equipo",
+    label: "Equipo y repartidores",
     path: "/configuracion/equipo",
     opens: "equipo.gestionar",
     purpose:
@@ -138,7 +163,7 @@ export const HELP_SCREENS = {
     terms: ["Sofi", "vendedora", "asistente", "bot", "probar", "seguimientos", "horario"],
   },
   pagos: {
-    label: "Medios de pago",
+    label: "Cobros",
     path: "/configuracion/medios-de-pago",
     opens: "configuracion",
     purpose:
@@ -146,7 +171,7 @@ export const HELP_SCREENS = {
     terms: ["medios de pago", "Yape", "Plin", "transferencia", "cuenta bancaria", "Mercado Pago"],
   },
   entregas: {
-    label: "Formas de entrega y zonas",
+    label: "Entregas",
     path: "/configuracion/entregas",
     opens: "configuracion",
     purpose:
@@ -298,7 +323,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo le mando un link de pago?",
         a: [
           "En el pedido por pagar, «Crear link de pago» y después «Copiar el link», para pegarlo en la conversación. Cuando paga, el pedido pasa a pagado solo.",
-          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Medios de pago, o venció el precio acordado.",
+          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Cobros, o venció el precio acordado.",
         ],
         needs: "ventas.atender",
         screen: "pedidos",
@@ -449,7 +474,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "pagado-sin-stock",
         q: "Está pagado, pero dice que no alcanzaba el stock",
         a: [
-          "El pago se confirma igual, pero el pedido no sale hasta que entre lo que falta. Anota la entrada en el Catálogo: en el producto, «Kardex» de esa variante y «Entrada», con lo que llegó.",
+          "El pago se confirma igual, pero el pedido no sale hasta que entre lo que falta. Anota la entrada en el Catálogo: en el producto, «Ver el kardex», elige esa variante y «Entrada», con lo que llegó.",
         ],
         needs: "configuracion",
         screen: "catalogo",
@@ -464,8 +489,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "agregar-producto",
         q: "¿Cómo subo un producto con tallas y stock?",
         a: [
-          "En Catálogo, «Agregar producto»: el nombre, el precio de lista y hasta tres opciones, como talla y color. Cada combinación es una variante con su código y su stock.",
-          "Después, en el producto, le sumas hasta 8 fotos y la primera entrada de stock de cada variante, en su «Kardex».",
+          "En Catálogo, «Agregar producto»: el nombre, el precio de lista y hasta tres opciones, como talla y color. Al guardarlo se abre su ficha.",
+          "En la ficha, en «Variantes», cada color es un chip y las tallas se escriben como se dicen («35 a 42»). Debajo, la cuadrícula: una celda por color y talla con su «Stock». Subir el stock ahí es una entrada del kardex.",
         ],
         needs: "configuracion",
         screen: "catalogo",
@@ -480,11 +505,42 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         screen: "catalogo",
       },
       {
+        id: "ficha-se-guarda-sola",
+        q: "¿Cómo guardo los cambios de un producto?",
+        a: [
+          "La ficha se guarda sola: arriba dice «Guardando…» y luego «Guardado». Si algo no se pudo guardar, lo dice ahí y en su campo; lo demás sí se guarda. Sin internet, lo escrito se queda y se guarda al volver.",
+          "Con «Deshacer» y «Rehacer» (o Ctrl+Z y Ctrl+Mayús+Z) vuelves atrás un cambio. En el menú ⋯, «Volver a lo guardado» deja la ficha como estaba y «Quién cambió qué» muestra cada cambio con quién y cuándo.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "cuadricula",
+        q: "¿Cómo lleno el stock de muchas tallas y colores de una vez?",
+        a: [
+          "En la cuadrícula de «Variantes»: con las flechas te mueves y con Mayúscula y las flechas eliges varias celdas. Escribe un número y Enter: se llena todo lo elegido. Abajo, «Poner» hace lo mismo con un valor para todas.",
+          "También pegas desde Excel o Google Sheets: copia las celdas allá y pégalas con Ctrl+V sobre la primera celda. Las pestañas «Precio» y «Código de barras» se llenan igual; una celda de precio vacía usa el precio del producto.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
         id: "cambiar-stock",
         q: "¿Cómo cambio el stock?",
         a: [
-          "El stock solo cambia con un movimiento. En el producto, «Kardex» de la variante: «Entrada» cuando llega mercadería (con su costo, si quieres) o «Ajuste» cuando contaste y no cuadra, con su motivo escrito.",
+          "El stock solo cambia con un movimiento. Subirlo en la cuadrícula es una entrada; bajarlo pide el motivo (contaste, se dañó…) y queda en el kardex con tu nombre.",
+          "En «Ver el kardex» eliges la variante y ves cada movimiento. Ahí también anotas una «Entrada» con su costo, o un «Ajuste» cuando contaste y no cuadra.",
           "Las ventas lo bajan solas cuando se confirma el pago, o cuando el pedido sale si se paga al recibir, y vuelve si se anula.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "color-y-foto",
+        q: "¿Cómo pongo el color de cada variante y la foto que manda Sofi?",
+        a: [
+          "En «Variantes», toca el chip del color: su nombre, el color sacado de sus fotos o escrito como código, con «Cuentagotas» sobre la foto, y si «Es de dos colores». Abajo eliges su foto: es la que manda Sofi cuando piden ese color.",
+          "También desde «Fotos»: en el menú de cada foto, de qué color es.",
         ],
         needs: "configuracion",
         screen: "catalogo",
@@ -493,9 +549,60 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "precio-minimo",
         q: "¿Cómo dejo que Sofi negocie el precio?",
         a: [
-          "En el producto, «Precio y negociación»: pon el precio mínimo de venta. Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
-          "Sofi primero cuenta lo bueno del producto y ofrece algo solo cuando ve que puede perder la venta: una sola vez, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
-          "Ahí también van los precios por cantidad y las promociones con sus fechas.",
+          "En la ficha, «Precio y ofertas de Sofi»: pon el «Mínimo». Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
+          "En «Lo que Sofi puede ofrecer» eliges qué puede dar de este producto: envío gratis, unos soles, precio en la 2.ª unidad o un regalo. Sofi ofrece una sola vez, del mismo margen y a cambio de pagar a una hora exacta.",
+          "En «Precio por cantidad y promociones» van el precio por cantidad, el de revendedora («Por mayor») y las promociones con fecha, de todo el producto, de un color o de una talla. No se suman: a cada variante le toca la mejor.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "margen",
+        q: "¿Cuánto gano con cada producto y cuánto cobraría Sofi?",
+        a: [
+          "En «Precio y ofertas de Sofi», con el costo de la última entrada, la barra dice cuánto ganas seguro hasta el mínimo y cuánto puede ceder Sofi. Cambia al momento con el precio o el mínimo.",
+          "En «Probar cuánto cobraría Sofi» eliges cuántos, la entrega y la variante: dice lo menos que cobraría, con la misma cuenta de los pedidos.",
+        ],
+        needs: "costos.ver",
+        screen: "catalogo",
+      },
+      {
+        id: "estado-producto",
+        q: "¿Cómo pongo un producto por encargo, en preventa o que ya no se vende?",
+        a: [
+          "En la ficha, en «Estado»: disponible y agotado salen solos del stock. Por encargo (con los días), con cupo por día, preventa (con el día que llega), liquidación o ya no se vende los pones tú. Debajo dice cómo lo cuenta Sofi.",
+          "Por encargo, con cupo o en preventa se vende sin stock. En liquidación el precio es el final y no se negocia. Lo que ya no se vende no entra a un pedido nuevo.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "datos-rubro",
+        q: "¿Qué datos pide cada producto para que Sofi responda?",
+        a: [
+          "En la ficha, elige su rubro (calzado, ropa…) y responde lo que preguntan sus clientas, como cómo calza o la tela. Lo que dice «Sofi lo necesita» le falta para venderlo sola; si no corresponde, «No aplica». Nada de esto frena una venta.",
+          "Arriba, la línea de Sofi dice si lo vende sola y qué le falta: «Ver» lo muestra y «Completar» te lleva a ese dato.",
+          "Con «Plantilla» ajustas qué pide cada producto de ese rubro en tu tienda: «Sofi lo necesita», «Suma» o «Quitar», y agregar un dato tuyo.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "sofi-no-supo",
+        q: "Sofi no supo responder algo de un producto, ¿cómo se lo enseño?",
+        a: [
+          "En la ficha, en «Lo que Sofi no supo», escribe la respuesta. Desde ahí Sofi la usa la próxima vez y queda en «Preguntas respondidas».",
+          "Quien atiende y no cambia la ficha la propone con «Proponer la respuesta»; quien cambia la ficha la deja con «Guardar en la ficha».",
+        ],
+        needs: "ventas.atender",
+        screen: "catalogo",
+      },
+      {
+        id: "web-paquete-cruzada",
+        q: "¿Dónde pongo el link del producto, el paquete para la agencia y lo que combina?",
+        a: [
+          "Al costado de la ficha: en «Catálogo web», si se muestra y «Su nombre en el link»; en «Paquete para la agencia», el peso y las medidas, solo si envías por agencia; y en «Venta cruzada», lo que Sofi ofrece junto («Combina con», con su porcentaje si lo lleva junto) o como «Algo más barato».",
+          "El código del producto va en «Organización» y el código de barras de cada variante, en la cuadrícula, en «Código de barras».",
         ],
         needs: "configuracion",
         screen: "catalogo",
@@ -510,11 +617,31 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "configuracion",
         q: "¿Dónde se ajusta la tienda y por qué hay quien no ve Configuración?",
         a: [
-          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega, tus avisos al celular y el plan. Se ajusta una vez y lo usan las demás pantallas.",
-          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración ve ahí solo sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En Configuración, al pie del menú, por tareas: «Tu tienda» (los datos de la tienda y Tu marca), «Vender» (Sofi, Cobros y Entregas), «Tu equipo» (Equipo y repartidores), «Para ti» (tus avisos al celular) y «Tu cuenta gestorIA» (el plan). Se ajusta una vez y lo usan las demás pantallas.",
+          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración, al abrir Configuración llega directo a sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En el celular, Configuración es una lista: cada parte se abre en su pantalla y «Configuración», arriba, vuelve a la lista.",
         ],
         needs: "configuracion",
-        screen: "datos",
+        screen: "configuracion",
+      },
+      {
+        id: "lo-que-falta",
+        q: "¿Qué me falta para vender y cómo está cada parte?",
+        a: [
+          "Configuración abre en «Lo que falta»: arriba, lo que falta para vender, cada cosa con su botón para hacerla (como «Conectar pasarela» o «Probar a Sofi»); lo que ya está lleva su ✓. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano. Cuando no falta nada, lo dice en una línea.",
+          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin pasarela». Toca la línea para abrirla.",
+        ],
+        needs: "configuracion",
+        screen: "configuracion",
+      },
+      {
+        id: "buscar-en-configuracion",
+        q: "No encuentro dónde se cambia algo, ¿cómo lo busco?",
+        a: [
+          "Arriba de la lista de Configuración, en «Buscar en Configuración», escribe con tus palabras: «yape», «shalom», «envío gratis», «horario» o el nombre de alguien de tu equipo. Cada resultado dice en qué parte está; con las flechas eliges y con Enter lo abres.",
+        ],
+        needs: "configuracion",
+        screen: "configuracion",
       },
       {
         id: "hora-de-la-tienda",
@@ -539,7 +666,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Medios de pago, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -548,7 +675,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Formas de entrega y zonas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
+          "En Configuración, en Entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
           "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
@@ -558,7 +685,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Medios de pago, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -578,7 +705,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "invitar",
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
-          "En Configuración, en Equipo, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
+          "En Configuración, en Equipo y repartidores, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -588,7 +715,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Qué ve soporte cuando lo dejo entrar y cómo sé si entró?",
         a: [
           "Soporte de gestorIA entra solo si lo dejan entrar, y por los minutos que pidió, que empiezan cuando lo dejan entrar. Ve tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Solo el equipo de gestorIA puede pedirlo.",
-          "En Configuración, en Equipo, ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
+          "Cuando soporte pide mirar tu tienda, lo ves una sola vez en la franja de arriba, en cualquier pantalla: «Revisar» te lleva a Configuración, en Equipo y repartidores, donde respondes «Dejar entrar» o «No». Mientras mira, la franja lo dice hasta que termina.",
+          "En Equipo y repartidores ves también quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",

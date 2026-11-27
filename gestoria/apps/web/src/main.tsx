@@ -22,7 +22,7 @@ import { DeviceNoticesPage } from "./avisos"
 import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
-import { ConfigFrame, StoreDataPage } from "./configuracion"
+import { ConfigFrame, ConfigHomePage, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import { DispatchPage } from "./despachos"
 import {
@@ -32,6 +32,7 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
+import { ProductPage } from "./ficha/ficha"
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { startInstalledApp } from "./lib/avisos"
@@ -41,7 +42,6 @@ import { BrandPage } from "./marca"
 import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
-import { ProductPage } from "./producto"
 import { ReportsPage } from "./reportes"
 import { SofiPage } from "./sofi"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
@@ -186,10 +186,16 @@ const storeChildren = [
     path: "/catalogo/$productId",
     component: ProductPage,
   }),
-  // Configuración (tablero 10): cada apartado con su dirección, en el orden de su menú.
+  // Configuración (tablero 10): cada apartado con su dirección, en el orden de su menú. Abre con
+  // «Lo que falta» (lienzo «gestorIA · Configuración, de nuevo», tablero 3).
   createRoute({
     getParentRoute: () => storeRoute,
     path: "/configuracion",
+    component: inConfig(ConfigHomePage),
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/configuracion/datos",
     component: inConfig(StoreDataPage),
   }),
   createRoute({
