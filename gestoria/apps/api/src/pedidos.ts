@@ -1524,7 +1524,9 @@ type DoorPayment = { methodId: string | null; amountCents: number }
 /** Lo que se cobró en la puerta: varios medios, o el monto y el medio de antes (uno solo). */
 function doorPaymentsOf(input: z.infer<typeof deliverInput>): DoorPayment[] {
   if (input.payments.length > 0) return input.payments
-  return input.collectedCents ? [{ methodId: input.methodId, amountCents: input.collectedCents }] : []
+  return input.collectedCents
+    ? [{ methodId: input.methodId, amountCents: input.collectedCents }]
+    : []
 }
 
 /**
@@ -1581,7 +1583,8 @@ export async function markDelivered(
         )
     }
     const methods: MethodCopy[] = []
-    for (const one of door) methods.push(await methodFor(tx, storeId, order, "al_recibir", one.methodId))
+    for (const one of door)
+      methods.push(await methodFor(tx, storeId, order, "al_recibir", one.methodId))
     // La foto del voucher va con lo cobrado con tarjeta (el POS), o con lo único cobrado.
     const withPhoto = voucher
       ? Math.max(

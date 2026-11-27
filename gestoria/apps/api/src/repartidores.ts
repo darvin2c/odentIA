@@ -52,7 +52,9 @@ export const slotsInput = z.object({
     .transform((slots) => sortSlots(slots))
     .refine(
       (slots) =>
-        slots.every((slot, i) => i === 0 || slotKey(slots[i - 1] as DeliverySlot) !== slotKey(slot)),
+        slots.every(
+          (slot, i) => i === 0 || slotKey(slots[i - 1] as DeliverySlot) !== slotKey(slot),
+        ),
       { message: "Esa franja ya está" },
     ),
 })

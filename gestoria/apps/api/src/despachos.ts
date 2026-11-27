@@ -4,7 +4,7 @@ import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { addDays, storeClockIn } from "./hora.js"
 import { pad } from "./pedidos.js"
-import { couriersIn, courierNamesIn, slotLabel, storeSlotsIn } from "./repartidores.js"
+import { courierNamesIn, couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
 import { balancesIn, unpaidBalance } from "./saldo.js"
 import { inStore } from "./tiendas.js"
 

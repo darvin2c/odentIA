@@ -116,8 +116,9 @@ beforeAll(async () => {
     listPriceCents: 19400,
     options: [{ name: "Talla", values: ["38"] }],
   })
-  ids.t38 = (await call("rosa", "GET", `${base}/productos/${zapatilla.json.product.id}`)).json
-    .product.variants[0].id
+  ids.t38 = (
+    await call("rosa", "GET", `${base}/productos/${zapatilla.json.product.id}`)
+  ).json.product.variants[0].id
   await call("rosa", "POST", `${base}/variantes/${ids.t38}/movimientos`, {
     kind: "entrada",
     quantity: 30,
@@ -201,7 +202,11 @@ describe("Despachos", () => {
         "lucia",
         "POST",
         `${base}/pedidos`,
-        order({ customerName: "Mariela Ríos", deliveryMethodId: ids.agencia, paymentMethodId: ids.yape }),
+        order({
+          customerName: "Mariela Ríos",
+          deliveryMethodId: ids.agencia,
+          paymentMethodId: ids.yape,
+        }),
       )
     ).json.order
     const receipt = new FormData()
@@ -266,9 +271,7 @@ describe("Despachos", () => {
     })
     expect(done.status).toBe(200)
     expect(done.json.order).toMatchObject({ state: "entregado", paid: true })
-    expect(
-      (done.json.order.payments as Json[]).map((p) => [p.methodName, p.amountCents]),
-    ).toEqual([
+    expect((done.json.order.payments as Json[]).map((p) => [p.methodName, p.amountCents])).toEqual([
       ["Efectivo", 15000],
       ["Tarjeta con POS", 5400],
     ])

@@ -34,7 +34,12 @@ const CASH = sql`p.kind = 'al_recibir' and p.method_type = '10' and p.status = '
 export async function collectedBetween(tx: Db, storeId: string, from: Date, to: Date | null) {
   // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
   const until = to ? sql`and p.reviewed_at < ${to.toISOString()}` : sql``
-  const rows = await tx.execute<{ method: string; type: string; cents: string; orders: string }>(sql`
+  const rows = await tx.execute<{
+    method: string
+    type: string
+    cents: string
+    orders: string
+  }>(sql`
     select p.method_name as method, p.method_type as type,
       coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders
     from order_payment p join sale_order o on o.id = p.order_id
@@ -202,9 +207,7 @@ export async function receiveCash(
       throw new StoreError(409, "CASH_CHANGED", "Ese efectivo ya cambió. Recarga para verlo.")
     const expected = found.reduce((total, row) => total + row.amount_cents, 0)
     const { currency } = (
-      await tx.execute<{ currency: string }>(
-        sql`select currency from store where id = ${storeId}`,
-      )
+      await tx.execute<{ currency: string }>(sql`select currency from store where id = ${storeId}`)
     )[0] as { currency: string }
     if (input.receivedCents !== expected && !input.note)
       throw new StoreError(
@@ -241,4 +244,3 @@ export async function receiveCash(
     }
   })
 }
-

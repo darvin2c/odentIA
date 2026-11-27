@@ -11,7 +11,7 @@ import {
 import { and, asc, eq } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
-import { slotLabel, storeSlotsIn } from "./repartidores.js"
+import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -136,6 +136,8 @@ export async function paymentsAndDeliveries(appDb: Db, person: Person, storeId: 
       deliveries: deliveries.map(({ storeId: _, ...m }) => m),
       /** Las franjas de entrega (Despachos), opcionales: un pedido sin franja sale igual. */
       slots: (await storeSlotsIn(tx, storeId)).map((slot) => ({ ...slot, label: slotLabel(slot) })),
+      /** A quién se le puede asignar una entrega: el equipo y los nombres externos que ya se usaron. */
+      couriers: await couriersIn(tx, storeId),
     }
   })
 }

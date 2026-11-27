@@ -3,8 +3,8 @@
  * franja, qué se acepta al configurarlas y qué se elige al asignar un repartidor.
  */
 import { describe, expect, it } from "vitest"
-import { courierChoice, sameSlot, slotLabel, slotsInput } from "./repartidores.js"
 import { missedInput, rescheduleInput, shipInput } from "./pedidos.js"
+import { courierChoice, sameSlot, slotLabel, slotsInput } from "./repartidores.js"
 
 describe("las franjas", () => {
   it("se leen como en la tienda: «9–13 h», con los minutos solo si los hay", () => {
