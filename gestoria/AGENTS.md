@@ -60,8 +60,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
 - El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en
-  «Gestión», Catálogo, Caja y Reportes); al pie, Configuración y Ayuda. Una pantalla nueva entra en
-  su lugar del tablero 4, no antes.
+  «Gestión», Catálogo, Caja y Reportes); al pie, Configuración. La Ayuda está en la cabecera, no en
+  el menú. Una pantalla nueva entra en su lugar del tablero 4, no antes.
 - Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`, con nombres
   de tarea (Tu tienda, Vender, Conexiones, Tu equipo, Para ti, Tu cuenta gestorIA): cada apartado
   lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
@@ -254,17 +254,33 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`supportStateOf`); a cualquier otra persona, 404. «Salir» termina solo la entrada, nunca la
   sesión. Ventas ve solo quién mira y hasta cuándo; soporte no ve la lista de soporte.
 
-## La Ayuda (entrega 7 del lienzo «gestorIA como odentIA»)
+## La Ayuda (entrega 7 del lienzo «gestorIA como odentIA»; ADR 0227)
 
-- La guía es `apps/api/src/ayuda.ts`: una pregunta por tarea, solo de lo que gestorIA hace hoy. Un
-  cambio de pantalla, botón o permiso cambia su respuesta en el mismo cambio, y una pantalla nueva
-  suma su pregunta. Quién puede sale de `needs` con `permisos.ts`, nunca del texto; lo que va entre
-  «» existe en la pantalla (lo prueban `apps/api/src/ayuda.test.ts`, si cambia la guía, y
-  `apps/web/src/lib/ayuda-guia.test.ts`, si cambia la pantalla).
-- «Pedir ayuda» es de todo el equipo (`ayuda.pedir`; soporte no), en la cabecera y en la Ayuda,
-  con la pantalla y el rol de quien pregunta: sale por `soporte.pedido` a la Bandeja de la
-  administración. Cada persona ve solo sus preguntas y respuestas (`helpView`, ADR 0221); «Plan y
-  pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de `plan`.
+- Es la misma de las clínicas: el botón «Ayuda» de la cabecera abre el panel común (`HelpButton`
+  de `@odentia/ui-patterns`, en `apps/web/src/ayuda.tsx`) con Ariadna; en el teléfono, o si la
+  fila no cabe, va en el menú ⋯. No hay página `/ayuda`, ni «Ayuda» en el menú, ni otro botón para
+  escribir a soporte. Abierta en una ventana ancha va en la columna lateral (`SideDockProvider` del
+  armazón) y le quita ancho a la página: una tabla mira su propio ancho (`@container`, como
+  Pedidos), no el de la ventana, y pasa a tarjetas si no cabe.
+- La guía es `apps/api/src/ayuda.ts`, la única fuente: una pregunta por tarea, solo de lo que
+  gestorIA hace hoy, y cada pantalla de `HELP_SCREENS` con su `purpose` y sus `terms` para
+  Ariadna. Un cambio de pantalla, botón o permiso cambia su respuesta en el mismo cambio, y una
+  pantalla nueva suma su pregunta. Quién puede sale de `needs` con `permisos.ts`, nunca del texto;
+  lo que va entre «» existe en la pantalla (lo prueban `apps/api/src/ayuda.test.ts`, si cambia la
+  guía, y `apps/web/src/lib/ayuda-guia.test.ts`, si cambia la pantalla).
+- El servidor responde al panel en `/api/tiendas/:id/ayuda` (`screen`, `ask`, `ask/:id/feedback`,
+  `ask/:id/none`, `requests` y `casos`). Cada pregunta lleva la guía entera, firmada, a Ariadna en
+  la administración (`CONTRACT_PATHS.help`, `askAriadna`), sin nada de la tienda ni de la persona;
+  vuelve en ids de la guía y aquí se hace texto para el rol (`helpReplyOf`): la pantalla solo si
+  el rol la abre y, si no puede hacerlo, a quién pedírselo. Sin el acuerdo o si la administración
+  no responde, solo se responde una pregunta que es exactamente de la guía; lo demás, «Ahora no
+  puedo buscar bien en la guía.». Lo que dice la persona de una respuesta va a
+  `CONTRACT_PATHS.helpFeedback`; si no llega, se dice (502/503).
+- Escribir a soporte desde la Ayuda es de todo el equipo (`ayuda.pedir`; soporte no), con la
+  pantalla y el rol: sale por `soporte.pedido` a la Bandeja de la administración. «Tus casos con
+  soporte», dentro del panel, muestra a cada persona solo lo suyo y sus respuestas (`helpCases`,
+  ADR 0221); «Plan y pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de
+  `plan`. La administración no dice qué respuestas se leyeron: el botón no lleva número.
 
 ## Los avisos al celular (entrega 5 del lienzo «gestorIA como odentIA»; ADR 0229)
 
