@@ -347,9 +347,7 @@ function TestChat({ overview }: { overview: SofiOverview }) {
                 className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-sm hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
               >
                 <span className="font-mono">Pedido {order.number}</span>
-                <Badge variant={STATE_TONE[order.state]}>
-                  {stateName({ state: order.state, paymentCollection: "comprobante" })}
-                </Badge>
+                <Badge variant={STATE_TONE[order.state]}>{stateName(order)}</Badge>
                 <span className="tabular-nums">{money(order.totalCents, store.currency)}</span>
                 {order.test ? <Badge variant="outline">Prueba</Badge> : null}
               </Link>

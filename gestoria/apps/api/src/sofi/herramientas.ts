@@ -30,6 +30,7 @@ import {
   variantPrices,
 } from "../pedidos.js"
 import { autoUnitCents } from "../precio.js"
+import { type Balance, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
 import { percentsIn } from "./revisar.js"
@@ -331,19 +332,33 @@ async function orderOf(tx: Db, ctx: SofiToolContext, pedido: string) {
 
 /**
  * El estado de un pedido como lo lee Sofi. Uno que se paga al recibir empieza «por salir» sin
- * pago: nunca se dice pagado (la misma regla que `stateName` de la pantalla).
+ * pago: nunca se dice pagado. Con su saldo (`saldo.ts`), «pagado» solo si no falta nada y todo
+ * está confirmado; si pagó una parte, que falta el resto (la misma regla que `stateName` de la
+ * pantalla).
  */
-export function stateWords(order: { state: string; paymentCollection: string }): string {
+export function stateWords(
+  order: { state: string; paymentCollection: string },
+  balance?: Balance,
+): string {
+  const nothingYet = !balance || balance.confirmedCents + balance.pendingCents === 0
+  const onDelivery = order.paymentCollection === "al_recibir" && nothingYet
+  const owes = balance ? balance.dueCents > 0 : onDelivery
   const words: Record<string, string> = {
     por_pagar: "por pagar",
     por_confirmar: "pago por confirmar: una persona del equipo lo está revisando",
-    por_salir:
-      order.paymentCollection === "al_recibir"
-        ? "por salir; se paga al recibir (todavía no pagó)"
-        : "pagado, por salir",
-    en_camino:
-      order.paymentCollection === "al_recibir" ? "en camino; se paga al recibir" : "en camino",
-    entregado: "entregado",
+    por_salir: onDelivery
+      ? "por salir; se paga al recibir (todavía no pagó)"
+      : !balance || balance.paid
+        ? "pagado, por salir"
+        : owes
+          ? "por salir; pagó una parte y falta pagar el resto"
+          : "por salir; un pago espera que una persona del equipo lo confirme",
+    en_camino: onDelivery
+      ? "en camino; se paga al recibir"
+      : owes
+        ? "en camino; falta pagar una parte"
+        : "en camino",
+    entregado: balance && balance.dueCents > 0 ? "entregado; falta pagar una parte" : "entregado",
     anulado: "anulado",
   }
   return words[order.state] ?? order.state
@@ -635,13 +650,31 @@ async function receipt(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.anotar
 async function orders(ctx: SofiToolContext) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const rows = await conversationOrders(tx, ctx)
+    const balances = await balancesIn(
+      tx,
+      rows.map((o) => o.id),
+    )
     return {
       pedidos: rows.map((o) => {
         ctx.trace.amounts.add(o.totalCents)
+        const balance = balances.get(o.id)
+        // Si pagó una parte: lo confirmado y lo que falta, la misma cifra que ve el equipo.
+        const partial = balance && balance.dueCents > 0 && balance.dueCents < o.totalCents
+        if (partial) {
+          ctx.trace.amounts.add(balance.dueCents)
+          ctx.trace.amounts.add(balance.confirmedCents)
+        }
+        const part = partial
+          ? {
+              pagado_confirmado: formatMoney(balance.confirmedCents, ctx.currency),
+              falta_pagar: formatMoney(balance.dueCents, ctx.currency),
+            }
+          : {}
         return {
           pedido: pad(o.number),
-          estado: stateWords(o),
+          estado: stateWords(o, balance),
           total: formatMoney(o.totalCents, ctx.currency),
+          ...part,
           entrega: o.deliveryName,
           pago: o.paymentName,
           ...(o.tracking ? { numero_de_envio: o.tracking } : {}),

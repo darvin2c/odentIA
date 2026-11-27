@@ -317,6 +317,7 @@ export async function argosBoard(appDb: Db, person: Person, storeId: string, now
         customer: saleOrder.customerName,
         amount: orderPayment.amountCents,
         kind: orderPayment.kind,
+        method: orderPayment.methodName,
         at: orderPayment.createdAt,
       })
       .from(orderPayment)
@@ -333,12 +334,12 @@ export async function argosBoard(appDb: Db, person: Person, storeId: string, now
       toDo.push({
         kind: "pago",
         title: "Confirmar un pago",
-        detail: `Pedido ${pad(p.number)} de ${p.customer}, ${money(p.amount)} ${p.kind === "link" ? "por el link (no coincide)" : "por captura"}`,
+        detail: `Pedido ${pad(p.number)} de ${p.customer}, ${money(p.amount)} ${p.kind === "link" ? "por el link (no coincide)" : `por ${p.method} (captura)`}`,
         orderId: p.orderId,
         at: p.at,
       })
 
-    // Pagados que no pueden salir: no alcanzaba el stock al pagar.
+    // Con su pago confirmado (todo o una parte) y sin poder salir: no alcanzaba el stock al pagar.
     const unpaidStock = await tx.execute<{ id: string; number: number; customer_name: string }>(sql`
       select o.id, o.number, o.customer_name from sale_order o
       where o.store_id = ${storeId} and o.state = 'por_salir' and o.test = false
@@ -348,7 +349,7 @@ export async function argosBoard(appDb: Db, person: Person, storeId: string, now
     for (const o of unpaidStock)
       toDo.push({
         kind: "stock_pedido",
-        title: "Falta stock para un pedido pagado",
+        title: "Falta stock para un pedido con su pago confirmado",
         detail: `Pedido ${pad(o.number)} de ${o.customer_name}: registra la entrada para que salga`,
         orderId: o.id,
       })

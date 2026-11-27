@@ -61,10 +61,15 @@ export function ReportsPage() {
             />
             <KpiCard
               title="Falta cobrar"
-              value={m(
-                r.pending.toConfirm.cents + r.pending.toPay.cents + r.pending.onDelivery.cents,
-              )}
-              description={`${r.pending.toConfirm.orders} por confirmar · ${r.pending.toPay.orders} por pagar · ${r.pending.onDelivery.orders} al recibir`}
+              value={m(r.pending.due.cents)}
+              description={[
+                `${r.pending.due.orders} ${r.pending.due.orders === 1 ? "pedido" : "pedidos"}`,
+                r.pending.toConfirm.cents > 0
+                  ? `aparte, ${m(r.pending.toConfirm.cents)} por confirmar`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
             <KpiCard
               title="Compraron"

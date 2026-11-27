@@ -10,6 +10,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  pgView,
   primaryKey,
   smallint,
   text,
@@ -862,7 +863,10 @@ export const saleOrderLine = pgTable(
 export const ORDER_PAYMENT_STATES = ["por_confirmar", "confirmado", "no_coincide"] as const
 export type OrderPaymentState = (typeof ORDER_PAYMENT_STATES)[number]
 
-/** Un pago de un pedido: por el link (lo confirma el proveedor), una captura o al recibir. */
+/**
+ * Un pago de un pedido: por el link (lo confirma el proveedor), una captura o al recibir. Un
+ * pedido acepta varios (el pago en partes, ADR 0221): cada uno con su medio y su estado.
+ */
 export const orderPayment = pgTable(
   "order_payment",
   {
@@ -872,6 +876,12 @@ export const orderPayment = pgTable(
     kind: text("kind").$type<PaymentCollection>().notNull(),
     status: text("status").$type<OrderPaymentState>().notNull(),
     amountCents: integer("amount_cents").notNull(),
+    /**
+     * Con qué pagó: el medio de pago de la tienda, copiado al anotarlo como se copia en el pedido
+     * («Yape», «Efectivo al recibir»), y su tipo de UN/CEFACT 4461 («1», otro, si ya no se sabe).
+     */
+    methodName: text("method_name").notNull(),
+    methodType: text("method_type").$type<PaymentTypeCode>().notNull(),
     /** El número de operación que se ve en la captura. */
     operation: text("operation"),
     /** El proveedor del link y su número de pago: un mismo pago no se anota dos veces. */
@@ -892,6 +902,10 @@ export const orderPayment = pgTable(
     check("order_payment_kind_check", inList("kind", PAYMENT_COLLECTIONS)),
     check("order_payment_status_check", inList("status", ORDER_PAYMENT_STATES)),
     check("order_payment_amount_check", sql`${table.amountCents} >= 0`),
+    check(
+      "order_payment_method_check",
+      sql`char_length(btrim(${table.methodName})) between 1 and 80 and ${inList("method_type", PAYMENT_TYPE_CODES)}`,
+    ),
     check(
       "order_payment_texts_check",
       sql`(${table.operation} is null or char_length(${table.operation}) between 1 and 60) and (${table.note} is null or char_length(${table.note}) <= 300)`,
@@ -916,6 +930,25 @@ export const orderPayment = pgTable(
     index("order_payment_order_idx").on(table.orderId, table.createdAt),
   ],
 )
+
+/**
+ * El saldo de cada pedido (ADR 0221), calculado en un solo lugar: esta vista, que leen el pedido,
+ * las listas, Reportes, Argos y Sofi. Falta cobrar = total − confirmado − por confirmar (nunca
+ * menos de 0, y 0 si se anuló). «Pagado» es no deber nada con todo confirmado; lo confirmado que
+ * pasa del total es un pago doble para revisar. La vista corre con los permisos de quien la lee
+ * (`security_invoker`): cada tienda ve solo lo suyo, con las reglas de sus tablas. Se crea a mano
+ * en `0016_el_saldo_y_el_pago_en_partes.sql`.
+ */
+export const orderBalance = pgView("order_balance", {
+  orderId: uuid("order_id").notNull(),
+  storeId: uuid("store_id").notNull(),
+  totalCents: integer("total_cents").notNull(),
+  confirmedCents: integer("confirmed_cents").notNull(),
+  pendingCents: integer("pending_cents").notNull(),
+  dueCents: integer("due_cents").notNull(),
+  overCents: integer("over_cents").notNull(),
+  paid: boolean("paid").notNull(),
+}).existing()
 
 /**
  * Lo que pasó con cada pedido, con quién y cuándo (tablero 2: «cada estado dice quién lo

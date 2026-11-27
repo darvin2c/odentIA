@@ -538,6 +538,7 @@ export function createApp(deps: AppDeps) {
     const input = receiptInput.parse({
       amountCents: Number(form.get("amountCents")),
       operation: String(form.get("operation") ?? ""),
+      methodId: String(form.get("methodId") ?? ""),
     })
     const photo =
       file instanceof File && file.size > 0 ? new Uint8Array(await file.arrayBuffer()) : null

@@ -18,6 +18,7 @@ import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { storeClockIn } from "../hora.js"
 import { type LinkDeps, pad } from "../pedidos.js"
+import { balancesIn } from "../saldo.js"
 import {
   moneyText as formatMoney,
   newTrace,
@@ -220,6 +221,10 @@ async function load(
       : []
     const currency = shop!.currency
     const { today } = await storeClockIn(tx, storeId, now)
+    const balances = await balancesIn(
+      tx,
+      orders.map((o) => o.id),
+    )
     const money = (cents: number) => formatMoney(cents, currency)
     const factAmounts: number[] = []
     const say = (cents: number) => {
@@ -243,9 +248,15 @@ async function load(
       (p, i) =>
         `${i + 1}. ${p.id} · ${p.name} · ${COLLECTION_WORDS[p.collection]}${p.details ? ` · datos para el cliente: ${p.details}` : ""}`,
     )
-    const orderLines = orders.map(
-      (o) => `- ${pad(o.number)} · ${stateWords(o)} · ${say(o.totalCents)} · ${o.paymentName}`,
-    )
+    // El saldo de cada pedido, el mismo que ve el equipo: si pagó una parte, cuánto falta.
+    const orderLines = orders.map((o) => {
+      const balance = balances.get(o.id)
+      const part =
+        balance && balance.dueCents > 0 && balance.dueCents < o.totalCents
+          ? ` · falta pagar ${say(balance.dueCents)}`
+          : ""
+      return `- ${pad(o.number)} · ${stateWords(o, balance)} · ${say(o.totalCents)}${part} · ${o.paymentName}`
+    })
     const facts = [
       `LA TIENDA: ${shop!.name}. Moneda: ${currency}. Hoy: ${today}.`,
       `Te presentas como «${display}».`,

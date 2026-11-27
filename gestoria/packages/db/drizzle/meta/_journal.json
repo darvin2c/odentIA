@@ -113,6 +113,20 @@
       "when": 1795749683887,
       "tag": "0015_reglas_hora_de_la_tienda",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795749684858,
+      "tag": "0016_el_saldo_y_el_pago_en_partes",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795749685873,
+      "tag": "0017_reglas_saldo",
+      "breakpoints": true
     }
   ]
 }

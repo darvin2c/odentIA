@@ -10,6 +10,7 @@ import {
   accountCopy,
   type Db,
   enterStore,
+  orderBalance,
   orderEvent,
   orderPayment,
   saleOrder,
@@ -94,6 +95,8 @@ describe("los pedidos de cada tienda", () => {
         kind: "comprobante",
         status: "por_confirmar",
         amountCents: 13900,
+        methodName: "Yape",
+        methodType: "68",
         createdBy: rosa.userId,
       })
     })
@@ -176,6 +179,8 @@ describe("los pedidos de cada tienda", () => {
           kind: "link",
           status: "confirmado",
           amountCents: 13900,
+          methodName: "Link de pago",
+          methodType: "68",
           provider: "mercadopago",
           providerRef: "1",
           reviewedAt: new Date(),
@@ -220,6 +225,85 @@ describe("los pedidos de cada tienda", () => {
           accessTokenEnc: "v1:x:y:z",
           hint: "abcd",
           connectedBy: mario.userId,
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it("el saldo sale de la base: falta cobrar = total − confirmado − por confirmar", async () => {
+    // Diana: S/ 117, paga S/ 80 por Yape (confirmado) y manda otra captura de S/ 20.
+    const [diana] = await inRosa((tx) =>
+      tx
+        .insert(saleOrder)
+        .values({ ...anOrder(calzados, 2, rosa.userId), totalCents: 11700, subtotalCents: 10700 })
+        .returning({ id: saleOrder.id }),
+    )
+    const pay = (amountCents: number) => ({
+      storeId: calzados,
+      orderId: diana!.id,
+      kind: "comprobante" as const,
+      status: "por_confirmar" as const,
+      amountCents,
+      methodName: "Yape",
+      methodType: "68" as const,
+      createdBy: rosa.userId,
+    })
+    const balance = () =>
+      inRosa(async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(orderBalance)
+          .where(eq(orderBalance.orderId, diana!.id))
+        return row
+      })
+    expect(await balance()).toMatchObject({ dueCents: 11700, paid: false })
+    const [first] = await inRosa((tx) =>
+      tx.insert(orderPayment).values(pay(8000)).returning({ id: orderPayment.id }),
+    )
+    await inRosa((tx) =>
+      tx
+        .update(orderPayment)
+        .set({ status: "confirmado", reviewedBy: rosa.userId, reviewedAt: new Date() })
+        .where(eq(orderPayment.id, first!.id)),
+    )
+    await inRosa((tx) => tx.insert(orderPayment).values(pay(2000)))
+    expect(await balance()).toMatchObject({
+      confirmedCents: 8000,
+      pendingCents: 2000,
+      dueCents: 1700,
+      overCents: 0,
+      paid: false,
+    })
+    // Otra tienda no ve el saldo de esta: la vista corre con las reglas de quien la lee.
+    expect(await inMario((tx) => tx.select().from(orderBalance))).toEqual([])
+    // Un pago que no coincide no cuenta.
+    await inRosa((tx) =>
+      tx
+        .update(orderPayment)
+        .set({
+          status: "no_coincide",
+          note: "No llegó",
+          reviewedBy: rosa.userId,
+          reviewedAt: new Date(),
+        })
+        .where(eq(orderPayment.status, "por_confirmar")),
+    )
+    expect(await balance()).toMatchObject({ pendingCents: 0, dueCents: 3700, paid: false })
+  })
+
+  it("cada pago guarda su medio con un tipo de UN/CEFACT 4461", async () => {
+    await expect(
+      inRosa((tx) =>
+        tx.insert(orderPayment).values({
+          storeId: calzados,
+          orderId,
+          kind: "comprobante",
+          status: "por_confirmar",
+          amountCents: 100,
+          methodName: "Yape",
+          // Un tipo que no es de la lista no entra, aunque el código se equivoque.
+          methodType: "99" as "68",
+          createdBy: rosa.userId,
         }),
       ),
     ).rejects.toThrow()

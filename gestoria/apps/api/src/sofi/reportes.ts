@@ -12,7 +12,8 @@ import { inStore } from "../tiendas.js"
  * (`reportes.ver`). Los pedidos de prueba no cuentan.
  *
  * Los periodos empiezan a las 00:00 de la tienda, con su hora (`hora.ts`): «hoy», desde el lunes
- * o desde el día 1.
+ * o desde el día 1. Lo que falta cobrar sale del saldo de cada pedido (`order_balance`, ADR 0221),
+ * el mismo que ve el pedido.
  */
 
 export const REPORT_PERIODS = ["hoy", "semana", "mes"] as const
@@ -49,24 +50,21 @@ export async function storeReport(
       from order_payment p join sale_order o on o.id = p.order_id
       where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
         and p.reviewed_at >= ${since}`)
-    // Falta cobrar: lo abierto, hoy.
+    // Lo que falta cobrar y lo que espera a una persona, hoy, del saldo de cada pedido. Un
+    // pedido por pagar con el precio vencido ya no se cuenta: no se va a cobrar así.
     const [pending] = await tx.execute<{
       to_confirm: string
       to_confirm_cents: string
-      to_pay: string
-      to_pay_cents: string
-      on_delivery: string
-      on_delivery_cents: string
+      due: string
+      due_cents: string
     }>(sql`
       select
-        count(*) filter (where o.state = 'por_confirmar') as to_confirm,
-        coalesce(sum(o.total_cents) filter (where o.state = 'por_confirmar'), 0) as to_confirm_cents,
-        count(*) filter (where o.state = 'por_pagar') as to_pay,
-        coalesce(sum(o.total_cents) filter (where o.state = 'por_pagar'), 0) as to_pay_cents,
-        count(*) filter (where o.state in ('por_salir','en_camino') and o.payment_collection = 'al_recibir') as on_delivery,
-        coalesce(sum(o.total_cents) filter (where o.state in ('por_salir','en_camino') and o.payment_collection = 'al_recibir'), 0) as on_delivery_cents
-      from sale_order o
-      where o.store_id = ${storeId} and o.test = false
+        count(*) filter (where b.pending_cents > 0) as to_confirm,
+        coalesce(sum(b.pending_cents), 0) as to_confirm_cents,
+        count(*) filter (where b.due_cents > 0) as due,
+        coalesce(sum(b.due_cents), 0) as due_cents
+      from order_balance b join sale_order o on o.id = b.order_id
+      where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and (o.state <> 'por_pagar' or o.price_expires_at is null or o.price_expires_at > ${at})`)
     // Conversaciones del periodo y cuántas compraron; quienes volvieron a comprar (siempre).
     const [talks] = await tx.execute<{ total: string; bought: string }>(sql`
@@ -143,9 +141,10 @@ export async function storeReport(
         ticketCents: soldOrders ? Math.round(n(sold?.cents) / soldOrders) : 0,
       },
       pending: {
+        /** Los pagos que esperan a una persona: no son «falta cobrar». */
         toConfirm: { orders: n(pending?.to_confirm), cents: n(pending?.to_confirm_cents) },
-        toPay: { orders: n(pending?.to_pay), cents: n(pending?.to_pay_cents) },
-        onDelivery: { orders: n(pending?.on_delivery), cents: n(pending?.on_delivery_cents) },
+        /** Falta cobrar = total − confirmado − por confirmar, pedido por pedido. */
+        due: { orders: n(pending?.due), cents: n(pending?.due_cents) },
       },
       conversations: { total: n(talks?.total), bought: n(talks?.bought) },
       returning: n(again?.customers),

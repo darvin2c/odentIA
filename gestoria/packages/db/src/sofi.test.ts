@@ -103,6 +103,8 @@ describe("Sofi en la base", () => {
       storeId: calzados,
       orderId,
       amountCents: 13900,
+      methodName: "Yape",
+      methodType: "68" as const,
       createdBy: "agente:sofi",
     }
     await expect(
@@ -181,6 +183,8 @@ describe("Sofi en la base", () => {
           kind: "comprobante",
           status: "por_confirmar",
           amountCents: 13900,
+          methodName: "Yape",
+          methodType: "68",
           createdBy: "agente:sofi",
         }),
       ),
