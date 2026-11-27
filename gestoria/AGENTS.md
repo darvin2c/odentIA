@@ -74,6 +74,10 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   no se borra nunca. Nadie borra un
   archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
   cascada) y el servidor la borra (`emptyMediaTrash`).
+- La pantalla (`apps/web/src/ficha/fotos.tsx`, `cargar.tsx`, `lib/medios.ts`) achica la foto y
+  prepara el video en el navegador (Mediabunny) antes de subirlo; sin almacenamiento
+  (`MEDIA_OFF`) lo dice con `ErrorState` y deja seguir. Reordenar es arrastrar o «Mover»/Alt y
+  flechas; la ★ de Sofi es la foto del color en la cuadrícula.
 - «Cargar muchos» (`cargas.ts`): una carga abierta con sus productos y sus fotos; nada pasa al
   catálogo hasta «Crear», que guarda todo o nada y deja las fotos en su misma carpeta. Una carga
   creada o descartada ya no cambia. El agente no ve las cargas ni toca videos.
