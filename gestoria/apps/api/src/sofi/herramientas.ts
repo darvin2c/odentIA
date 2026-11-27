@@ -563,7 +563,7 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
 async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const input = await toOrderInput(tx, ctx, args)
-    const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
+    const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today, { byAgent: true })
     if (!result.quote) return { ok: false, problemas: problemsOf(result.fields, input) }
     const q = result.quote
     const problem = offerProblem(
@@ -616,7 +616,7 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
 async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchema>) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const input = await toOrderInput(tx, ctx, args, args)
-    const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
+    const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today, { byAgent: true })
     if (!priced.quote) return { ok: false, problemas: problemsOf(priced.fields, input) }
     const problem = offerProblem(
       ctx.offer,

@@ -13,6 +13,7 @@ import {
   type PaymentTypeCode,
   type PhotoType,
   product,
+  productLink,
   productPhoto,
   productPromotion,
   productQuantityPrice,
@@ -29,7 +30,7 @@ import {
 import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 import { agentName, SOFI_ACTOR } from "./agente.js"
-import { imageType } from "./catalogo.js"
+import { imageType, SELLS_WITHOUT_STOCK } from "./catalogo.js"
 import { customerForOrderIn, shownCustomerId } from "./clientes.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
@@ -38,12 +39,13 @@ import type { LinkAdapters } from "./link-de-pago.js"
 import { can } from "./permisos.js"
 import {
   autoUnitCents,
-  floorUnitCents,
+  floorOf,
   negotiatedUntil,
   type PricedVariant,
   type Quote,
   type QuoteLine,
   quote,
+  type SofiOffers,
 } from "./precio.js"
 import {
   checkSlotIn,
@@ -369,6 +371,13 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
       productName: product.name,
       listPriceCents: product.listPriceCents,
       minPriceCents: product.minPriceCents,
+      status: product.status,
+      wholesaleMinQuantity: product.wholesaleMinQuantity,
+      wholesalePriceCents: product.wholesalePriceCents,
+      offerDelivery: product.offerDelivery,
+      offerDiscount: product.offerDiscount,
+      offerSecondUnit: product.offerSecondUnit,
+      offerGift: product.offerGift,
     })
     .from(productVariant)
     .innerJoin(product, eq(product.id, productVariant.productId))
@@ -386,6 +395,8 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
       productId: productPromotion.productId,
       name: productPromotion.name,
       percentOff: productPromotion.percentOff,
+      optionIndex: productPromotion.optionIndex,
+      optionValue: productPromotion.optionValue,
     })
     .from(productPromotion)
     .where(
@@ -403,19 +414,107 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
     })
     .from(productQuantityPrice)
     .where(inArray(productQuantityPrice.productId, productIds))
-  const promoBy = new Map(promotions.map((p) => [p.productId, p]))
+  const promosBy = Map.groupBy(promotions, (p) => p.productId)
   const tiersBy = Map.groupBy(tiers, (t) => t.productId)
-  return rows.map((row) => ({
-    ...row,
-    variantName: row.optionValues.join(" · ") || "Única",
-    promotion: promoBy.get(row.productId)?.name ?? null,
-    pricing: {
-      listUnitCents: row.priceCents ?? row.listPriceCents,
-      minPriceCents: row.minPriceCents,
-      percentOff: promoBy.get(row.productId)?.percentOff ?? null,
-      quantityPrices: tiersBy.get(row.productId) ?? [],
-    } satisfies PricedVariant,
-  }))
+  return rows.map((row) => {
+    // La mejor promoción de hoy para esta variante: la de todo el producto, la de su color o la de
+    // su talla. Nunca se suman.
+    const promotion =
+      (promosBy.get(row.productId) ?? [])
+        .filter(
+          (p) =>
+            p.optionIndex === null ||
+            (row.optionValues[p.optionIndex] ?? "").localeCompare(p.optionValue ?? "", "es", {
+              sensitivity: "base",
+            }) === 0,
+        )
+        .sort((a, b) => b.percentOff - a.percentOff)[0] ?? null
+    return {
+      ...row,
+      variantName: row.optionValues.join(" · ") || "Única",
+      promotion: promotion?.name ?? null,
+      pricing: {
+        listUnitCents: row.priceCents ?? row.listPriceCents,
+        minPriceCents: row.minPriceCents,
+        percentOff: promotion?.percentOff ?? null,
+        quantityPrices: tiersBy.get(row.productId) ?? [],
+        wholesale:
+          row.wholesaleMinQuantity !== null && row.wholesalePriceCents !== null
+            ? { minQuantity: row.wholesaleMinQuantity, unitPriceCents: row.wholesalePriceCents }
+            : null,
+        clearance: row.status === "liquidacion",
+      } satisfies PricedVariant,
+      offers: {
+        delivery: row.offerDelivery,
+        discount: row.offerDiscount,
+        secondUnit: row.offerSecondUnit,
+        gift: row.offerGift !== null,
+      } satisfies SofiOffers,
+    }
+  })
+}
+
+/**
+ * El combo de un pedido: a lo que combina (`product_link` «combina») con otro producto del mismo
+ * pedido le toca el porcentaje del combo de ese otro, el mayor si hay varios. Va como una opción más
+ * del precio sin negociar: no se suma con la promoción ni con el precio por cantidad.
+ */
+export async function comboPercents(tx: Db, productIds: string[]): Promise<Map<string, number>> {
+  const ids = [...new Set(productIds)]
+  if (ids.length < 2) return new Map()
+  const links = await tx
+    .select({ a: productLink.productA, b: productLink.productB })
+    .from(productLink)
+    .where(
+      and(
+        eq(productLink.kind, "combina"),
+        inArray(productLink.productA, ids),
+        inArray(productLink.productB, ids),
+      ),
+    )
+  if (links.length === 0) return new Map()
+  const percents = await tx
+    .select({ id: product.id, percent: product.comboPercentOff })
+    .from(product)
+    .where(inArray(product.id, ids))
+  const percentOf = new Map(percents.map((p) => [p.id, p.percent]))
+  const out = new Map<string, number>()
+  for (const { a, b } of links)
+    for (const [mine, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const percent = percentOf.get(other)
+      if (percent) out.set(mine, Math.max(out.get(mine) ?? 0, percent))
+    }
+  return out
+}
+
+/**
+ * Lo que cuesta el envío de una forma de entrega, antes de negociarlo: el fijo, el de la zona o el
+ * que se acordó. Lo que falta para saberlo queda en `fields`.
+ */
+export function deliveryListOf(
+  delivery: typeof storeDeliveryMethod.$inferSelect | undefined,
+  input: { zone: string | null; deliveryListCents: number | null },
+  fields: Record<string, string>,
+): number {
+  if (!delivery?.isActive) {
+    fields.deliveryMethodId = "Esa forma de entrega ya no está encendida"
+    return 0
+  }
+  if (delivery.cost === "fijo") return delivery.priceCents ?? 0
+  if (delivery.cost === "por_zona") {
+    const zone = delivery.zones.find((z) => z.name === input.zone)
+    if (!zone) fields.zone = "Elige la zona"
+    return zone?.priceCents ?? 0
+  }
+  if (delivery.cost === "se_acuerda") {
+    if (input.deliveryListCents === null)
+      fields.deliveryListCents = "Escribe cuánto cuesta el envío"
+    return input.deliveryListCents ?? 0
+  }
+  return 0
 }
 
 /**
@@ -434,6 +533,8 @@ async function priceOrder(
    * stock no frena (lo que el pedido ya tiene fuera cuenta; si falta, queda «falta stock»).
    */
   change: { collection: PaymentCollection } | null = null,
+  /** Lo cotiza Sofi: solo cede lo que cada producto deja ofrecer. */
+  byAgent = false,
 ): Promise<{ ok: true; priced: Priced } | { ok: false; fields: Record<string, string> }> {
   const fields: Record<string, string> = {}
   const ids = input.lines.map((line) => line.variantId)
@@ -450,6 +551,7 @@ async function priceOrder(
     if (row && !line.gift)
       bought.set(row.productId, (bought.get(row.productId) ?? 0) + line.quantity)
   }
+  const combo = await comboPercents(tx, [...bought.keys()])
   const lines: QuoteLine[] = []
   input.lines.forEach((line, i) => {
     const row = byId.get(line.variantId)
@@ -458,17 +560,26 @@ async function priceOrder(
       return
     }
     if (row.removedAt) fields[`lines.${i}.variantId`] = "Esa variante ya no se vende"
-    else if (!change && row.stock < line.quantity)
+    else if (!change && row.status === "no_se_vende")
+      fields[`lines.${i}.variantId`] = "Ese producto ya no se vende"
+    // Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre.
+    else if (
+      !change &&
+      row.stock < line.quantity &&
+      !(row.status && SELLS_WITHOUT_STOCK.includes(row.status))
+    )
       fields[`lines.${i}.quantity`] =
         row.stock === 0 ? "Está agotado" : `Quedan ${row.stock}: registra una entrada si hay más`
-    const auto = autoUnitCents(row.pricing, bought.get(row.productId) ?? 0)
+    const pricing = { ...row.pricing, comboPercentOff: combo.get(row.productId) ?? null }
+    const auto = autoUnitCents(pricing, bought.get(row.productId) ?? 0)
     lines.push({
       quantity: line.quantity,
       listUnitCents: row.pricing.listUnitCents,
       autoUnitCents: auto,
-      floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
+      floorUnitCents: floorOf(pricing, auto),
       unitCents: line.unitCents,
       gift: line.gift,
+      offers: row.offers,
     })
   })
 
@@ -481,18 +592,7 @@ async function priceOrder(
         eq(storeDeliveryMethod.storeId, storeId),
       ),
     )
-  let deliveryList = 0
-  if (!delivery?.isActive) fields.deliveryMethodId = "Esa forma de entrega ya no está encendida"
-  else if (delivery.cost === "fijo") deliveryList = delivery.priceCents ?? 0
-  else if (delivery.cost === "por_zona") {
-    const zone = delivery.zones.find((z) => z.name === input.zone)
-    if (!zone) fields.zone = "Elige la zona"
-    else deliveryList = zone.priceCents
-  } else if (delivery.cost === "se_acuerda") {
-    if (input.deliveryListCents === null)
-      fields.deliveryListCents = "Escribe cuánto cuesta el envío"
-    else deliveryList = input.deliveryListCents
-  }
+  const deliveryList = deliveryListOf(delivery, input, fields)
 
   let payment: typeof storePaymentMethod.$inferSelect | null = null
   if (change) {
@@ -525,6 +625,7 @@ async function priceOrder(
       chargedCents: input.deliveryCents,
     },
     currency,
+    { byAgent },
   )
   if (!result.ok) return result
   return {
@@ -552,9 +653,15 @@ async function priceOrder(
  * El precio de un pedido sin guardarlo, dentro de la transacción de la tienda: el resumen de
  * «Anotar un pedido» y lo que cotiza Sofi (la misma regla).
  */
-export async function quoteOrderIn(tx: Db, storeId: string, input: OrderInput, today: string) {
+export async function quoteOrderIn(
+  tx: Db,
+  storeId: string,
+  input: OrderInput,
+  today: string,
+  options: { byAgent?: boolean } = {},
+) {
   const { currency } = await storeRow(tx, storeId)
-  const result = await priceOrder(tx, storeId, currency, input, today)
+  const result = await priceOrder(tx, storeId, currency, input, today, null, options.byAgent)
   return result.ok
     ? { quote: result.priced.quote, fields: {} as Record<string, string>, currency }
     : { quote: null, fields: result.fields, currency }
@@ -691,7 +798,9 @@ export async function createOrderIn(
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
   const today = options.today ?? (await todayIn(tx, storeId, now))
-  const result = await priceOrder(tx, storeId, currency, input, today)
+  // Lo que anota Sofi solo cede lo que cada producto deja ofrecer, como al cotizarlo.
+  const byAgent = actorUserId.startsWith("agente:")
+  const result = await priceOrder(tx, storeId, currency, input, today, null, byAgent)
   if (!result.ok)
     throw new StoreError(
       400,
@@ -1209,7 +1318,7 @@ export async function sellable(appDb: Db, person: Person, storeId: string, now =
           stock: row.stock,
           listUnitCents: row.pricing.listUnitCents,
           autoUnitCents: auto,
-          floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
+          floorUnitCents: floorOf(row.pricing, auto),
           promotion: row.promotion,
         }
       }),

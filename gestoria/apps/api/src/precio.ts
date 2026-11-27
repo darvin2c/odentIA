@@ -18,27 +18,71 @@ export interface PricedVariant {
   /** El precio de la variante (o el del producto, si no tiene propio). */
   listUnitCents: number
   minPriceCents: number | null
-  /** El porcentaje de la promoción vigente hoy, si hay. */
+  /** El porcentaje de la mejor promoción vigente hoy para esta variante (de todo el producto, de su color o de su talla). */
   percentOff: number | null
   /** El precio por cantidad del producto: desde N unidades, cada una a X. */
   quantityPrices: { minQuantity: number; unitPriceCents: number }[]
+  /** El precio para revendedoras: desde N unidades del producto, cada una a X. */
+  wholesale?: { minQuantity: number; unitPriceCents: number } | null
+  /** El combo: cuánto menos cuesta si va junto con lo que combina (lo pone el pedido que lo lleva). */
+  comboPercentOff?: number | null
+  /** En liquidación: su precio es el final, no se negocia (decisión 8). */
+  clearance?: boolean
 }
 
-/** El mejor precio sin negociar: la lista, la promoción o el precio por cantidad, sin sumarlos. */
-export function autoUnitCents(variant: PricedVariant, productQuantity: number): number {
-  const options = [variant.listUnitCents]
-  if (variant.percentOff)
-    options.push(Math.round((variant.listUnitCents * (100 - variant.percentOff)) / 100))
+/** De dónde sale el precio sin negociar. */
+export type AutoReason = "lista" | "promocion" | "cantidad" | "mayor" | "combo"
+
+/**
+ * El mejor precio sin negociar y de dónde sale: la lista, la promoción, el precio por cantidad, el
+ * de revendedora o el del combo, el que sea mejor para el cliente, sin sumarlos.
+ */
+export function autoUnit(
+  variant: PricedVariant,
+  productQuantity: number,
+): { cents: number; reason: AutoReason } {
+  const off = (percent: number) => Math.round((variant.listUnitCents * (100 - percent)) / 100)
+  const options: { cents: number; reason: AutoReason }[] = [
+    { cents: variant.listUnitCents, reason: "lista" },
+  ]
+  if (variant.percentOff) options.push({ cents: off(variant.percentOff), reason: "promocion" })
   const tier = variant.quantityPrices
     .filter((q) => q.minQuantity <= productQuantity)
     .sort((a, b) => b.minQuantity - a.minQuantity)[0]
-  if (tier) options.push(tier.unitPriceCents)
-  return Math.min(...options)
+  if (tier) options.push({ cents: tier.unitPriceCents, reason: "cantidad" })
+  if (variant.wholesale && productQuantity >= variant.wholesale.minQuantity)
+    options.push({ cents: variant.wholesale.unitPriceCents, reason: "mayor" })
+  if (variant.comboPercentOff)
+    options.push({ cents: off(variant.comboPercentOff), reason: "combo" })
+  // Con el mismo precio, el primero: así «lista» gana cuando nada baja.
+  return options.reduce((best, o) => (o.cents < best.cents ? o : best))
+}
+
+/** El mejor precio sin negociar (`autoUnit`), solo el importe. */
+export function autoUnitCents(variant: PricedVariant, productQuantity: number): number {
+  return autoUnit(variant, productQuantity).cents
 }
 
 /** Lo más bajo a lo que se vende: el mínimo si queda bajo el precio sin negociar; si no, ese precio. */
 export function floorUnitCents(auto: number, minPriceCents: number | null): number {
   return minPriceCents !== null && minPriceCents < auto ? minPriceCents : auto
+}
+
+/** Lo más bajo a lo que se vende una variante: en liquidación, su precio sin negociar. */
+export function floorOf(variant: PricedVariant, auto: number): number {
+  return floorUnitCents(auto, variant.clearance ? null : variant.minPriceCents)
+}
+
+/**
+ * Lo que Sofi puede ofrecer de un producto (tablero 21 del lienzo «gestorIA como odentIA»): poner
+ * el envío, unos soles menos, el precio de la 2.ª unidad (una rebaja cuando lleva dos o más) y un
+ * regalo. Siempre del mismo margen y una sola vez (ADR 0224). El equipo negocia como siempre.
+ */
+export interface SofiOffers {
+  delivery: boolean
+  discount: boolean
+  secondUnit: boolean
+  gift: boolean
 }
 
 export interface QuoteLine {
@@ -49,7 +93,13 @@ export interface QuoteLine {
   /** El acordado; null: el precio sin negociar. Se ignora en un regalo. */
   unitCents: number | null
   gift: boolean
+  /** Lo que Sofi puede ofrecer de su producto; sin él, todo (como antes). */
+  offers?: SofiOffers
 }
+
+/** Si Sofi puede rebajar esta línea: con «unos soles», o con la 2.ª unidad si lleva dos o más. */
+const agentMayDiscount = (line: QuoteLine) =>
+  !line.offers || line.offers.discount || (line.offers.secondUnit && line.quantity >= 2)
 
 export interface QuoteDelivery {
   listCents: number
@@ -102,6 +152,8 @@ export function quote(
   lines: QuoteLine[],
   delivery: QuoteDelivery,
   currency: string,
+  /** Lo cotiza Sofi: solo cede lo que cada producto deja ofrecer (`SofiOffers`). */
+  options: { byAgent?: boolean } = {},
 ): { ok: true; quote: Quote } | { ok: false; fields: Record<string, string> } {
   const money = (cents: number) => formatMoney(cents, currency)
   const fields: Record<string, string> = {}
@@ -115,10 +167,19 @@ export function quote(
         line.floorUnitCents === line.autoUnitCents
           ? `No se negocia: va a ${money(line.autoUnitCents)}`
           : `No puede bajar de ${money(line.floorUnitCents)}, el mínimo`
+    else if (options.byAgent && unit < line.autoUnitCents && !agentMayDiscount(line))
+      fields[`lines.${i}.unitCents`] =
+        `De este producto no se ofrece rebaja: va a ${money(line.autoUnitCents)}`
     return { ...line, unitCents: unit }
   })
   const sold = priced.filter((line) => !line.gift)
   if (sold.length === 0) fields.lines = "Un pedido no puede ser solo de regalo"
+  if (
+    options.byAgent &&
+    priced.some((line) => line.gift) &&
+    !sold.some((l) => !l.offers || l.offers.gift)
+  )
+    fields.lines = "Con estos productos no se ofrece un regalo"
   const sum = (list: typeof priced, of: (line: (typeof priced)[number]) => number) =>
     list.reduce((total, line) => total + of(line) * line.quantity, 0)
   const subtotalCents = sum(sold, (l) => l.unitCents)
@@ -142,6 +203,13 @@ export function quote(
     fields.deliveryCents = delivery.maxDiscountCents
       ? `Este envío se rebaja hasta ${money(delivery.maxDiscountCents)}`
       : "Este envío no se rebaja"
+  else if (
+    options.byAgent &&
+    !free &&
+    absorbed > 0 &&
+    !sold.some((line) => !line.offers || line.offers.delivery)
+  )
+    fields.deliveryCents = "Con estos productos no se ofrece el envío"
   const fromMargin = free ? 0 : Math.max(0, absorbed)
   const marginUsedCents = discountCents + fromMargin + giftCents
   if (Object.keys(fields).length === 0 && marginUsedCents > marginCents) {
@@ -173,4 +241,34 @@ export function quote(
       negotiated: marginUsedCents > 0,
     },
   }
+}
+
+/**
+ * Lo menos que cobraría Sofi por una línea con su envío («Probar cuánto cobraría Sofi», tablero 15
+ * del lienzo «La ficha del producto»): la misma cotización de los pedidos, con todo lo que Sofi
+ * puede ceder. Primero baja el precio hasta el mínimo, si el producto deja rebajarlo; con lo que
+ * queda del margen pone el envío, hasta lo que su forma de entrega deja rebajar. Como el margen es
+ * uno solo, ceder el envío no baja el total más allá del mínimo: solo cambia qué se cede.
+ */
+export function lowestQuote(
+  line: Omit<QuoteLine, "unitCents" | "gift">,
+  delivery: Omit<QuoteDelivery, "chargedCents">,
+  currency: string,
+) {
+  const sell = { ...line, gift: false, unitCents: null }
+  const unitCents = agentMayDiscount(sell) ? line.floorUnitCents : line.autoUnitCents
+  const left = (unitCents - line.floorUnitCents) * line.quantity
+  const free =
+    delivery.listCents > 0 &&
+    delivery.freeFromCents !== null &&
+    unitCents * line.quantity >= delivery.freeFromCents
+  const mayDeliver = !line.offers || line.offers.delivery
+  const absorbed =
+    free || !mayDeliver ? 0 : Math.min(delivery.maxDiscountCents ?? 0, left, delivery.listCents)
+  return quote(
+    [{ ...sell, unitCents }],
+    { ...delivery, chargedCents: free ? null : delivery.listCents - absorbed },
+    currency,
+    { byAgent: true },
+  )
 }

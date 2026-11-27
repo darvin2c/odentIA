@@ -225,9 +225,48 @@ export const productPatch = z
           percentOff: z.number().int().min(1, "Al menos 1 %").max(90, "Hasta 90 %"),
           startsOn: dateOnly,
           endsOn: dateOnly,
+          /**
+           * Solo para un color o una talla: la opción (su índice en `options`) y su valor. Nulo:
+           * todo el producto.
+           */
+          scope: z
+            .object({
+              optionIndex: z
+                .number()
+                .int()
+                .min(0)
+                .max(MAX_PRODUCT_OPTIONS - 1),
+              optionValue: z.string().trim().min(1).max(30),
+            })
+            .nullable()
+            .default(null),
         }),
       )
       .max(10, "Hasta 10 promociones"),
+    /** El precio para revendedoras: desde tantas unidades, cada una a tanto. Nulo: no hay. */
+    wholesale: z
+      .object({
+        minQuantity: z.number().int().min(2, "Desde 2 unidades").max(10_000),
+        unitPriceCents: money,
+      })
+      .nullable(),
+    /** Cuánto menos cuesta lo que combina con este si va junto (el combo). Nulo: sin combo. */
+    comboPercentOff: z.number().int().min(1, "Al menos 1 %").max(90, "Hasta 90 %").nullable(),
+    /** Lo que Sofi puede ofrecer de este producto (siempre del mismo margen, una sola vez). */
+    offers: z
+      .object({
+        delivery: z.boolean(),
+        discount: z.boolean(),
+        secondUnit: z.boolean(),
+        /** Lo que regala, en palabras («Medias tobilleras»); nulo: no regala. */
+        gift: z
+          .string()
+          .trim()
+          .max(80, "Máximo 80 caracteres")
+          .nullable()
+          .transform((g) => g || null),
+      })
+      .partial(),
     links: z
       .array(z.object({ productId: z.uuid(), kind: z.enum(PRODUCT_RELATIONS) }))
       .max(30, "Hasta 30 productos relacionados"),
@@ -259,8 +298,20 @@ export const productPatch = z
           path: ["promotions", i, "endsOn"],
           message: "Termina antes de empezar",
         })
+      // Dos del mismo alcance no se pisan; de alcances distintos, va la mejor para cada variante.
+      const sameScope = (other: typeof promo) =>
+        (promo.scope === null && other.scope === null) ||
+        (promo.scope !== null &&
+          other.scope !== null &&
+          promo.scope.optionIndex === other.scope.optionIndex &&
+          sameText(promo.scope.optionValue, other.scope.optionValue))
       promos.forEach((other, j) => {
-        if (j < i && promo.startsOn <= other.endsOn && other.startsOn <= promo.endsOn)
+        if (
+          j < i &&
+          sameScope(other) &&
+          promo.startsOn <= other.endsOn &&
+          other.startsOn <= promo.endsOn
+        )
           ctx.addIssue({
             code: "custom",
             path: ["promotions", i, "startsOn"],
@@ -456,12 +507,14 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
     .from(productQuantityPrice)
     .where(eq(productQuantityPrice.productId, productId))
     .orderBy(asc(productQuantityPrice.minQuantity))
-  const promotions = await tx
+  const promotionRows = await tx
     .select({
       name: productPromotion.name,
       percentOff: productPromotion.percentOff,
       startsOn: productPromotion.startsOn,
       endsOn: productPromotion.endsOn,
+      optionIndex: productPromotion.optionIndex,
+      optionValue: productPromotion.optionValue,
     })
     .from(productPromotion)
     .where(eq(productPromotion.productId, productId))
@@ -498,6 +551,16 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
     widthMm: row.packageWidthMm,
     heightMm: row.packageHeightMm,
   }
+  const promotions = promotionRows.map(({ optionIndex, optionValue, ...promo }) => ({
+    ...promo,
+    scope: optionIndex !== null && optionValue !== null ? { optionIndex, optionValue } : null,
+  }))
+  const offers = {
+    delivery: row.offerDelivery,
+    discount: row.offerDiscount,
+    secondUnit: row.offerSecondUnit,
+    gift: row.offerGift,
+  }
   return {
     id: row.id,
     name: row.name,
@@ -513,6 +576,12 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
     photos,
     quantityPrices,
     promotions,
+    wholesale:
+      row.wholesaleMinQuantity !== null && row.wholesalePriceCents !== null
+        ? { minQuantity: row.wholesaleMinQuantity, unitPriceCents: row.wholesalePriceCents }
+        : null,
+    comboPercentOff: row.comboPercentOff,
+    offers,
     links: linkRows
       .map((l) => {
         const id = l.a === productId ? l.b : l.a
@@ -556,6 +625,7 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
       rowLabel: row.rubro ? RUBROS[row.rubro].rowLabel : "Color",
       template,
       rubroData: row.rubroData,
+      offersSomething: offers.delivery || offers.discount || offers.secondUnit || !!offers.gift,
       keywordCount: row.keywords.length,
       hasPackage: pkg.weightG !== null && pkg.lengthMm !== null,
     }),
@@ -827,6 +897,39 @@ export async function updateProduct(
       patch.options !== undefined &&
       current.colorOption !== null &&
       current.colorOption >= patch.options.length
+    // El precio de revendedora queda bajo el de lista, como el precio por cantidad.
+    const wholesale =
+      patch.wholesale !== undefined
+        ? patch.wholesale
+        : current.wholesaleMinQuantity !== null && current.wholesalePriceCents !== null
+          ? {
+              minQuantity: current.wholesaleMinQuantity,
+              unitPriceCents: current.wholesalePriceCents,
+            }
+          : null
+    if (wholesale && wholesale.unitPriceCents >= listPriceCents)
+      throw new StoreError(
+        400,
+        "VALIDATION_ERROR",
+        "El precio por mayor es menor que el de lista",
+        {
+          wholesale: "El precio por mayor es menor que el de lista",
+        },
+      )
+    const options = patch.options ?? current.options
+    for (const [i, promo] of (patch.promotions ?? []).entries())
+      if (
+        promo.scope &&
+        !options[promo.scope.optionIndex]?.values.some((v) => sameText(v, promo.scope!.optionValue))
+      )
+        throw new StoreError(
+          400,
+          "VALIDATION_ERROR",
+          "Esa promoción es de un color o talla que no está",
+          {
+            [`promotions.${i}.scope`]: "Ese color o talla no está en el producto",
+          },
+        )
     const changes = {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.category !== undefined ? { category: patch.category } : {}),
@@ -848,6 +951,19 @@ export async function updateProduct(
       ...(patch.keywords !== undefined ? { keywords: patch.keywords } : {}),
       ...(patch.web?.visible !== undefined ? { webVisible: patch.web.visible } : {}),
       ...(patch.web?.slug !== undefined ? { webSlug: patch.web.slug } : {}),
+      ...(patch.wholesale !== undefined
+        ? {
+            wholesaleMinQuantity: patch.wholesale?.minQuantity ?? null,
+            wholesalePriceCents: patch.wholesale?.unitPriceCents ?? null,
+          }
+        : {}),
+      ...(patch.comboPercentOff !== undefined ? { comboPercentOff: patch.comboPercentOff } : {}),
+      ...(patch.offers?.delivery !== undefined ? { offerDelivery: patch.offers.delivery } : {}),
+      ...(patch.offers?.discount !== undefined ? { offerDiscount: patch.offers.discount } : {}),
+      ...(patch.offers?.secondUnit !== undefined
+        ? { offerSecondUnit: patch.offers.secondUnit }
+        : {}),
+      ...(patch.offers?.gift !== undefined ? { offerGift: patch.offers.gift } : {}),
       listPriceCents,
       minPriceCents,
       updatedAt: new Date(),
@@ -874,9 +990,18 @@ export async function updateProduct(
     if (patch.promotions) {
       await tx.delete(productPromotion).where(eq(productPromotion.productId, productId))
       if (patch.promotions.length > 0)
-        await tx
-          .insert(productPromotion)
-          .values(patch.promotions.map((promo) => ({ storeId, productId, ...promo })))
+        await tx.insert(productPromotion).values(
+          patch.promotions.map(({ scope, ...promo }) => ({
+            storeId,
+            productId,
+            ...promo,
+            optionIndex: scope?.optionIndex ?? null,
+            optionValue: scope
+              ? (options[scope.optionIndex]?.values.find((v) => sameText(v, scope.optionValue)) ??
+                scope.optionValue)
+              : null,
+          })),
+        )
     }
     if (patch.links) {
       const others = [...new Set(patch.links.map((l) => l.productId))].filter(
@@ -970,6 +1095,9 @@ export function sheetOf(detail: ProductDetail) {
     options: detail.options,
     quantityPrices: detail.quantityPrices,
     promotions: detail.promotions,
+    wholesale: detail.wholesale,
+    comboPercentOff: detail.comboPercentOff,
+    offers: detail.offers,
     links: detail.links.map((l) => ({ productId: l.productId, kind: l.kind })),
     rubro: detail.rubro,
     rubroData: detail.rubroData,

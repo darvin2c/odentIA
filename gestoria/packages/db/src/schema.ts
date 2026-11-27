@@ -534,10 +534,35 @@ export const product = pgTable(
     /** Si se muestra en la web de la tienda y su nombre en el link, único en la tienda. */
     webVisible: boolean("web_visible").notNull().default(true),
     webSlug: text("web_slug"),
+    /**
+     * El precio para revendedoras («por mayor»): desde tantas unidades del producto, cada una a
+     * tanto. Es un precio por cantidad más, con su nombre: no se suma con otro (va el mejor).
+     */
+    wholesaleMinQuantity: smallint("wholesale_min_quantity"),
+    wholesalePriceCents: integer("wholesale_price_cents"),
+    /** El combo: cuánto menos cuesta lo que combina con este (`product_link` «combina») si va junto. */
+    comboPercentOff: smallint("combo_percent_off"),
+    /**
+     * Lo que Sofi puede ofrecer de este producto (tablero 21 del lienzo «gestorIA como odentIA»),
+     * siempre del mismo margen y una sola vez (ADR 0224): poner el envío, unos soles menos, el
+     * precio de la 2.ª unidad y un regalo (lo que regala, en palabras; nulo: no regala).
+     */
+    offerDelivery: boolean("offer_delivery").notNull().default(true),
+    offerDiscount: boolean("offer_discount").notNull().default(true),
+    offerSecondUnit: boolean("offer_second_unit").notNull().default(false),
+    offerGift: text("offer_gift"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "product_wholesale_check",
+      sql`(${table.wholesaleMinQuantity} is null) = (${table.wholesalePriceCents} is null) and (${table.wholesaleMinQuantity} is null or (${table.wholesaleMinQuantity} between 2 and 10000 and ${table.wholesalePriceCents} > 0 and ${table.wholesalePriceCents} < ${table.listPriceCents}))`,
+    ),
+    check(
+      "product_offers_check",
+      sql`(${table.comboPercentOff} is null or ${table.comboPercentOff} between 1 and 90) and (${table.offerGift} is null or char_length(btrim(${table.offerGift})) between 1 and 80)`,
+    ),
     check(
       "product_color_option_check",
       sql`${table.colorOption} is null or ${table.colorOption} between 0 and 2`,
@@ -900,9 +925,10 @@ export const productQuantityPrice = pgTable(
 )
 
 /**
- * Una promoción con fecha: un porcentaje menos, de un día a otro (inclusive). No se suma con
- * otra ni con el precio por cantidad: va la mejor para el cliente (tablero 14). En un mismo
- * producto no se pisan.
+ * Una promoción con fecha: un porcentaje menos, de un día a otro (inclusive), para todo el
+ * producto o solo para un color o una talla (un valor de una de sus opciones). No se suma con
+ * otra ni con el precio por cantidad: va la mejor para el cliente (tablero 14). Dos del mismo
+ * alcance no se pisan.
  */
 export const productPromotion = pgTable(
   "product_promotion",
@@ -914,12 +940,19 @@ export const productPromotion = pgTable(
     percentOff: smallint("percent_off").notNull(),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on").notNull(),
+    /** Su alcance: la opción (su índice en `product.options`) y su valor; nulos: todo el producto. */
+    optionIndex: smallint("option_index"),
+    optionValue: text("option_value"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("product_promotion_name_check", sql`char_length(btrim(${table.name})) between 1 and 60`),
     check("product_promotion_percent_check", sql`${table.percentOff} between 1 and 90`),
     check("product_promotion_dates_check", sql`${table.endsOn} >= ${table.startsOn}`),
+    check(
+      "product_promotion_scope_check",
+      sql`(${table.optionIndex} is null) = (${table.optionValue} is null) and (${table.optionIndex} is null or (${table.optionIndex} between 0 and 2 and char_length(btrim(${table.optionValue})) between 1 and 30))`,
+    ),
     foreignKey({
       name: "product_promotion_product_fkey",
       columns: [table.storeId, table.productId],

@@ -5,13 +5,15 @@ import {
   product,
   productColor,
   productPhoto,
+  productPromotion,
   productVariant,
   type RubroValue,
   saleOrder,
   saleOrderLine,
   stockMovement,
+  storeDeliveryMethod,
 } from "@gestoria/db"
-import { and, eq, inArray, isNull, notInArray } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, notInArray } from "drizzle-orm"
 import { z } from "zod"
 import {
   barcodeInput,
@@ -28,7 +30,11 @@ import {
   takenSkus,
 } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
+import { deliveryListOf, storeRow, todayIn, variantPrices } from "./pedidos.js"
+import { can } from "./permisos.js"
+import { autoUnit, floorOf, lowestQuote } from "./precio.js"
 import { templateIn } from "./rubros.js"
+import { lastEntryCost } from "./stock.js"
 import { constraintError, inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -434,6 +440,28 @@ async function saveGridIn(
     })
     .where(eq(product.id, productId))
 
+  // Las promociones de un color o una talla siguen a su valor con el nombre nuevo; las de uno que
+  // se quitó ya no tienen a quién bajarle el precio y se borran.
+  const scoped = await tx
+    .select()
+    .from(productPromotion)
+    .where(and(eq(productPromotion.productId, productId), isNotNull(productPromotion.optionIndex)))
+  const promoChanges: ProductChange[] = []
+  for (const promo of scoped) {
+    const axis = reshaped ? null : (axes[promo.optionIndex!] ?? null)
+    const list = axis ? (axis === "rows" ? grid.rows : grid.columns)?.values : undefined
+    const value = list ? renamed(list, promo.optionValue!) : null
+    const index = axis === "rows" ? 0 : axis === "columns" ? (grid.rows ? 1 : 0) : null
+    if (value === null || index === null) {
+      await tx.delete(productPromotion).where(eq(productPromotion.id, promo.id))
+      promoChanges.push({ field: "promotionRemoved", from: promo.name, to: null })
+    } else if (value !== promo.optionValue || index !== promo.optionIndex)
+      await tx
+        .update(productPromotion)
+        .set({ optionIndex: index, optionValue: value })
+        .where(eq(productPromotion.id, promo.id))
+  }
+
   // Los colores: cómo se ve cada uno y su foto. Uno que cambió de nombre sigue siendo el mismo.
   if (grid.rows) {
     const looks = await tx.select().from(productColor).where(eq(productColor.productId, productId))
@@ -478,7 +506,7 @@ async function saveGridIn(
   const changes: ProductChange[] = []
   if (JSON.stringify(current.options) !== JSON.stringify(next))
     changes.push({ field: "options", from: current.options, to: next })
-  changes.push(...priceChanges)
+  changes.push(...priceChanges, ...promoChanges)
   if (entered) changes.push({ field: "stockIn", from: null, to: entered })
   if (lowered) changes.push({ field: "stockOut", from: null, to: lowered })
   if (created.length) changes.push({ field: "variantsAdded", from: null, to: created.length })
@@ -496,4 +524,109 @@ async function saveGridIn(
   )
   const detail = await detailIn(tx, storeId, productId)
   return { product: detail, entered, lowered, created: created.length, removed: gone.length }
+}
+
+/* ------------------------------------------------ «Probar cuánto cobraría Sofi» */
+
+export const simulateInput = z.object({
+  /** La variante; sin ella, la del medio del producto. */
+  variantId: z.uuid().optional(),
+  quantity: z.number().int().min(1, "Al menos 1").max(1000),
+  /** La forma de entrega; sin ella, sin envío. */
+  deliveryMethodId: z.uuid().optional(),
+  zone: z.string().trim().max(60).nullable().default(null),
+  /** Lo que cuesta el envío si «se acuerda». */
+  deliveryListCents: z.number().int().min(0).max(100_000_000).nullable().default(null),
+})
+
+/**
+ * Lo menos que cobraría Sofi por tantas unidades de una variante con una forma de entrega: el
+ * precio sin negociar y de dónde sale, el mínimo y la cotización más baja que Sofi podría dar
+ * (`lowestQuote` de `precio.ts`, la misma regla de los pedidos). Lo que se gana sale del costo del
+ * kardex y solo lo ve quien puede ver costos.
+ */
+export async function simulatePrice(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  productId: string,
+  input: z.infer<typeof simulateInput>,
+) {
+  return inStore(appDb, person, storeId, "catalogo.ver", async (tx, role) => {
+    await productRow(tx, storeId, productId)
+    const { currency } = await storeRow(tx, storeId)
+    const today = await todayIn(tx, storeId)
+    const variants = (await variantPrices(tx, storeId, today)).filter(
+      (v) => v.productId === productId,
+    )
+    const row = input.variantId
+      ? variants.find((v) => v.id === input.variantId)
+      : variants[Math.floor(variants.length / 2)]
+    if (!row) throw new StoreError(404, "NOT_FOUND", "Esa variante ya no está")
+    const fields: Record<string, string> = {}
+    let delivery = {
+      listCents: 0,
+      maxDiscountCents: null as number | null,
+      freeFromCents: null as number | null,
+    }
+    let deliveryName: string | null = null
+    if (input.deliveryMethodId) {
+      const [method] = await tx
+        .select()
+        .from(storeDeliveryMethod)
+        .where(
+          and(
+            eq(storeDeliveryMethod.id, input.deliveryMethodId),
+            eq(storeDeliveryMethod.storeId, storeId),
+          ),
+        )
+      const listCents = deliveryListOf(method, input, fields)
+      if (method) {
+        deliveryName = method.name
+        delivery = {
+          listCents,
+          maxDiscountCents: method.cost === "se_acuerda" ? null : method.maxDiscountCents,
+          freeFromCents: method.freeFromCents,
+        }
+      }
+    }
+    if (Object.keys(fields).length > 0)
+      throw new StoreError(400, "VALIDATION_ERROR", Object.values(fields)[0]!, fields)
+    const auto = autoUnit(row.pricing, input.quantity)
+    const floor = floorOf(row.pricing, auto.cents)
+    const result = lowestQuote(
+      {
+        quantity: input.quantity,
+        listUnitCents: row.pricing.listUnitCents,
+        autoUnitCents: auto.cents,
+        floorUnitCents: floor,
+        offers: row.offers,
+      },
+      delivery,
+      currency,
+    )
+    const costCents = can(role, "costos.ver") ? await lastEntryCost(tx, productId) : null
+    const lowest = result.ok ? result.quote : null
+    return {
+      variantId: row.id,
+      variantName: row.variantName,
+      quantity: input.quantity,
+      listUnitCents: row.pricing.listUnitCents,
+      autoUnitCents: auto.cents,
+      /** De dónde sale el precio sin negociar: lista, promoción, cantidad o por mayor. */
+      reason: auto.reason,
+      promotion: auto.reason === "promocion" ? row.promotion : null,
+      floorUnitCents: floor,
+      /** Se negocia: hay margen entre el precio sin negociar y el mínimo. */
+      negotiable: floor < auto.cents,
+      deliveryName,
+      deliveryListCents: delivery.listCents,
+      lowest,
+      problems: result.ok ? null : result.fields,
+      // Lo que costó y lo que se gana en el peor caso, solo con `costos.ver`.
+      costCents,
+      gainCents:
+        costCents !== null && lowest ? lowest.subtotalCents - costCents * input.quantity : null,
+    }
+  })
 }

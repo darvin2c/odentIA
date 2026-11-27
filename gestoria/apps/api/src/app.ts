@@ -89,7 +89,7 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
-import { gridInput, saveGrid } from "./ficha.js"
+import { gridInput, saveGrid, simulateInput, simulatePrice } from "./ficha.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
@@ -627,6 +627,12 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, gridInput)
     const { id, productId } = c.req.param()
     return c.json(await saveGrid(deps.appDb, c.get("person"), id, productId, input))
+  })
+  // «Probar cuánto cobraría Sofi»: la misma regla de precio de los pedidos, sin guardar nada.
+  app.post("/api/tiendas/:id/productos/:productId/simular", async (c) => {
+    const input = await bodyOf(c, simulateInput)
+    const { id, productId } = c.req.param()
+    return c.json(await simulatePrice(deps.appDb, c.get("person"), id, productId, input))
   })
   app.get("/api/tiendas/:id/preguntas", async (c) =>
     c.json(await openQuestions(deps.appDb, c.get("person"), c.req.param("id"))),
