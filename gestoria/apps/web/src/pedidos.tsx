@@ -1171,7 +1171,7 @@ function MoveToDay({ order }: { order: OrderDetail }) {
         title={`Pasar a… · pedido ${order.number}`}
         description={
           order.deliverOn
-            ? `Hoy sale ${dayName(order.deliverOn, today)}. Elige el día nuevo: nada se anula.`
+            ? `Ahora sale ${dayName(order.deliverOn, today)}. Elige el día nuevo: nada se anula.`
             : "Elige el día en que sale: nada se anula."
         }
         confirmLabel="Pasar a ese día"
@@ -1467,14 +1467,15 @@ function NewOrderSheet({
   const [customerPhone, setCustomerPhone] = useState("")
   const [channel, setChannel] = useState<OrderChannel>("otro")
   const nextKey = useRef(editing ? editing.lines.length : 1)
-  // Al cambiar, cada línea guarda su precio acordado; si se elige otra variante, toma el de hoy.
+  // Al cambiar, una línea negociada guarda su precio acordado; la que iba a su precio, o la que
+  // cambia de variante, toma el de hoy.
   const [lines, setLines] = useState<LineDraft[]>(
     editing
       ? editing.lines.map((l, i) => ({
           key: i,
           variantId: l.variantId,
           quantity: String(l.quantity),
-          price: l.gift ? "" : moneyInput(l.unitCents, cur),
+          price: l.gift || l.unitCents >= l.autoUnitCents ? "" : moneyInput(l.unitCents, cur),
           gift: l.gift,
         }))
       : [{ key: 0, variantId: "", quantity: "1", price: "", gift: false }],
@@ -1851,7 +1852,12 @@ function NewOrderSheet({
               maxLength={300}
               error={errors.address}
             />
-            <DateField label="Día de entrega" value={deliverOn} onChange={setDeliverOn} />
+            <DateField
+              label="Día de entrega"
+              value={deliverOn}
+              onChange={setDeliverOn}
+              error={errors.deliverOn}
+            />
           </div>
         </FieldSet>
 
