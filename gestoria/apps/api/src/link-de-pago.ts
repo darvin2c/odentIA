@@ -73,7 +73,7 @@ export interface LinkAdapter {
     input: { code: string; verifier: string; test: boolean },
   ): Promise<LinkTokens>
   /** Renueva las credenciales con el `refresh_token`. */
-  refresh(app: LinkApp, refreshToken: string): Promise<LinkTokens>
+  refresh(app: LinkApp, refreshToken: string, test: boolean): Promise<LinkTokens>
   /** La cuenta de esas credenciales; «sin_permiso» si el proveedor ya no las reconoce. */
   account(accessToken: string): Promise<{ id: string; label: string | null } | "sin_permiso">
   /** Crea el link. Pedirlo otra vez para el mismo pedido no crea otro distinto. */
@@ -192,13 +192,15 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
         "Mercado Pago no aceptó el permiso: pudo vencer (dura 10 minutos). Vuelve a conectar.",
       )
     },
-    async refresh(app, refreshToken) {
+    async refresh(app, refreshToken, test) {
       return tokens(
         await post("/oauth/token", {
           client_id: app.clientId,
           client_secret: app.clientSecret,
           grant_type: "refresh_token",
           refresh_token: refreshToken,
+          // En modo prueba se renueva como prueba: nunca pasa a credenciales reales sin pedirlo.
+          test_token: test ? "true" : "false",
         }),
         "Mercado Pago no renovó el permiso de la tienda.",
       )
@@ -249,8 +251,9 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
         throw providerError(
           "Mercado Pago ya no reconoce la cuenta de la tienda. Vuelve a conectarla en Cobros.",
         )
-      // Con las credenciales de prueba, el link que se paga con la tarjeta de prueba.
-      const url = options.test ? (body.sandbox_init_point ?? body.init_point) : body.init_point
+      // Con las credenciales de prueba, solo el link que se paga con la tarjeta de prueba: si no
+      // viene, no se cae al link real (cobraría dinero de verdad en una prueba).
+      const url = options.test ? body.sandbox_init_point : body.init_point
       if (!response.ok || !body.id || !url?.startsWith("https://"))
         throw providerError("Mercado Pago no creó el link. Inténtalo de nuevo.")
       return { url, ref: body.id }

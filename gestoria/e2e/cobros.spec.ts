@@ -120,8 +120,9 @@ test("Mercado Pago entrando a la cuenta: modo prueba con S/ 1, cobrar de verdad 
   await expect(page.getByText(/Por cada S\/ 100 recibes S\/ 94,70 al instante/)).toBeVisible()
 
   // El link de S/ 1 se abre aparte; se paga con la tarjeta de prueba y queda pagado solo.
-  const popup = page.waitForEvent("popup")
   await page.getByRole("button", { name: "Probar con S/ 1" }).click()
+  const popup = page.waitForEvent("popup")
+  await page.getByRole("link", { name: "Abrir el link de prueba" }).click()
   const pay = await popup
   await pay.getByRole("button", { name: "Pagar con la tarjeta de prueba" }).click()
   await expect(pay.getByText("¡Listo!")).toBeVisible()

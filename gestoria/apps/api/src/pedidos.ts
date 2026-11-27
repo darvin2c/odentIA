@@ -1077,6 +1077,8 @@ export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
   const link = order.state === "por_pagar" ? await linkStateIn(tx, storeId) : null
   const linkConnected = chargesOrders(link)
   const linkTestMode = Boolean(link?.usable && link.mode === "prueba")
+  // Conectada, pero Mercado Pago ya no deja usarla (venció o quitaron el permiso).
+  const linkBroken = Boolean(link && !link.usable)
   const balance = await balanceIn(tx, order)
   const now = Date.now()
   // Cambios y devoluciones (tablero 17): de qué pedido sale este, los que salieron de este, lo que
@@ -1150,6 +1152,7 @@ export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
     linkConnected,
     linkTestMode,
+    linkBroken,
     /** La ficha de la clienta que se ve (si quedó dentro de otra, esa otra); nula sin ficha. */
     customerId: await shownCustomerId(tx, order.customerId),
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,

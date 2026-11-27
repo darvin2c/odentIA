@@ -459,7 +459,15 @@ const connectNotice = z.object({
  * que dice: se pregunta a Mercado Pago con el token de cada tienda de esa cuenta, y solo si ya no
  * lo reconoce queda «sin permiso». Siempre responde lo mismo: el aviso no cuenta qué tiendas hay.
  */
-export async function receiveConnectNotice(ownerDb: Db, body: string, deps: LinkDeps) {
+/** Cada cuenta de Mercado Pago se mira a lo más una vez por minuto: un aviso inventado no la gasta. */
+const connectSeen = new Map<string, number>()
+
+export async function receiveConnectNotice(
+  ownerDb: Db,
+  body: string,
+  deps: LinkDeps,
+  now = Date.now(),
+) {
   const key = deps.secretsKey
   let raw: unknown
   try {
@@ -469,6 +477,10 @@ export async function receiveConnectNotice(ownerDb: Db, body: string, deps: Link
   }
   const notice = connectNotice.safeParse(raw)
   if (!key || !notice.success || notice.data.action !== "application.deauthorized") return
+  const last = connectSeen.get(notice.data.user_id)
+  if (last !== undefined && now - last < 60_000) return
+  if (connectSeen.size > 10_000) connectSeen.clear()
+  connectSeen.set(notice.data.user_id, now)
   const rows = await ownerDb
     .select()
     .from(storePaymentLink)
@@ -480,9 +492,11 @@ export async function receiveConnectNotice(ownerDb: Db, body: string, deps: Link
       ),
     )
   for (const row of rows) {
-    const seen = await deps.adapters[row.provider].account(
-      openSecret(key, row.storeId, row.accessTokenEnc),
-    )
+    // Si Mercado Pago no responde, esa tienda queda como estaba y se sigue con las demás: el aviso
+    // responde igual (no cuenta qué tiendas hay) y la próxima vez que se use el token se sabrá.
+    const seen = await deps.adapters[row.provider]
+      .account(openSecret(key, row.storeId, row.accessTokenEnc))
+      .catch(() => null)
     if (seen !== "sin_permiso") continue
     await ownerDb.transaction(async (tx) => {
       await tx
@@ -532,8 +546,9 @@ export async function renewPaymentLinks(ownerDb: Db, deps: LinkDeps, now = new D
       const tokens = await deps.adapters[row.provider].refresh(
         app,
         openSecret(key, row.storeId, row.refreshTokenEnc!),
+        row.mode === "prueba",
       )
-      await ownerDb
+      const saved = await ownerDb
         .update(storePaymentLink)
         .set({
           accessTokenEnc: sealSecret(key, row.storeId, tokens.accessToken),
@@ -550,7 +565,9 @@ export async function renewPaymentLinks(ownerDb: Db, deps: LinkDeps, now = new D
             eq(storePaymentLink.accessTokenEnc, row.accessTokenEnc),
           ),
         )
-      renewed++
+        .returning({ storeId: storePaymentLink.storeId })
+      if (saved.length > 0) renewed++
+      else failed++
     } catch {
       failed++
     }

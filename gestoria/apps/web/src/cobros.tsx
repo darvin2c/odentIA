@@ -43,7 +43,7 @@ import {
   whoConfirms,
 } from "./lib/cobros"
 import { when } from "./lib/pedidos"
-import { money, PAYMENT_TYPES, type PaymentTypeCode } from "./lib/tienda"
+import { fractionDigits, money, PAYMENT_TYPES, type PaymentTypeCode } from "./lib/tienda"
 import { shrinkPhoto } from "./piezas"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
@@ -302,6 +302,9 @@ function ActiveSwitch({
 
 /* ---------------------------------------------------------- el link: Mercado Pago */
 
+/** Lo que vale el link de prueba: una unidad de la moneda (S/ 1), como lo crea el servidor. */
+const trialCents = (currency: string) => 10 ** fractionDigits(currency)
+
 function feeText(currency: string): string | null {
   if (currency !== MERCADO_PAGO_FEE.currency) return null
   return `Por cada ${money(10000, currency)} recibes ${money(netOf(10000), currency)} al instante · ${String(MERCADO_PAGO_FEE.percent).replace(".", ",")} % + ${money(MERCADO_PAGO_FEE.fixedCents, currency)} + IGV, la comisión que publica Mercado Pago`
@@ -320,10 +323,12 @@ function LinkCard({
   const status = useQuery({
     queryKey: LINK_KEY(storeId),
     queryFn: () => api<LinkStatus>(`/api/tiendas/${storeId}/link-de-pago`),
-    // Mientras espera el pago de prueba, mira cada 5 segundos si Mercado Pago avisó.
+    // Mientras espera el pago de prueba (de la última hora), mira cada 5 segundos si Mercado Pago
+    // avisó.
     refetchInterval: (query) => {
       const trial = query.state.data?.trial
-      return trial && !trial.paidAt ? 5000 : false
+      const recent = trial && Date.now() - new Date(trial.createdAt).getTime() < 3_600_000
+      return recent && !trial.paidAt ? 5000 : false
     },
   })
   const connect = useMutation({
@@ -343,10 +348,8 @@ function LinkCard({
         `/api/tiendas/${storeId}/link-de-pago/prueba`,
         { method: "POST" },
       ),
-    onSuccess: async ({ trial }) => {
-      await queryClient.invalidateQueries({ queryKey: LINK_KEY(storeId) })
-      window.open(trial.url, "_blank", "noopener")
-    },
+    // El link se abre con «Abrir el link de prueba»: abrirlo solo, tras esperar, lo bloquea el navegador.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINK_KEY(storeId) }),
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const [removing, setRemoving] = useState(false)
@@ -402,7 +405,8 @@ function LinkCard({
         )}
         <p className="text-xs text-muted-foreground">
           Entras con tu cuenta y das permiso para crear links de pago y ver si se pagaron. No copias
-          ninguna clave. Empieza en modo prueba, con un link de {money(100, currency)}.
+          ninguna clave. Empieza en modo prueba, con un link de{" "}
+          {money(trialCents(currency), currency)}.
         </p>
       </div>
     )
@@ -455,7 +459,9 @@ function LinkCard({
                     disabled={trial.isPending}
                     onClick={() => trial.mutate()}
                   >
-                    {trial.isPending ? "Creando el link…" : `Probar con ${money(100, currency)}`}
+                    {trial.isPending
+                      ? "Creando el link…"
+                      : `Probar con ${money(trialCents(currency), currency)}`}
                   </Button>
                   <Button disabled={connect.isPending} onClick={() => connect.mutate("real")}>
                     Cobrar de verdad
@@ -726,18 +732,22 @@ function PaymentForm({
 }) {
   const queryClient = useQueryClient()
   const [removing, setRemoving] = useState(false)
+  // Si se creó y falló después (subir el QR), el reintento cambia la misma: no crea otra.
+  const created = useRef<string | null>(null)
   const save = useMutation({
     mutationFn: async (value: z.infer<typeof formSchema>) => {
       const body = bodyOf(value)
-      const saved = method
-        ? await api<{ method: PaymentMethod }>(
-            `/api/tiendas/${storeId}/medios-de-pago/${method.id}`,
-            { method: "PATCH", body },
-          )
+      const id = method?.id ?? created.current
+      const saved = id
+        ? await api<{ method: PaymentMethod }>(`/api/tiendas/${storeId}/medios-de-pago/${id}`, {
+            method: "PATCH",
+            body,
+          })
         : await api<{ method: PaymentMethod }>(`/api/tiendas/${storeId}/medios-de-pago`, {
             method: "POST",
             body,
           })
+      created.current = saved.method.id
       const wallet = value.kind === "yape" || value.kind === "plin"
       const qrPath = `/api/tiendas/${storeId}/medios-de-pago/${saved.method.id}/qr`
       if (wallet && value.qr && value.qr !== "quitar")
@@ -1076,6 +1086,7 @@ function QrPicker({
     }
     try {
       const blob = file.size > 1_000_000 ? await shrinkPhoto(file) : file
+      if (value && value !== "quitar") URL.revokeObjectURL(value.url)
       onChange({ blob, url: URL.createObjectURL(blob) })
     } catch (error) {
       setProblem(error instanceof Error ? error.message : "No se pudo abrir esa imagen.")
@@ -1089,6 +1100,8 @@ function QrPicker({
   takeRef.current = take
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest("input, textarea, [contenteditable='true']")) return
       const file = Array.from(event.clipboardData?.files ?? []).find((f) =>
         f.type.startsWith("image/"),
       )

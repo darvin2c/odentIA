@@ -906,11 +906,13 @@ function CollectActions({ order }: { order: OrderDetail }) {
       </div>
       {!order.linkConnected ? (
         <p className="text-xs text-muted-foreground">
-          {order.linkTestMode
-            ? "Mercado Pago está en modo prueba: con dinero de prueba no se cobra un pedido. Se pasa a «Cobrar de verdad» en Configuración › Cobros."
-            : store.permissions.includes("configuracion")
-              ? "Para cobrar con link de pago, conecta Mercado Pago en Configuración › Cobros."
-              : "El link de pago se usa cuando el Dueño lo conecte."}
+          {order.linkBroken
+            ? "Mercado Pago ya no deja cobrar con la cuenta de la tienda: hay que volver a conectarla en Configuración › Cobros."
+            : order.linkTestMode
+              ? "Mercado Pago está en modo prueba: con dinero de prueba no se cobra un pedido. Se pasa a «Cobrar de verdad» en Configuración › Cobros."
+              : store.permissions.includes("configuracion")
+                ? "Para cobrar con link de pago, conecta Mercado Pago en Configuración › Cobros."
+                : "El link de pago se usa cuando el Dueño lo conecte."}
         </p>
       ) : null}
       {link.isError ? (
