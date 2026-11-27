@@ -902,7 +902,9 @@ describe("la tienda de ejemplo", () => {
     expect(overview.sofi).toEqual({ enabled: true, tried: false })
     expect(overview.team.supportAsks).toBe(1)
     expect(overview.catalog.withStock).toBeGreaterThan(0)
-    const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {
+    const help = (await (
+      await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda/casos`)
+    ).json()) as {
       questions: { question: string; replies: unknown[] }[]
     }
     expect(help.questions).toEqual([
