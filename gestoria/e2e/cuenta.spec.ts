@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, CLAVE, CODIGO_TOTP, PEOPLE, STORE_ID, type Who } from "./entorno"
+import { ACCOUNT, CLAVE, CODIGO_TOTP, PEOPLE, STORE_ID, surface, type Who } from "./entorno"
 
 /**
  * La cuenta dentro de gestorIA (ADR 0218): desde el menú de la persona en la tienda, Mi perfil con
@@ -56,7 +56,7 @@ test("desde la tienda: cambiar la contraseña y activar los dos pasos sin salir 
 
   // Mi perfil en gestorIA, con el cajón de la contraseña abierto y el camino de vuelta.
   await expect(page).toHaveURL(/\/cuenta\?/)
-  const drawer = page.getByRole("dialog", { name: "Cambiar contraseña" })
+  const drawer = surface(page, "Cambiar contraseña")
   await expect(drawer).toBeVisible()
   await expect(drawer).toContainText("Es la de tu cuenta: vale para todas tus apps.")
   await shot(page, "cuenta-contrasena-escritorio")
@@ -81,14 +81,14 @@ test("desde la tienda: cambiar la contraseña y activar los dos pasos sin salir 
 
   // Activar los dos pasos: la contraseña, escanear y el código, y guardar los códigos.
   await page.getByRole("link", { name: "Activar" }).click()
-  const setup = page.getByRole("dialog", { name: "Activar la verificación en dos pasos" })
+  const setup = surface(page, "Activar la verificación en dos pasos")
   await setup.getByLabel("Tu contraseña").fill(CLAVE)
   await setup.getByRole("button", { name: "Continuar" }).click()
   await expect(
     setup.getByRole("img", { name: "Código QR para agregar gestorIA a tu app" }),
   ).toBeVisible()
   await setup.getByLabel("Escribe el código de 6 dígitos que muestra la app").fill(CODIGO_TOTP)
-  const codes = page.getByRole("dialog", { name: "Guarda tus códigos de respaldo" })
+  const codes = surface(page, "Guarda tus códigos de respaldo")
   await expect(codes.getByRole("list", { name: "Códigos de respaldo" })).toContainText(
     "aaaa1-bbbb1",
   )

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Inicio y los primeros pasos en un navegador (lienzo «gestorIA como odentIA», tableros 5 y 16),
@@ -262,7 +262,7 @@ test.describe("«Te toca» en Calzados Rosa", () => {
 
     // «Ver y confirmar» abre el pedido con su captura: nunca se confirma a ciegas.
     await camila.getByRole("button", { name: "Ver y confirmar" }).click()
-    const sheet = page.getByRole("dialog", { name: /· Camila Ríos$/ })
+    const sheet = surface(page, /· Camila Ríos$/)
     await expect(sheet.getByRole("img", { name: "Captura del pago" })).toBeVisible()
     await shot(page, "inicio-ver-y-confirmar-escritorio")
     await sheet.getByRole("button", { name: "Confirmar pago" }).click()
@@ -273,9 +273,7 @@ test.describe("«Te toca» en Calzados Rosa", () => {
 
     // «Pasar a…» desde Inicio: el mismo diálogo de Despachos y Pedidos, con el pedido abierto.
     await martin.getByRole("button", { name: "Pasar a…" }).click()
-    await expect(
-      page.getByRole("alertdialog", { name: /^Pasar a… · \d+ Martín Vega/ }),
-    ).toBeVisible()
+    await expect(surface(page, /^Pasar a… · \d+ Martín Vega/)).toBeVisible()
     await page.keyboard.press("Escape")
 
     await page.setViewportSize(PHONE)

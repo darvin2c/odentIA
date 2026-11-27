@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Despachos y Caja en un navegador (lienzo «gestorIA como odentIA», tableros 6, 17, 23 y 24),
@@ -230,18 +230,15 @@ test("«Pasar a…» con el teclado, a 390 px: Valeria pasa a mañana, de 9 a 13
   const item = page.getByRole("menuitem", { name: "Pasar a…" })
   await expect(item).toBeVisible()
   await item.press("Enter")
-  const move = page.getByRole("alertdialog")
+  const move = surface(page, /^Pasar a… · /)
   await expect(move).toContainText("Valeria Soto")
   await move.getByRole("button", { name: "Mañana", exact: true }).press("Enter")
   await expect(move.getByRole("button", { name: "Mañana", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
-  await move.getByRole("button", { name: "9–13 h", exact: true }).press("Enter")
-  await expect(move.getByRole("button", { name: "9–13 h", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await move.getByRole("radio", { name: "9–13 h", exact: true }).press("Space")
+  await expect(move.getByRole("radio", { name: "9–13 h", exact: true })).toBeChecked()
   await noSideScroll(page)
   await shot(page, "despachos-pasar-a-telefono")
   await move.getByRole("button", { name: "Pasar a mañana, 9–13 h" }).press("Enter")
@@ -269,20 +266,21 @@ test("«Salió», «Cobrar y entregar» y «Recibí» en Caja, con la diferencia
   await page.getByRole("button", { name: "Día siguiente" }).click()
   const valeria = rowOf(page, orders.valeria.number)
   await valeria.getByRole("button", { name: "Salió" }).click()
-  const ship = page.getByRole("alertdialog")
+  const ship = surface(page, `El pedido ${orders.valeria.number} salió`)
   await expect(ship).toContainText(`El pedido ${orders.valeria.number} salió`)
   await ship.getByRole("button", { name: "Salió" }).click()
   await expect(ship).toHaveCount(0)
   await expect(valeria.getByText("En camino")).toBeVisible()
   await valeria.getByRole("button", { name: "Cobrar y entregar" }).click()
-  const deliver = page.getByRole("alertdialog")
-  await expect(deliver).toContainText("Cobrar S/ 169 y entregar")
+  const deliver = surface(page, "Cobrar S/ 169 y entregar")
+  await expect(deliver).toBeVisible()
   await expect(deliver.getByLabel("Cobraste")).toHaveValue("169")
   await expect(deliver.getByText("Suma S/ 169: es lo que falta.")).toBeVisible()
   // Menos de lo que falta no se entrega.
   await deliver.getByLabel("Cobraste").fill("150")
   await expect(deliver.getByText("Faltan S/ 19: sin todo el pago no se entrega.")).toBeVisible()
-  await expect(deliver.getByRole("button", { name: "Cobré S/ 150 y entregué" })).toBeDisabled()
+  await deliver.getByRole("button", { name: "Cobré S/ 150 y entregué" }).click()
+  await expect(deliver.getByText("Lo cobrado tiene que sumar S/ 169.")).toBeVisible()
   await deliver.getByLabel("Cobraste").fill("169")
   await shot(page, "despachos-cobrar-escritorio")
   await deliver.getByRole("button", { name: "Cobré S/ 169 y entregué" }).click()
@@ -297,11 +295,13 @@ test("«Salió», «Cobrar y entregar» y «Recibí» en Caja, con la diferencia
   await noSideScroll(page)
   await shot(page, "caja-por-recibir-telefono")
   await kevin.getByRole("button", { name: "Recibí S/ 169" }).click()
-  const receive = page.getByRole("alertdialog")
+  // Lo recibido no se deshace: siempre en un cajón aparte, nunca en la columna.
+  const receive = page.getByRole("dialog", { name: "Recibí de Kevin" })
   await expect(receive.getByLabel("¿Cuánto recibiste?")).toHaveValue("169")
   await receive.getByLabel("¿Cuánto recibiste?").fill("160")
   await expect(receive.getByText("Faltan S/ 9.")).toBeVisible()
-  await expect(receive.getByRole("button", { name: "Recibí S/ 160" })).toBeDisabled()
+  await receive.getByRole("button", { name: "Recibí S/ 160" }).click()
+  await expect(receive.getByText("Escribe por qué no cuadra")).toBeVisible()
   await receive.getByLabel("¿Por qué no cuadra?").fill("Faltó el vuelto")
   await noSideScroll(page)
   await shot(page, "caja-recibi-telefono")
@@ -323,7 +323,10 @@ test("el Yape de Ana se confirma en el mismo paso de entregar", async ({ page })
   const ana = rowOf(page, orders.ana.number)
   await ana.getByRole("button", { name: `Más acciones del pedido ${orders.ana.number}` }).click()
   await page.getByRole("menuitem", { name: "Entregado", exact: true }).click()
-  const deliver = page.getByRole("alertdialog")
+  const deliver = surface(
+    page,
+    new RegExp(`^(Antes de entregar · ${orders.ana.number}|El pedido ${orders.ana.number} llegó)$`),
+  )
   await expect(deliver).toContainText(`Antes de entregar · ${orders.ana.number}`)
   await expect(deliver).toContainText("Yape a la tienda · S/ 169")
   await expect(deliver.getByRole("button", { name: "Entregado" })).toBeDisabled()
@@ -350,7 +353,7 @@ test("«Avisar» abre el WhatsApp con el mensaje y queda «enviado por usted»",
   await page.goto(`${BASE}/despachos`)
   const jorge = rowOf(page, orders.jorge.number)
   await jorge.getByRole("button", { name: "Avisar" }).click()
-  const notice = page.getByRole("alertdialog")
+  const notice = surface(page, "Avisar a Jorge Salinas")
   const text = notice.getByLabel("El mensaje")
   await expect(text).toHaveValue(
     // El monto lleva el espacio que no se corta de Intl, entre «S/» y la cifra.
@@ -371,7 +374,7 @@ test("«Avisar» abre el WhatsApp con el mensaje y queda «enviado por usted»",
     .getByRole("button", { name: `Más acciones del pedido ${orders.jorge.number}` })
     .click()
   await page.getByRole("menuitem", { name: "Abrir el pedido" }).click()
-  const sheet = page.getByRole("dialog", { name: `Pedido ${orders.jorge.number} · Jorge Salinas` })
+  const sheet = surface(page, `Pedido ${orders.jorge.number} · Jorge Salinas`)
   await expect(sheet).toContainText("enviado por usted desde su WhatsApp")
   await expect(sheet).toContainText("Lo lleva")
   await noSideScroll(page)

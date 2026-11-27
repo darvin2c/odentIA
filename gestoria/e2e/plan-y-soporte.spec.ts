@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, type Who } from "./entorno"
+import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, surface, type Who } from "./entorno"
 
 /**
  * Lo nuevo de gestorIA en un navegador (ADR 0214), contra su servidor y su base de verdad:
@@ -71,7 +71,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   await page.keyboard.press("Escape")
   // «Pedir ayuda» de la cabecera se abre ahí mismo, con la pantalla y el rol de quien pregunta.
   await page.getByRole("button", { name: "Pedir ayuda" }).click()
-  const asking = page.getByRole("dialog", { name: "Pedir ayuda" })
+  const asking = surface(page, "Pedir ayuda")
   await expect(asking.getByLabel("¿Qué pasó?")).toBeFocused()
   await expect(asking.getByText(/\(Pedidos · Dueño · Calzados Rosa\)/)).toBeVisible()
   await page.keyboard.press("Escape")
@@ -86,7 +86,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   const upload = page.getByRole("button", { name: "Subir comprobante" })
   await upload.focus()
   await page.keyboard.press("Enter")
-  const sheet = page.getByRole("dialog", { name: "Subir comprobante" })
+  const sheet = surface(page, "Subir comprobante")
   await expect(sheet).toBeVisible()
   await expect(sheet.getByText("Yapea al 999 000 000 y sube la captura.")).toBeVisible()
   // Dice ser un PDF y no lo es: el servidor mira el contenido.
@@ -116,7 +116,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   await noSideScroll(page)
   await shot(page, "plan-telefono")
   await page.getByRole("button", { name: "Subir comprobante" }).click()
-  await expect(page.getByRole("dialog", { name: "Subir comprobante" })).toBeVisible()
+  await expect(surface(page, "Subir comprobante")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "comprobante-hoja-telefono")
 })
@@ -125,7 +125,11 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/catalogo`)
-  await expect(page.getByText("Ana de Soporte pide mirar tu tienda 30 minutos")).toBeVisible()
+  // El pedido sale una sola vez, en la franja de arriba, y se responde en Equipo y repartidores.
+  const strip = page.getByRole("region", { name: "Soporte de gestorIA" })
+  await expect(strip.getByText("Ana de Soporte pide mirar tu tienda 30 minutos")).toBeVisible()
+  await strip.getByRole("link", { name: "Revisar" }).click()
+  await expect(page).toHaveURL(/\/configuracion\/equipo$/)
   // La caja dice qué verá, desde cuándo corren los minutos y quién puede pedirlo.
   // (El mismo texto va plegado para el celular: se mira el que se ve en escritorio.)
   await expect(
@@ -229,9 +233,9 @@ test("la Ayuda dice cómo hacer cada tarea y quién puede, y «Pedir ayuda» que
   await page.goto(`${BASE}/pedidos`)
   // Lo escrito sin enviar se queda: cerrar no pregunta, y sigue ahí al abrirlo desde la Ayuda.
   await page.getByRole("button", { name: "Pedir ayuda" }).click()
-  await page.getByRole("dialog", { name: "Pedir ayuda" }).getByLabel("¿Qué pasó?").fill("Lo que")
+  await surface(page, "Pedir ayuda").getByLabel("¿Qué pasó?").fill("Lo que")
   await page.keyboard.press("Escape")
-  await expect(page.getByRole("dialog", { name: "Pedir ayuda" })).toHaveCount(0)
+  await expect(surface(page, "Pedir ayuda")).toHaveCount(0)
   // Al pie del menú, para todos.
   await page.getByRole("link", { name: "Ayuda", exact: true }).click()
   await expect(page).toHaveURL(/\/ayuda$/)
@@ -249,7 +253,7 @@ test("la Ayuda dice cómo hacer cada tarea y quién puede, y «Pedir ayuda» que
 
   // «¿No era esto?» abre «Pedir ayuda» desde la Ayuda; Enter envía.
   await answer.getByRole("button", { name: "¿No era esto? Pedir ayuda" }).click()
-  const asking = page.getByRole("dialog", { name: "Pedir ayuda" })
+  const asking = surface(page, "Pedir ayuda")
   await expect(asking.getByText(/\(Ayuda · Dueño · Calzados Rosa\)/)).toBeVisible()
   await expect(asking.getByLabel("¿Qué pasó?")).toHaveValue("Lo que")
   await asking.getByLabel("¿Qué pasó?").fill("No encuentro dónde cambiar el nombre de la tienda")
