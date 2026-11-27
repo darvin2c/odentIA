@@ -1,4 +1,5 @@
 import type { Balance, OrderChannel, OrderState } from "./pedidos"
+import type { ConsentNote } from "./perfil"
 import type { AgentStop } from "./plan"
 import type { PaymentCollection } from "./tienda"
 
@@ -43,6 +44,11 @@ export interface ConversationView {
   waitingReason: string | null
   costMicros: number
   messages: ConversationMessage[]
+  /**
+   * Lo que Sofi anotó en la ficha desde esta conversación (el permiso o la baja, ADR 0240), para
+   * decirlo en el hilo en su momento. Opcional: lo suma el servidor.
+   */
+  consentNotes?: ConsentNote[]
   orders: {
     id: string
     number: string
