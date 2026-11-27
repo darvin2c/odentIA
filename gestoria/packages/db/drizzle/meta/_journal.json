@@ -239,6 +239,20 @@
       "when": 1795805419993,
       "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795809046528,
+      "tag": "0041_equipo_y_repartidores",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795809055478,
+      "tag": "0042_reglas_equipo_y_repartidores",
+      "breakpoints": true
     }
   ]
 }

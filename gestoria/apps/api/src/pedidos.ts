@@ -2278,6 +2278,42 @@ export async function assignCourier(
 }
 
 /**
+ * Cuando la tienda saca a un repartidor (Equipo y repartidores, tablero 9): lo que todavía no salió
+ * queda «sin repartidor» en Despachos, cada pedido con su línea en la historia. Lo que ya va en
+ * camino sigue con él: lo lleva encima y lo que cobre en la puerta queda a su nombre. Devuelve
+ * cuántos pedidos quedaron sin repartidor.
+ */
+export async function unassignCourierIn(
+  tx: Db,
+  storeId: string,
+  courierId: string,
+  actorUserId: string,
+): Promise<number> {
+  const orders = await tx
+    .update(saleOrder)
+    .set({ courierId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(saleOrder.storeId, storeId),
+        eq(saleOrder.courierId, courierId),
+        inArray(saleOrder.state, NOT_SHIPPED),
+      ),
+    )
+    .returning({ id: saleOrder.id })
+  if (orders.length > 0)
+    await tx.insert(orderEvent).values(
+      orders.map((order) => ({
+        storeId,
+        orderId: order.id,
+        actorUserId,
+        action: "repartidor" as const,
+        detail: { repartidor: "sin repartidor" },
+      })),
+    )
+  return orders.length
+}
+
+/**
  * La agencia y el número de envío de un pedido por agencia (tablero 17), al salir o después: el
  * número llega cuando la agencia lo da.
  */
