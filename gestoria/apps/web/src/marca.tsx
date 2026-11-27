@@ -368,7 +368,7 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
               noValidate
               onSubmit={onSubmit}
               aria-label="Tu marca"
-              className="grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_22rem]"
+              className="grid items-start gap-6 @min-[46rem]:grid-cols-[minmax(0,1fr)_22rem]"
             >
               <DraftGuard dirty={dirty && canEdit} />
               <div className="flex min-w-0 flex-col gap-5">
@@ -464,7 +464,7 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
                 <Button
                   type="button"
                   variant="outline"
-                  className="min-h-11 @4xl:hidden"
+                  className="min-h-11 @min-[46rem]:hidden"
                   onClick={() => setPreviewOpen(true)}
                 >
                   <Eye aria-hidden />
@@ -510,7 +510,7 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
 
               <aside
                 aria-label="Así lo ve tu clienta"
-                className="sticky top-14 hidden flex-col gap-3 @4xl:flex"
+                className="sticky top-14 hidden flex-col gap-3 @min-[46rem]:flex"
               >
                 {preview}
               </aside>

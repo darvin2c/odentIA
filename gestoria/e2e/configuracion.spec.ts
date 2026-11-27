@@ -200,7 +200,7 @@ test("Tu marca: se suelta o se pega el logo, sus colores se eligen con un toque 
     .getByRole("button", { name: /^Rosa #/ })
     .first()
     .click()
-  await expect(page.getByText("Se lee bien")).toBeVisible()
+  await expect(page.getByText("Se lee bien", { exact: true })).toBeVisible()
   // Pegar con Ctrl + V también vale: una imagen chica avisa que se verá borrosa, y deja seguir.
   await page.evaluate(async () => {
     const canvas = document.createElement("canvas")
@@ -241,9 +241,8 @@ test("Tu marca: se suelta o se pega el logo, sus colores se eligen con un toque 
   await expect(preview.getByText("https://calzados-rosa.gestoria24.com")).toBeVisible()
   // Salir antes de guardar pregunta.
   await page.getByRole("link", { name: "Datos de la tienda" }).first().click()
-  const unsaved = page.getByRole("alertdialog")
-  await expect(unsaved).toBeVisible()
-  await unsaved.getByRole("button").first().click()
+  const unsaved = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
+  await unsaved.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(page).toHaveURL(/\/configuracion\/marca$/)
   await noSideScroll(page)
   await shot(page, "tu-marca-escritorio")
