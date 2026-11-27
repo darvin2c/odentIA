@@ -53,11 +53,14 @@ export function ReportsPage() {
             <KpiCard
               title="Vendido y cobrado"
               value={m(r.sold.cents)}
-              description={
+              description={[
                 r.sold.orders
                   ? `${r.sold.orders} ${r.sold.orders === 1 ? "pedido" : "pedidos"} · ticket ${m(r.sold.ticketCents)}`
-                  : "Sin pagos confirmados"
-              }
+                  : "Sin pagos confirmados",
+                r.sold.refundedCents > 0 ? `ya resta ${m(r.sold.refundedCents)} devueltos` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
             <KpiCard
               title="Falta cobrar"
@@ -126,7 +129,7 @@ export function ReportsPage() {
               <KpiCard
                 title="Pedidos que armó"
                 value={m(r.agent.cents)}
-                description={`${r.agent.orders} ${r.agent.orders === 1 ? "pedido" : "pedidos"} sin anular`}
+                description={`${r.agent.orders} ${r.agent.orders === 1 ? "pedido" : "pedidos"} sin anular${r.agent.returnedCents > 0 ? `; volvieron ${m(r.agent.returnedCents)} en cambios y devoluciones` : ""}`}
               />
               <KpiCard
                 title="Margen que usó"

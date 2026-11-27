@@ -24,8 +24,9 @@ export type OrderFilter =
 
 /**
  * El saldo de un pedido, como lo calcula el servidor en un solo lugar: lo cobrado, lo que espera a
- * una persona y lo que falta cobrar (total − confirmado − por confirmar). «Pagado» es no deber
- * nada con todo confirmado. La pantalla no lo recalcula.
+ * una persona, lo devuelto y lo que falta cobrar (total − pagado − por confirmar). «Pagado» es no
+ * deber nada con todo confirmado; lo que sobra es lo que falta devolver. La pantalla no lo
+ * recalcula.
  */
 export interface Balance {
   confirmedCents: number
@@ -33,6 +34,8 @@ export interface Balance {
   dueCents: number
   overCents: number
   paid: boolean
+  /** Lo que la tienda ya devolvió (tablero 17). */
+  refundedCents: number
 }
 
 export interface OrderRow {
@@ -56,6 +59,8 @@ export interface OrderRow {
   bySofi: boolean
   balance: Balance
   paid: boolean
+  /** «Cambio del 0147»: el número del pedido entregado del que sale; null si no es un cambio. */
+  exchangeOf: string | null
 }
 
 export interface OrderList {
@@ -117,6 +122,8 @@ export interface OrderEvent {
     | "no_entregado"
     | "reprogramado"
     | "pago_deshecho"
+    | "cambio"
+    | "dinero_devuelto"
   detail: Record<string, unknown>
   createdAt: string
   actorName: string | null
@@ -171,6 +178,73 @@ export interface OrderDetail {
   lines: OrderLine[]
   payments: OrderPayment[]
   events: OrderEvent[]
+  /** «Cambio del 0147»: el pedido entregado del que sale este cambio. */
+  exchangeOf: { id: string; number: string } | null
+  /** «Cambio en el 0171»: los cambios que salieron de este pedido. */
+  exchanges: { id: string; number: string; state: OrderState }[]
+  /** Lo que vuelve en este cambio, a lo que se pagó, con su motivo. */
+  returns: OrderReturn[]
+  /** Lo que vuelve, a lo que se pagó: se descuenta del total. */
+  returnCreditCents: number
+  /** Lo que todavía puede volver de este pedido entregado, por variante. */
+  returnable: { variantId: string; quantity: number }[]
+  /** El dinero que la tienda devolvió de lo que sobra. */
+  refunds: OrderRefund[]
+}
+
+export interface OrderReturn {
+  variantId: string
+  productName: string
+  variantName: string
+  sku: string
+  quantity: number
+  unitCents: number
+  reason: string
+  /** Cuándo volvió a la tienda; null mientras no llega. */
+  returnedAt: string | null
+}
+
+export interface OrderRefund {
+  id: string
+  amountCents: number
+  methodName: string
+  createdAt: string
+  createdByName: string | null
+}
+
+/**
+ * El resumen de un cambio antes de crearlo, con las cifras que guardaría el servidor: lo que vuelve,
+ * lo que se lleva, el envío, lo que falta cobrar o lo que la tienda devuelve.
+ */
+export interface ExchangeSummary {
+  backCents: number
+  takesCents: number
+  deliveryCents: number
+  deliveryListCents: number
+  totalCents: number
+  dueCents: number
+  refundCents: number
+  paymentName: string
+  payOnDelivery: boolean
+  takes: { variantId: string; unitCents: number; stock: number; short: boolean }[]
+}
+
+/** Por qué vuelve (tablero 17); si es otro, se escribe. */
+export const RETURN_REASONS = [
+  "Le quedó chica",
+  "Le quedó grande",
+  "No le gustó",
+  "Llegó fallado",
+] as const
+
+/** «Sandalia beige 38», «Medias × 2». */
+export function itemText(line: { productName: string; variantName: string; quantity: number }) {
+  return `${line.productName}${line.variantName === "Única" ? "" : ` ${line.variantName}`}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`
+}
+
+/** El enlace de WhatsApp con el aviso ya escrito (decisión 4): lo envía la persona. */
+export function whatsappWithText(link: string | null, text: string): string | null {
+  return link ? `${link}?text=${encodeURIComponent(text)}` : null
 }
 
 export interface Quote {
@@ -250,9 +324,16 @@ export function stateName(order: {
   state: OrderState
   paymentCollection: PaymentCollection
   balance: Balance
+  /** Bajo cero: un cambio que cuesta menos o una devolución (tablero 17). */
+  totalCents?: number
 }): string {
   const { balance } = order
   const nothingYet = balance.confirmedCents + balance.pendingCents === 0
+  // Lo que la tienda devuelve de un cambio no es «Pagado»: falta devolverlo.
+  const toRefund = (order.totalCents ?? 0) < 0 && balance.overCents > 0
+  if (toRefund && (order.state === "por_salir" || order.state === "en_camino"))
+    return order.state === "por_salir" ? "Por salir · falta devolver" : "En camino · falta devolver"
+  if (toRefund && order.state === "entregado") return "Entregado · falta devolver"
   switch (order.state) {
     case "por_pagar":
       return "Por pagar"

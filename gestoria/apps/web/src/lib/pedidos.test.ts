@@ -7,11 +7,13 @@ import { describe, expect, it } from "vitest"
 import {
   type Balance,
   dayName,
+  itemText,
   missedReason,
   nextDay,
   type OrderEvent,
   stateName,
   storeToday,
+  whatsappWithText,
 } from "./pedidos"
 
 const balance = (over: Partial<Balance>): Balance => ({
@@ -20,6 +22,7 @@ const balance = (over: Partial<Balance>): Balance => ({
   dueCents: 11700,
   overCents: 0,
   paid: false,
+  refundedCents: 0,
   ...over,
 })
 
@@ -94,5 +97,49 @@ describe("volvió sin entregar (tablero 6)", () => {
     expect(nextDay("2026-11-26")).toBe("2026-11-27")
     expect(nextDay("2026-11-30")).toBe("2026-12-01")
     expect(nextDay("2026-12-31")).toBe("2027-01-01")
+  })
+})
+
+describe("los cambios y devoluciones (tablero 17)", () => {
+  it("una devolución por salir no es «Pagado»: falta devolver", () => {
+    const owed = balance({ dueCents: 0, overCents: 12900, paid: true })
+    expect(
+      stateName({
+        state: "por_salir",
+        paymentCollection: "comprobante",
+        balance: owed,
+        totalCents: -12900,
+      }),
+    ).toBe("Por salir · falta devolver")
+    expect(
+      stateName({
+        state: "entregado",
+        paymentCollection: "comprobante",
+        balance: owed,
+        totalCents: -12900,
+      }),
+    ).toBe("Entregado · falta devolver")
+    const done = balance({ dueCents: 0, overCents: 0, refundedCents: 12900, paid: true })
+    expect(
+      stateName({
+        state: "entregado",
+        paymentCollection: "comprobante",
+        balance: done,
+        totalCents: -12900,
+      }),
+    ).toBe("Entregado")
+  })
+
+  it("lo que vuelve se nombra como en el pedido, y el aviso va escrito en el enlace", () => {
+    expect(itemText({ productName: "Sandalia beige", variantName: "38", quantity: 1 })).toBe(
+      "Sandalia beige 38",
+    )
+    expect(itemText({ productName: "Medias", variantName: "Única", quantity: 2 })).toBe(
+      "Medias × 2",
+    )
+    expect(whatsappWithText("https://wa.me/51987654321", "Hola Andrea, ¿todo bien?")).toBe(
+      "https://wa.me/51987654321?text=Hola%20Andrea%2C%20%C2%BFtodo%20bien%3F",
+    )
+    expect(whatsappWithText(null, "Hola")).toBeNull()
   })
 })
