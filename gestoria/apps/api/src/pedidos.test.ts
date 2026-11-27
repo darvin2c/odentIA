@@ -1430,3 +1430,83 @@ describe("cambiar o devolver después de entregar (Andrea, tablero 17)", () => {
     expect([403, 404]).toContain(other.status)
   })
 })
+
+describe("el envío por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7)", () => {
+  it("la plantilla de Lima la usa quien configura; el distrito dice la zona y su precio", async () => {
+    const denied = await call("lucia", "POST", `${base}/entregas/plantilla-lima`, {
+      shipFrom: "150115",
+    })
+    expect(denied.status).toBe(403)
+    const used = await call("rosa", "POST", `${base}/entregas/plantilla-lima`, {
+      shipFrom: "150115",
+    })
+    expect(used.status).toBe(200)
+    expect(used.json.method.id).toBe(ids.reparto)
+    const setup = await call("lucia", "GET", `${base}/entregas`)
+    expect(setup.json.shipFrom).toBe("150115")
+    const zones = setup.json.deliveries.find((d: Json) => d.id === ids.reparto).zones as Json[]
+    expect(zones.map((z) => z.name)).toEqual([
+      "Centro y Lima Moderna",
+      "Lima Este",
+      "Lima Norte",
+      "Lima Sur",
+      "Callao",
+      "Lejanos y playas",
+    ])
+    expect(zones.flatMap((z) => z.districts as string[])).toHaveLength(50)
+
+    // Lince (zona 1) a S/ 10; Lurín (lejanos) a S/ 18.
+    const lince = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150116",
+    })
+    expect(lince.json.quote).toMatchObject({ deliveryListCents: 1000, deliveryCents: 1000 })
+    const lurin = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150119",
+    })
+    expect(lurin.json.quote).toMatchObject({ deliveryListCents: 1800, deliveryCents: 1800 })
+    // En «Lejanos y playas» no se paga al recibir.
+    const door = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150119",
+      paymentMethodId: ids.efectivo,
+    })
+    expect(door.json.quote).toBeNull()
+    expect(door.json.fields.paymentMethodId).toBe(
+      "En «Lejanos y playas» no se paga al recibir",
+    )
+  })
+
+  it("un distrito está en una sola zona de la tienda", async () => {
+    const other = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Moto express",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      zones: [{ name: "Lince", priceCents: 1500, districts: ["150116"] }],
+    })
+    expect(other.status).toBe(409)
+    expect(JSON.stringify(other.json)).toContain("Lince ya está en «Reparto en Lima»")
+    // Dos zonas de la misma forma tampoco lo comparten.
+    const twice = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Moto express",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      zones: [
+        { name: "A", priceCents: 1500, districts: ["070101"] },
+        { name: "B", priceCents: 1500, districts: ["070101"] },
+      ],
+    })
+    expect(twice.status).toBe(400)
+  })
+
+  it("quién paga el viaje fallido lo cambia quien configura", async () => {
+    const denied = await call("lucia", "PATCH", `${base}/entregas/reglas`, {
+      failedTrip: "clienta",
+    })
+    expect(denied.status).toBe(403)
+    const done = await call("rosa", "PATCH", `${base}/entregas/reglas`, { failedTrip: "clienta" })
+    expect(done.status).toBe(200)
+    expect((await call("lucia", "GET", `${base}/entregas`)).json.failedTrip).toBe("clienta")
+  })
+})
