@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm"
 import { z } from "zod"
 
 /**
- * La hora de la tienda (ADR 0221): qué día es «hoy» se cuenta con la zona horaria de cada tienda
+ * La hora de la tienda (ADR 0222): qué día es «hoy» se cuenta con la zona horaria de cada tienda
  * (IANA, «America/Lima»), nunca con la del servidor ni con la del navegador. La usan «Para
  * entregar hoy», los periodos de Reportes, las promociones (de un día a otro, inclusive), Argos y
  * lo que Sofi sabe de hoy. Un día va como en el calendario: «2026-11-25» (ISO 8601).
@@ -14,21 +14,10 @@ export const DEFAULT_TIME_ZONE = "America/Lima"
 
 const DAY_MS = 86_400_000
 
-/** Las zonas que conoce el entorno (la base de IANA de ICU), y «UTC», que no siempre lista. */
-export function isTimeZone(name: string): boolean {
-  if (name === "UTC") return true
-  if (!/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/.test(name) || name.length > 64)
-    return false
-  return Intl.supportedValuesOf("timeZone").includes(name)
-}
-
-export const timeZoneInput = z.object({
-  timeZone: z.string().trim().refine(isTimeZone, "Elige una hora de la lista"),
-})
-
 const formatters = new Map<string, Intl.DateTimeFormat>()
 
-function partsOf(timeZone: string, at: Date) {
+/** El reloj de una zona (se arma una vez por zona). Lanza si la zona no existe. */
+function formatterOf(timeZone: string): Intl.DateTimeFormat {
   let format = formatters.get(timeZone)
   if (!format) {
     format = new Intl.DateTimeFormat("en-US", {
@@ -43,6 +32,33 @@ function partsOf(timeZone: string, at: Date) {
     })
     formatters.set(timeZone, format)
   }
+  return format
+}
+
+/**
+ * Una zona de IANA que el entorno sabe usar. No basta la lista de `Intl.supportedValuesOf`: cada
+ * navegador nombra algunas zonas distinto que el servidor («America/Argentina/Buenos_Aires» o
+ * «America/Buenos_Aires», «Asia/Kolkata» o «Asia/Calcutta») y las dos formas son válidas.
+ */
+export function isTimeZone(name: string): boolean {
+  if (name.length > 64 || !/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/.test(name))
+    return false
+  if (formatters.has(name)) return true
+  try {
+    // Sin guardarlo: lo que se escribe para probar no llena la memoria.
+    new Intl.DateTimeFormat("en-US", { timeZone: name })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const timeZoneInput = z.object({
+  timeZone: z.string().trim().refine(isTimeZone, "Elige una hora de la lista"),
+})
+
+function partsOf(timeZone: string, at: Date) {
+  const format = formatterOf(timeZone)
   const parts: Record<string, number> = {}
   for (const part of format.formatToParts(at))
     if (part.type !== "literal") parts[part.type] = Number(part.value)

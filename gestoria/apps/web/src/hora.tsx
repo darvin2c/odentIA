@@ -12,17 +12,20 @@ import { FormAlert, fieldErrors, SELECT_CLASSES } from "./piezas"
  * «Datos de la tienda» cuando esté Configuración.
  */
 
-/** Las de la región primero, como las monedas al crear la tienda; después, todas. */
+/**
+ * Las de la región primero, como las monedas al crear la tienda; después, todas. Buenos Aires se
+ * llama distinto según el navegador: va la que conozca.
+ */
 const FIRST = [
-  "America/Lima",
-  "America/Bogota",
-  "America/Guayaquil",
-  "America/La_Paz",
-  "America/Santiago",
-  "America/Argentina/Buenos_Aires",
-  "America/Mexico_City",
-  "America/Caracas",
-  "Europe/Madrid",
+  ["America/Lima"],
+  ["America/Bogota"],
+  ["America/Guayaquil"],
+  ["America/La_Paz"],
+  ["America/Santiago"],
+  ["America/Argentina/Buenos_Aires", "America/Buenos_Aires"],
+  ["America/Mexico_City"],
+  ["America/Caracas"],
+  ["Europe/Madrid"],
 ]
 
 /** «Lima (UTC−5)»: la ciudad de la zona y cuánto va de UTC hoy. */
@@ -43,11 +46,16 @@ export function zoneLabel(zone: string, now = new Date()): string {
 
 function useZones(current: string) {
   return useMemo(() => {
-    const all = Intl.supportedValuesOf("timeZone")
+    // Un navegador viejo que no da la lista ofrece al menos las de la región.
+    const all =
+      typeof Intl.supportedValuesOf === "function"
+        ? Intl.supportedValuesOf("timeZone")
+        : FIRST.map(([zone]) => zone as string)
     const option = (zone: string) => ({ value: zone, label: zoneLabel(zone) })
-    const first = FIRST.filter((zone) => all.includes(zone)).map(option)
+    const firstZones = FIRST.flatMap((names) => names.find((zone) => all.includes(zone)) ?? [])
+    const first = firstZones.map(option)
     const rest = all
-      .filter((zone) => !FIRST.includes(zone))
+      .filter((zone) => !firstZones.includes(zone))
       .map(option)
       .sort((a, b) => a.label.localeCompare(b.label, "es"))
     const zones = [...first, ...rest]
@@ -71,6 +79,9 @@ export function StoreTimeSection({ store }: { store: MyStore }) {
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
       await queryClient.invalidateQueries({ queryKey: ["pedidos", store.id] })
       await queryClient.invalidateQueries({ queryKey: ["reportes", store.id] })
+      // Las promociones valen de un día a otro de la tienda, y Argos cuenta con ellas.
+      await queryClient.invalidateQueries({ queryKey: ["para-vender", store.id] })
+      await queryClient.invalidateQueries({ queryKey: ["argos", store.id] })
       toast.success(`Hora de la tienda: ${zoneLabel(zone)}`)
     },
   })

@@ -1,5 +1,5 @@
 /**
- * La hora de la tienda (ADR 0221), sin base: el «hoy» que fallaba en producción (desde las 19:00
+ * La hora de la tienda (ADR 0222), sin base: el «hoy» que fallaba en producción (desde las 19:00
  * de Lima gestorIA ya contaba el día siguiente, con la hora de Londres) y los periodos de Reportes.
  */
 import { describe, expect, it } from "vitest"
@@ -51,7 +51,12 @@ describe("qué día es en la tienda", () => {
   it("solo zonas que existen", () => {
     expect(isTimeZone(LIMA)).toBe(true)
     expect(isTimeZone("UTC")).toBe(true)
+    // Cada navegador nombra algunas zonas a su manera: las dos formas valen.
+    expect(isTimeZone("America/Argentina/Buenos_Aires")).toBe(true)
+    expect(isTimeZone("America/Buenos_Aires")).toBe(true)
+    expect(isTimeZone("Asia/Kolkata")).toBe(true)
     expect(isTimeZone("America/Narnia")).toBe(false)
+    expect(isTimeZone("+05:00")).toBe(false)
     expect(isTimeZone("../etc/passwd")).toBe(false)
     expect(isTimeZone("")).toBe(false)
   })
