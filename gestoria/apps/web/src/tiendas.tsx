@@ -143,25 +143,27 @@ function OpeningFailed({ error, onRetry }: { error: unknown; onRetry: () => void
 }
 
 /**
- * «Pedir ayuda» en la cabecera, para todo el equipo (`ayuda.pedir`; lienzo «gestorIA como
- * odentIA», tablero 19): abre «Pedir ayuda» ahí mismo, con la pantalla en la que está. El panel
- * queda montado al cerrarlo: lo escrito sin enviar sigue ahí al volver a abrirlo.
+ * Abre «Pedir ayuda» de la tienda, o `null` si el rol de quien está no pide ayuda (soporte). Es un
+ * solo panel para la cabecera y la Ayuda, montado en el armazón: lo escrito sin enviar sigue ahí
+ * al volver a abrirlo, desde cualquier pantalla de la tienda.
  */
-function AskForHelp({ store }: { store: MyStore }) {
+const AskForHelpContext = createContext<(() => void) | null>(null)
+
+export function useAskForHelp(): (() => void) | null {
+  return useContext(AskForHelpContext)
+}
+
+/**
+ * «Pedir ayuda» en la cabecera, para todo el equipo (`ayuda.pedir`; lienzo «gestorIA como
+ * odentIA», tablero 19): abre «Pedir ayuda» ahí mismo, con la pantalla en la que está.
+ */
+function AskForHelp({ onOpen }: { onOpen: () => void }) {
   const compact = useHeaderCompact()
-  const [open, setOpen] = useState(false)
   return (
-    <>
-      <Button
-        variant="outline"
-        className="elevated h-9 gap-2 rounded-full px-3"
-        onClick={() => setOpen(true)}
-      >
-        <LifeBuoy className="size-4" aria-hidden />
-        <span className={compact ? "sr-only" : "max-md:sr-only"}>Pedir ayuda</span>
-      </Button>
-      <AskForHelpSheet store={store} open={open} onClose={() => setOpen(false)} />
-    </>
+    <Button variant="outline" className="elevated h-9 gap-2 rounded-full px-3" onClick={onOpen}>
+      <LifeBuoy className="size-4" aria-hidden />
+      <span className={compact ? "sr-only" : "max-md:sr-only"}>Pedir ayuda</span>
+    </Button>
   )
 }
 
@@ -290,6 +292,9 @@ export function Shell({
   children: ReactNode
 }) {
   const { pathname } = useLocation()
+  const [asking, setAsking] = useState(false)
+  const canAsk = store?.permissions.includes("ayuda.pedir") ?? false
+  const openAsk = useMemo(() => (canAsk ? () => setAsking(true) : null), [canAsk])
   // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
   const live = authClient.useSession().data?.user
   const items: AppShellNavItem[] = store
@@ -347,17 +352,26 @@ export function Shell({
       }
       onSignOut={() => void signOut()}
     >
-      <HeaderUtilitiesProvider
-        value={{
-          // En la Ayuda, «Pedir ayuda» ya es el botón de la página.
-          utilities:
-            store?.permissions.includes("ayuda.pedir") && !pathname.endsWith("/ayuda") ? (
-              <AskForHelp store={store} />
-            ) : undefined,
-        }}
-      >
-        {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
-      </HeaderUtilitiesProvider>
+      <AskForHelpContext.Provider value={openAsk}>
+        <HeaderUtilitiesProvider
+          value={{
+            // En la Ayuda, «Pedir ayuda» ya es el botón de la página.
+            utilities:
+              openAsk && !pathname.endsWith("/ayuda") ? <AskForHelp onOpen={openAsk} /> : undefined,
+          }}
+        >
+          {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
+        </HeaderUtilitiesProvider>
+        {/* Uno por tienda: lo escrito en una no aparece en otra. */}
+        {store && openAsk ? (
+          <AskForHelpSheet
+            key={store.id}
+            store={store}
+            open={asking}
+            onClose={() => setAsking(false)}
+          />
+        ) : null}
+      </AskForHelpContext.Provider>
     </AppShell>
   )
 }

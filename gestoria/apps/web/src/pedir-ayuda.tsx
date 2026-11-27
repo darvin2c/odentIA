@@ -57,8 +57,9 @@ export function AskForHelpSheet({
   })
   const closed = help.data ? !help.data.connected : false
   const error = empty ? "Cuéntanos qué pasó" : fieldErrors(ask.error).question
-  const role = store.role === "support" ? ROLES.support.name : ROLES[store.role].name
-  // Lo escrito se queda para la próxima vez; el error de este intento, no.
+  const role = ROLES[store.role].name
+  // Lo escrito se queda para la próxima vez (por eso cerrar no pregunta); el error de este
+  // intento, no.
   const close = () => {
     ask.reset()
     setEmpty(false)
@@ -75,7 +76,6 @@ export function AskForHelpSheet({
         setEmpty(!question.trim())
         if (question.trim()) ask.mutate()
       }}
-      dirty={question.trim().length > 0}
       footer={
         <>
           <Button variant="outline" type="button" onClick={close}>

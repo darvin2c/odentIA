@@ -3,7 +3,7 @@ import { EmptyState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useSearch } from "@tanstack/react-router"
 import { ChevronLeft, LifeBuoy, MessageCircleQuestion } from "lucide-react"
-import { type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { type RefObject, useEffect, useRef, useSyncExternalStore } from "react"
 import { api } from "./lib/api"
 import {
   HELP_KEY,
@@ -14,8 +14,7 @@ import {
   whoLine,
 } from "./lib/ayuda"
 import { when } from "./lib/pedidos"
-import { AskForHelpSheet } from "./pedir-ayuda"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useAskForHelp, useStoreContext } from "./tiendas"
 
 /**
  * La Ayuda de la tienda (entrega 7 del lienzo «gestorIA como odentIA», tablero 19): una guía por
@@ -48,39 +47,30 @@ export function HelpPage() {
     queryKey: HELP_KEY(store.id),
     queryFn: () => api<HelpView>(`/api/tiendas/${store.id}/ayuda`),
   })
-  const [asking, setAsking] = useState(false)
-  const canAsk = help.data?.canAsk ?? store.permissions.includes("ayuda.pedir")
+  // El mismo «Pedir ayuda» de la cabecera (lo escrito sin enviar sigue ahí); soporte no lo tiene.
+  const ask = useAskForHelp()
   return (
     <>
       <StoreHeader
         title="Ayuda"
         subtitle="Cómo hacer cada tarea, para tu rol."
         primary={
-          canAsk
-            ? {
-                label: "Pedir ayuda",
-                icon: <LifeBuoy aria-hidden />,
-                onClick: () => setAsking(true),
-              }
-            : undefined
+          ask ? { label: "Pedir ayuda", icon: <LifeBuoy aria-hidden />, onClick: ask } : undefined
         }
       />
       {help.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
       {help.isError ? <ErrorBlock error={help.error} onRetry={() => void help.refetch()} /> : null}
       {help.data ? (
         <>
-          <Guide view={help.data} onAsk={() => setAsking(true)} />
+          <Guide view={help.data} onAsk={ask} />
           {help.data.canAsk ? <Questions questions={help.data.questions} /> : null}
         </>
-      ) : null}
-      {canAsk ? (
-        <AskForHelpSheet store={store} open={asking} onClose={() => setAsking(false)} />
       ) : null}
     </>
   )
 }
 
-function Guide({ view, onAsk }: { view: HelpView; onAsk: () => void }) {
+function Guide({ view, onAsk }: { view: HelpView; onAsk: (() => void) | null }) {
   const { store } = useStoreContext()
   const { pregunta } = useSearch({ strict: false }) as { pregunta?: string }
   const wide = useWide()
@@ -134,14 +124,7 @@ function Guide({ view, onAsk }: { view: HelpView; onAsk: () => void }) {
           </nav>
         ) : null}
         {shown ? (
-          <Answer
-            faq={shown}
-            role={view.role}
-            canAsk={view.canAsk}
-            back={!wide}
-            onAsk={onAsk}
-            headingRef={heading}
-          />
+          <Answer faq={shown} role={view.role} back={!wide} onAsk={onAsk} headingRef={heading} />
         ) : null}
       </div>
     </section>
@@ -151,16 +134,14 @@ function Guide({ view, onAsk }: { view: HelpView; onAsk: () => void }) {
 function Answer({
   faq,
   role,
-  canAsk,
   back,
   onAsk,
   headingRef,
 }: {
   faq: HelpFaq
   role: string
-  canAsk: boolean
   back: boolean
-  onAsk: () => void
+  onAsk: (() => void) | null
   headingRef: RefObject<HTMLHeadingElement | null>
 }) {
   const { store } = useStoreContext()
@@ -205,7 +186,7 @@ function Answer({
             Ir a {faq.screen.label}
           </Button>
         ) : null}
-        {canAsk ? (
+        {onAsk ? (
           <Button variant="outline" onClick={onAsk}>
             ¿No era esto? Pedir ayuda
           </Button>
@@ -242,8 +223,9 @@ function Questions({ questions }: { questions: HelpQuestion[] }) {
                 <Badge variant="outline">{questionStatus(one.status)}</Badge>
               </div>
               <span className="text-xs text-muted-foreground">{when(one.createdAt)}</span>
-              {one.replies.map((reply) => (
-                <div key={reply.at} className="rounded-md bg-muted/50 p-3">
+              {one.replies.map((reply, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: dos respuestas pueden tener la misma hora
+                <div key={`${reply.at}-${i}`} className="rounded-md bg-muted/50 p-3">
                   <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{reply.body}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Equipo de gestorIA · {when(reply.at)}
