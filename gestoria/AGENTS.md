@@ -112,6 +112,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
+  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
 - Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos

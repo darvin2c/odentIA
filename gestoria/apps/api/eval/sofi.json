@@ -1,5 +1,5 @@
 {
-  "nota": "Banco de casos de venta de Sofi (gestorIA, B5). Escritos por el equipo, nunca datos reales. La tienda del banco está en eval-sofi.ts (armarTienda): Zapatilla urbana blanca S/ 129 y negra S/ 89 (mínimo S/ 100 solo para la blanca, que es la que se negocia; la negra queda bajo él y no se negocia), blanca 42 y negra 35 agotadas, 2 por S/ 220; Medias S/ 15 sin mínimo (combinan con la zapatilla); Sandalia S/ 89 con 15 % de promoción vigente, sin mínimo; Botín S/ 219 sin mínimo, 43 agotada; Mocasín azul S/ 149 mínimo S/ 130 (parecido a la zapatilla). Entregas: Reparto en Lima por zona (Surco y Miraflores S/ 10, Callao S/ 15; se rebaja hasta S/ 10; acepta pago al recibir), Recojo en la tienda (gratis; acepta), Envío a provincia (se acuerda; no acepta). Pagos: link (proveedor controlado), Yape (captura) y Efectivo al recibir. Cada caso dice lo que se espera de forma fija (espera); el juez califica lo demás.",
+  "nota": "Banco de casos de venta de Sofi (gestorIA, B5). Escritos por el equipo, nunca datos reales. La tienda del banco está en eval-sofi.ts (armarTienda): Zapatilla urbana blanca S/ 129 y negra S/ 89 (mínimo S/ 100 solo para la blanca, que es la que se negocia; la negra queda bajo él y no se negocia), blanca 42 y negra 35 agotadas, 2 por S/ 220; Medias S/ 15 sin mínimo (combinan con la zapatilla); Sandalia S/ 89 con 15 % de promoción vigente, sin mínimo; Botín S/ 219 sin mínimo, 43 agotada; Mocasín azul S/ 149 mínimo S/ 130 (parecido a la zapatilla). Entregas: Reparto en Lima por zona (Surco y Miraflores S/ 10, Callao S/ 15; se rebaja hasta S/ 10; gratis desde S/ 150; acepta pago al recibir), Recojo en la tienda (gratis; acepta), Envío a provincia (se acuerda; no acepta). Pagos: link (proveedor controlado), Yape (captura) y Efectivo al recibir. Los casos de las cinco clientas (ana-, valeria-, rosa-maria-, carla-, jorge-) son los del tablero 21: primero el valor, la oferta solo cuando puede perder la venta, una vez, a la medida y con el plazo exacto. «antes» es lo que ya compró en esa conversación. Cada caso dice lo que se espera de forma fija (espera); el juez califica lo demás.",
   "casos": [
     {
       "id": "precio-directo",
@@ -20,7 +20,7 @@
     },
     {
       "id": "regatea-en-margen",
-      "que": "Regatea dentro del margen: primero valor, luego envío, el descuento al final",
+      "que": "Regatea dentro del margen: primero el valor; si insiste, una sola oferta con su plazo y no la mejora",
       "turnos": [
         "Hola, quiero la zapatilla blanca en 38 para Surco",
         "Está cara, ¿me la dejas en 115?",
@@ -210,6 +210,154 @@
         "¿Si llevo también unas medias me haces precio?"
       ],
       "espera": { "herramientas": ["cotizar"], "pedido_total_minimo": 10000 }
+    },
+    {
+      "id": "ana-lo-pienso",
+      "que": "Primera compra: pide rebaja y dice «lo pienso». Primero el valor; después, envío gratis o S/ 10 menos a elegir, con la hora exacta",
+      "turnos": [
+        "Hola, quiero la zapatilla blanca en 38 para Surco. ¿Me la dejas en 110?",
+        "mmm, lo voy a pensar",
+        "El envío gratis, porfa. Soy Ana Torres, Av. Primavera 123",
+        "Sí, confirmo"
+      ],
+      "espera": {
+        "herramientas": ["cotizar"],
+        "primera_no_dice": [
+          "te consigo",
+          "\\d+ menos",
+          "env[ií]o gratis",
+          "descuento de",
+          "te (la|lo) dejo en"
+        ],
+        "dice": ["hasta (hoy|mañana|el \\p{L}+ \\d{1,2}) a las \\d{1,2}:\\d{2}"],
+        "no_dice": ["S/ ?100\\b", "m[ií]nimo"],
+        "cedido_maximo": 1000,
+        "persona": false
+      }
+    },
+    {
+      "id": "ana-insiste",
+      "que": "Ya le ofreció; insiste por más: repite la misma oferta y no la mejora",
+      "turnos": [
+        "Quiero la zapatilla blanca en 39 para Miraflores, ¿cuánto sería?",
+        "Está cara, lo voy a pensar",
+        "¿Y no me la dejas en 105 con el envío gratis? Soy Ana Torres, Av. Larco 300",
+        "Ya, como digas, lo confirmo"
+      ],
+      "espera": {
+        "herramientas": ["cotizar"],
+        "dice": ["hasta (hoy|mañana|el \\p{L}+ \\d{1,2}) a las \\d{1,2}:\\d{2}"],
+        "cedido_maximo": 1000,
+        "pedido_total_minimo": 11900
+      }
+    },
+    {
+      "id": "valeria-ya-tiene-envio-gratis",
+      "que": "Ya pasa el monto del envío gratis y pide un descuentito: el envío no sirve como oferta, una rebaja chica",
+      "turnos": [
+        "Hola, quiero la zapatilla blanca en 37 y 2 medias, para Miraflores",
+        "¿Me haces un descuentito?",
+        "Uy, la vi más barata en otra tienda"
+      ],
+      "espera": {
+        "herramientas": ["cotizar"],
+        "primera_no_dice": [
+          "te consigo",
+          "\\d+ menos",
+          "env[ií]o gratis",
+          "descuento de",
+          "te (la|lo) dejo en"
+        ],
+        "no_dice": ["env[ií]o gratis o", "o (el )?env[ií]o gratis"],
+        "cedido_maximo": 1000
+      }
+    },
+    {
+      "id": "rosa-maria-cada-mes",
+      "que": "Compra cada mes y la ve cara: unas medias de regalo, que a la tienda le cuestan poco",
+      "antes": [{ "dias": 62 }, { "dias": 31 }],
+      "turnos": [
+        "Hola, quiero otra vez la zapatilla blanca, esta vez en 37, para Surco",
+        "La veo cara",
+        "No sé, lo voy a pensar"
+      ],
+      "espera": {
+        "herramientas": ["cotizar"],
+        "primera_no_dice": [
+          "te consigo",
+          "\\d+ menos",
+          "env[ií]o gratis",
+          "descuento de",
+          "te (la|lo) dejo en"
+        ],
+        "dice": ["[Mm]edias"],
+        "persona": false
+      }
+    },
+    {
+      "id": "rosa-maria-siempre-pide",
+      "que": "Siempre pide rebaja: la oferta más chica, y no la mejora",
+      "antes": [{ "dias": 70, "cedido": 1000 }, { "dias": 35, "cedido": 1000 }],
+      "turnos": [
+        "Hola, la zapatilla blanca en 38 para Surco. ¿Cuánto me descuentas esta vez?",
+        "Siempre me haces precio, no seas así. Lo pienso",
+        "¿No me das más?"
+      ],
+      "espera": {
+        "herramientas": ["cotizar"],
+        "primera_no_dice": [
+          "te consigo",
+          "\\d+ menos",
+          "env[ií]o gratis",
+          "descuento de",
+          "te (la|lo) dejo en"
+        ]
+      }
+    },
+    {
+      "id": "carla-duda-entre-dos",
+      "que": "Duda entre dos: el segundo con rebaja si lleva los dos, con su plazo",
+      "turnos": [
+        "Hola, me gustan la zapatilla blanca y el mocasín azul, en 39. No sé cuál llevar, lo recojo en la tienda",
+        "Los dos me gustan… no sé, lo voy a pensar"
+      ],
+      "espera": {
+        "herramientas": ["cotizar"],
+        "primera_no_dice": [
+          "te consigo",
+          "\\d+ menos",
+          "env[ií]o gratis",
+          "descuento de",
+          "te (la|lo) dejo en"
+        ],
+        "dice": ["hasta (hoy|mañana|el \\p{L}+ \\d{1,2}) a las \\d{1,2}:\\d{2}"],
+        "pedido": "ninguno"
+      }
+    },
+    {
+      "id": "jorge-ya-en-oferta",
+      "que": "El producto ya está en promoción: no hay más rebaja, «ya está en su mejor precio»",
+      "turnos": [
+        "¿La sandalia negra en 38 está en oferta? ¿Me la dejas más barata?",
+        "¿Nada más? Lo pienso"
+      ],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "dice": ["75[.,]65"],
+        "no_dice": ["te consigo", "\\d+ menos", "descuento de", "env[ií]o gratis"],
+        "cedido_maximo": 0
+      }
+    },
+    {
+      "id": "al-recibir-sin-rebaja",
+      "que": "Le ofreció algo y elige pagar al recibir: la rebaja no aplica, vuelve al precio normal",
+      "turnos": [
+        "Quiero la zapatilla blanca en 40 para Surco, Calle Las Flores 140. Soy Rocío Vega",
+        "Está cara, lo pienso",
+        "Ya, pero lo pago en efectivo cuando me llegue",
+        "Sí, confirmo así"
+      ],
+      "espera": { "herramientas": ["cotizar"], "pedido": "por_salir", "cedido_maximo": 0 }
     }
   ]
 }

@@ -37,7 +37,7 @@ import { can } from "./permisos.js"
 import {
   autoUnitCents,
   floorUnitCents,
-  NEGOTIATED_PRICE_MS,
+  negotiatedUntil,
   type PricedVariant,
   type Quote,
   type QuoteLine,
@@ -497,13 +497,23 @@ async function notifyCustomer(
  * Arma un pedido dentro de la transacción de la tienda. Es la operación que llamará la
  * conversación (B2 y Sofi en B5) con su `conversationId`; el equipo la usa con «Anotar un
  * pedido». Con pago al recibir, empieza en «por salir»: se cobra en la puerta.
+ *
+ * Un precio negociado vence a las 24 horas (ADR 0207). Sofi puede pasar la hora que ya le dijo a
+ * la clienta al ofrecerlo (`priceExpiresAt`): nunca más tarde que esas 24 horas, para que el
+ * pedido venza a la misma hora que la oferta.
  */
 export async function createOrderIn(
   tx: Db,
   storeId: string,
   actorUserId: string,
   input: OrderInput,
-  options: { conversationId?: string | null; now?: Date; today?: string; test?: boolean } = {},
+  options: {
+    conversationId?: string | null
+    now?: Date
+    today?: string
+    test?: boolean
+    priceExpiresAt?: Date | null
+  } = {},
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
@@ -517,6 +527,10 @@ export async function createOrderIn(
       result.fields,
     )
   const { quote: q, variants, delivery, payment } = result.priced
+  // El trato que ya venció no se renueva solo: quien arma el pedido vuelve a cotizar.
+  const expiresAt = q.negotiated ? negotiatedUntil(now, options.priceExpiresAt) : null
+  if (q.negotiated && !expiresAt)
+    throw new StoreError(409, "PRICE_EXPIRED", "El precio acordado ya venció: vuelve a cotizar.")
   // La ficha de la clienta: la elegida, la de su conversación o una nueva (nunca por el teléfono).
   const client = await customerForOrderIn(tx, storeId, actorUserId, input, {
     conversationId: options.conversationId,
@@ -564,7 +578,7 @@ export async function createOrderIn(
       totalCents: q.totalCents,
       marginCents: q.marginCents,
       marginUsedCents: q.marginUsedCents,
-      priceExpiresAt: q.negotiated ? new Date(now.getTime() + NEGOTIATED_PRICE_MS) : null,
+      priceExpiresAt: expiresAt,
       deliverOn: input.deliverOn,
       test: options.test ?? false,
       createdBy: actorUserId,
