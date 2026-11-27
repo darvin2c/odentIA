@@ -1,44 +1,72 @@
 ---
-// Sofi (web v5): qué hace la vendedora con IA de gestorIA y qué no hace nunca. Lo que viene
-// («Pagar ahora», gestorIA Reparto) va como «pronto».
+// Sofi, la vendedora con IA (web v5): la página del agente, con las mismas escenas del Inicio.
+// - Héroe con Sofi en grande (se puede tocar) y chats que le llegan por los tres canales.
+// - Su oficio, en tarjetas que pasan de costado con el scroll.
+// - El chat que se puede tocar, lo que lee de la tienda y la venta por capítulos (los del Inicio).
+// - Sus reglas: la oferta choca con el mínimo y rebota. Sus humores, con su cara de verdad.
+// Lo que viene («Pagar ahora», gestorIA Reparto) va como «pronto».
+import { Image } from "astro:assets"
+import instagram from "../assets/iconos/instagram.svg"
+import messenger from "../assets/iconos/messenger.svg"
+import whatsapp from "../assets/iconos/whatsapp.svg"
+import sofiAtenta from "../assets/sofi-atenta.png"
+import sofiDecidida from "../assets/sofi-decidida.png"
+import sofiFeliz from "../assets/sofi-feliz.png"
 import Acordeon from "../components/Acordeon.astro"
-import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Chat from "../components/escenas/Chat.astro"
+import Mapa from "../components/escenas/Mapa.astro"
+import Venta from "../components/escenas/Venta.astro"
 import Base from "../layouts/Base.astro"
 import { faqLd, MAS_PREGUNTAS, PREGUNTAS } from "../lib/contenido"
-import { SITE_URL } from "../lib/sitio"
+import { cta, SITE_URL } from "../lib/sitio"
+import "../styles/inicio.css"
+import "../styles/agentes.css"
 
-const hace = [
-  {
-    t: "Atiende al instante",
-    d: "Contesta tus chats de WhatsApp, Instagram y Messenger a la hora que sea, con tu catálogo y tu stock. Primero muestra el valor del producto.",
-  },
-  {
-    t: "Negocia sin bajar de tu mínimo",
-    d: "Si la clienta pide rebaja, hace una sola oferta y pone un plazo para pagar. Tu precio mínimo no se toca.",
-  },
-  {
-    t: "Cobra con tus medios",
-    d: "Anota el pedido con su envío y su total, y pide el pago con Yape, Plin, transferencia o un link de pago.",
-    pronto: "«Pagar ahora» con Yape o tarjeta",
-  },
-  {
-    t: "Avisa a la clienta",
-    d: "Apenas tu equipo confirma el pago, Sofi le avisa a la clienta que su pedido sale.",
-  },
-  {
-    t: "Coordina la entrega",
-    d: "Sin pago confirmado no se entrega. Con el pago confirmado, el pedido queda listo para salir.",
-    pronto: "gestorIA Reparto, la app del repartidor",
-  },
-  {
-    t: "Suma algo antes de que salga",
-    d: "Antes de que el pedido salga, ofrece algo más para el mismo envío.",
-  },
+const flecha =
+  '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+const llegan = [
+  { canal: "WhatsApp", icono: whatsapp, texto: "¿La tienen en 38?" },
+  { canal: "Instagram", icono: instagram, texto: "¿Hacen envíos a Arequipa?" },
+  { canal: "Messenger", icono: messenger, texto: "¿Me la separas hasta mañana?" },
 ]
-const nunca = [
-  ["Nunca baja de tu mínimo", "Lo pones tú, producto por producto."],
-  ["Nunca inventa un precio ni un stock", "Vende con lo que hay en tu catálogo."],
-  ["Nunca entrega sin pago confirmado", "Una captura la confirma una persona de tu equipo."],
+const oficio = [
+  {
+    t: "Atiende",
+    d: "Contesta al instante, a la hora que sea, con tu catálogo y tu stock.",
+    ella: "¿La tienen en 38?",
+    sofi: "Sí, en 38 me quedan 2. ¿Te la envío?",
+  },
+  {
+    t: "Muestra el valor",
+    d: "Antes del precio, lo que hace bueno al producto.",
+    ella: "¿Y es cómoda?",
+    sofi: "Planta de goma y horma normal: pide tu talla de siempre.",
+  },
+  {
+    t: "Negocia",
+    d: "Una sola oferta, con plazo, sin bajar de tu mínimo.",
+    ella: "¿Me la dejas en 110?",
+    sofi: "A 110 no llego, pero te regalo el envío si pagas hasta mañana.",
+  },
+  {
+    t: "Cobra",
+    d: "Anota el pedido y pide el pago con tus medios.",
+    ella: "Ya, va.",
+    sofi: "Listo: pedido 0018, S/ 120. Puedes pagar por Yape.",
+  },
+  {
+    t: "Avisa",
+    d: "Apenas tu equipo confirma el pago, le avisa a la clienta.",
+    ella: "Te yapeé 120",
+    sofi: "¡Pago confirmado! Tu pedido sale hoy a Surco.",
+  },
+  {
+    t: "Suma algo",
+    d: "Antes de que el pedido salga, ofrece algo más para el mismo envío.",
+    ella: "¿Algo más?",
+    sofi: "¿Te sumo unas medias por S/ 15? Van en el mismo envío.",
+  },
 ]
 const preguntas = [PREGUNTAS[0], PREGUNTAS[1], MAS_PREGUNTAS[0], PREGUNTAS[3]].filter(
   (p) => p !== undefined,
@@ -60,56 +88,138 @@ const app = {
   description="Sofi atiende tus chats a toda hora con tu catálogo y tu stock, negocia sin bajar de tu precio mínimo y cobra antes de entregar. Es la vendedora de gestorIA."
   ld={[app, faqLd(preguntas)]}
 >
-  <PaginaHeroe
-    etiqueta="Sofi"
-    titulo="Sofi, la vendedora con IA"
-    acento="de tu tienda."
-    bajada="Atiende tus chats de WhatsApp, Instagram y Messenger a toda hora, negocia sin bajar de tu precio mínimo y cobra antes de entregar. Tú empacas."
-    humor="curiosa"
-    segundo={{ href: "/#venta", label: "Mírala vender" }}
-  />
-  <section class="p-bloques" aria-labelledby="hace-h">
-    <div class="marco">
-      <div class="cabeza" data-aparece>
-        <p class="etiqueta">Lo que hace</p>
-        <h2 id="hace-h" class="titulo-2">Una venta entera, <span class="tenue">de la pregunta al envío.</span></h2>
+  <!-- ============================================================ héroe -->
+  <section class="ag-heroe" aria-labelledby="ag-h" data-ag-heroe>
+    <div class="ag-heroe__fondo" aria-hidden="true"></div>
+    <div class="marco ag-heroe__marco">
+      <div class="ag-heroe__texto">
+        <nav class="migas" aria-label="Migas de pan"><ol><li><a href="/">Inicio</a></li><li><span aria-current="page">Sofi</span></li></ol></nav>
+        <p class="ag-chip" data-entra><span aria-hidden="true"></span>Agente de IA · Vendedora</p>
+        <h1 id="ag-h" class="ag-heroe__h">
+          <span class="linea"><span>Sofi vende</span></span>
+          <span class="linea"><span>por ti, <span class="cur">a toda hora</span></span></span>
+        </h1>
+        <p class="bajada" data-entra>Atiende tus chats de WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar. Tú empacas.</p>
+        <div class="fila-botones" data-entra>
+          <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
+          <a class="boton boton--fantasma" href="#prueba">Pregúntale tú</a>
+        </div>
+        <ul class="ag-verbos" aria-label="Lo que hace Sofi" data-entra>
+          <li>Atiende</li><li>Negocia</li><li>Cobra</li><li>Avisa</li>
+        </ul>
       </div>
-      <ol class="p-bloques__lista">
-        {hace.map((h, i) => (
-          <li class="p-bloque" data-aparece style={`--i:${i}`}>
-            <span class="p-bloque__n">{String(i + 1).padStart(2, "0")}</span>
-            <h3>{h.t}</h3>
-            <p>{h.d}</p>
-            {h.pronto && <p><span class="pronto">Pronto</span> {h.pronto}</p>}
+      <div class="ag-heroe__escena">
+        <span class="ag-heroe__anillo" aria-hidden="true"></span>
+        <span class="ag-heroe__anillo ag-heroe__anillo--b" aria-hidden="true"></span>
+        <span class="ag-heroe__sofi" data-sofi="curiosa" data-sofi-escala="0.5" data-sofi-juego aria-hidden="true"></span>
+        <ul class="llegan" aria-label="Chats que le llegan a Sofi, de ejemplo">
+          {llegan.map((l, i) => (
+            <li class:list={["llega", `llega--${i}`]} data-llega>
+              <img src={l.icono.src} width="22" height="22" alt="" />
+              <span><small>{l.canal}</small>{l.texto}</span>
+            </li>
+          ))}
+        </ul>
+        <p class="ag-heroe__pista" aria-hidden="true">Tócala</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ su oficio -->
+  <section class="oficio" aria-labelledby="oficio-h" data-oficio>
+    <div class="oficio__pin" data-oficio-pin>
+      <div class="marco cabeza">
+        <p class="etiqueta">Su oficio</p>
+        <h2 id="oficio-h" class="titulo-2">Una vendedora completa, <span class="cur">de la pregunta al envío</span></h2>
+      </div>
+      <ol class="oficio__pista" data-oficio-pista>
+        {oficio.map((o, i) => (
+          <li class="oficio__tarjeta">
+            <span class="oficio__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+            <h3>{o.t}</h3>
+            <p>{o.d}</p>
+            <div class="oficio__chat" aria-hidden="true">
+              <span class="oficio__ella">{o.ella}</span>
+              <span class="oficio__sofi">{o.sofi}</span>
+            </div>
           </li>
         ))}
       </ol>
     </div>
   </section>
-  <section class="p-bloques p-bloques--suave" aria-labelledby="nunca-h">
-    <div class="marco">
+
+  <!-- ============================================================ pregúntale tú -->
+  <section class="prueba" id="prueba" aria-labelledby="prueba-h">
+    <div class="marco prueba__marco">
       <div class="cabeza" data-aparece>
-        <p class="etiqueta">Lo que nunca hace</p>
-        <h2 id="nunca-h" class="titulo-2">Tus reglas <span class="cur">mandan.</span></h2>
+        <p class="etiqueta">Pruébala</p>
+        <h2 id="prueba-h" class="titulo-2">Pregúntale tú, <span class="cur">como si fueras la clienta</span></h2>
+        <p class="bajada">Toca una pregunta y mira cómo contesta. Son respuestas de muestra de Calzados Rosa; en tu tienda, Sofi responde con tu catálogo.</p>
       </div>
-      <ul class="p-bloques__lista">
-        {nunca.map(([t, d], i) => (
-          <li class="p-bloque" data-aparece style={`--i:${i}`}>
-            <h3>{t}</h3>
-            <p>{d}</p>
-          </li>
-        ))}
+      <Chat />
+    </div>
+  </section>
+
+  <Mapa />
+
+  <Venta />
+
+  <!-- ============================================================ sus reglas -->
+  <section class="reglas" aria-labelledby="reglas-h" data-reglas>
+    <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
+        <p class="etiqueta">Sus reglas</p>
+        <h2 id="reglas-h" class="titulo-2">Tu precio mínimo <span class="cur">no se toca</span></h2>
+        <p class="bajada">Si la clienta pide rebaja, Sofi ofrece una sola vez y nunca baja de tu mínimo. La oferta choca con el piso y rebota.</p>
+      </div>
+      <div class="regla-g" data-regla-g>
+        <span class="regla-g__piso" aria-hidden="true"><b>Tu mínimo · S/ 100</b></span>
+        <div class="regla-g__riel" aria-hidden="true">
+          <span class="regla-g__marca" style="--x:100%"><b>S/ 129</b><small>Lista</small></span>
+          <span class="regla-g__marca regla-g__marca--pide" style="--x:34.5%"><b>S/ 110</b><small>Pide la clienta</small></span>
+          <span class="regla-g__marca regla-g__marca--oferta" style="--x:69%"><b>S/ 120</b><small>Oferta de Sofi</small></span>
+          <span class="regla-g__punto" data-regla-g-punto></span>
+        </div>
+        <span class="regla-g__sofi" data-sofi="decidida" data-sofi-escala="0.5" aria-hidden="true"></span>
+        <p class="sr">Ejemplo: lista S/ 129, la clienta pide S/ 110, Sofi ofrece S/ 120 todo incluido y tu mínimo es S/ 100.</p>
+      </div>
+      <ul class="reglas__lista">
+        <li class="reglas__item" data-aparece><b>Nunca baja de tu mínimo</b><span>Lo pones tú, producto por producto.</span></li>
+        <li class="reglas__item" data-aparece><b>Nunca inventa un precio ni un stock</b><span>Vende con lo que hay en tu catálogo.</span></li>
+        <li class="reglas__item" data-aparece><b>Nunca entrega sin pago confirmado</b><span>Una captura la confirma una persona de tu equipo.</span></li>
       </ul>
     </div>
   </section>
-  <section class="p-bloques" aria-labelledby="preg-h">
+
+  <!-- ============================================================ sus humores -->
+  <section class="humores" aria-labelledby="humores-h">
     <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
+        <p class="etiqueta">Su cara</p>
+        <h2 id="humores-h" class="titulo-2">Sofi se nota <span class="cur">en cada paso</span></h2>
+      </div>
+      <ul class="humores__lista">
+        <li class="humor" data-aparece><span class="humor__cara"><Image src={sofiAtenta} alt="" widths={[220, 440]} sizes="220px" /></span><b>Atenta</b><span>Cuando atiende y busca en tu catálogo</span></li>
+        <li class="humor" data-aparece><span class="humor__cara"><Image src={sofiDecidida} alt="" widths={[220, 440]} sizes="220px" /></span><b>Decidida</b><span>Cuando negocia sin bajar de tu mínimo</span></li>
+        <li class="humor" data-aparece><span class="humor__cara"><Image src={sofiFeliz} alt="" widths={[220, 440]} sizes="220px" /></span><b>Feliz</b><span>Cuando se confirma el pago</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ preguntas -->
+  <section class="p-bloques" aria-labelledby="preg-h">
+    <div class="marco p-dos">
       <div class="cabeza" data-aparece>
         <p class="etiqueta">Preguntas</p>
-        <h2 id="preg-h" class="titulo-2">Sobre Sofi</h2>
+        <h2 id="preg-h" class="titulo-2">Sobre <span class="cur">Sofi</span></h2>
+        <p class="bajada"><a class="enlace" href="/preguntas">Ver todas las preguntas</a></p>
       </div>
-      <div class="p-faq"><Acordeon preguntas={preguntas} /></div>
-      <p class="p-mas"><a class="enlace" href="/preguntas">Ver todas las preguntas</a></p>
+      <Acordeon preguntas={preguntas} />
     </div>
   </section>
 </Base>
+
+<script>
+  import { iniciarSofi } from "../scripts/agentes"
+  iniciarSofi()
+</script>

@@ -24,7 +24,7 @@ const centro = (el: Element) => {
 }
 
 /** Las líneas del mapa «Sofi conoce tu tienda», de cada fuente a Sofi y de Sofi a lo que hace. */
-function trazarMapa(): SVGPathElement[] {
+export function trazarMapa(): SVGPathElement[] {
   const mapa = $("[data-mapa]")
   const svg = $<SVGSVGElement>("[data-mapa-lineas]")
   const nucleo = $(".mapa__centro")
@@ -87,7 +87,7 @@ function trazarMapa(): SVGPathElement[] {
 }
 
 /** El chat del héroe: la visitante toca una pregunta y Sofi contesta con la respuesta de muestra. */
-function chatVivo(sofi: Sofi, quieta: boolean) {
+export function chatVivo(sofi: Sofi, quieta: boolean) {
   const caja = $("[data-chat-vivo]")
   const lista = $("[data-chat-lista]")
   const escribe = $("[data-escribe]")
@@ -159,6 +159,7 @@ function chatVivo(sofi: Sofi, quieta: boolean) {
 }
 
 function heroe() {
+  if (!$(".heroe__h")) return
   const t0 = gsap.timeline({ defaults: { ease: "expo.out" } })
   t0.from(
     ".heroe__h .linea > span",
@@ -253,7 +254,7 @@ function decides() {
     )
 }
 
-function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
+export function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   const mapaEl = $("[data-mapa]")
   if (!mapaEl) return
   const fuentes = $$("[data-fuente]", mapaEl)
@@ -353,7 +354,7 @@ function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   })
 }
 
-function venta(sofi: Sofi | null) {
+export function venta(sofi: Sofi | null) {
   const seccion = $("[data-venta]")
   const pin = $("[data-venta-pin]")
   const escena = $("[data-venta-escena]")
@@ -553,6 +554,7 @@ function argos() {
 }
 
 function rubros() {
+  if (!$(".rubros")) return
   gsap.from(".rubro", {
     y: 60,
     opacity: 0,
@@ -623,7 +625,8 @@ function precio() {
     )
 }
 
-function cierre() {
+export function cierre() {
+  if (!$(".cierre__sofi")) return
   gsap.from(".cierre__sofi", {
     scale: 0.4,
     opacity: 0,
@@ -633,29 +636,43 @@ function cierre() {
   })
 }
 
-export function iniciarInicio() {
-  const quieta = reduceMovimiento()
-  const lineas = trazarMapa()
-  // three.js pesa: Sofi se carga aparte, sin frenar lo demás. Mientras llega, lo que se le pide
-  // no hace nada.
+/**
+ * Carga a Sofi aparte (three.js pesa) y devuelve con qué pedirle cosas: mientras llega, lo que se le
+ * pide no hace nada. La página que la carga así lo marca (`data-sofi-propia`) para que sitio.ts no
+ * la cargue otra vez.
+ */
+export function cargarSofi(quieta: boolean): Sofi {
+  document.documentElement.setAttribute("data-sofi-propia", "")
   let real: Sofi | null = null
-  const sofi: Sofi = {
+  import("./sofi").then((m) => {
+    real = m.crearSofi(quieta)
+  })
+  return {
     humor: (el, h) => real?.humor(el, h),
     mirar: (p) => real?.mirar(p),
     festejar: () => real?.festejar(),
     tocar: () => real?.tocar(),
     hablar: () => real?.hablar(),
   }
-  import("./sofi").then((m) => {
-    real = m.crearSofi(quieta)
-  })
+}
+
+/** Lenis y ScrollTrigger van juntos, y todo se recalcula cuando cargan fuentes e imágenes. */
+export function prepararScroll() {
+  const lenis = scrollSuave()
+  if (lenis) lenis.on("scroll", ScrollTrigger.update)
+  window.addEventListener("load", () => ScrollTrigger.refresh())
+  document.fonts?.ready.then(() => ScrollTrigger.refresh())
+}
+
+export function iniciarInicio() {
+  const quieta = reduceMovimiento()
+  const lineas = trazarMapa()
+  const sofi = cargarSofi(quieta)
   chatVivo(sofi, quieta)
   const puntos = $<HTMLCanvasElement>("[data-puntos]")
   if (puntos) import("./puntos").then((m) => m.marDePuntos(puntos, quieta))
   if (quieta) return
-
-  const lenis = scrollSuave()
-  if (lenis) lenis.on("scroll", ScrollTrigger.update)
+  prepararScroll()
 
   heroe()
   trabajo(sofi)
@@ -667,7 +684,4 @@ export function iniciarInicio() {
   rubros()
   precio()
   cierre()
-  // Las fuentes y las imágenes cambian los altos: se recalcula al terminar de cargar.
-  window.addEventListener("load", () => ScrollTrigger.refresh())
-  document.fonts?.ready.then(() => ScrollTrigger.refresh())
 }

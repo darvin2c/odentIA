@@ -1,112 +1,225 @@
 ---
-// Argos (web v5): el administrador de gestorIA, con lo que hace hoy (apps/api/src/sofi/argos.ts y
-// Reportes): le encarga a Sofi los seguimientos de rutina (recordar el pago, agradecer, avisar que
-// volvió una talla, invitar a volver), te trae lo delicado a «Te toca» y cuenta lo vendido. Las
-// cifras salen de cálculos fijos, no del modelo. Las promociones a la medida van como «pronto».
+// Argos, el administrador (web v5): la página del agente, con escenas propias.
+// - Héroe con el radar vivo: los avisos de Argos aparecen alrededor, uno por uno.
+// - Un día con Argos: una escena fija que avanza con el scroll, hora por hora; lo de rutina se lo
+//   encarga a Sofi (que reacciona) y lo delicado te lo trae a «Te toca».
+// - Lo que hace (vende, cuida el stock, conoce a tus clientas, ordena), con animaciones propias.
+// Es lo que hace hoy (apps/api/src/sofi/argos.ts y Reportes): seguimientos uno por clienta,
+// cálculos fijos y nada que confirme pagos. Las promociones a la medida van como «pronto».
 import isotipo from "../assets/isotipo.svg?raw"
-import PaginaHeroe from "../components/PaginaHeroe.astro"
 import Base from "../layouts/Base.astro"
+import { cta } from "../lib/sitio"
+import "../styles/inicio.css"
+import "../styles/agentes.css"
 
 const marca = isotipo
   .replace(/ role="[^"]*"/, "")
   .replace(/ aria-label="[^"]*"/, "")
   .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
+const flecha =
+  '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
-const poderes = [
+const avisos = [
+  { t: "Recordar el pago", d: "3 clientas", c: "verde" },
+  { t: "Reponer Blanca 38", d: "2 la pidieron", c: "naranja" },
+  { t: "Te toca: confirmar", d: "Pedido 0008", c: "ambar" },
+  { t: "Invitar a volver", d: "Andrea, 60 días", c: "verde" },
+]
+const dia = [
   {
-    t: "Vende",
-    d: "Le encarga a Sofi los mensajes que venden: recordar el pago a quien no pagó, agradecer y preguntar si llegó, avisar cuando vuelve la talla que pidieron e invitar a volver a quien no compra hace dos meses. Uno por clienta, nunca masivos.",
+    h: "09:00",
+    quien: "sofi",
+    t: "Le pedí a Sofi 3 mensajes para recordar el pago",
+    d: "A quien anotó su pedido y no pagó. Uno por clienta.",
   },
   {
-    t: "Cuida el stock",
-    d: "Te dice qué reponer, con cuántas personas lo pidieron, y qué pedido pagado espera mercadería para salir.",
+    h: "10:30",
+    quien: "tu",
+    t: "Te toca: confirmar un pago",
+    d: "Pedido 0008 de Carla Mendoza, S/ 120 por Yape (captura).",
   },
   {
-    t: "Conoce a tus clientas",
-    d: "En Reportes ves quién volvió a comprar, lo más vendido, lo que se acaba y lo que hizo Sofi.",
+    h: "12:00",
+    quien: "tu",
+    t: "Reponer Zapatilla urbana blanca 38",
+    d: "Se acabó y 2 personas la pidieron.",
   },
   {
-    t: "Administra lo delicado",
-    d: "Lo que pide una persona te lo trae a «Te toca»: un pago por confirmar o que no coincide, o una conversación que Sofi te pasó.",
+    h: "15:00",
+    quien: "sofi",
+    t: "Volvió la talla: le pedí a Sofi 2 mensajes para avisar",
+    d: "Entró la mercadería y Sofi les avisa sola a quienes la pidieron.",
+  },
+  {
+    h: "18:00",
+    quien: "sofi",
+    t: "Le pedí a Sofi 4 mensajes para agradecer y preguntar si llegó",
+    d: "A quien recibió su pedido ayer.",
+  },
+  {
+    h: "20:00",
+    quien: "sofi",
+    t: "Le pedí a Sofi 1 mensaje para invitar a volver",
+    d: "Andrea no compra hace dos meses.",
   },
 ]
-const hoy = [
-  {
-    t: "Le pedí a Sofi 3 mensajes para recordar el pago",
-    d: "Salen solos, uno por clienta",
-    c: "#3ddc84",
-  },
-  {
-    t: "Le pedí a Sofi 2 mensajes para avisar que volvió",
-    d: "La Sandalia beige 37 ya tiene stock",
-    c: "#3ddc84",
-  },
-  {
-    t: "Reponer Zapatilla urbana blanca 38",
-    d: "Se acabó y 2 personas la pidieron. Cuando entre, Sofi les avisa sola.",
-    c: "#fe4f02",
-  },
-  {
-    t: "Te toca: confirmar un pago",
-    d: "Pedido 0008 de Carla Mendoza, S/ 120 por Yape (captura)",
-    c: "#ffc247",
-  },
-  {
-    t: "Una conversación espera a una persona",
-    d: "Rocío pregunta por un cambio de talla",
-    c: "#ffc247",
-  },
+const masVendido = [
+  { t: "Zapatilla urbana blanca", n: 18 },
+  { t: "Sandalia beige", n: 12 },
+  { t: "Botín de cuero marrón", n: 7 },
+  { t: "Zapatilla urbana negra", n: 5 },
 ]
 ---
 <Base
   title="Argos: el administrador que vende, cuida y ordena tu tienda"
   description="Argos le encarga a Sofi los mensajes que venden, te dice qué reponer, te muestra quién vuelve a comprar y te trae a «Te toca» lo que pide una persona."
 >
-  <PaginaHeroe
-    etiqueta="Argos"
-    titulo="Argos administra tu tienda"
-    acento="mientras vendes"
-    bajada="Vigila pedidos, pagos, stock y chats. Lo de rutina se lo encarga a Sofi y sale solo; lo delicado te lo trae a «Te toca»."
-  >
-    <div class="p-radar" slot="visual" aria-hidden="true">
-      <span class="p-radar__barrido"></span>
-      <span class="p-radar__ojo"><Fragment set:html={marca} /></span>
+  <!-- ============================================================ héroe -->
+  <section class="ag-heroe ag-heroe--argos" aria-labelledby="ag-h" data-ag-heroe>
+    <div class="ag-heroe__fondo" aria-hidden="true"></div>
+    <div class="marco ag-heroe__marco">
+      <div class="ag-heroe__texto">
+        <nav class="migas" aria-label="Migas de pan"><ol><li><a href="/">Inicio</a></li><li><span aria-current="page">Argos</span></li></ol></nav>
+        <p class="ag-chip ag-chip--oscuro" data-entra><span aria-hidden="true"></span>Agente de IA · Administrador</p>
+        <h1 id="ag-h" class="ag-heroe__h">
+          <span class="linea"><span>Argos administra</span></span>
+          <span class="linea"><span>tu tienda <span class="cur">mientras vendes</span></span></span>
+        </h1>
+        <p class="bajada" data-entra>Vigila pedidos, pagos, stock y chats. Lo de rutina se lo encarga a Sofi y sale solo; lo delicado te lo trae a «Te toca».</p>
+        <div class="fila-botones" data-entra>
+          <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
+          <a class="boton boton--fantasma" href="#dia">Un día con Argos</a>
+        </div>
+        <ul class="ag-verbos" aria-label="Lo que hace Argos" data-entra>
+          <li>Vende</li><li>Cuida</li><li>Conoce</li><li>Ordena</li>
+        </ul>
+      </div>
+      <div class="radar-g" data-radar-g>
+        <span class="radar-g__anillo"></span>
+        <span class="radar-g__anillo radar-g__anillo--b"></span>
+        <span class="radar-g__anillo radar-g__anillo--c"></span>
+        <span class="radar-g__barrido" aria-hidden="true"></span>
+        <span class="radar-g__ojo" aria-hidden="true"><Fragment set:html={marca} /></span>
+        <ul class="radar-g__avisos" aria-label="Avisos de ejemplo">
+          {avisos.map((a, i) => (
+            <li class:list={["aviso-r", `aviso-r--${i}`, `aviso-r--${a.c}`]} data-aviso-r><i aria-hidden="true"></i><span><b>{a.t}</b><small>{a.d}</small></span></li>
+          ))}
+        </ul>
+      </div>
     </div>
-  </PaginaHeroe>
-  <section class="p-bloques" aria-labelledby="hace-h">
+  </section>
+
+  <!-- ============================================================ un día con Argos -->
+  <section class="dia" id="dia" aria-labelledby="dia-h" data-dia>
+    <div class="dia__pin" data-dia-pin>
+      <div class="marco dia__marco">
+        <div class="dia__reloj">
+          <p class="etiqueta">Un día con Argos</p>
+          <h2 id="dia-h" class="titulo-2">Abres la app <span class="cur">y ya está hecho</span></h2>
+          <p class="dia__hora" aria-hidden="true" data-dia-hora>09:00</p>
+          <span class="dia__barra" aria-hidden="true"><i data-dia-avance></i></span>
+          <p class="bajada">Ejemplo de un día en Calzados Rosa. Las cifras salen de tus pedidos, nunca se inventan.</p>
+        </div>
+        <div class="dia__escena">
+          <span class="dia__sofi" data-sofi="atenta" data-sofi-escala="0.5" aria-hidden="true"></span>
+          <ol class="dia__feed">
+            {dia.map((e) => (
+              <li class:list={["evento", `evento--${e.quien}`]} data-evento>
+                <span class="evento__hora">{e.h}</span>
+                <div>
+                  <span class="evento__para">{e.quien === "sofi" ? "Argos → Sofi" : "Argos → tú"}</span>
+                  <b>{e.t}</b>
+                  <small>{e.d}</small>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ lo que hace -->
+  <section class="poderes" aria-labelledby="poderes-h">
     <div class="marco">
       <div class="cabeza" data-aparece>
         <p class="etiqueta">Lo que hace</p>
-        <h2 id="hace-h" class="titulo-2">Vende, cuida, conoce <span class="cur">y ordena</span></h2>
+        <h2 id="poderes-h" class="titulo-2">Vende, cuida, conoce <span class="cur">y ordena</span></h2>
       </div>
-      <ul class="p-bloques__lista">
-        {poderes.map((p) => <li class="p-bloque" data-aparece><h3>{p.t}</h3><p>{p.d}</p></li>)}
-        <li class="p-bloque" data-aparece><h3>Promociones</h3><p>Promociones a la medida de cada clienta.</p><p><span class="pronto">Pronto</span></p></li>
-      </ul>
+      <div class="poderes__grilla">
+        <article class="poder poder--vende" data-poder="vende">
+          <h3>Vende</h3>
+          <p>Le encarga a Sofi los mensajes que venden. Uno por clienta, nunca masivos.</p>
+          <ul class="poder__mensajes" aria-label="Los seguimientos que encarga">
+            <li><b>Recordar el pago</b><span>A las 3 horas, si el precio sigue vigente</span></li>
+            <li><b>Agradecer y preguntar si llegó</b><span>Al día siguiente de entregado</span></li>
+            <li><b>Avisar que volvió la talla</b><span>A quien la pidió, cuando entra stock</span></li>
+            <li><b>Invitar a volver</b><span>A los 60 días de su última compra</span></li>
+          </ul>
+        </article>
+        <article class="poder poder--stock" data-poder="stock">
+          <h3>Cuida el stock</h3>
+          <p>Te dice qué reponer y qué pedido pagado espera mercadería.</p>
+          <div class="stock-v" aria-hidden="true">
+            <div class="stock-v__fila"><span>Zapatilla urbana blanca 38</span><b data-stock-n>6</b></div>
+            <span class="stock-v__barra"><i data-stock-barra></i></span>
+            <span class="stock-v__reponer" data-stock-reponer>Reponer · 2 personas la pidieron</span>
+          </div>
+          <p class="poder__nota">Ejemplo. Cuando registras la entrada, Sofi les avisa sola.</p>
+        </article>
+        <article class="poder poder--conoce" data-poder="conoce">
+          <h3>Conoce a tus clientas</h3>
+          <p>En Reportes: lo más vendido, quién volvió a comprar y lo que se acaba.</p>
+          <ul class="barras" aria-label="Lo más vendido, de ejemplo">
+            {masVendido.map((m) => (
+              <li><span>{m.t}</span><i style={`--v:${m.n / 18}`} data-barra></i><b>{m.n}</b></li>
+            ))}
+          </ul>
+          <p class="poder__nota">Ejemplo de la tienda Calzados Rosa.</p>
+        </article>
+        <article class="poder poder--ordena oscuro" data-poder="ordena">
+          <h3>Ordena lo delicado</h3>
+          <p>Lo que pide una persona te lo trae a «Te toca».</p>
+          <ul class="toca" aria-label="Te toca, de ejemplo">
+            <li><i class="toca__a"></i><span><b>Confirmar un pago</b><small>Pedido 0008, S/ 120 por Yape</small></span></li>
+            <li><i class="toca__b"></i><span><b>Falta stock para un pedido pagado</b><small>Registra la entrada para que salga</small></span></li>
+            <li><i class="toca__c"></i><span><b>Una conversación espera a una persona</b><small>Rocío pregunta por un cambio</small></span></li>
+          </ul>
+        </article>
+      </div>
+      <div class="poder-pronto" data-aparece><span class="pronto">Pronto</span><p><b>Promociones a la medida de cada clienta.</b> Argos sabrá a quién ofrecerle qué.</p></div>
     </div>
   </section>
-  <section class="p-bloques p-bloques--suave" aria-labelledby="hoy-h">
-    <div class="marco p-dos">
-      <div class="cabeza" data-aparece>
-        <p class="etiqueta">Un día con Argos</p>
-        <h2 id="hoy-h" class="titulo-2">Abres la app <span class="cur">y ya está hecho</span></h2>
-        <p class="bajada">Lo que Argos le encargó a Sofi y lo que te toca a ti, en un solo lugar. Las cifras salen de tus pedidos, no se inventan.</p>
-      </div>
-      <ul class="p-alertas" aria-label="Ejemplo de un día con Argos">
-        {hoy.map((a) => (
-          <li class="p-alerta" data-aparece><i style={`background:${a.c}`}></i><span><b>{a.t}</b><small>{a.d}</small></span></li>
-        ))}
-      </ul>
-    </div>
-  </section>
-  <section class="p-bloques" aria-labelledby="decides-h">
-    <div class="marco p-dos">
-      <div class="cabeza" data-aparece>
+
+  <!-- ============================================================ Argos y Sofi -->
+  <section class="equipo" aria-labelledby="equipo-h">
+    <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
         <p class="etiqueta">Con control humano</p>
-        <h2 id="decides-h" class="titulo-2">Argos propone, <span class="cur">tú decides</span></h2>
+        <h2 id="equipo-h" class="titulo-2">Argos propone, Sofi hace, <span class="cur">tú decides</span></h2>
         <p class="bajada">Eliges qué seguimientos le encarga a Sofi. Confirmar un pago o entregar sigue siendo de una persona.</p>
       </div>
-      <span class="p-heroe__sofi" data-sofi="feliz" data-sofi-escala="0.5" aria-hidden="true"></span>
+      <div class="equipo__escena" data-equipo>
+        <div class="equipo__agente">
+          <span class="equipo__ojo" aria-hidden="true"><span class="agente__barrido"></span><Fragment set:html={marca} /></span>
+          <b>Argos</b><small>Vigila y propone</small>
+        </div>
+        <span class="equipo__linea" aria-hidden="true" data-equipo-linea></span>
+        <div class="equipo__agente">
+          <span class="equipo__sofi" data-sofi="feliz" data-sofi-escala="0.5" aria-hidden="true"></span>
+          <b>Sofi</b><small>Escribe y vende</small>
+        </div>
+        <span class="equipo__linea" aria-hidden="true" data-equipo-linea></span>
+        <div class="equipo__agente equipo__agente--tu">
+          <span class="equipo__tu" aria-hidden="true">Tú</span>
+          <b>Tu equipo</b><small>Confirma y entrega</small>
+        </div>
+      </div>
     </div>
   </section>
 </Base>
+
+<script>
+  import { iniciarArgos } from "../scripts/agentes"
+  iniciarArgos()
+</script>

@@ -110,7 +110,10 @@ export function iniciarSitio() {
   cabecera()
   menu()
   aparecer()
-  // Sofi está en el cierre de todas las páginas; el Inicio la maneja él mismo (inicio.ts).
-  if (!document.querySelector("[data-heroe]") && document.querySelector("[data-sofi]"))
+  // Sofi está en el cierre de todas las páginas; la que la carga ella misma lo marca (`data-sofi-propia`).
+  if (
+    !document.documentElement.hasAttribute("data-sofi-propia") &&
+    document.querySelector("[data-sofi]")
+  )
     import("./sofi").then((m) => m.crearSofi(reduceMovimiento()))
 }
