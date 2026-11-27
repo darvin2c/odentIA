@@ -74,6 +74,19 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 
+## Las clientas (entrega 4)
+
+- La clienta es la persona (ADR 0221): una ficha (`customer`) por clienta, y cada pedido lleva la
+  suya desde `createOrderIn` (`customerForOrderIn` de `apps/api/src/clientes.ts`): la elegida al
+  anotarlo, la de los pedidos anteriores del mismo chat o una nueva. Nunca se busca ni se une por
+  el teléfono o el nombre: eso solo sugiere «¿Es la misma clienta?», que no frena ninguna venta.
+  Los pedidos de «Probar a Sofi» y los de antes de Clientes no tienen ficha.
+- Unir, separar y «son distintas» los decide una persona que atiende (`ventas.atender`). Unir deja
+  la ficha más nueva dentro de la más antigua (`merged_into`), sin mover ni borrar nada; «Separar»
+  la deja sola. Lo decidido va a `customer_event` y no se vuelve a preguntar. Un pedido no cambia
+  de ficha. Sofi abre fichas, pero no las cambia ni anota decisiones (`0015_reglas_clientas.sql`).
+- Lo que debe una clienta no se calcula en Clientes: sale del saldo de cada pedido.
+
 ## Sofi y Argos (B5)
 
 - Sofi usa las operaciones de `pedidos.ts` (`quoteOrderIn`, `createOrderIn`, `addReceiptIn`,
