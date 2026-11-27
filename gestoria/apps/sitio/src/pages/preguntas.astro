@@ -1,0 +1,28 @@
+---
+// Preguntas (web v5): las del Inicio y las que suma esta página, con sus datos para los buscadores.
+import Acordeon from "../components/Acordeon.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { faqLd, MAS_PREGUNTAS, PREGUNTAS } from "../lib/contenido"
+
+const todas = [...PREGUNTAS, ...MAS_PREGUNTAS]
+---
+<Base
+  title="Preguntas frecuentes sobre gestorIA y Sofi"
+  description="Respuestas sobre Sofi, el precio mínimo, los pagos, las entregas, el equipo y el precio de gestorIA, para tiendas que venden por WhatsApp, Instagram y Messenger."
+  ld={[faqLd(todas)]}
+>
+  <PaginaHeroe
+    etiqueta="Preguntas"
+    titulo="Lo que preguntan"
+    acento="las tiendas."
+    bajada="Antes de empezar, en pocas palabras. Si tu pregunta no está, escríbenos y te responde una persona."
+    humor="curiosa"
+    segundo={{ href: "/contacto", label: "Escríbenos" }}
+  />
+  <section class="p-bloques" aria-label="Preguntas y respuestas">
+    <div class="marco">
+      <div class="p-faq p-faq--sola"><Acordeon preguntas={todas} /></div>
+    </div>
+  </section>
+</Base>

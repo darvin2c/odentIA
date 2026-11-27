@@ -17,16 +17,26 @@ import {
   CONTRACT_MAX_RECEIPT_BYTES,
   CONTRACT_PATHS,
   type CONTRACT_RECEIPT_TYPES,
+  helpAskAnswer,
+  helpAskQuestion,
+  helpFeedback,
   SUPPORT_KINDS,
   USAGE_CHANNELS,
 } from "@odentia/contract"
 import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
-import { helpGuideFor } from "./ayuda.js"
+import {
+  type HelpReplyBody,
+  helpReplyOf,
+  helpReplyWithoutAriadna,
+  helpScreenView,
+  helpTopics,
+  storePath,
+} from "./ayuda.js"
 import { imageType } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { signMessage } from "./firma.js"
-import { can, ROLE_NAMES, type StoreSeat } from "./permisos.js"
+import { ROLE_NAMES, type StoreSeat } from "./permisos.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -38,7 +48,8 @@ import { inStore, StoreError } from "./tiendas.js"
  *   aviso se guarda en `contract_outbox` en la misma transacción que lo que lo causó, y
  *   `deliverOutbox` lo envía y lo reintenta siempre con la misma clave (su id): la administración
  *   reconoce un repetido y nunca lo cuenta dos veces; nada se pierde.
- * - **gestorIA pregunta** el estado de cada tienda y guarda lo último que supo (`contract_state`).
+ * - **gestorIA pregunta** el estado de cada tienda y guarda lo último que supo (`contract_state`),
+ *   y le pregunta a Ariadna, la de la Ayuda, con su guía (`askAriadna`), al momento.
  * - **La app nunca se detiene por la administración:** si no responde, sigue con lo último que
  *   supo; si nunca supo nada, deja trabajar. Solo Sofi se detiene, y solo si la administración
  *   lo dijo (la cuenta no puede seguir, se acabó el saldo de prueba o llegó a su tope).
@@ -291,15 +302,16 @@ export const supportInput = z.object({
 })
 
 /**
- * «Pedir ayuda» desde cualquier pantalla (entrega 7, tablero 19): lo que pasó y, sin que la persona
- * lo escriba, la pantalla desde la que pregunta (su ruta dentro de la tienda).
+ * Lo que se envía al equipo de gestorIA desde la Ayuda (entrega 7, tablero 19; ADR 0227): una
+ * pregunta o un problema y, sin que la persona lo escriba, la pantalla desde la que escribe.
  */
 export const helpRequestInput = z.object({
   question: z.string().trim().min(1, "Cuéntanos qué pasó").max(500, "Máximo 500 caracteres"),
+  kind: z.enum(["pregunta", "problema"]).default("pregunta"),
   screen: z
     .string()
     .trim()
-    .max(200)
+    .max(300)
     .refine((path) => path.startsWith("/"), "La pantalla no se pudo leer")
     .optional(),
 })
@@ -394,10 +406,12 @@ export async function askSupport(
   )
 }
 
+/* ---------- La Ayuda (ADR 0227: la misma Ariadna de las clínicas) ---------- */
+
 /**
- * «Pedir ayuda» de la Ayuda y de la cabecera: cualquier rol del equipo (`ayuda.pedir`; decisión 6
- * del lienzo «gestorIA como odentIA»). Llega a la Bandeja de la administración como las preguntas
- * de las clínicas, y la respuesta vuelve a quien preguntó (`helpView`).
+ * Lo que se escribe a soporte desde la Ayuda: cualquier rol del equipo (`ayuda.pedir`; soporte
+ * no). Llega a la Bandeja de la administración como los casos de las clínicas, con la pantalla
+ * (su ruta dentro de la tienda) y el rol, y la respuesta vuelve a quien escribió (`helpCases`).
  */
 export async function askForHelp(
   appDb: Db,
@@ -407,30 +421,32 @@ export async function askForHelp(
   input: z.infer<typeof helpRequestInput>,
   now = new Date(),
 ): Promise<void> {
+  const { question, kind, screen } = input
   await inStore(appDb, person, storeId, "ayuda.pedir", (tx, seat) =>
-    enqueueSupport(tx, config, person, storeId, seat, { kind: "pregunta", ...input }, now),
+    enqueueSupport(
+      tx,
+      config,
+      person,
+      storeId,
+      seat,
+      { kind, question, ...(screen ? { screen: storePath(screen, storeId) } : {}) },
+      now,
+    ),
   )
 }
 
 /**
- * La Ayuda de quien la abre: la guía para su rol y, si puede pedir ayuda, sus preguntas con las
- * respuestas del equipo de gestorIA. Solo las suyas: las de otra persona de la tienda (y lo del
- * plan, que es del Dueño) no se le muestran (ADR 0221). Las respuestas son las de lo último que
- * dijo la administración, que se pregunta cada 10 minutos: abrir la Ayuda no la espera.
+ * «Tus casos con soporte» de quien abre la Ayuda: lo que escribió al equipo de gestorIA, con sus
+ * respuestas. Solo lo suyo: lo de otra persona de la tienda (y lo del plan, que es del Dueño) no
+ * se le muestra (ADR 0221). Las respuestas son las de lo último que dijo la administración, que
+ * se pregunta cada 10 minutos: abrir la Ayuda no la espera.
  */
-export async function helpView(appDb: Db, config: ContractConfig, person: Person, storeId: string) {
-  return inStore(appDb, person, storeId, "tienda.ver", async (tx, seat) => {
-    const canAsk = can(seat, "ayuda.pedir")
-    const { row, state } = canAsk ? await knownStateIn(tx, storeId) : { row: null, state: null }
-    const pending = canAsk
-      ? await pendingSupport(tx, storeId, row?.receivedAt ?? null, person.userId)
-      : []
+export async function helpCases(appDb: Db, person: Person, storeId: string) {
+  return inStore(appDb, person, storeId, "ayuda.pedir", async (tx) => {
+    const { row, state } = await knownStateIn(tx, storeId)
+    const pending = await pendingSupport(tx, storeId, row?.receivedAt ?? null, person.userId)
     const cases = state?.found ? state.support.filter((kase) => kase.userId === person.userId) : []
     return {
-      role: ROLE_NAMES[seat],
-      canAsk,
-      connected: Boolean(config.secret),
-      guide: helpGuideFor(seat),
       questions: [
         ...pending.map((one) => ({
           id: null,
@@ -449,6 +465,146 @@ export async function helpView(appDb: Db, config: ContractConfig, person: Person
       ],
     }
   })
+}
+
+/**
+ * La pantalla donde está la persona: su nombre, lo que la guía sugiere preguntar ahí para su rol
+ * y lo que llevaría un envío a soporte (la pantalla, el rol y la tienda).
+ */
+export async function helpScreen(appDb: Db, person: Person, storeId: string, path: string) {
+  return inStore(appDb, person, storeId, "tienda.ver", async (tx, seat) => {
+    const [shop] = await tx.select({ name: store.name }).from(store).where(eq(store.id, storeId))
+    const inside = storePath(path, storeId)
+    const view = helpScreenView(seat, inside)
+    return {
+      ...view,
+      attached: {
+        screen: view.title ?? inside,
+        role: ROLE_NAMES[seat],
+        clinic: shop?.name ?? null,
+        version: null,
+      },
+    }
+  })
+}
+
+export const helpAskInput = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(3, "Escribe tu pregunta: al menos 3 caracteres.")
+    .max(500, "Escribe como mucho 500 caracteres."),
+  screen: z.string().trim().max(300).default("/"),
+  previous: z
+    .object({
+      question: z.string().trim().min(1).max(500),
+      where: z.string().trim().max(200).nullable(),
+    })
+    .optional(),
+})
+
+export const helpFeedbackInput = z.object({ helpful: z.boolean() })
+
+/** Lo más que se espera a Ariadna: la persona mira el panel mientras tanto. */
+const HELP_TIMEOUT_MS = 8_000
+/** Lo que responde Ariadna, en el sobre de la API de la administración. */
+const helpAskEnvelope = z.object({ data: helpAskAnswer })
+/** El estado de una cuenta, en el sobre de la API de la administración. */
+const accountStateEnvelope = z.object({ data: accountState })
+/** El id de una respuesta que salió sin Ariadna: la administración no la conoce. */
+const LOCAL_ASK = "local-"
+
+/**
+ * Una pregunta a la Ayuda: la guía entera de gestorIA viaja a Ariadna, en la administración
+ * (`CONTRACT_PATHS.help`, firmada), que responde con ids de esa guía; aquí se hacen texto para el
+ * rol de quien pregunta. Nada de la tienda ni de la persona sale con ella. Sin el acuerdo, o si
+ * la administración no responde, solo se responde una pregunta que es exactamente de la guía.
+ */
+export async function askAriadna(
+  appDb: Db,
+  config: ContractConfig,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof helpAskInput>,
+): Promise<HelpReplyBody> {
+  const seat = await inStore(appDb, person, storeId, "tienda.ver", async (_tx, role) => role)
+  if (config.secret) {
+    const body = JSON.stringify(
+      helpAskQuestion.parse({
+        question: input.question,
+        screen: storePath(input.screen, storeId),
+        previous: input.previous ?? null,
+        guide: helpTopics(),
+      }),
+    )
+    try {
+      const response = await postSigned(
+        config,
+        CONTRACT_PATHS.help,
+        `ay_${randomUUID()}`,
+        body,
+        HELP_TIMEOUT_MS,
+      )
+      // La administración responde como toda su API: `{ data: … }`.
+      if (response.ok)
+        return helpReplyOf(helpAskEnvelope.parse(await response.json()).data, seat, storeId)
+      console.warn(
+        `La Ayuda no pudo preguntar a Ariadna: la administración respondió ${response.status}`,
+      )
+    } catch (error) {
+      console.warn(
+        `La Ayuda no pudo preguntar a Ariadna: ${error instanceof Error ? error.name : "error"}`,
+      )
+    }
+  }
+  return helpReplyWithoutAriadna(input.question, seat, storeId, `${LOCAL_ASK}${randomUUID()}`)
+}
+
+/**
+ * Lo que dijo la persona de una respuesta («¿Te sirvió?» o «Ninguna es lo que busco»), a la
+ * administración (`CONTRACT_PATHS.helpFeedback`, firmado). Si no llega, se dice: no se anotó.
+ */
+export async function sendHelpFeedback(
+  appDb: Db,
+  config: ContractConfig,
+  person: Person,
+  storeId: string,
+  askId: string,
+  said: { helpful: boolean } | { noneFits: true },
+): Promise<void> {
+  await inStore(appDb, person, storeId, "tienda.ver", async () => undefined)
+  if (!config.secret || askId.startsWith(LOCAL_ASK))
+    throw new StoreError(
+      503,
+      "HELP_OFFLINE",
+      "Esta respuesta salió sin conexión con la guía: no se pudo anotar.",
+    )
+  if (!z.uuid().safeParse(askId).success)
+    throw new StoreError(404, "NOT_FOUND", "No encontramos esa pregunta.")
+  let response: Response
+  try {
+    response = await postSigned(
+      config,
+      CONTRACT_PATHS.helpFeedback,
+      `af_${randomUUID()}`,
+      JSON.stringify(helpFeedback.parse({ askId, ...said })),
+      HELP_TIMEOUT_MS,
+    )
+  } catch {
+    throw new StoreError(
+      502,
+      "HELP_DOWN",
+      "La guía no respondió y no se anotó. Vuelve a intentarlo.",
+    )
+  }
+  if (response.status === 404)
+    throw new StoreError(404, "NOT_FOUND", "No encontramos esa pregunta.")
+  if (!response.ok)
+    throw new StoreError(
+      502,
+      "HELP_DOWN",
+      "La guía no respondió y no se anotó. Vuelve a intentarlo.",
+    )
 }
 
 export const planReceiptInput = z.object({
@@ -801,7 +957,8 @@ async function askState(
     )
     down = response.status >= 500 || response.status === 429
     if (!response.ok) throw new Error(`La administración respondió ${response.status}`)
-    state = accountState.parse(await response.json())
+    // La administración responde como toda su API: `{ data: … }`.
+    state = accountStateEnvelope.parse(await response.json()).data
     if (state.account !== storeId) throw new Error("La administración respondió por otra cuenta")
   } catch (error) {
     // Lo último que se supo se queda: solo se anota que esta vez no respondió.

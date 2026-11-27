@@ -5,27 +5,27 @@ import Base from "../layouts/Base.astro"
 import { CONTACT_EMAIL, LOGIN_URL, SALES_TEXT, salesWhatsApp } from "../lib/sitio"
 ---
 <Base title="Contacto" description="Habla con una persona de gestorIA por WhatsApp o por correo.">
-  <div class="wrap page">
-    <header class="page-head">
+  <div class="marco pagina">
+    <header class="pagina__cabeza">
       <h1>Hablemos</h1>
       <p>Te contamos cómo vendería gestorIA en tu tienda. Te responde una persona.</p>
     </header>
-    <ul class="contact">
+    <ul class="contacto">
       {salesWhatsApp && (
         <li>
           <h2>Escríbenos por WhatsApp</h2>
           <p>Abre el chat con «{SALES_TEXT}».</p>
-          <a class="btn btn-big" href={salesWhatsApp}>Abrir WhatsApp</a>
+          <a class="boton" href={salesWhatsApp}>Abrir WhatsApp</a>
         </li>
       )}
       <li>
         <h2>Por correo</h2>
-        <a class="email" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+        <a class="enlace correo" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
       </li>
       <li>
         <h2>¿Ya tienes tienda?</h2>
         <p>Entra con tu cuenta y sigue donde lo dejaste.</p>
-        <a class="btn btn-ghost" href={LOGIN_URL}>Entrar a mi tienda</a>
+        <a class="boton boton--fantasma" href={LOGIN_URL}>Entrar a mi tienda</a>
       </li>
     </ul>
   </div>

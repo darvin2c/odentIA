@@ -1,19 +1,27 @@
 ---
-// El documento de cada página: título y descripción propios, la imagen al compartir el enlace
-// (WhatsApp la muestra), la cabecera y el pie.
+// El documento de cada página (web v5): título y descripción propios, la imagen al compartir el
+// enlace (WhatsApp la muestra), la cabecera, el contenido y el pie con su cierre. El sistema visual
+// es propio (src/styles/base.css): Geist, tinta cálida y el naranja de la marca (#CC4604).
+import "@fontsource-variable/geist"
+import "@fontsource-variable/geist-mono"
+import "@fontsource/instrument-serif/latin-400-italic.css"
 import Footer from "../components/Footer.astro"
 import Header from "../components/Header.astro"
 import { SITE_URL } from "../lib/sitio"
-import "../styles/sitio.css"
+import "../styles/base.css"
+import "../styles/paginas.css"
 
 interface Props {
   title: string
   description: string
-  header?: "dark" | "light"
   noindex?: boolean
+  /** Datos estructurados propios de la página (schema.org), además del sitio. */
+  ld?: Record<string, unknown>[]
+  /** El tono del héroe de la página: con uno oscuro, la cabecera empieza con letras blancas. */
+  tono?: "oscuro" | "claro"
 }
 
-const { title, description, header = "light", noindex = false } = Astro.props
+const { title, description, noindex = false, ld = [], tono = "claro" } = Astro.props
 // Al armar, la ruta es el archivo (/terminos.html); la dirección pública va sin .html.
 const path = Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/"
 const canonical = new URL(path, SITE_URL).toString()
@@ -22,7 +30,7 @@ const ogImage = new URL("/og.png", SITE_URL).toString()
 const isHome = path === "/"
 // La 404 se sirve en cualquier dirección que no existe: no dice ser ninguna.
 const isNotFound = path === "/404"
-const ld = {
+const site = {
   "@context": "https://schema.org",
   "@type": "WebSite",
   name: "gestorIA",
@@ -31,12 +39,13 @@ const ld = {
   inLanguage: "es",
   publisher: { "@type": "Organization", name: "gestorIA", url: `${SITE_URL}/` },
 }
+const data = isHome ? [site, ...ld] : ld
 ---
 <!doctype html>
-<html lang="es" data-brand="gestoria">
+<html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     {!isNotFound && <link rel="canonical" href={canonical} />}
@@ -50,19 +59,27 @@ const ld = {
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="gestorIA: tu tienda vende en los chats a toda hora." />
+    <meta property="og:image:alt" content="gestorIA: Sofi vende por chat para tu tienda." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content="#170d07" />
+    <meta name="theme-color" content={tono === "oscuro" ? "#111113" : "#ffffff"} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
-    {isHome && <script type="application/ld+json" set:html={JSON.stringify(ld)} />}
+    {/* `js`: hay JavaScript (el chat del héroe se puede tocar). `mueve`: además, sin «reducir movimiento», lo que entra al bajar empieza escondido. */}
+    <script is:inline>
+      document.documentElement.classList.add("js")
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("mueve")
+    </script>
+    {data.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
   </head>
   <body>
-    <a class="skip" href="#contenido">Ir al contenido</a>
-    <Header variant={header} />
+    <Header tono={tono} />
     <main id="contenido">
       <slot />
     </main>
     <Footer />
+    <script>
+      import { iniciarSitio } from "../scripts/sitio"
+      iniciarSitio()
+    </script>
   </body>
 </html>

@@ -857,7 +857,9 @@ describe("la tienda de ejemplo", () => {
       ]),
     )
     expect(home.setup).toBeNull()
-    const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {
+    const help = (await (
+      await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda/casos`)
+    ).json()) as {
       questions: { question: string; replies: unknown[] }[]
     }
     expect(help.questions).toEqual([

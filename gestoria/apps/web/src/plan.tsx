@@ -437,7 +437,7 @@ function Payments({ state, view }: { state: Known; view: PlanView }) {
 
 /**
  * Pedir ayuda al equipo de gestorIA sobre el plan o un cobro, y ver las respuestas de la tienda.
- * Lo de cada tarea está en la Ayuda, que también tiene «Pedir ayuda» para todo el equipo.
+ * Lo de cada tarea está en la Ayuda de la cabecera, que también escribe a soporte para todo el equipo.
  */
 function Support({ view }: { view: PlanView }) {
   const { store } = useStoreContext()

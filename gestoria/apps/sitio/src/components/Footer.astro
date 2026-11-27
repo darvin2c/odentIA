@@ -1,12 +1,50 @@
 ---
-// El pie de todas las páginas: la firma y lo que enlazan los correos de la cuenta.
-import { footerLinks, SIGNATURE } from "../lib/sitio"
+// El cierre y el pie de todas las páginas (web v5): una banda oscura con la llamada a vender con
+// Sofi, que está ahí en grande para jugar con ella (se aplasta al tocarla), y debajo los grupos del
+// mapa de la web. El título de cada grupo es más grande, blanco, de peso medio y con una línea
+// debajo; sus enlaces van más chicos, en gris y subrayados, para que no dependan solo del color
+// (WCAG 1.4.1).
+import { cta, footerGroups, footerLinks, SIGNATURE } from "../lib/sitio"
+import Logo from "./Logo.astro"
+
+const year = new Date().getFullYear()
+const flecha =
+  '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 ---
-<footer class="footer-line">
-  <div class="wrap footer">
-    <span>{SIGNATURE}</span>
-    <nav aria-label="Pie">
-      {footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}
-    </nav>
+<footer class="pie" aria-labelledby="cierre-h">
+  <div class="cierre">
+    <div class="cierre__fondo" aria-hidden="true"><span class="heroe__reticula"></span><span class="cierre__luz"></span></div>
+    <div class="marco cierre__marco">
+      <div class="cierre__texto" data-aparece>
+        <h2 id="cierre-h">¿Lista para vender <span class="cur">con Sofi?</span></h2>
+        <p>Escríbenos y te mostramos cómo vendería Sofi en tu tienda, con tus productos. USD 19 al mes, que vuelven como saldo.</p>
+        <div class="pie__botones">
+          <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
+        </div>
+      </div>
+      <div class="cierre__juego">
+        <span class="cierre__sofi" data-sofi="feliz" data-sofi-escala="0.5" data-sofi-juego aria-hidden="true"></span>
+        <p class="cierre__pista" aria-hidden="true">Tócala</p>
+      </div>
+    </div>
+  </div>
+  <div class="marco">
+    <div class="pie__grupos">
+      <div class="pie__marca">
+        <Logo class="pie__logo" />
+        <p>La vendedora con IA para tiendas que venden por WhatsApp, Instagram y Messenger. Hecha en el Perú.</p>
+      </div>
+      {footerGroups.map((group) => (
+        <nav class="pie__grupo" aria-label={group.title}>
+          <h3>{group.title}</h3>
+          <ul>{group.links.map((link) => <li><a href={link.href}>{link.label}</a></li>)}</ul>
+        </nav>
+      ))}
+    </div>
+    <div class="pie__legal">
+      <span>© {year} {SIGNATURE}</span>
+      <nav aria-label="Legal">{footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}</nav>
+      <span>WhatsApp, Instagram y Messenger son marcas de sus dueños.</span>
+    </div>
   </div>
 </footer>

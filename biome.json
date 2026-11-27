@@ -12,7 +12,8 @@
       "!**/.turbo",
       "!**/coverage",
       "!**/apps/web/src/presentations/*/deck.js",
-      "!**/apps/web/src/presentations/*/deck.html"
+      "!**/apps/web/src/presentations/*/deck.html",
+      "!**/gestoria/apps/sitio/public/assets"
     ]
   },
   "formatter": {
