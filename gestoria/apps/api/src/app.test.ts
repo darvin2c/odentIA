@@ -899,7 +899,8 @@ describe("la tienda de ejemplo", () => {
       catalog: { withStock: number }
     }
     expect(overview.paymentLink).toBeNull()
-    expect(overview.sofi).toEqual({ enabled: true, tried: false, toAnswer: 0 })
+    // Y tres preguntas que Sofi no supo, por responder en «Lo que aprendió».
+    expect(overview.sofi).toEqual({ enabled: true, tried: false, toAnswer: 3 })
     expect(overview.team.supportAsks).toBe(1)
     expect(overview.catalog.withStock).toBeGreaterThan(0)
     const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {
@@ -908,7 +909,7 @@ describe("la tienda de ejemplo", () => {
     expect(help.questions).toEqual([
       expect.objectContaining({
         question: "¿Dónde le digo a Sofi el horario de la tienda?",
-        replies: [expect.objectContaining({ body: expect.stringContaining("«Cómo vende»") })],
+        replies: [expect.objectContaining({ body: expect.stringContaining("«Cuándo te pasa el chat»") })],
       }),
     ])
   })

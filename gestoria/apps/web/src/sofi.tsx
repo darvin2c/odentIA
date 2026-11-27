@@ -118,24 +118,24 @@ export function SofiPage() {
             </PageNotice>
           ) : null}
           <StatusCard overview={overview.data} />
-          <div className="grid items-start gap-4 @4xl:grid-cols-[minmax(0,1fr)_minmax(19rem,24rem)]">
+          <ViewTabs
+            label="Qué ajustar de Sofi"
+            value={part}
+            onValueChange={setPart}
+            options={[
+              { value: "habla", label: "Cómo habla" },
+              { value: "ofrece", label: "Qué ofrece" },
+              { value: "persona", label: "Cuándo te pasa el chat" },
+              { value: "sabe", label: "Lo que sabe" },
+              {
+                value: "aprendio",
+                label: "Lo que aprendió",
+                ...(toAnswer > 0 ? { count: toAnswer } : {}),
+              },
+            ]}
+          />
+          <div className="grid items-start gap-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(19rem,23rem)]">
             <section aria-label="Cómo trabaja Sofi" className="flex min-w-0 flex-col gap-4">
-              <ViewTabs
-                label="Qué ajustar de Sofi"
-                value={part}
-                onValueChange={setPart}
-                options={[
-                  { value: "habla", label: "Cómo habla" },
-                  { value: "ofrece", label: "Qué ofrece" },
-                  { value: "persona", label: "Cuándo te pasa el chat" },
-                  { value: "sabe", label: "Lo que sabe" },
-                  {
-                    value: "aprendio",
-                    label: "Lo que aprendió",
-                    ...(toAnswer > 0 ? { count: toAnswer } : {}),
-                  },
-                ]}
-              />
               {part === "habla" ? <HowSheTalks overview={overview.data} /> : null}
               {part === "ofrece" ? <WhatSheOffers settings={overview.data.settings} /> : null}
               {part === "persona" ? <WhenToPerson overview={overview.data} /> : null}
@@ -260,7 +260,7 @@ function StatusCard({ overview }: { overview: SofiOverview }) {
       className="elevated flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4"
     >
       <AgentMark size="md" />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 basis-56 flex-col">
         <p className="flex flex-wrap items-center gap-2 font-semibold">
           {name}
           <Badge variant={settings.enabled ? "success" : "outline"}>
@@ -1278,7 +1278,7 @@ function TestChat({ overview }: { overview: SofiOverview }) {
     <section
       id="probar-a-sofi"
       aria-labelledby="sofi-prueba"
-      className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4 @4xl:sticky @4xl:top-4"
+      className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4 @3xl:sticky @3xl:top-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5">

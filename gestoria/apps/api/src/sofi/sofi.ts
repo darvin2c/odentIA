@@ -85,11 +85,13 @@ export const SOFI_HANDOFF =
  * Fuera del horario del equipo, los avisos fijos dicen cuándo vuelve («mañana desde las 9 a. m.»):
  * no prometen «en un momento» lo que no va a pasar. El aviso al celular sale igual (`avisos.ts`).
  */
+/** «… desde las 9 a. m.» ya termina en punto: no se le pone otro. */
+const endWith = (text: string) => (text.endsWith(".") ? text : `${text}.`)
 export const handoffLater = (back: string) =>
-  `Te paso con una persona del equipo: te escribe por aquí ${back}.`
+  `Te paso con una persona del equipo: te escribe por aquí ${endWith(back)}`
 const handoffText = (back: string | null) => (back ? handoffLater(back) : SOFI_HANDOFF)
 const fallbackText = (back: string | null) =>
-  back ? `Déjame revisarlo con el equipo y te escribo por aquí ${back}.` : SOFI_FALLBACK
+  back ? `Déjame revisarlo con el equipo y te escribo por aquí ${endWith(back)}` : SOFI_FALLBACK
 
 /** Cuántas veces llama al modelo en un turno como mucho, y cuánto espera en total. */
 export const SOFI_MAX_STEPS = 8

@@ -732,7 +732,7 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
   const settings = (extra: Json = {}) => ({
     ...DEFAULT_CHOICES,
     enabled: true,
-    displayName: null,
+    displayName: "",
     followPayment: true,
     followThanks: true,
     followRestock: true,
