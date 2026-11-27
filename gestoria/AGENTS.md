@@ -206,6 +206,12 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- A Sofi se la configura eligiendo (ADR 0234): cada opción de `store_agent` (tono, trato, emojis,
+  lo que ofrece, cuándo pasa el chat, el horario) tiene su frase fija en `sofi/opciones.ts`; nada
+  que escriba la tienda va como instrucción. Lo que puede ofrecer lo frenan también cotizar y
+  armar_pedido. «Lo que sabe» llega por `leer_lo_que_sabe` (las preguntas, como JSON en los datos);
+  «Lo que aprendió» lo anota solo Sofi, en chats de verdad, y lo cierra solo una persona: nada se
+  agrega solo. «Por qué» en la prueba sale solo de lo anotado en su respuesta (`whyOf`).
 - Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
   (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
