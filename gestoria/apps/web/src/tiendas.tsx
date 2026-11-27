@@ -73,6 +73,7 @@ import {
   useState,
 } from "react"
 import { HelpMenuItem, StoreHelpButton } from "./ayuda"
+import { DraftGuard } from "./borrador"
 import {
   ApiError,
   api,
@@ -340,10 +341,11 @@ export function Shell({
       }
       onSignOut={() => void signOut()}
     >
-      {/* La Ayuda (ADR 0227), la misma de las clínicas: en la cabecera de cada pantalla de la
-          tienda; con la fila compacta (el teléfono), en su menú ⋯. Abierta en una ventana ancha va
-          en la columna lateral, a la derecha de la página, que le cede el ancho. */}
-      <SideDockProvider>
+      {/* La columna lateral, como en las clínicas: en una ventana ancha, lo que se abre al lado (la
+          Ayuda, un formulario de la cuenta) va a la derecha de la página, que le cede el ancho, y
+          salir con algo escrito pregunta antes. La Ayuda (ADR 0227) está en la cabecera de cada
+          pantalla de la tienda; con la fila compacta (el teléfono), en su menú ⋯. */}
+      <SideDockProvider draftGuard={DraftGuard}>
         <HeaderUtilitiesProvider
           value={
             store
