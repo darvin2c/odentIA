@@ -2215,7 +2215,7 @@
         },
         "product_package_check": {
           "name": "product_package_check",
-          "value": "(\"product\".\"package_weight_g\" is null or \"product\".\"package_weight_g\" between 1 and 1000000) and ((\"product\".\"package_length_mm\" is null and \"product\".\"package_width_mm\" is null and \"product\".\"package_height_mm\" is null) or (\"product\".\"package_length_mm\" between 1 and 10000 and \"product\".\"package_width_mm\" between 1 and 10000 and \"product\".\"package_height_mm\" between 1 and 10000))"
+          "value": "(\"product\".\"package_weight_g\" is null or \"product\".\"package_weight_g\" between 1 and 1000000) and ((\"product\".\"package_length_mm\" is null and \"product\".\"package_width_mm\" is null and \"product\".\"package_height_mm\" is null) or (\"product\".\"package_length_mm\" is not null and \"product\".\"package_width_mm\" is not null and \"product\".\"package_height_mm\" is not null and \"product\".\"package_length_mm\" between 1 and 10000 and \"product\".\"package_width_mm\" between 1 and 10000 and \"product\".\"package_height_mm\" between 1 and 10000))"
         },
         "product_keywords_check": {
           "name": "product_keywords_check",

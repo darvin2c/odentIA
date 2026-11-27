@@ -579,7 +579,7 @@ export const product = pgTable(
     ),
     check(
       "product_package_check",
-      sql`(${table.packageWeightG} is null or ${table.packageWeightG} between 1 and 1000000) and ((${table.packageLengthMm} is null and ${table.packageWidthMm} is null and ${table.packageHeightMm} is null) or (${table.packageLengthMm} between 1 and 10000 and ${table.packageWidthMm} between 1 and 10000 and ${table.packageHeightMm} between 1 and 10000))`,
+      sql`(${table.packageWeightG} is null or ${table.packageWeightG} between 1 and 1000000) and ((${table.packageLengthMm} is null and ${table.packageWidthMm} is null and ${table.packageHeightMm} is null) or (${table.packageLengthMm} is not null and ${table.packageWidthMm} is not null and ${table.packageHeightMm} is not null and ${table.packageLengthMm} between 1 and 10000 and ${table.packageWidthMm} between 1 and 10000 and ${table.packageHeightMm} between 1 and 10000))`,
     ),
     check(
       "product_keywords_check",

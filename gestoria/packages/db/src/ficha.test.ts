@@ -105,10 +105,15 @@ describe("la ficha del producto en la base", () => {
       { packageLengthMm: 100, packageWidthMm: null },
       { webSlug: "con espacios" },
       { code: "con espacio" },
-    ])
-      await expect(
-        inRosa((tx) => tx.update(product).set(bad).where(eq(product.id, productId))),
-      ).rejects.toThrow()
+    ]) {
+      const done = await inRosa((tx) =>
+        tx.update(product).set(bad).where(eq(product.id, productId)).returning({ id: product.id }),
+      ).then(
+        () => JSON.stringify(bad),
+        () => null,
+      )
+      expect(done).toBeNull()
+    }
   })
 
   it("el código de barras tiene la forma de un GTIN y no se repite en la tienda", async () => {
@@ -127,7 +132,9 @@ describe("la ficha del producto en la base", () => {
 
   it("un color guarda su hex como #rrggbb y el segundo solo si hay primero", async () => {
     await inRosa((tx) =>
-      tx.insert(productColor).values({ storeId: calzados, productId, value: "blanca", hex: "#f2f0ea" }),
+      tx
+        .insert(productColor)
+        .values({ storeId: calzados, productId, value: "blanca", hex: "#f2f0ea" }),
     )
     for (const bad of [
       { value: "negra", hex: "#FFF" },
@@ -176,7 +183,9 @@ describe("la ficha del producto en la base", () => {
       ),
     ).rejects.toThrow()
     await expect(
-      inRosa((tx) => tx.update(productEvent).set({ reason: "x" }).where(eq(productEvent.productId, productId))),
+      inRosa((tx) =>
+        tx.update(productEvent).set({ reason: "x" }).where(eq(productEvent.productId, productId)),
+      ),
     ).rejects.toThrow()
   })
 
