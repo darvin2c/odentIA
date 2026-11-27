@@ -1,4 +1,5 @@
-// Las direcciones de la web de gestorIA y la llamada a la acción de toda la web (lienzo B8).
+// Las direcciones de la web de gestorIA, la llamada a la acción y el mapa de sus páginas (lienzo B8;
+// web v3: el plan de páginas de la v2, entregado por partes).
 
 /** El dominio de gestorIA: la web en la raíz y la app en `app.` (ADR 0203). */
 export const DOMAIN = "gestoria24.com"
@@ -9,12 +10,12 @@ export const REGISTER_URL = `${APP_URL}/register`
 export const CONTACT_EMAIL = `hola@${DOMAIN}`
 
 /**
- * ¿Ya se puede abrir una tienda y vender en sus chats? Mientras WhatsApp, Instagram y Messenger de
- * gestorIA esperan su conexión con Meta, no: quien crea una tienda arma el catálogo y prueba a Sofi,
- * pero no vende en sus chats. Por eso el botón principal es hablar con nosotros. El día que los
- * chats estén conectados, esta línea pasa a `true` y el botón principal es «Crea tu tienda».
+ * ¿El botón principal es crear la tienda? Desde la web v3, sí: el usuario lo pidió así. Quien crea
+ * su tienda arma el catálogo y prueba a Sofi; vender en sus propios chats llega cuando WhatsApp,
+ * Instagram y Messenger de gestorIA estén conectados con Meta. Con `false`, el botón principal
+ * vuelve a ser hablar con nosotros por WhatsApp.
  */
-export const TIENDAS_ABIERTAS = false
+export const TIENDAS_ABIERTAS = true
 
 /** El mensaje ya escrito del WhatsApp de ventas: por él la administración sabe que es gestorIA. */
 export const SALES_TEXT = "Hola, quiero información de gestorIA"
@@ -47,19 +48,109 @@ export const cta = primaryCta(TIENDAS_ABIERTAS, salesWhatsApp)
 
 export type NavLink = { href: string; label: string }
 
-/** La cabecera de la portada: sus secciones y el contacto. Sin «Precios» hasta que haya planes. */
+/**
+ * Una página del plan de la web (las 25 de la v2). `path` es su dirección cuando exista; `lista`
+ * dice si ya se armó. Mientras no, el enlace lleva a su parte del Inicio (`hoy`), o no se muestra:
+ * la web nunca enlaza a una página que no existe (lo comprueba `scripts/comprobar-armado.mjs`).
+ */
+export type Pagina = {
+  label: string
+  /** Lo que hace, en pocas palabras: el menú de la cabecera lo muestra debajo del nombre. */
+  hint?: string
+  path: string
+  lista: boolean
+  hoy?: string
+}
+
+/** El enlace de una página hoy: su dirección si existe, su parte del Inicio, o nada. */
+export function hrefOf(p: Pagina): string | null {
+  if (p.lista) return p.path
+  return p.hoy ?? null
+}
+
+/** Las páginas de un grupo que hoy tienen adónde llevar, como enlaces. */
+export function linksOf(pages: Pagina[]): NavLink[] {
+  return pages.flatMap((p) => {
+    const href = hrefOf(p)
+    return href ? [{ href, label: p.label }] : []
+  })
+}
+
+/** El mapa de la web, por grupos, en el orden del pie. */
+export const SITE_MAP = {
+  producto: [
+    {
+      label: "Sofi",
+      hint: "Atiende, negocia y cobra",
+      path: "/sofi",
+      lista: false,
+      hoy: "/#venta",
+    },
+    {
+      label: "Cobros",
+      hint: "El pago de cada pedido",
+      path: "/cobros",
+      lista: false,
+      hoy: "/#pedidos",
+    },
+    {
+      label: "Entregas",
+      hint: "Solo con el pago confirmado",
+      path: "/entregas",
+      lista: false,
+      hoy: "/#entrega",
+    },
+    {
+      label: "Clientes",
+      hint: "La ficha de cada clienta",
+      path: "/clientes",
+      lista: false,
+      hoy: "/#clientas",
+    },
+    { label: "Catálogo", hint: "Tu vitrina con tu marca", path: "/catalogo", lista: false },
+    { label: "Inventario", hint: "Stock por variante", path: "/inventario", lista: false },
+    { label: "Argos", hint: "Lo que te toca hoy", path: "/argos", lista: false },
+  ],
+  recursos: [
+    { label: "Rubros", path: "/rubros", lista: false, hoy: "/#rubros" },
+    { label: "Preguntas", path: "/preguntas", lista: false, hoy: "/#preguntas" },
+    { label: "Cómo funciona", path: "/como-funciona", lista: false },
+    { label: "Guías", path: "/guias", lista: false },
+    { label: "Integraciones", path: "/integraciones", lista: false },
+    { label: "Comparar", path: "/comparar", lista: false },
+  ],
+  empresa: [
+    { label: "Precios", path: "/precios", lista: false, hoy: "/#precio" },
+    { label: "Contacto", path: "/contacto", lista: true },
+    { label: "Repartidores", path: "/repartidores", lista: false },
+  ],
+  legal: [
+    { label: "Términos", path: "/terminos", lista: true },
+    { label: "Privacidad", path: "/privacidad", lista: true },
+  ],
+} satisfies Record<string, Pagina[]>
+
+/** Las palabras de la cabecera; «Producto» abre su menú con las páginas del producto. */
 export const mainNav: NavLink[] = [
-  { href: "/#como", label: "Cómo vende" },
-  { href: "/#agentes", label: "Sofi y Argos" },
-  { href: "/contacto", label: "Contacto" },
+  { href: "/#venta", label: "Producto" },
+  ...linksOf([SITE_MAP.recursos[0], SITE_MAP.empresa[0], SITE_MAP.recursos[1]]),
 ]
 
-/** El pie de todas las páginas: lo que enlazan los correos de la cuenta, y entrar. */
-export const footerLinks: NavLink[] = [
-  { href: "/terminos", label: "Términos" },
-  { href: "/privacidad", label: "Privacidad" },
-  { href: "/contacto", label: "Contacto" },
-  { href: LOGIN_URL, label: "Entrar" },
-]
+/** El pie de todas las páginas: los grupos del mapa que hoy tienen enlaces. */
+export const footerGroups: { title: string; links: NavLink[] }[] = [
+  { title: "Producto", links: linksOf(SITE_MAP.producto) },
+  { title: "Recursos", links: linksOf(SITE_MAP.recursos) },
+  { title: "Empresa", links: linksOf(SITE_MAP.empresa) },
+  {
+    title: "Tu tienda",
+    links: [
+      { href: LOGIN_URL, label: "Entrar" },
+      { href: REGISTER_URL, label: "Crea tu tienda" },
+    ],
+  },
+].filter((g) => g.links.length > 0)
+
+/** La última línea del pie: Términos y Privacidad, que enlazan los correos de la cuenta. */
+export const footerLinks: NavLink[] = linksOf(SITE_MAP.legal)
 
 export const SIGNATURE = "gestorIA es una marca del Grupo Sallca"

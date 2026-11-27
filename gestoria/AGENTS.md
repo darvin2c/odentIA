@@ -194,11 +194,19 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   de `apps/web` de las clínicas (lo vigila `src/lib/limites.test.ts`).
 - Existen siempre `/terminos`, `/privacidad` y `/contacto`: los enlazan los correos de la cuenta.
   El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
-- Solo dice lo que gestorIA ya hace. Sin precios hasta que el usuario defina los planes. Términos y
+- Solo dice lo que gestorIA hace; lo que todavía no existe va como «pronto» y nunca se muestra como
+  pantalla. El precio es el que definió el usuario: USD 19 al mes, que vuelven como saldo, más el
+  1 % de cada pedido que gestorIA genera sola. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
-- El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
-  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda».
+- El botón principal es «Crea tu tienda» (el registro de la app) y «Entrar» lleva a su ingreso;
+  `TIENDAS_ABIERTAS` en false lo vuelve el WhatsApp de ventas (`vars.SALES_WHATSAPP`).
+- Las páginas del plan (web v3) están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
+  la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
+- El diseño es el de tasteskill 2.5.1: sus archivos van tal cual en `public/assets/` (no se editan;
+  su puerta los compara) y lo propio, en `src/styles/`. Las pantallas del producto son capturas
+  reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras y con `astro:assets`; nunca
+  dibujadas ni recortadas.
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
 
 ## Trabajo

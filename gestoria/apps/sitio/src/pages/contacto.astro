@@ -15,17 +15,17 @@ import { CONTACT_EMAIL, LOGIN_URL, SALES_TEXT, salesWhatsApp } from "../lib/siti
         <li>
           <h2>Escríbenos por WhatsApp</h2>
           <p>Abre el chat con «{SALES_TEXT}».</p>
-          <a class="btn btn-big" href={salesWhatsApp}>Abrir WhatsApp</a>
+          <a class="btn btn--primary" href={salesWhatsApp}>Abrir WhatsApp</a>
         </li>
       )}
       <li>
         <h2>Por correo</h2>
-        <a class="email" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+        <a class="email link" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
       </li>
       <li>
         <h2>¿Ya tienes tienda?</h2>
         <p>Entra con tu cuenta y sigue donde lo dejaste.</p>
-        <a class="btn btn-ghost" href={LOGIN_URL}>Entrar a mi tienda</a>
+        <a class="btn btn--secondary" href={LOGIN_URL}>Entrar a mi tienda</a>
       </li>
     </ul>
   </div>

@@ -1,0 +1,318 @@
+/*
+ * Lo propio de la web de gestorIA sobre el sistema de tasteskill (public/assets, sin editar): el
+ * logo, el pie con sus grupos, la barra del celular y las páginas de texto (Contacto, Términos,
+ * Privacidad y la 404). Solo tokens del sistema: --ink, --muted, --line, --action, --t-*, --s-*.
+ */
+
+/* El logotipo: su alto manda, el ancho sale del dibujo. */
+.logo svg {
+  display: block;
+  height: 26px;
+  width: auto;
+}
+
+@media (max-width: 639px) {
+  .logo svg {
+    height: 22px;
+  }
+}
+
+/* El pie: el título de cada grupo se distingue de sus enlaces por tamaño, peso, color pleno y una
+   línea debajo; los enlaces, por su subrayado, no solo por el color (WCAG 1.4.1). */
+.footer__col h3 {
+  margin: 0 0 var(--s-4);
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-text);
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
+.footer__col ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-1);
+}
+
+.footer__col a,
+.footer__legal a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.footer__col a:hover,
+.footer__legal a:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+/* La barra del celular: tres pestañas como las de una app y el botón principal. */
+@media (max-width: 639px) {
+  .actionbar.barra {
+    grid-auto-flow: initial;
+    grid-template-columns: repeat(3, minmax(52px, 64px)) minmax(0, 1fr);
+    gap: var(--s-2);
+  }
+
+  .barra__tab {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    height: 52px;
+    font-size: 13px;
+    line-height: 16px;
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  .barra__tab svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  /* La parte que se lee: su pestaña en el color de la marca, con una raya que entra desde el centro. */
+  .barra__tab::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    left: 25%;
+    right: 25%;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--action);
+    transform: scaleX(0);
+    transition: transform 240ms var(--ease);
+  }
+
+  .barra__tab[aria-current] {
+    color: var(--action);
+  }
+
+  .barra__tab[aria-current]::before {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barra__tab::before {
+    transition: none;
+  }
+}
+
+/* Las páginas de texto: Contacto, Términos, Privacidad y la 404. */
+.page,
+.not-found {
+  padding-top: calc(var(--nav) + var(--s-8));
+  padding-bottom: var(--s-9);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+.crumbs ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-size: var(--t-small);
+  color: var(--muted);
+}
+
+.crumbs li + li::before {
+  content: "/";
+  margin-right: var(--s-2);
+}
+
+.page-head {
+  display: grid;
+  gap: var(--s-3);
+  max-width: 62ch;
+}
+
+.page-head h1,
+.not-found h1 {
+  margin: 0;
+  font-size: var(--t-h2);
+}
+
+.page-head p,
+.since {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Lo que falta escribir en Términos y Privacidad: se ve marcado («[Por completar]»). */
+.pendiente {
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.legal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-8);
+  align-items: flex-start;
+}
+
+.toc {
+  flex: 1 1 240px;
+  max-width: 280px;
+}
+
+.toc h2 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-label);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  font-size: 15px;
+}
+
+.toc a {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.legal-body {
+  flex: 999 1 560px;
+  min-width: 0;
+  max-width: 62ch;
+  display: grid;
+  gap: var(--s-6);
+}
+
+.legal-body section {
+  display: grid;
+  gap: var(--s-3);
+  scroll-margin-top: calc(var(--nav) + var(--s-4));
+}
+
+.legal-body h2 {
+  margin: 0;
+  font-size: var(--t-h3);
+}
+
+.legal-body p,
+.legal-body ul {
+  margin: 0;
+}
+
+.legal-body ul {
+  padding-left: 22px;
+  display: grid;
+  gap: var(--s-2);
+}
+
+@media (max-width: 860px) {
+  .toc {
+    max-width: none;
+    padding: var(--s-4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+  }
+}
+
+.contact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--s-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contact li {
+  padding: var(--s-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.contact h2 {
+  margin: 0;
+  font-size: var(--t-card);
+}
+
+.contact p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.contact .email {
+  font-size: var(--t-card);
+  overflow-wrap: anywhere;
+}
+
+.contact .btn {
+  margin-top: auto;
+}
+
+.not-found {
+  align-items: flex-start;
+  max-width: 62ch;
+}
+
+.not-found p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.not-found .t-label {
+  color: var(--action);
+}
+
+/* La línea legal del pie: la firma, Términos y Privacidad juntos, y la nota de las marcas. */
+.footer__legal-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s-5);
+}
+
+/* Los grupos del pie: cuatro en fila desde la tableta, dos por fila en el celular. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .closing__links > .grid > .footer__col {
+    grid-column: auto / span 3;
+  }
+}
+
+@media (max-width: 639px) {
+  .closing__links > .grid > .footer__col {
+    grid-column: auto / span 6;
+  }
+}

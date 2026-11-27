@@ -5,12 +5,12 @@ import { APP_URL, LOGIN_URL } from "../lib/sitio"
 ---
 <Base title="Esta página no existe" description="La dirección que abriste no existe en gestoria24.com." noindex>
   <div class="wrap not-found">
-    <p class="mono">[404]</p>
+    <p class="t-label">Error 404</p>
     <h1>Esta página no existe</h1>
-    <p>¿Buscabas tu tienda? Está en <a href={APP_URL}>{APP_URL.replace("https://", "")}</a>.</p>
-    <div class="row">
-      <a class="btn btn-primary" href={LOGIN_URL}>Entrar a mi tienda</a>
-      <a class="btn btn-ghost" href="/">Ir al inicio</a>
+    <p>¿Buscabas tu tienda? Está en <a class="link" href={APP_URL}>{APP_URL.replace("https://", "")}</a>.</p>
+    <div class="btn-row">
+      <a class="btn btn--primary" href={LOGIN_URL}>Entrar a mi tienda</a>
+      <a class="btn btn--secondary" href="/">Ir al inicio</a>
     </div>
   </div>
 </Base>

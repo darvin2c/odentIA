@@ -937,6 +937,12 @@ importers:
       '@astrojs/sitemap':
         specifier: 3.7.4
         version: 3.7.4
+      '@fontsource-variable/figtree':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@fontsource-variable/gabarito':
+        specifier: 5.3.0
+        version: 5.3.0
       '@fontsource-variable/manrope':
         specifier: 5.3.0
         version: 5.3.0
@@ -968,6 +974,9 @@ importers:
       react-dom:
         specifier: ^19.2.8
         version: 19.3.0(react@19.3.0)
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -3181,6 +3190,12 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@fontsource-variable/figtree@5.3.0':
+    resolution: {integrity: sha512-VRVodD7OiG7apQwE8/2fMjaqpY/a0qRJqL5HtYj8CKIVps+9amaFcdfKmDIf7iqYQx6iPLlArVXAfKeIZmVcNQ==}
+
+  '@fontsource-variable/gabarito@5.3.0':
+    resolution: {integrity: sha512-p7ROuY70ufLI5/hVvdgo4iJo17Dz2OfQXgdkaeS0U/B2wMqNIPt+/2WWWaAzrUYvcrNquL7farT2MY/vVo2ENw==}
 
   '@fontsource-variable/manrope@5.3.0':
     resolution: {integrity: sha512-6D5dgokHsWDDMtmXHznKa0hK229NN+1a4BLPmUCLqcO1Pw5EEhWY5RFt0AcXnVRAljFFPfRtLkJePQj6LSsV6g==}
@@ -10705,6 +10720,10 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@fontsource-variable/figtree@5.3.0': {}
+
+  '@fontsource-variable/gabarito@5.3.0': {}
 
   '@fontsource-variable/manrope@5.3.0': {}
 

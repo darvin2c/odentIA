@@ -1,12 +1,38 @@
 ---
-// El pie de todas las páginas: la firma y lo que enlazan los correos de la cuenta.
-import { footerLinks, SIGNATURE } from "../lib/sitio"
+// El cierre y el pie de todas las páginas (web v3; close-word y footer-statement de tasteskill): la
+// llamada a crear la tienda, los grupos del mapa de la web y la línea legal. El título de cada grupo
+// es más grande, de peso medio, en tinta plena y con una línea debajo; sus enlaces van más chicos,
+// en peso normal y subrayados, para que no dependan solo del color (WCAG 1.4.1).
+import { cta, footerGroups, footerLinks, SIGNATURE } from "../lib/sitio"
+
+const year = new Date().getFullYear()
 ---
-<footer class="footer-line">
-  <div class="wrap footer">
-    <span>{SIGNATURE}</span>
-    <nav aria-label="Pie">
-      {footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}
-    </nav>
+<footer class="closing footer--statement g2m" id="contact" aria-labelledby="close-h">
+  <div class="wrap">
+    <div class="closing__cta close--word">
+      <div class="section-head--split">
+        <div>
+          <h2 id="close-h">Tu tienda en gestorIA, con Sofi en el chat</h2>
+          <p class="t-lead">USD 19 al mes, que vuelven como saldo.</p>
+        </div>
+        <a class="btn btn--primary" href={cta.href}>{cta.label}<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"></path><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"></path></svg></a>
+      </div>
+      <p class="close__word" aria-hidden="true">gestorIA</p>
+    </div>
+    <div class="closing__links">
+      <div class="grid">
+        {footerGroups.map((group) => (
+          <nav class="span-3 footer__col" aria-label={group.title}>
+            <h3>{group.title}</h3>
+            <ul>{group.links.map((link) => <li><a href={link.href}>{link.label}</a></li>)}</ul>
+          </nav>
+        ))}
+      </div>
+      <div class="footer__legal">
+        <span>© {year} {SIGNATURE}</span>
+        <span class="footer__legal-links">{footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}</span>
+        <span>WhatsApp, Instagram y Messenger son marcas de sus dueños.</span>
+      </div>
+    </div>
   </div>
 </footer>
