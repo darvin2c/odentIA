@@ -18,6 +18,7 @@ import {
 } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
+import { HelpPage } from "./ayuda"
 import { CatalogPage } from "./catalogo"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import {
@@ -113,7 +114,7 @@ const signedIn = createRoute({
 })
 
 // La tienda y sus secciones: los pedidos, Sofi, el catálogo (su producto), pagos y entregas,
-// Reportes y el equipo.
+// Reportes, el equipo, el plan y la Ayuda.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
@@ -150,6 +151,14 @@ const storeChildren = [
   }),
   createRoute({ getParentRoute: () => storeRoute, path: "/equipo", component: TeamPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/plan", component: PlanPage }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/ayuda",
+    // «?pregunta=…» abre esa respuesta de la guía.
+    validateSearch: (s: Record<string, unknown>): { pregunta?: string } =>
+      typeof s.pregunta === "string" ? { pregunta: s.pregunta } : {},
+    component: HelpPage,
+  }),
 ]
 
 /**
