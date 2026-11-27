@@ -46,6 +46,12 @@ describe("BirthDateInput", () => {
     expect(screen.getByText("31 años")).toBeTruthy()
   })
 
+  it("a un niño de 18 meses le dice «18 meses», no «1 año»", async () => {
+    render(<Harness />)
+    await userEvent.type(field(), "16042025")
+    expect(screen.getByText("18 meses")).toBeTruthy()
+  })
+
   it("muestra lo guardado en el orden de otro formato regional", () => {
     setFormatRegion({ locale: "en-US", timeZone: "America/New_York" })
     render(<Harness initial="1995-07-30" />)
