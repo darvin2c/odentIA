@@ -23,6 +23,8 @@ export function Photo({
   // Se pide al acercarse a la vista: un catálogo largo no baja todas sus fotos de una vez.
   const [seen, setSeen] = useState(false)
   const holder = useRef<HTMLSpanElement>(null)
+  // Se vuelve a mirar si la foto llega después (antes no había dónde observar).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: photoId cambia qué se dibuja
   useEffect(() => {
     const node = holder.current
     if (!node || seen) return
@@ -34,7 +36,7 @@ export function Photo({
     )
     watch.observe(node)
     return () => watch.disconnect()
-  }, [seen])
+  }, [seen, photoId])
   const blob = useQuery({
     queryKey: ["foto", storeId, photoId],
     queryFn: () => api<Blob>(`/api/tiendas/${storeId}/fotos/${photoId}`, { as: "blob" }),

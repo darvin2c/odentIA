@@ -184,11 +184,10 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
       },
     ])
     .returning({ id: productColor.id })
-  if (photos[0])
-    await tx
-      .update(productPhoto)
-      .set({ colorId: blanca!.id })
-      .where(eq(productPhoto.id, photos[0].id))
+  // La primera y la tercera son de la blanca (la primera es la que manda Sofi); la segunda, de la negra.
+  for (const photo of [photos[0], photos[2]])
+    if (photo)
+      await tx.update(productPhoto).set({ colorId: blanca!.id }).where(eq(productPhoto.id, photo.id))
   if (photos[1])
     await tx
       .update(productPhoto)

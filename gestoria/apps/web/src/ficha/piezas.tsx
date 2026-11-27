@@ -41,7 +41,7 @@ export function Swatch({
     <span
       aria-hidden
       className={cn(
-        "inline-block size-4 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.14)]",
+        "inline-block size-4 shrink-0 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.14)] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.35)]",
         !hex && "bg-[repeating-linear-gradient(135deg,var(--muted)_0_3px,var(--border)_3px_6px)]",
         className,
       )}
