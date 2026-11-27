@@ -59,6 +59,17 @@ import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
+  brandInput,
+  imageKindOf,
+  putStoreImage,
+  removeStoreImage,
+  setStoreBrand,
+  setStoreData,
+  storeBrand,
+  storeDataInput,
+  storeImageContent,
+} from "./marca.js"
+import {
   addReceipt,
   cancelInput,
   cancelOrder,
@@ -145,7 +156,7 @@ type Env = { Variables: { person: Person } }
 /** Lo más que pesa un aviso de la cuenta o un pedido de la app. */
 const MAX_BODY_BYTES = 64 * 1024
 /** Una foto (ya achicada por la pantalla) y una hoja del catálogo pesan más: su ruta tiene su tope. */
-const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
+const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/(productos\/[^/]+\/fotos|marca\/[^/]+)$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 /** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
 /** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
@@ -343,6 +354,48 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, timeZoneInput)
     return c.json({
       store: await setStoreTimeZone(deps.appDb, c.get("person"), c.req.param("id"), input),
+    })
+  })
+
+  // Configuración › Datos de la tienda y Tu marca (lienzo «gestorIA como odentIA», tablero 10).
+  app.put("/api/tiendas/:id/datos", async (c) => {
+    const input = await bodyOf(c, storeDataInput)
+    return c.json({
+      store: await setStoreData(deps.appDb, c.get("person"), c.req.param("id"), input),
+    })
+  })
+  app.get("/api/tiendas/:id/marca", async (c) =>
+    c.json({ brand: await storeBrand(deps.appDb, c.get("person"), c.req.param("id")) }),
+  )
+  app.put("/api/tiendas/:id/marca", async (c) => {
+    const input = await bodyOf(c, brandInput)
+    return c.json({
+      brand: await setStoreBrand(deps.appDb, c.get("person"), c.req.param("id"), input),
+    })
+  })
+  // El logo o la portada: su contenido tal cual (se mira qué es por sus primeros bytes).
+  app.post("/api/tiendas/:id/marca/:kind", async (c) => {
+    const kind = imageKindOf(c.req.param("kind"))
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    return c.json({
+      brand: await putStoreImage(deps.appDb, c.get("person"), c.req.param("id"), kind, bytes),
+    })
+  })
+  app.delete("/api/tiendas/:id/marca/:kind", async (c) => {
+    const kind = imageKindOf(c.req.param("kind"))
+    return c.json({
+      brand: await removeStoreImage(deps.appDb, c.get("person"), c.req.param("id"), kind),
+    })
+  })
+  app.get("/api/tiendas/:id/marca/:kind", async (c) => {
+    const kind = imageKindOf(c.req.param("kind"))
+    const image = await storeImageContent(deps.appDb, c.get("person"), c.req.param("id"), kind)
+    return c.body(new Uint8Array(image.content), 200, {
+      "content-type": image.contentType,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+      // Cambia con la misma dirección: la pantalla la pide con su versión (`?v=`).
+      "cache-control": "private, max-age=86400",
     })
   })
 

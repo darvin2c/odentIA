@@ -3,7 +3,7 @@
  * el de la cuenta: entrar, crear la tienda, invitar y los permisos de cada rol; la copia de las
  * cuentas con los avisos firmados y la revisión diaria.
  */
-import { accountCopy, storeEvent, storeMember } from "@gestoria/db"
+import { accountCopy, store, storeEvent, storeLink, storeMember } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import { eq, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
@@ -358,6 +358,111 @@ describe("los permisos de cada rol (decisión 7)", () => {
         "equipo.rol:u-mario",
       ]),
     )
+  })
+})
+
+describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
+  /** Un PNG de 1 × 1 rosado: lo que se mira es su contenido, no su nombre. */
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4H8bwHwAE/wJ/l6pZhwAAAABJRU5ErkJggg==",
+    "base64",
+  )
+  async function upload(who: Who, kind: string, bytes: Uint8Array) {
+    const p = people[who]
+    const response = await app.request(
+      `https://servidor.gestoria.test/api/tiendas/${storeId}/marca/${kind}`,
+      {
+        method: "POST",
+        headers: {
+          origin: WEB,
+          "content-type": "application/octet-stream",
+          authorization: `Bearer ${await tokenFor(p.id, p.email, p.name)}`,
+        },
+        body: bytes,
+      },
+    )
+    return response
+  }
+
+  it("Ventas ve la marca y no la cambia; el Dueño cambia los datos y queda anotado", async () => {
+    expect((await call("lucia", "GET", `/api/tiendas/${storeId}/marca`)).status).toBe(200)
+    const data = { name: "Calzados Rosa", country: "PE", timeZone: "America/Lima" }
+    expect((await call("lucia", "PUT", `/api/tiendas/${storeId}/datos`, data)).status).toBe(403)
+    expect((await upload("lucia", "logo", PNG)).status).toBe(403)
+    const bad = await call("rosa", "PUT", `/api/tiendas/${storeId}/datos`, {
+      ...data,
+      timeZone: "America/Narnia",
+    })
+    expect(bad.json.error.fields).toHaveProperty("timeZone")
+    const saved = await call("rosa", "PUT", `/api/tiendas/${storeId}/datos`, data)
+    expect(saved.json.store).toMatchObject({ country: "PE", timeZone: "America/Lima" })
+    const events = await db.ownerDb.select().from(storeEvent).where(eq(storeEvent.storeId, storeId))
+    expect(events.map((e) => e.action)).toContain("configuracion.tienda")
+  })
+
+  it("el color se guarda como se escribe en la base y el nombre del link rechaza los reservados", async () => {
+    const brand = (body: unknown) => call("rosa", "PUT", `/api/tiendas/${storeId}/marca`, body)
+    const reserved = await brand({ publicName: "", brandColor: "", link: "4dm1n" })
+    expect(reserved.status).toBe(400)
+    expect(reserved.json.error.fields).toHaveProperty("link")
+    const ok = await brand({ publicName: " Rosa ", brandColor: "BE185D", link: "Calzados-Rosa" })
+    expect(ok.json.brand).toMatchObject({
+      publicName: "Rosa",
+      brandColor: "#be185d",
+      link: "calzados-rosa",
+    })
+    // El color pinta la app de todo el equipo: llega con la tienda.
+    expect((await call("lucia", "GET", "/api/yo")).json.stores).toEqual([
+      expect.objectContaining({ id: storeId, brandColor: "#be185d" }),
+    ])
+  })
+
+  it("un nombre del link es de una sola tienda; el de antes se queda con ella", async () => {
+    const [other] = await db.ownerDb
+      .insert(store)
+      .values({ name: "Otra", currency: "PEN", createdBy: "u-ajena" })
+      .returning({ id: store.id })
+    await db.ownerDb
+      .insert(storeLink)
+      .values({ name: "zapatos-ana", storeId: other!.id, createdBy: "u-ajena" })
+    const brand = (link: string) =>
+      call("rosa", "PUT", `/api/tiendas/${storeId}/marca`, {
+        publicName: "",
+        brandColor: "",
+        link,
+      })
+    const taken = await brand("zapatos-ana")
+    expect(taken.status).toBe(409)
+    expect(taken.json.error.fields).toHaveProperty("link")
+    expect((await brand("calzadosrosa")).json.brand.link).toBe("calzadosrosa")
+    // Volver al de antes lo vuelve a usar, sin chocar consigo mismo.
+    expect((await brand("calzados-rosa")).json.brand).toMatchObject({
+      link: "calzados-rosa",
+      publicName: null,
+      brandColor: null,
+    })
+    const links = await db.ownerDb.select().from(storeLink).where(eq(storeLink.storeId, storeId))
+    expect(links.filter((l) => l.current).map((l) => l.name)).toEqual(["calzados-rosa"])
+    expect(links.map((l) => l.name).sort()).toEqual(["calzados-rosa", "calzadosrosa"])
+  })
+
+  it("el logo se mira por su contenido, se ve con su tipo y se quita", async () => {
+    expect((await upload("rosa", "logo", Buffer.from("<svg></svg>"))).status).toBe(400)
+    expect((await upload("rosa", "fondo", PNG)).status).toBe(404)
+    const put = await upload("rosa", "logo", PNG)
+    expect(put.status).toBe(200)
+    const body = (await put.json()) as { brand: { logo: { version: number } | null } }
+    expect(body.brand.logo?.version).toBeGreaterThan(0)
+    const p = people.lucia
+    const seen = await app.request(
+      `https://servidor.gestoria.test/api/tiendas/${storeId}/marca/logo`,
+      {
+        headers: { origin: WEB, authorization: `Bearer ${await tokenFor(p.id, p.email, p.name)}` },
+      },
+    )
+    expect(seen.headers.get("content-type")).toBe("image/png")
+    const removed = await call("rosa", "DELETE", `/api/tiendas/${storeId}/marca/logo`)
+    expect(removed.json.brand.logo).toBeNull()
   })
 })
 
