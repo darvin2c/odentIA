@@ -162,8 +162,8 @@ const app = createApp({
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
   storage,
-  // La IA de fotos, con el modelo de desarrollo: sin red, propone un nombre de muestra y pregunta
-  // lo que la plantilla necesita. Nunca un proveedor real.
+  // La IA de fotos, con el modelo de desarrollo: sin red, responde lo grabado para las fotos de la
+  // demo y del banco (`ia-fotos-muestra.ts`). Nunca un proveedor real.
   photosModel: fakePhotosModel(),
 })
 

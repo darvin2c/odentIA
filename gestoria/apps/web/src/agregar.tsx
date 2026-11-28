@@ -18,6 +18,7 @@ import {
   aiSuggestedClass,
   FormDrawer,
   PageNotice,
+  RadioChips,
 } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -206,6 +207,8 @@ export function AddFromPhotos({
   })
   const [decided, setDecided] = useState<Record<string, Decision>>({})
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  /** Lo cambiado de un dato propuesto antes de usarlo (otra opción). */
+  const [changed, setChanged] = useState<Record<string, string>>({})
   const [sizes, setSizes] = useState("")
   const [price, setPrice] = useState("")
   const [saving, setSaving] = useState(false)
@@ -295,8 +298,9 @@ export function AddFromPhotos({
   const of = (field: string) => proposals.find((p) => p.field === field)
   const colors = proposals.filter((p) => p.kind === "color")
   const questions = proposals.filter((p) => p.kind === "pregunta")
-  const waiting = proposals.filter((p) => p.waitsForProduct && p.kind !== "pregunta")
-  const undecided = [...TEXT_FIELDS.map((f) => of(f)), ...colors].filter(
+  // Lo que es de la ficha (los datos que se ven y las palabras) se decide aquí y se usa al crear.
+  const later = proposals.filter((p) => p.kind === "dato" || p.kind === "palabras")
+  const undecided = [...TEXT_FIELDS.map((f) => of(f)), ...colors, ...later].filter(
     (p): p is Proposal => !!p && !decided[p.id],
   )
   const rubroOf = (id: string) => templates.find((t) => t.id === id)
@@ -360,6 +364,9 @@ export function AddFromPhotos({
   }
 
   const decide = (p: Proposal, d: Decision) => setDecided((now) => ({ ...now, [p.id]: d }))
+  const fieldOf = (p: Proposal) => template?.fields.find((f) => f.key === keyOf(p.field))
+  const labelOf = (p: Proposal) =>
+    p.kind === "palabras" ? "Cómo la buscan" : (fieldOf(p)?.label ?? p.reason)
   const acceptAll = () =>
     setDecided((now) =>
       Object.fromEntries([...Object.entries(now), ...undecided.map((p) => [p.id, "usar"])]),
@@ -417,15 +424,24 @@ export function AddFromPhotos({
       // «Crear» dice por qué no lo creó (un nombre que ya está): se corrige y se vuelve a guardar.
       if (!productId) throw new Error(created.errors[0]?.message ?? "No se pudo crear el producto")
       openLoad.current = null
-      // Lo que respondió de lo que la IA no ve: a la ficha, con el rubro que propuso.
+      // Lo decidido de la ficha: los datos que se ven y las palabras.
       const lost: string[] = []
+      for (const p of later) {
+        const choice = decided[p.id]
+        if (choice === "usar")
+          await apply(p.id, changed[p.id]).catch(() => {
+            lost.push(labelOf(p))
+          })
+        else if (choice === "descartar")
+          await discardProposal(store.id, p.id).catch(() => undefined)
+      }
+      // Lo que respondió de lo que la IA no ve: a la ficha, con el rubro que propuso.
       for (const q of questions)
         if (answers[q.id])
           await apply(q.id, answers[q.id]).catch(() => {
             lost.push(q.reason)
           })
-      if (lost.length)
-        toast.warning(`No se guardó tu respuesta a «${lost[0]}»: respóndela en la ficha.`)
+      if (lost.length) toast.warning(`No se guardó «${lost[0]}»: complétalo en la ficha.`)
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
       toast.success("Producto agregado. Lo punteado que no usaste sigue en la ficha (✦).")
       onClose()
@@ -682,17 +698,77 @@ export function AddFromPhotos({
             return field?.type === "opcion" && field.options?.length ? (
               <AiQuestion
                 key={q.id}
-                question={answer ? `${field.label}: ${answer}` : q.reason}
+                question={q.reason}
                 reason={
-                  answer ? "Se guarda en la ficha." : "Lo respondes ahora o después, en la ficha."
+                  answer
+                    ? `Respondiste «${answer}»: se guarda en la ficha.`
+                    : "Lo respondes ahora o después, en la ficha."
                 }
-                options={field.options.map((o) => ({ value: o, label: o }))}
+                options={field.options.map((o) => ({
+                  value: o,
+                  label: answer === o ? `✓ ${o}` : o,
+                }))}
                 onAnswer={(value) => setAnswers((a) => ({ ...a, [q.id]: value }))}
               />
             ) : (
               <AiQuestion key={q.id} question={q.reason} reason="Lo respondes en la ficha." />
             )
           })}
+
+          {later
+            .filter((p) => p.kind === "dato" && decided[p.id] !== "descartar")
+            .map((p) => {
+              const field = fieldOf(p)
+              const value = changed[p.id] ?? String(p.value)
+              const open = !decided[p.id]
+              return (
+                <div key={p.id} className="flex flex-col gap-2">
+                  <div className="flex min-h-6 items-center gap-2">
+                    <span id={`dato-${p.id}`} className="text-sm font-medium">
+                      {labelOf(p)}
+                    </span>
+                    {open ? (
+                      <AiSuggestionMark
+                        reason={p.reason}
+                        label={labelOf(p).toLowerCase()}
+                        onAccept={() => decide(p, "usar")}
+                        onDiscard={() => decide(p, "descartar")}
+                      />
+                    ) : null}
+                  </div>
+                  {field?.type === "opcion" && field.options?.length ? (
+                    <div
+                      className={cn(
+                        "w-fit rounded-3xl border border-transparent p-0.5",
+                        open && aiSuggestedClass,
+                      )}
+                    >
+                      <RadioChips
+                        aria-labelledby={`dato-${p.id}`}
+                        value={value}
+                        options={field.options.map((o) => ({ value: o, label: o }))}
+                        onChange={(next) => {
+                          if (!next) return
+                          setChanged((c) => ({ ...c, [p.id]: next }))
+                          decide(p, "usar")
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <Input
+                      aria-labelledby={`dato-${p.id}`}
+                      value={value}
+                      maxLength={500}
+                      className={cn(open && aiSuggestedClass)}
+                      onChange={(e) => {
+                        setChanged((c) => ({ ...c, [p.id]: e.target.value }))
+                        decide(p, "usar")
+                      }}
+                    />
+                  )}
+                </div>
+              )
+            })}
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor={ids.price} className="text-sm font-medium">
@@ -731,27 +807,36 @@ export function AddFromPhotos({
             long
           />
 
-          {waiting.length ? (
-            <p className="flex items-start gap-2 rounded-xl bg-agent-soft px-3 py-2 text-sm">
-              <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-              <span>
-                Además propone{" "}
-                {waiting
-                  .map((p) =>
-                    p.kind === "rubro"
-                      ? `el rubro ${rubroOf(String(p.value))?.label ?? p.value}`
-                      : p.kind === "palabras"
-                        ? "las palabras con que la buscan"
-                        : p.kind === "dato"
-                          ? `${template?.fields.find((f) => f.key === keyOf(p.field))?.label.toLowerCase() ?? "un dato"}: ${String(p.value)}`
-                          : null,
-                  )
-                  .filter(Boolean)
-                  .join(", ")}
-                . Lo ves en la ficha (✦) para usarlo o no.
-              </span>
-            </p>
-          ) : null}
+          {later
+            .filter((p) => p.kind === "palabras" && decided[p.id] !== "descartar")
+            .map((p) => (
+              <div key={p.id} className="flex flex-col gap-2">
+                <div className="flex min-h-6 items-center gap-2">
+                  <span className="text-sm font-medium">Cómo la buscan</span>
+                  {decided[p.id] ? null : (
+                    <AiSuggestionMark
+                      reason={p.reason}
+                      label="las palabras con que la buscan"
+                      onAccept={() => decide(p, "usar")}
+                      onDiscard={() => decide(p, "descartar")}
+                    />
+                  )}
+                </div>
+                <ul className="flex flex-wrap gap-1.5">
+                  {(p.value as string[]).map((word) => (
+                    <li
+                      key={word}
+                      className={cn(
+                        "inline-flex h-7 items-center rounded-full border px-2.5 text-[13px] font-medium",
+                        decided[p.id] ? "border-transparent bg-secondary" : aiSuggestedClass,
+                      )}
+                    >
+                      {word}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
         </div>
       )}
       {preview ? (

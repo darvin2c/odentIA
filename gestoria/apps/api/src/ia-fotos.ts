@@ -1,5 +1,6 @@
 import { PRODUCT_RUBROS, type ProductRubro, type RubroValue } from "@gestoria/db"
 import { z } from "zod"
+import { samplePhotosModel } from "./ia-fotos-muestra.js"
 import { applyRubroData, RUBROS, type TemplateField } from "./rubros.js"
 import {
   type ChatModel,
@@ -756,10 +757,16 @@ export function photosModelFromEnv(env: PhotosModelEnv): ChatModel | null {
 }
 
 /**
- * El modelo de desarrollo de la IA de fotos: sin red ni costo. Propone un nombre de muestra y nada
- * más (sin datos ni colores), para ver la pantalla en local. No cuenta como medición.
+ * El modelo de desarrollo de la IA de fotos: sin red ni costo. Responde lo grabado para las fotos
+ * de la demo y del banco (`ia-fotos-muestra.ts`) y, si no conoce la foto, un nombre de muestra.
+ * No cuenta como medición.
  */
 export function fakePhotosModel(): ChatModel {
+  return samplePhotosModel(basicFakeModel())
+}
+
+/** Lo que responde el modelo de desarrollo cuando no reconoce las fotos, y al mejorar un texto. */
+function basicFakeModel(): ChatModel {
   const base = fakeModel()
   return {
     name: "fake",

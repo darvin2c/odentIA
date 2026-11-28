@@ -81,10 +81,17 @@ test("«Agregar desde fotos»: la IA propone, el precio lo pone la persona y se 
 
   // Lo propuesto va punteado, con ✦ y «Usar»; el precio, vacío: lo pone la persona.
   const name = drawer.getByLabel("Nombre", { exact: true })
-  await expect(name).toHaveValue("Producto de muestra", { timeout: 30_000 })
-  await expect(drawer.getByText(/La IA propone 1 cosa/)).toBeVisible()
+  await expect(name).toHaveValue("Zapatilla de lona", { timeout: 30_000 })
+  await expect(drawer.getByLabel("Categoría", { exact: true })).toHaveValue("Zapatillas")
+  await expect(drawer.getByText(/La IA propone \d+ cosas y pregunta lo que no ve/)).toBeVisible()
+  await expect(drawer.getByRole("listitem").filter({ hasText: /^negra/ })).toBeVisible()
   await expect(drawer.getByText("Lo pones tú. La IA nunca propone precios.")).toBeVisible()
+  // Lo que no se ve, en amarillo y con sus opciones; el material que se ve, propuesto.
+  const fit = drawer.getByRole("group", { name: "¿Cómo calza? No se ve en las fotos." })
+  await expect(fit).toBeVisible()
   await shot(page, "ia-2-propuesta-1440")
+  await fit.getByRole("button", { name: "Normal" }).click()
+  await expect(fit.getByText(/Respondiste «Normal»/)).toBeVisible()
   await drawer.getByRole("button", { name: "Aplicar todos" }).click()
   await name.fill("Zapatilla de lona negra")
   await drawer.getByLabel("Precio").fill("129")
@@ -104,13 +111,18 @@ test("«Agregar desde fotos»: la IA propone, el precio lo pone la persona y se 
   const sheet = await json("GET", `${STORE}/productos/${productId}`)
   expect(sheet.product).toMatchObject({ name: "Zapatilla de lona negra", listPriceCents: 12900 })
   expect(sheet.product.photos).toHaveLength(2)
+  // Lo usado y lo respondido, en la ficha; el color con su hex y sus fotos.
+  expect(sheet.product).toMatchObject({
+    category: "Zapatillas",
+    rubro: "calzado",
+    rubroData: { horma: "Normal", material: "Lona" },
+  })
+  expect(sheet.product.colors).toMatchObject([{ value: "negra", hex: "#1f1f1f" }])
 })
 
-test("en la ficha, «Completar» pregunta lo que no se ve y la respuesta se guarda", async ({
-  page,
-}) => {
+test("en la ficha, «Completar» vuelve a mirar y pregunta lo que falta", async ({ page }) => {
   await as("rosa")
-  await json("PATCH", `${STORE}/productos/${productId}`, { rubro: "calzado" })
+  await json("PATCH", `${STORE}/productos/${productId}`, { rubroData: { horma: null } })
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/catalogo/${productId}`)
   await page.locator("#texto").getByRole("button", { name: "Completar" }).click()
@@ -125,10 +137,10 @@ test("en la ficha, «Completar» pregunta lo que no se ve y la respuesta se guar
       timeout: 15_000,
     })
     .toMatchObject({ horma: "Chico" })
-  // «Ahora no» deja la otra pregunta para después, sin cambiar la ficha.
-  const material = page.getByRole("group", { name: "¿De qué material es?" })
-  await material.getByRole("button", { name: "Ahora no" }).click()
-  await expect(material).toBeHidden()
+  // El nombre que vuelve a proponer se descarta: la ficha queda como está.
+  const texto = page.locator("#texto")
+  await texto.getByRole("button", { name: "Descartar" }).first().click()
+  await expect(page.getByRole("heading", { name: "Zapatilla de lona negra" })).toBeVisible()
 
   // En oscuro y en el celular.
   await page.emulateMedia({ colorScheme: "dark" })
@@ -140,7 +152,7 @@ test("en la ficha, «Completar» pregunta lo que no se ve y la respuesta se guar
   await shot(page, "ia-6-ficha-390")
 })
 
-test("«Cargar muchos»: «Juntar con IA» dice lo que vio y nada se frena", async ({ page }) => {
+test("«Cargar muchos»: «Juntar con IA» propone y Rosa confirma el grupo", async ({ page }) => {
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   const { load } = await json("POST", `${STORE}/cargas`)
@@ -158,10 +170,17 @@ test("«Cargar muchos»: «Juntar con IA» dice lo que vio y nada se frena", asy
   }
   await page.goto(`${BASE}/catalogo/cargar`)
   await page.getByRole("button", { name: "Juntar con IA" }).click()
-  await expect(page.getByText("La IA no vio fotos del mismo producto")).toBeVisible({
-    timeout: 30_000,
-  })
+  // Las dos blancas son el mismo producto; el botín va solo. Rosa confirma el grupo.
+  const group = page
+    .getByRole("group")
+    .filter({ hasText: "Estas 2 fotos parecen del mismo producto" })
+  await expect(group).toBeVisible({ timeout: 30_000 })
   await shot(page, "ia-7-cargar-muchos-1440")
+  await group.getByRole("button", { name: "Juntar" }).click()
+  await expect(group).toBeHidden()
+  await expect
+    .poll(async () => (await json("GET", `${STORE}/cargas/${load.id}`)).items.length)
+    .toBe(2)
   await json("DELETE", `${STORE}/cargas/${load.id}`)
 })
 
