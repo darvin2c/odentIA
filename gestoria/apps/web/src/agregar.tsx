@@ -210,7 +210,32 @@ export function AddFromPhotos({
   const [price, setPrice] = useState("")
   const [saving, setSaving] = useState(false)
   const [preview, setPreview] = useState(false)
-  const saved = useRef(false)
+  /**
+   * La carga de esta mirada mientras no se creó el producto. Cerrar sin guardar (o irse a otra
+   * pantalla, o que falle una foto) la descarta: sus fotos se borran y no aparece en «Cargar
+   * muchos».
+   */
+  const openLoad = useRef<string | null>(null)
+  const dropLoad = () => {
+    const id = openLoad.current
+    openLoad.current = null
+    if (id)
+      void api(`/api/tiendas/${store.id}/cargas/${id}`, {
+        method: "DELETE",
+        keepalive: true,
+      }).catch(() => undefined)
+  }
+  // Al cerrar el cajón, ir a otra pantalla o cerrar la pestaña.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al cerrar
+  useEffect(() => {
+    window.addEventListener("pagehide", dropLoad)
+    return () => {
+      window.removeEventListener("pagehide", dropLoad)
+      dropLoad()
+    }
+  }, [])
+  /** Lo que ya se decidió en un intento de guardar: otro intento no lo vuelve a mandar. */
+  const sent = useRef(new Set<string>())
   const gallery = useRef<HTMLInputElement>(null)
   const camera = useRef<HTMLInputElement>(null)
   const ids = {
@@ -252,12 +277,20 @@ export function AddFromPhotos({
     window.addEventListener("paste", paste)
     return () => window.removeEventListener("paste", paste)
   }, [step])
+  const shown = useRef<Picked[]>([])
+  shown.current = photos
   useEffect(
     () => () => {
-      for (const p of photos) URL.revokeObjectURL(p.url)
+      for (const p of shown.current) URL.revokeObjectURL(p.url)
     },
-    [photos],
+    [],
   )
+  const removePhoto = (i: number) =>
+    setPhotos((now) => {
+      const gone = now[i]
+      if (gone) URL.revokeObjectURL(gone.url)
+      return now.filter((_, j) => j !== i)
+    })
 
   const of = (field: string) => proposals.find((p) => p.field === field)
   const colors = proposals.filter((p) => p.kind === "color")
@@ -279,9 +312,12 @@ export function AddFromPhotos({
     setError(null)
     setStep("mirando")
     try {
+      // Una mirada anterior que no terminó deja su carga: se descarta antes de abrir otra.
+      dropLoad()
       const { load } = await api<{ load: { id: string } }>(`/api/tiendas/${store.id}/cargas`, {
         method: "POST",
       })
+      openLoad.current = load.id
       let itemId = ""
       for (const [i, photo] of photos.entries()) {
         const blob = await preparePhoto(photo.file)
@@ -316,6 +352,8 @@ export function AddFromPhotos({
       void queryClient.invalidateQueries({ queryKey: ["ia-tope", store.id] })
       setStep("propuesta")
     } catch (problem) {
+      dropLoad()
+      setTarget(null)
       setStep("elegir")
       setError(problem instanceof Error ? problem.message : "No se pudieron subir las fotos")
     }
@@ -332,15 +370,19 @@ export function AddFromPhotos({
     const name = text.nombre.trim()
     const nameProposal = of("nombre")
     if (!name) return setError("Escribe el nombre o usa el que propone la IA.")
-    if (nameProposal && !decided[nameProposal.id] && name === stringOf(nameProposal))
-      return setError("Usa el nombre que propone la IA (✦ Usar) o escribe otro.")
     const cents = readMoney(price, store.currency)
     if (!cents) return setError("Pon el precio: lo pones tú, la IA nunca propone precios.")
     setError(null)
     setSaving(true)
     const base = `/api/tiendas/${store.id}/cargas/${target.loadId}/productos/${target.itemId}`
     try {
-      // Lo decidido del producto de la carga, por su operación: usar, cambiar o descartar.
+      // Lo decidido del producto de la carga, por su operación: usar, cambiar o descartar. Lo
+      // que ya salió en un intento anterior no se manda de nuevo.
+      const once = async (id: string, fn: () => Promise<unknown>) => {
+        if (sent.current.has(id)) return
+        await fn()
+        sent.current.add(id)
+      }
       const patch: Record<string, unknown> = { listPriceCents: cents }
       for (const field of TEXT_FIELDS) {
         const p = of(field)
@@ -351,28 +393,39 @@ export function AddFromPhotos({
           continue
         }
         const choice = decided[p.id]
-        if (choice === "descartar") {
-          await discardProposal(store.id, p.id)
+        if (choice === "descartar" || (!value && field !== "nombre")) {
+          // Borrar lo propuesto a mano es descartarlo.
+          await once(p.id, () => discardProposal(store.id, p.id))
           if (value && value !== stringOf(p)) patch[key] = value
-        } else if (choice === "usar" || value !== stringOf(p))
-          await apply(p.id, value === stringOf(p) ? undefined : value)
+        } else if (choice === "usar" || value !== stringOf(p) || field === "nombre")
+          // El nombre se necesita: guardarlo como lo propuso la IA es usarlo.
+          await once(p.id, () => apply(p.id, value === stringOf(p) ? undefined : value))
         // Sin decidir: queda propuesto y pasa a la ficha (✦).
       }
       for (const p of colors) {
-        if (decided[p.id] === "usar") await apply(p.id)
-        else if (decided[p.id] === "descartar") await discardProposal(store.id, p.id)
+        if (decided[p.id] === "usar") await once(p.id, () => apply(p.id))
+        else if (decided[p.id] === "descartar")
+          await once(p.id, () => discardProposal(store.id, p.id))
       }
       if (sizes.trim()) patch.sizes = readSizes(sizes)
       await api(base, { method: "PATCH", body: patch })
-      const created = await api<{ productIds: string[]; errors: { message: string }[] }>(
+      const created = await api<{ productIds?: string[]; errors: { message: string }[] }>(
         `/api/tiendas/${store.id}/cargas/${target.loadId}/crear`,
         { method: "POST" },
       )
-      saved.current = true
-      const productId = created.productIds[0]!
+      const productId = created.productIds?.[0]
+      // «Crear» dice por qué no lo creó (un nombre que ya está): se corrige y se vuelve a guardar.
+      if (!productId) throw new Error(created.errors[0]?.message ?? "No se pudo crear el producto")
+      openLoad.current = null
       // Lo que respondió de lo que la IA no ve: a la ficha, con el rubro que propuso.
+      const lost: string[] = []
       for (const q of questions)
-        if (answers[q.id]) await apply(q.id, answers[q.id]).catch(() => undefined)
+        if (answers[q.id])
+          await apply(q.id, answers[q.id]).catch(() => {
+            lost.push(q.reason)
+          })
+      if (lost.length)
+        toast.warning(`No se guardó tu respuesta a «${lost[0]}»: respóndela en la ficha.`)
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
       toast.success("Producto agregado. Lo punteado que no usaste sigue en la ficha (✦).")
       onClose()
@@ -387,23 +440,9 @@ export function AddFromPhotos({
     }
   }
 
-  // Cerrar sin guardar (o irse a otra pantalla) descarta la carga: sus fotos se borran y no
-  // aparece en «Cargar muchos».
-  const pendingLoad = useRef<string | null>(null)
-  pendingLoad.current = target && !saved.current ? target.loadId : null
-  useEffect(
-    () => () => {
-      if (pendingLoad.current)
-        void api(`/api/tiendas/${store.id}/cargas/${pendingLoad.current}`, {
-          method: "DELETE",
-        }).catch(() => undefined)
-    },
-    [store.id],
-  )
   const close = () => onClose()
 
   const capNote = cap.data && !cap.data.available ? cap.data.message : null
-  const firstColor = colors.map((p) => p.value as ColorValue)
   const previewColors = useMemo(
     () => colors.filter((p) => decided[p.id] !== "descartar").map((p) => p.value as ColorValue),
     [colors, decided],
@@ -515,10 +554,7 @@ export function AddFromPhotos({
             </>
           ) : null}
           {photos.length ? (
-            <PhotoStrip
-              photos={photos}
-              onRemove={(i) => setPhotos((now) => now.filter((_, j) => j !== i))}
-            />
+            <PhotoStrip photos={photos} onRemove={removePhoto} />
           ) : (
             <p className="text-sm text-muted-foreground">
               De frente, de lado, el detalle y puesto. La IA propone el nombre, los colores y lo que
@@ -724,7 +760,7 @@ export function AddFromPhotos({
           photo={photos[0]?.url ?? null}
           name={text.nombre}
           priceCents={readMoney(price, store.currency)}
-          colors={previewColors.length ? previewColors : firstColor}
+          colors={previewColors}
           description={text.descripcion}
         />
       ) : null}

@@ -393,6 +393,26 @@ describe("la IA mira las fotos de un producto y propone", () => {
     expect((await call("rosa", "GET", `${base}/ia`)).json.cap.used).toBe(before + 2)
   })
 
+  it("«Aplicar todos» no pisa un dato que la persona ya llenó", async () => {
+    steps.push(() =>
+      lookReply({
+        nombre: null,
+        categoria: null,
+        colores: [],
+        palabras: [],
+        descripcion: null,
+        datos: [{ clave: "material", valor: "Lona", de: "foto", porque: "Se ve la trama" }],
+      }),
+    )
+    await call("rosa", "POST", `${base}/productos/${zapatilla}/ia`)
+    const all = await call("rosa", "POST", `${base}/productos/${zapatilla}/ia/aplicar-todos`)
+    expect(all.json).toMatchObject({
+      applied: 0,
+      skipped: [{ field: "dato:material", message: expect.stringMatching(/ya tiene un valor/) }],
+    })
+    expect(all.json.product.rubroData).toMatchObject({ material: "Sintético" })
+  })
+
   it("al llegar al tope del día la persona lo sabe y sigue a mano", async () => {
     const cap = (await call("rosa", "GET", `${base}/ia`, undefined, undefined, tight)).json.cap
     expect(cap).toMatchObject({ available: false, reason: "tope", left: 0 })

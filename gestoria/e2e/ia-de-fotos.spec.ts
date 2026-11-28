@@ -85,8 +85,6 @@ test("«Agregar desde fotos»: la IA propone, el precio lo pone la persona y se 
   await expect(drawer.getByText(/La IA propone 1 cosa/)).toBeVisible()
   await expect(drawer.getByText("Lo pones tú. La IA nunca propone precios.")).toBeVisible()
   await shot(page, "ia-2-propuesta-1440")
-  await drawer.getByRole("button", { name: "Guardar y abrir la ficha" }).click()
-  await expect(drawer.getByText(/Usa el nombre que propone la IA/)).toBeVisible()
   await drawer.getByRole("button", { name: "Aplicar todos" }).click()
   await name.fill("Zapatilla de lona negra")
   await drawer.getByLabel("Precio").fill("129")

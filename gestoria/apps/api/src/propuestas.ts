@@ -1020,7 +1020,7 @@ export async function applyAll(
           eq(aiProposal.productId, target.productId))
         : (uuidOr404(target.itemId, "Ese producto ya no está en la carga"),
           and(eq(aiProposal.itemId, target.itemId), isNull(aiProposal.productId)))
-    const rows = (
+    const candidates = (
       await tx
         .select()
         .from(aiProposal)
@@ -1028,8 +1028,22 @@ export async function applyAll(
     )
       .filter((r) => !r.field.startsWith("pregunta:") && r.field !== "juntar")
       .filter((r) => r.productId || ITEM_FIELDS.has(r.field))
-      .sort((a, b) => orderOf(a.field) - orderOf(b.field))
+    // Un dato que la persona ya llenó no se pisa: queda propuesto, para que lo decida ella.
+    const filled =
+      "productId" in target ? (await productRow(tx, storeId, target.productId)).rubroData : {}
     const skipped: { id: string; field: string; message: string }[] = []
+    const rows = candidates
+      .filter((r) => {
+        const key = r.field.startsWith("dato:") ? r.field.slice(5) : null
+        if (key === null || filled[key] === undefined) return true
+        skipped.push({
+          id: r.id,
+          field: r.field,
+          message: "Ese dato ya tiene un valor: queda propuesto para que lo decidas",
+        })
+        return false
+      })
+      .sort((a, b) => orderOf(a.field) - orderOf(b.field))
     let applied = 0
     for (const row of rows) {
       try {

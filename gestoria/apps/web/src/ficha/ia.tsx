@@ -20,6 +20,7 @@ import {
   useProductProposals,
 } from "../lib/ia"
 import type { FichaStore } from "./borrador"
+import { useFichaContext } from "./contexto"
 import { PRODUCT_KEY } from "./datos"
 import { Swatch } from "./piezas"
 
@@ -30,6 +31,23 @@ import { Swatch } from "./piezas"
  * guardar y después le pide al servidor que lo use: la ficha que vuelve reemplaza la de la
  * pantalla. Quien no cambia el catálogo no ve propuestas.
  */
+
+/**
+ * Antes de usar una propuesta, lo que la persona tenía sin guardar se guarda: así la ficha que
+ * devuelve el servidor no pisa nada ni queda pisada. Si no se puede guardar (falta el motivo del
+ * stock, sin conexión), se dice y no se usa.
+ */
+async function settled(store: FichaStore) {
+  await store.flush()
+  for (let i = 0; i < 60 && !store.idle(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    if (!store.idle()) await store.flush()
+  }
+  if (!store.idle())
+    throw new Error(
+      "Primero se tiene que guardar lo que cambiaste (arriba dice qué falta). Después usa la propuesta.",
+    )
+}
 
 interface FichaIa {
   proposals: Proposal[]
@@ -70,7 +88,7 @@ export function FichaIaProvider({
   const queryClient = useQueryClient()
   const query = useProductProposals(storeId, productId)
   const actions = useFichaProposals(storeId, productId, {
-    beforeUse: () => store.flush(),
+    beforeUse: () => settled(store),
     onSheet: (sheet: Sheet) =>
       queryClient.setQueryData(PRODUCT_KEY(storeId, productId), { product: sheet }),
   })
@@ -124,8 +142,14 @@ export function AskButton({
 /** Arriba de la ficha: cuántas propuestas esperan, «Aplicar todos» y lo que avisa la IA. */
 export function IaBar() {
   const ia = useFichaIa()
+  const { draft } = useFichaContext()
   if (!ia.active) return null
-  const usable = ia.proposals.filter((p) => p.kind !== "pregunta")
+  // Un dato que ya tiene valor no se cambia con «Aplicar todos»: se ve solo si se borra.
+  const usable = ia.proposals.filter(
+    (p) =>
+      p.kind !== "pregunta" &&
+      !(p.kind === "dato" && draft.rubroData[keyOf(p.field)] !== undefined),
+  )
   const questions = ia.proposals.length - usable.length
   return (
     <>
