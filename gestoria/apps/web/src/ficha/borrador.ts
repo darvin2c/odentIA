@@ -766,16 +766,23 @@ function clashMessage(clash: string[]): string {
   return `Alguien cambió esta ficha mientras la tenías abierta: ${listOf(names)}. Lo tuyo sigue aquí, sin guardar.`
 }
 
-/** Si el foco está en algo donde se escribe (un campo de texto o de número). */
-function typingInPage(): boolean {
-  if (typeof document === "undefined") return false
-  const el = document.activeElement as HTMLElement | null
-  if (!el) return false
-  if (el instanceof HTMLTextAreaElement || el.isContentEditable) return true
+/** Si es algo donde se escribe (un campo de texto o de número). */
+export function isTextEntry(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false
+  if (target instanceof HTMLTextAreaElement || target.isContentEditable) return true
   return (
-    el instanceof HTMLInputElement &&
-    !["checkbox", "radio", "button", "submit", "range", "color", "file"].includes(el.type)
+    target instanceof HTMLInputElement &&
+    ["text", "number", "search", "email", "tel", "url"].includes(target.type) &&
+    !target.readOnly &&
+    // Lo escondido de un control (el input de un grupo de radios) no es un campo donde se escribe.
+    target.tabIndex >= 0 &&
+    target.getAttribute("aria-hidden") !== "true"
   )
+}
+
+/** Si el foco está en algo donde se escribe. */
+function typingInPage(): boolean {
+  return typeof document !== "undefined" && isTextEntry(document.activeElement)
 }
 
 /**

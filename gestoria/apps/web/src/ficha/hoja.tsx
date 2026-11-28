@@ -545,12 +545,19 @@ export function Hoja(props: HojaProps) {
               ? "Solo lectura."
               : touch
                 ? `Toca una celda para cambiarla, o un nombre para elegir toda la fila o la columna.${columns.length > 4 ? " Desliza para ver las demás." : ""}`
-                : "Arrastra o usa Mayúscula y las flechas para elegir varias, escribe un número y Enter. Desde Excel: copia la tabla, con sus títulos o sin ellos, elige la primera celda y pega (Ctrl+V)."}
+                : "Arrastra o usa Mayúscula y las flechas para elegir varias, escribe un número y Enter."}
           </span>
         )}
         {problem ? (
           <span role="alert" className="text-destructive">
             {problem}
+          </span>
+        ) : null}
+        {/* Siempre a la vista (no cambia de alto al entrar o salir de la cuadrícula). */}
+        {edit && !touch ? (
+          <span className="basis-full text-muted-foreground">
+            Desde Excel: copia la tabla, con sus títulos de talla y color o sin ellos, elige la
+            primera celda y pega (Ctrl+V).
           </span>
         ) : null}
         {changed ? (

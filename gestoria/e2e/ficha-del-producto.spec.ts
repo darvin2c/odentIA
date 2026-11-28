@@ -183,9 +183,11 @@ test("la ficha: la cuadrícula con el teclado y pegando, el margen y deshacer", 
   await expect(cell(page, "36", "negra")).toHaveAttribute("aria-label", /: 2/)
   await why.getByRole("radio", { name: "Conté y corregí" }).click()
   await saved(page)
-  expect([await stockOf("blanca,35"), await stockOf("negra,35"), await stockOf("negra,36")]).toEqual(
-    [3, 0, 2],
-  )
+  expect([
+    await stockOf("blanca,35"),
+    await stockOf("negra,35"),
+    await stockOf("negra,36"),
+  ]).toEqual([3, 0, 2])
 
   // Pegar con los títulos de Excel: cada número va a su talla y su color, y se dice lo que no entró.
   await cell(page, "35", "blanca").click()
@@ -275,8 +277,11 @@ test("Ventas ve la ficha sin cambiarla y sin costos; el servidor la rechaza", as
   // A Ventas ni se le dibuja el costo ni el margen.
   await expect(page.getByText(/por unidad a precio de lista/)).toHaveCount(0)
   await expect(page.getByText("De lo último que entró de cada variante")).toHaveCount(0)
-  // Sí copia el enlace del producto, para mandarlo.
-  await expect(page.getByRole("button", { name: "Copiar el enlace" })).toBeVisible()
+  // El enlace del producto también es suyo: la ficha lo pide para ella y el producto nace con él.
+  expect((await call("GET", `${STORE}/marca`)).status).toBe(200)
+  expect((await json("GET", `${STORE}/productos/${productId}`)).product.web.slug).toBe(
+    "zapatilla-de-cuero",
+  )
   const rejected = await call("PATCH", `${STORE}/productos/${productId}`, { listPriceCents: 100 })
   expect(rejected.status).toBe(403)
   const grid = await call("POST", `${STORE}/productos/${productId}/cuadricula`, {

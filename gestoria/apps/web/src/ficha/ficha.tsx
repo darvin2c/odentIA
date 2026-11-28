@@ -42,7 +42,7 @@ import { anchorOf, cellKey, type Readiness, type RubroTemplate, type Sheet } fro
 import { money } from "../lib/tienda"
 import { Photo } from "../piezas"
 import { StoreHeader, useStoreContext } from "../tiendas"
-import { type GridSaved, type SaveStatus, useFicha, useFichaStore } from "./borrador"
+import { type GridSaved, isTextEntry, type SaveStatus, useFicha, useFichaStore } from "./borrador"
 import { HistoryDrawer, KardexDrawer, SearchDialog, ShortcutsDialog } from "./cajones"
 import { type Ficha, FichaContext } from "./contexto"
 import { DataCard, PRODUCT_KEY, useTemplates } from "./datos"
@@ -362,6 +362,13 @@ function ProductSheet({
       })
   }, [fichaStore])
 
+  // Un ancla en la dirección (`#dato-horma`, `#precio`, `#variantes`): al abrir la ficha va a ese
+  // campo, abre su sección si está plegada y le da el foco (lo usa «Completar» desde otras pantallas).
+  useEffect(() => {
+    const target = decodeURIComponent(window.location.hash.slice(1))
+    if (target) goTo(target)
+  }, [])
+
   // Lo que cambió otra pestaña u otra persona y ya se ve aquí.
   const news = state.news
   useEffect(() => {
@@ -389,7 +396,10 @@ function ProductSheet({
   // Lo que se escribe en un campo se guarda al salir de él o con Enter, nunca a medias: así el
   // deshacer del campo (Ctrl+Z) no deja en el servidor un valor que nadie escribió.
   useEffect(() => {
-    const release = () => fichaStore.release()
+    // Solo al salir de un campo donde se escribe: salir de un botón o de la cuadrícula no apura nada.
+    const release = (e: FocusEvent) => {
+      if (isTextEntry(e.target)) fichaStore.release()
+    }
     window.addEventListener("focusout", release)
     return () => window.removeEventListener("focusout", release)
   }, [fichaStore])
@@ -397,7 +407,7 @@ function ProductSheet({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey
-      if (e.key === "Enter" && e.target instanceof HTMLInputElement) fichaStore.release()
+      if (e.key === "Enter" && isTextEntry(e.target)) fichaStore.release()
       // En un campo, Ctrl+Z es el del campo; en la cuadrícula, el de la ficha.
       if (mod && e.key.toLowerCase() === "z" && !typing(e.target)) {
         e.preventDefault()

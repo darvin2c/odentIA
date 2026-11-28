@@ -117,11 +117,11 @@ export const HELP_SCREENS = {
       "código de barras",
     ],
   },
-  // La ficha de un producto (`/catalogo/<id>`): su propia pantalla en la Ayuda, con sus preguntas.
-  // Su enlace es el Catálogo, donde se elige el producto.
+  // La ficha de un producto: su propia pantalla en la Ayuda, con sus preguntas. Su ruta lleva el
+  // producto (`$productId`); el enlace de la Ayuda va al Catálogo, donde se elige.
   producto: {
     label: "Ficha del producto",
-    path: "/catalogo",
+    path: "/catalogo/$productId",
     opens: "catalogo.ver",
     purpose:
       "La ficha de un producto, que se guarda sola: fotos, colores y tallas con su stock en una cuadrícula (también pegando desde Excel), precio, mínimo, margen, lo que Sofi puede ofrecer, promociones, estado, datos del rubro, lo que Sofi no supo y quién cambió qué.",
@@ -953,14 +953,23 @@ export function storePath(path: string, storeId: string): string {
   return (inside.startsWith("/") ? inside : `/${inside}`).slice(0, 200)
 }
 
+/**
+ * Si la ruta está en esa pantalla o debajo de ella. Una parte variable (`/catalogo/$productId`)
+ * vale para cualquier valor de esa parte.
+ */
+function routeHas(screen: string, path: string): boolean {
+  const want = screen.split("/")
+  const have = path.split("/")
+  if (have.length < want.length) return false
+  return want.every((part, i) => (part.startsWith("$") ? have[i] !== "" : part === have[i]))
+}
+
 /** La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. */
 export function helpScreenOf(path: string): HelpScreen | null {
-  // La ficha de un producto es su propia pantalla, aunque cuelgue del Catálogo.
-  if (/^\/catalogo\/[^/]+$/.test(path)) return "producto"
   let found: HelpScreen | null = null
   for (const key of SCREEN_KEYS) {
     const screen: string = HELP_SCREENS[key].path
-    const inside = screen === "/" ? path === "/" : path === screen || path.startsWith(`${screen}/`)
+    const inside = screen === "/" ? path === "/" : routeHas(screen, path)
     if (inside && (!found || screen.length > HELP_SCREENS[found].path.length)) found = key
   }
   return found
@@ -1017,8 +1026,10 @@ function restrictionFor(seat: StoreSeat, needs: StorePermission): string | null 
 
 /** La pantalla en la tienda, si el rol la abre. */
 function pathFor(seat: StoreSeat, storeId: string, screen: HelpScreen): string | null {
-  const { path, opens } = HELP_SCREENS[screen]
+  const { path: full, opens } = HELP_SCREENS[screen]
   if (!can(seat, opens)) return null
+  // Una ruta con su parte variable lleva a lo de antes de ella (la ficha, al Catálogo).
+  const path = full.split("/$")[0] || "/"
   return `/tiendas/${storeId}${path === "/" ? "" : path}`
 }
 
