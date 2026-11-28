@@ -30,12 +30,15 @@ interface Photo {
 
 /** Lo que queda escrito cuando «Juntar con IA» no encuentra qué juntar: un resultado, no un error. */
 export const NOTHING_TO_JOIN = "No encontré fotos del mismo producto para juntar."
+/** Sin dos fotos sueltas, la IA no mira: no hay nada que juntar. */
+export const NO_LOOSE_PHOTOS = "No hay fotos sueltas para juntar."
 
 /** «Juntar con IA» y «Completar con IA» de un producto de la carga. */
 export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
-  // Sin grupos, el resultado queda fijo junto a la tabla hasta que se vuelva a pedir.
+  // Sin grupos, el resultado queda fijo junto a la tabla hasta que se vuelva a pedir o cambien
+  // las fotos de la carga.
   const [groupNote, setGroupNote] = useState<string | null>(null)
   const key = LOAD_PROPOSALS_KEY(store.id, loadId)
   const done = (data: LoadProposals, what: string) => {
@@ -60,7 +63,7 @@ export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
     },
     onError: (error) => {
       if (error instanceof ApiError && error.code === "NOTHING_TO_GROUP")
-        setGroupNote(NOTHING_TO_JOIN)
+        setGroupNote(NO_LOOSE_PHOTOS)
       else toast.error(error.message)
     },
   })
@@ -95,13 +98,32 @@ export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
     },
     onError: (error) => toast.error(error.message),
   })
-  return { group, complete, decide, all, groupNote }
+  return { group, complete, decide, all, groupNote, clearGroupNote: () => setGroupNote(null) }
 }
 
 const LABEL: Record<string, string> = {
   nombre: "Nombre",
   categoria: "Categoría",
   descripcion: "Descripción",
+}
+
+/**
+ * Lo que dijo «Juntar con IA» cuando no hubo qué juntar, fijo y en neutro. La región está siempre
+ * montada para que el lector de pantalla la anuncie al cambiar.
+ */
+export function JoinNote({ ia }: { ia: ReturnType<typeof useLoadIa> }) {
+  return (
+    <p
+      role="status"
+      className={
+        ia.groupNote
+          ? "rounded-xl border bg-card px-3 py-2 text-sm text-muted-foreground"
+          : "sr-only"
+      }
+    >
+      {ia.groupNote ?? ""}
+    </p>
+  )
 }
 
 export function LoadIaPanel({
@@ -129,13 +151,7 @@ export function LoadIaPanel({
       later: proposals.filter((p) => p.itemId === item.id && p.waitsForProduct),
     }))
     .filter((x) => x.list.length || x.later.length)
-  if (
-    !groups.length &&
-    !byItem.length &&
-    !(cap && !cap.available) &&
-    look?.state !== "fallo" &&
-    !ia.groupNote
-  )
+  if (!groups.length && !byItem.length && !(cap && !cap.available) && look?.state !== "fallo")
     return null
   const busy = ia.decide.isPending || ia.all.isPending
   return (
@@ -144,14 +160,6 @@ export function LoadIaPanel({
         <PageNotice tone="aviso" label="La IA no mira ahora">
           {cap.message}
         </PageNotice>
-      ) : null}
-      {ia.groupNote && !groups.length ? (
-        <p
-          role="status"
-          className="rounded-xl border bg-card px-3 py-2 text-sm text-muted-foreground"
-        >
-          {ia.groupNote}
-        </p>
       ) : null}
       {look?.state === "fallo" && look.failure ? (
         <PageNotice tone="aviso" label="La IA no pudo mirar">

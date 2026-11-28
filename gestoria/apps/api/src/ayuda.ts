@@ -681,7 +681,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Qué hace «Juntar con IA»?",
         a: [
           "Mira las fotos sueltas de la carga y propone qué fotos son del mismo producto. Cada grupo lo confirmas tú; nada se junta solo.",
-          "Si no encuentra fotos del mismo producto, lo deja escrito junto a la tabla y no cambia nada: júntalas tú con «Juntar en uno» si son del mismo.",
+          "Si no hay fotos sueltas, o si no encuentra fotos del mismo producto, lo deja escrito junto a la tabla y no cambia nada: júntalas tú con «Juntar en uno» si son del mismo.",
         ],
         needs: "configuracion",
         screen: "cargar",

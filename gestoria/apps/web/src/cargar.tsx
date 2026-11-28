@@ -42,7 +42,7 @@ import {
   Upload,
 } from "lucide-react"
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
-import { LoadIaPanel, useLoadIa } from "./cargar-ia"
+import { JoinNote, LoadIaPanel, useLoadIa } from "./cargar-ia"
 import { CATALOG_KEY } from "./catalogo"
 import { ApiError, api } from "./lib/api"
 import { isImageFile, MEDIA_OFF, preparePhoto } from "./lib/medios"
@@ -615,6 +615,12 @@ function LoadView({
   const live = useRef({ items, errors })
   live.current = { items, errors }
   const allPhotos = items.reduce((n, i) => n + i.photos.length, 0) + loose.length
+  // Lo que dijo «Juntar con IA» vale para esas fotos: si cambian, ya no se muestra.
+  const photoShape = `${allPhotos}:${items.length}:${loose.map((p) => p.id).join(",")}`
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambian las fotos
+  useEffect(() => {
+    iaRef.current.clearGroupNote()
+  }, [photoShape])
   const chosen = items.filter((i) => selection[i.id]).map((i) => i.id)
 
   /** «Mover a…»: a otro producto de la carga, a uno nuevo o sin producto. */
@@ -920,6 +926,7 @@ function LoadView({
           <PhotoStack photos={loose} items={items} itemId={null} onMove={moveTo} spread />
         </section>
       ) : null}
+      <JoinNote ia={ia} />
       <LoadIaPanel
         loadId={loadId}
         items={items}
