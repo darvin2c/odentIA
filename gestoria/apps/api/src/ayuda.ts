@@ -809,7 +809,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "avisos-al-celular",
         q: "¿Cómo me entero de un pago o de una entrega aunque gestorIA esté cerrada?",
         a: [
-          "Instala gestorIA en tu celular y activa los avisos: en Pedidos, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
+          "Instala gestorIA en tu celular y activa los avisos: en Inicio, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
           "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre lo que toca resolver, y el siguiente del mismo tipo reemplaza al anterior.",
           "En Avisos al celular eliges qué te llega, y vale en todos tus celulares. «Apagar en este celular» los apaga solo en ese celular; al cerrar sesión también se apagan en él.",
         ],
@@ -820,7 +820,20 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "invitar",
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
-          "En Configuración, en Equipo y repartidores, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
+          "En Configuración, en Equipo y repartidores, «Invitar»: su nombre, su celular, el correo con el que entrará y su rol; cada rol dice lo que puede hacer. «Crear la invitación» y después «Enviar por WhatsApp»: se abre el WhatsApp de tu celular con el mensaje escrito y lo envías tú. En la lista dice quién la envió por WhatsApp: gestorIA no sabe si le llegó.",
+          "Entra solo con la cuenta de ese correo: el link solo no basta. La invitación vence en 7 días; si venció, «Invitar otra vez». Si un dato estaba mal, «Corregir»: se abre con sus datos puestos y, al crear la nueva, la anterior queda anulada. Para que ya no sirva, «Anular» y confírmalo.",
+          "Para cambiar el rol de alguien o quitarlo del equipo, tócalo en la lista: cada rol dice lo que puede hacer. A quien tiene el plan solo lo cambia o lo quita alguien con su mismo rol, y la tienda nunca se queda sin quien tiene el plan.",
+        ],
+        needs: "equipo.gestionar",
+        screen: "equipo",
+      },
+      {
+        id: "repartidores",
+        q: "¿Cómo sumo a un repartidor y anoto lo que le pago?",
+        a: [
+          "En Configuración, en Equipo y repartidores, «Agregar repartidor»: su nombre, su celular, «Le pagas por entrega» y qué pasa «Si la clienta no estaba». Desde ese momento lo eliges al despachar, en Despachos, y le puedes avisar por WhatsApp desde tu celular.",
+          "Lo que le pagas por entrega es para que sepas cuánto le debes: gestorIA no le paga ni lo descuenta de nada. Quien es de tu equipo y ya llevó un pedido también aparece, con su pago si se lo anotas.",
+          "Para que deje de repartir, tócalo en la lista y «Sacar»: lo que tenía asignado y todavía no salió queda sin repartidor en Despachos; lo que llevó y cobró sigue con su nombre.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -859,7 +872,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "plan",
         q: "¿Dónde veo mi plan y lo que se me cobró?",
         a: [
-          "En Configuración, en «Plan y pagos» (también se abre desde el nombre de la tienda, arriba en el menú): tu plan, lo que se te cobró, tus pagos y sus avisos. Ahí también subes el comprobante de un pago.",
+          "En Configuración, en «Plan y pagos» (también se abre desde el nombre de la tienda, arriba en el menú): primero, lo que tienes por pagar y cuándo vence, o «Nada por pagar». Si tienes algo por pagar, ahí mismo está «Subir comprobante»; si no aparece, avísanos que pagaste escribiendo a soporte desde la «Ayuda», arriba. Debajo, tu plan, cuánto usaste de tu saldo y cuánto te queda, tu tope y cuándo cierra tu mes. Más abajo, lo que se te cobró y pagaste antes.",
+          "Para cambiar tu tope, «Pedir otro tope» (o «Pedir un tope», si no tienes): se abre la Ayuda con tu mensaje a soporte de gestorIA ya escrito, lo completas y lo envías. Para preguntar por un cobro, escribe a soporte desde la «Ayuda», arriba en cualquier pantalla. En «Plan y pagos» ves las respuestas de toda la tienda.",
         ],
         needs: "plan",
         screen: "plan",

@@ -1,4 +1,4 @@
-import type { AccountState, SUPPORT_KINDS } from "@odentia/contract"
+import type { AccountState } from "@odentia/contract"
 
 /**
  * Lo que la pantalla sabe de «Plan y pagos» (paso B7): lo que la administración dijo de la tienda
@@ -87,8 +87,8 @@ const NOTICE_WORDS: Record<string, Partial<Record<Level, string>>> = {
 
 /** Lo que se hace con el aviso: aquí, pedirlo a soporte. */
 const NOTICE_ACTIONS: Record<string, string> = {
-  elegir_plan: "Para elegir tu plan, escríbenos en «Pedir ayuda».",
-  cambiar_tope: "Para subir el tope, escríbenos en «Pedir ayuda».",
+  elegir_plan: "Para elegir tu plan, escríbenos desde la «Ayuda», arriba.",
+  cambiar_tope: "Para subir el tope, toca «Pedir otro tope».",
 }
 
 export function noticeText(notice: AccountState["notices"][number]): string {
@@ -131,11 +131,20 @@ export const SUPPORT_STATUS_WORDS: Record<string, string> = {
   resuelto: "Resuelta",
 }
 
-export type SupportKind = (typeof SUPPORT_KINDS)[number]
+type Charge = AccountState["charges"][number]
 
-/** Los tipos de pregunta del acuerdo, con su nombre. */
-export const SUPPORT_KIND_LABELS: Record<SupportKind, string> = {
-  pregunta: "Una pregunta",
-  problema: "Algo no funciona",
-  cobro: "Sobre un cobro",
-}
+/** Lo que todavía falta pagar de un cobro, con las dos cifras que manda la administración. */
+export const owedOf = (charge: Charge) =>
+  charge.status === "anulada" || charge.status === "reversada"
+    ? 0
+    : Math.max(0, charge.amountCents - charge.paidCents)
+
+/**
+ * Se sube un comprobante si hay algo por pagar, cómo pagarlo y gestorIA está conectada a la
+ * administración: solo entonces está «Subir comprobante», y solo entonces la página lo nombra.
+ */
+export const receiptHere = (
+  state: Pick<AccountState, "charges" | "paymentMethods">,
+  connected: boolean,
+) =>
+  connected && state.paymentMethods.length > 0 && state.charges.some((charge) => owedOf(charge) > 0)

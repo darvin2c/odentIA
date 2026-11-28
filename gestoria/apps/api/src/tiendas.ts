@@ -14,6 +14,7 @@ import {
 import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import { noteStoreAccount, noteStoreTeam } from "./acuerdo.js"
+import { e164, personName } from "./contacto.js"
 import type { Person } from "./cuenta.js"
 import { DEFAULT_TIME_ZONE, type timeZoneInput } from "./hora.js"
 import {
@@ -89,6 +90,11 @@ const CONSTRAINT_ERRORS: Record<string, () => StoreError> = {
       "HAS_ORDERS",
       "Este producto ya está en pedidos: no se borra. Quita sus variantes para dejar de venderlo.",
     ),
+  // Dos repartidores de fuera con el mismo nombre se confunden en Despachos.
+  store_courier_name_uidx: () =>
+    new StoreError(409, "NAME_TAKEN", "Ya tienes un repartidor con ese nombre", {
+      name: "Ya tienes un repartidor con ese nombre",
+    }),
   // El nombre del link es de una sola tienda, aunque cada una vea solo los suyos.
   store_link_pkey: () =>
     new StoreError(409, "LINK_TAKEN", "Ese nombre ya lo usa otra tienda", {
@@ -133,6 +139,15 @@ export const invitationInput = z.object({
     .email("Escribe un correo válido, como nombre@tienda.com")
     .max(254),
   role: z.enum(STORE_ROLES),
+  /** Cómo la llama la tienda hasta que entra con su cuenta (tablero 9). */
+  name: personName.nullish(),
+  /** Su celular en E.164, para enviarle la invitación por WhatsApp. */
+  phone: e164.nullish(),
+  /**
+   * «Corregir»: la invitación pendiente que esta reemplaza. Se anula en el mismo paso, así un
+   * correo mal escrito se corrige sin dejar dos vivas y sin perder la de antes si no se guarda.
+   */
+  replaces: z.uuid().nullish(),
 })
 
 export const roleInput = z.object({ role: z.enum(STORE_ROLES) })
@@ -391,6 +406,10 @@ export async function storeTeam(appDb: Db, person: Person, storeId: string) {
         role: storeInvitation.role,
         expiresAt: storeInvitation.expiresAt,
         createdAt: storeInvitation.createdAt,
+        name: storeInvitation.name,
+        phone: storeInvitation.phone,
+        sharedAt: storeInvitation.sharedAt,
+        sharedBy: storeInvitation.sharedBy,
       })
       .from(storeInvitation)
       .where(
@@ -402,9 +421,15 @@ export async function storeTeam(appDb: Db, person: Person, storeId: string) {
       )
       .orderBy(desc(storeInvitation.createdAt))
     const now = Date.now()
+    // El celular del invitado es para escribirle: solo lo ve quien invita (soporte y Ventas, no).
+    const contact = can(seat, "equipo.gestionar")
     return {
       members,
-      invitations: invitations.map((i) => ({ ...i, expired: i.expiresAt.getTime() <= now })),
+      invitations: invitations.map((i) => ({
+        ...i,
+        phone: contact ? i.phone : null,
+        expired: i.expiresAt.getTime() <= now,
+      })),
       support: await supportForTeam(tx, storeId, seat),
     }
   })
@@ -480,6 +505,49 @@ export async function inviteToStore(
         email: "Esa persona ya es parte del equipo",
       })
     const expiresAt = new Date(now.getTime() + INVITATION_DAYS * 86_400_000)
+    if (input.replaces) {
+      const [replaced] = await tx
+        .select({ email: storeInvitation.email, role: storeInvitation.role })
+        .from(storeInvitation)
+        .where(
+          and(
+            eq(storeInvitation.id, input.replaces),
+            eq(storeInvitation.storeId, storeId),
+            isNull(storeInvitation.acceptedAt),
+            isNull(storeInvitation.revokedAt),
+          ),
+        )
+      if (!replaced) throw new StoreError(404, "NOT_FOUND", "La invitación que corriges ya no está")
+      if (!canAssign(role, replaced.role))
+        throw new StoreError(
+          403,
+          "FORBIDDEN",
+          "Solo el dueño puede corregir la invitación de un dueño",
+        )
+      // Solo si sigue pendiente: dos correcciones a la vez, o una aceptación en medio, no dejan
+      // dos vivas ni anulan una ya aceptada.
+      const revoked = await tx
+        .update(storeInvitation)
+        .set({ revokedAt: now, revokedBy: person.userId })
+        .where(
+          and(
+            eq(storeInvitation.id, input.replaces),
+            eq(storeInvitation.storeId, storeId),
+            isNull(storeInvitation.acceptedAt),
+            isNull(storeInvitation.revokedAt),
+          ),
+        )
+        .returning({ id: storeInvitation.id })
+      if (revoked.length === 0)
+        throw new StoreError(404, "NOT_FOUND", "La invitación que corriges ya no está")
+      await tx.insert(storeEvent).values({
+        storeId,
+        actorUserId: person.userId,
+        action: "invitacion.anulada",
+        subject: replaced.email,
+        detail: { por: "corregir" },
+      })
+    }
     const [pending] = await tx
       .select({ id: storeInvitation.id })
       .from(storeInvitation)
@@ -523,15 +591,71 @@ export async function inviteToStore(
       role: input.role,
       invitedBy: person.userId,
       expiresAt,
+      name: input.name ?? null,
+      phone: input.phone ?? null,
     })
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
       action: "invitacion.creada",
       subject: input.email,
-      detail: { role: input.role, ...(pending ? { replaces: pending.id } : {}) },
+      detail: {
+        role: input.role,
+        ...((input.replaces ?? pending?.id) ? { replaces: input.replaces ?? pending?.id } : {}),
+      },
     })
-    return { id, email: input.email, role: input.role, expiresAt }
+    return {
+      id,
+      email: input.email,
+      role: input.role,
+      expiresAt,
+      name: input.name ?? null,
+      phone: input.phone ?? null,
+    }
+  })
+}
+
+/**
+ * «Enviar por WhatsApp» (tablero 9): se abrió el WhatsApp de este celular con la invitación. Lo
+ * envía la persona: queda «enviada por ti», nunca que llegó. Solo la de una invitación pendiente.
+ */
+export async function noteInvitationShared(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  invitationId: string,
+  now = new Date(),
+) {
+  return inStore(appDb, person, storeId, "equipo.gestionar", async (tx, role) => {
+    if (!z.uuid().safeParse(invitationId).success)
+      throw new StoreError(404, "NOT_FOUND", "Esa invitación ya no está")
+    const [row] = await tx
+      .select({ email: storeInvitation.email, role: storeInvitation.role })
+      .from(storeInvitation)
+      .where(
+        and(
+          eq(storeInvitation.id, invitationId),
+          eq(storeInvitation.storeId, storeId),
+          isNull(storeInvitation.acceptedAt),
+          isNull(storeInvitation.revokedAt),
+          gt(storeInvitation.expiresAt, now),
+        ),
+      )
+    if (!row) throw new StoreError(404, "NOT_FOUND", "Esa invitación ya no está vigente")
+    if (!canAssign(role, row.role))
+      throw new StoreError(403, "FORBIDDEN", "Solo el dueño puede enviar la invitación de un dueño")
+    await tx
+      .update(storeInvitation)
+      .set({ sharedAt: now, sharedBy: person.userId })
+      .where(eq(storeInvitation.id, invitationId))
+    await tx.insert(storeEvent).values({
+      storeId,
+      actorUserId: person.userId,
+      action: "invitacion.enviada",
+      subject: row.email,
+      detail: { por: "whatsapp" },
+    })
+    return { sharedAt: now }
   })
 }
 

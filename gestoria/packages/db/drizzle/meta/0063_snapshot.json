@@ -1,6 +1,6 @@
 {
-  "id": "7872e04f-1391-4ad1-ad53-e2aa545828ab",
-  "prevId": "e92c9d34-6d33-404b-b7e3-82c0129d3c7b",
+  "id": "aeae5d7f-c4b1-4b49-964c-d535187bf119",
+  "prevId": "a5d9c26b-6e1e-4b25-b8c6-b86cf5ea7746",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -154,437 +154,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.bulk_load": {
-      "name": "bulk_load",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'abierta'"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "finished_by": {
-          "name": "finished_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_products": {
-          "name": "created_products",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "bulk_load_store_idx": {
-          "name": "bulk_load_store_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "bulk_load_store_id_fkey": {
-          "name": "bulk_load_store_id_fkey",
-          "tableFrom": "bulk_load",
-          "tableTo": "store",
-          "columnsFrom": [
-            "store_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "bulk_load_store_id_key": {
-          "name": "bulk_load_store_id_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "store_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "bulk_load_state_check": {
-          "name": "bulk_load_state_check",
-          "value": "state IN ('abierta','creada','descartada') and (\"bulk_load\".\"state\" = 'abierta') = (\"bulk_load\".\"finished_at\" is null) and (\"bulk_load\".\"state\" = 'creada') = (\"bulk_load\".\"created_products\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.bulk_load_item": {
-      "name": "bulk_load_item",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "load_id": {
-          "name": "load_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'revisar'"
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "list_price_cents": {
-          "name": "list_price_cents",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "options": {
-          "name": "options",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "variants": {
-          "name": "variants",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "doubt": {
-          "name": "doubt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sheet_row": {
-          "name": "sheet_row",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "bulk_load_item_load_idx": {
-          "name": "bulk_load_item_load_idx",
-          "columns": [
-            {
-              "expression": "load_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "bulk_load_item_load_fkey": {
-          "name": "bulk_load_item_load_fkey",
-          "tableFrom": "bulk_load_item",
-          "tableTo": "bulk_load",
-          "columnsFrom": [
-            "store_id",
-            "load_id"
-          ],
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "bulk_load_item_store_id_key": {
-          "name": "bulk_load_item_store_id_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "store_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "bulk_load_item_check": {
-          "name": "bulk_load_item_check",
-          "value": "state IN ('revisar','listo','quitado') and char_length(\"bulk_load_item\".\"name\") <= 120 and (\"bulk_load_item\".\"category\" is null or char_length(\"bulk_load_item\".\"category\") <= 60) and char_length(\"bulk_load_item\".\"description\") <= 2000 and (\"bulk_load_item\".\"doubt\" is null or char_length(\"bulk_load_item\".\"doubt\") <= 200) and (\"bulk_load_item\".\"list_price_cents\" is null or \"bulk_load_item\".\"list_price_cents\" between 1 and 100000000) and jsonb_typeof(\"bulk_load_item\".\"options\") = 'array' and jsonb_typeof(\"bulk_load_item\".\"variants\") = 'array' and jsonb_array_length(\"bulk_load_item\".\"variants\") <= 200"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.bulk_load_photo": {
-      "name": "bulk_load_photo",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "load_id": {
-          "name": "load_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "file_name": {
-          "name": "file_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "width": {
-          "name": "width",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "height": {
-          "name": "height",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "bulk_load_photo_load_idx": {
-          "name": "bulk_load_photo_load_idx",
-          "columns": [
-            {
-              "expression": "load_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "bulk_load_photo_load_fkey": {
-          "name": "bulk_load_photo_load_fkey",
-          "tableFrom": "bulk_load_photo",
-          "tableTo": "bulk_load",
-          "columnsFrom": [
-            "store_id",
-            "load_id"
-          ],
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "bulk_load_photo_item_fkey": {
-          "name": "bulk_load_photo_item_fkey",
-          "tableFrom": "bulk_load_photo",
-          "tableTo": "bulk_load_item",
-          "columnsFrom": [
-            "store_id",
-            "item_id"
-          ],
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "bulk_load_photo_check": {
-          "name": "bulk_load_photo_check",
-          "value": "content_type IN ('image/jpeg','image/png','image/webp') and char_length(\"bulk_load_photo\".\"file_name\") <= 200 and \"bulk_load_photo\".\"object_key\" ~ '^[a-z0-9/-]{1,200}$' and \"bulk_load_photo\".\"size_bytes\" between 1 and 8000000"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.cash_handover": {
@@ -1814,32 +1383,6 @@
           "value": "\"customer_event\".\"customer_id\" <> \"customer_event\".\"other_id\""
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.media_trash": {
-      "name": "media_trash",
-      "schema": "",
-      "columns": {
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.order_event": {
@@ -3103,43 +2646,7 @@
           "name": "content",
           "type": "bytea",
           "primaryKey": false,
-          "notNull": false
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "width": {
-          "name": "width",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "height": {
-          "name": "height",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cutout": {
-          "name": "cutout",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cutout_id": {
-          "name": "cutout_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "color_id": {
           "name": "color_id",
@@ -3235,11 +2742,7 @@
         },
         "product_photo_size_check": {
           "name": "product_photo_size_check",
-          "value": "\"product_photo\".\"content\" is null or octet_length(\"product_photo\".\"content\") between 1 and 1500000"
-        },
-        "product_photo_where_check": {
-          "name": "product_photo_where_check",
-          "value": "(\"product_photo\".\"content\" is not null or \"product_photo\".\"object_key\" is not null) and (\"product_photo\".\"object_key\" is null or \"product_photo\".\"object_key\" ~ '^[a-z0-9/-]{1,200}$') and (\"product_photo\".\"size_bytes\" is null or \"product_photo\".\"size_bytes\" between 1 and 8000000) and (\"product_photo\".\"cutout\" is null or (\"product_photo\".\"object_key\" is not null and cutout IN ('propuesta','usada'))) and (\"product_photo\".\"cutout\" is null) = (\"product_photo\".\"cutout_id\" is null)"
+          "value": "octet_length(\"product_photo\".\"content\") between 1 and 1500000"
         }
       },
       "isRLSEnabled": false
@@ -3851,152 +3354,6 @@
         "product_variant_values_check": {
           "name": "product_variant_values_check",
           "value": "cardinality(\"product_variant\".\"option_values\") <= 3"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.product_video": {
-      "name": "product_video",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "color_id": {
-          "name": "color_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "duration_ms": {
-          "name": "duration_ms",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "width": {
-          "name": "width",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "height": {
-          "name": "height",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "product_video_color_uidx": {
-          "name": "product_video_color_uidx",
-          "columns": [
-            {
-              "expression": "product_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "coalesce(\"color_id\", '00000000-0000-0000-0000-000000000000'::uuid)",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "product_video_product_fkey": {
-          "name": "product_video_product_fkey",
-          "tableFrom": "product_video",
-          "tableTo": "product",
-          "columnsFrom": [
-            "store_id",
-            "product_id"
-          ],
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_video_color_fkey": {
-          "name": "product_video_color_fkey",
-          "tableFrom": "product_video",
-          "tableTo": "product_color",
-          "columnsFrom": [
-            "store_id",
-            "color_id"
-          ],
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "product_video_check": {
-          "name": "product_video_check",
-          "value": "char_length(\"product_video\".\"label\") <= 60 and \"product_video\".\"object_key\" ~ '^[a-z0-9/-]{1,200}$' and \"product_video\".\"size_bytes\" between 1 and 16000000 and \"product_video\".\"duration_ms\" between 1 and 30000 and \"product_video\".\"width\" between 1 and 4096 and \"product_video\".\"height\" between 1 and 4096"
         }
       },
       "isRLSEnabled": false
@@ -5739,6 +5096,25 @@
           "notNull": true,
           "default": true
         },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pay_cents": {
+          "name": "pay_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_trip_paid": {
+          "name": "failed_trip_paid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -5843,6 +5219,10 @@
         "store_courier_name_check": {
           "name": "store_courier_name_check",
           "value": "char_length(btrim(\"store_courier\".\"name\")) between 1 and 80"
+        },
+        "store_courier_pay_check": {
+          "name": "store_courier_pay_check",
+          "value": "(\"store_courier\".\"pay_cents\" is null or \"store_courier\".\"pay_cents\" between 0 and 100000000) and (\"store_courier\".\"phone\" is null or \"store_courier\".\"phone\" ~ '^[+][1-9][0-9]{6,14}$')"
         }
       },
       "isRLSEnabled": false
@@ -6155,7 +5535,7 @@
       "checkConstraints": {
         "store_event_action_check": {
           "name": "store_event_action_check",
-          "value": "action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla','catalogo.carga')"
+          "value": "action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','invitacion.enviada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla','repartidor.agregado','repartidor.cambiado','repartidor.quitado')"
         }
       },
       "isRLSEnabled": false
@@ -6316,6 +5696,30 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_at": {
+          "name": "shared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_by": {
+          "name": "shared_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -6392,6 +5796,10 @@
         "store_invitation_role_check": {
           "name": "store_invitation_role_check",
           "value": "role IN ('owner','admin','sales')"
+        },
+        "store_invitation_contact_check": {
+          "name": "store_invitation_contact_check",
+          "value": "(\"store_invitation\".\"name\" is null or char_length(btrim(\"store_invitation\".\"name\")) between 1 and 80) and (\"store_invitation\".\"phone\" is null or \"store_invitation\".\"phone\" ~ '^[+][1-9][0-9]{6,14}$') and ((\"store_invitation\".\"shared_at\" is null) = (\"store_invitation\".\"shared_by\" is null))"
         },
         "store_invitation_email_check": {
           "name": "store_invitation_email_check",
