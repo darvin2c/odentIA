@@ -407,7 +407,7 @@ export async function proposeForLoadItem(
   ai: PhotoAi,
 ) {
   const begun = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const item = await itemRow(tx, loadId, itemId)
     const photos = (await loadPhotoKeys(tx, loadId, itemId))
       .slice(0, MAX_LOOK_PHOTOS)
@@ -459,7 +459,7 @@ export async function proposeGroups(
   ai: PhotoAi,
 ) {
   const begun = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const photos = await loadPhotoKeys(tx, loadId, null)
     const named = await tx
       .select({ id: bulkLoadItem.id })
@@ -920,7 +920,7 @@ async function useOnLoadIn(
 ) {
   if (row.field === "juntar") {
     const { photos } = joinValue.parse(value)
-    return joinPhotosIn(tx, storeId, row.loadId!, photos)
+    return joinPhotosIn(tx, person, storeId, row.loadId!, photos)
   }
   if (!ITEM_FIELDS.has(row.field))
     throw new StoreError(
@@ -934,7 +934,7 @@ async function useOnLoadIn(
     .where(and(eq(bulkLoadItem.id, row.itemId!), eq(bulkLoadItem.storeId, storeId)))
   if (!found) throw new StoreError(404, "NOT_FOUND", "Ese producto ya no está en la carga")
   // Primero la carga tomada; después el producto, como en «Revisar» de siempre.
-  await openLoadRow(tx, storeId, found.loadId)
+  await openLoadRow(tx, person, storeId, found.loadId)
   const item = await itemRow(tx, found.loadId, row.itemId!)
   const text = z.string().trim().min(1, "Escribe el valor")
   const colors = colorsOf(item.options)

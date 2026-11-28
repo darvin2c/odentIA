@@ -83,7 +83,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Ver es un enlace firmado que vence: la app (`catalogo.ver`), la vitrina pública
   (`/vitrina/:link/:producto/medios`, solo lo que se ve en la web, nunca la original) y lo que
   mandará Sofi cuando haya canal (`sofiMediaIn`, la copia de WhatsApp de la foto del color
-  pedido; todavía ninguna herramienta la llama).
+  pedido o, sin ella, la que es para todos; nunca la de otro color. Todavía ninguna herramienta la
+  llama).
 - La foto sin fondo es una propuesta (`cutout`), cada una en su carpeta (`cutout_id`); la original
   no se borra nunca. Nadie borra un
   archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
