@@ -12,14 +12,14 @@ interface Props {
 const { doc } = Astro.props
 ---
 <Base title={doc.title} description={doc.description} noindex={hasPending(doc)}>
-  <div class="wrap page">
-    <nav class="crumbs" aria-label="Migas de pan">
+  <div class="marco pagina">
+    <nav class="migas" aria-label="Migas de pan">
       <ol>
         <li><a href="/">Inicio</a></li>
         <li><span aria-current="page">{doc.title}</span></li>
       </ol>
     </nav>
-    <header class="page-head">
+    <header class="pagina__cabeza">
       <h1>{doc.title}</h1>
       <p class="since">Vigente desde <Texto text={doc.since} /></p>
       <p>{doc.intro}</p>
@@ -38,6 +38,8 @@ const { doc } = Astro.props
             {s.blocks.map((b) =>
               typeof b === "string" ? (
                 <p><Texto text={b} /></p>
+              ) : "h" in b ? (
+                <h3>{b.h}</h3>
               ) : (
                 <ul>{b.list.map((item) => <li><Texto text={item} /></li>)}</ul>
               ),
