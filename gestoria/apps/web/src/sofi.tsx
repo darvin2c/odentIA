@@ -176,6 +176,22 @@ export function SofiPage() {
               },
             ]}
           />
+          {/* En el teléfono las pestañas se deslizan y «Lo que aprendió» queda al final, fuera de
+              la vista: lo que tiene por responder se dice aquí, a la vista, con su botón. */}
+          {toAnswer > 0 && part !== "aprendio" ? (
+            <Button
+              variant="outline"
+              className="h-auto min-h-11 w-full justify-between whitespace-normal text-left @3xl:hidden"
+              onClick={() => setPart("aprendio")}
+            >
+              <span>
+                {toAnswer === 1
+                  ? "1 pregunta que Sofi no supo responder"
+                  : `${toAnswer} preguntas que Sofi no supo responder`}
+              </span>
+              <span className="shrink-0 font-semibold">Responder</span>
+            </Button>
+          ) : null}
           <div
             className={cn(
               "grid items-start gap-4",

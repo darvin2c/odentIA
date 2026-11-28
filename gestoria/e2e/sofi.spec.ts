@@ -8,7 +8,7 @@ import { ACCOUNT, STORE_ID, surface, type Who } from "./entorno"
  * servidor y su base de verdad, con el modelo de desarrollo (responde por reglas, sin la red):
  * - Cómo habla se elige con un ejemplo de cada tono, y la prueba dice «Por qué» con lo elegido.
  * - Lo que Sofi no supo en un chat de verdad está en «Lo que aprendió»; respondido, pasa a «Lo
- *   que sabe» y deja de proponerse.
+ *   que sabe» y deja de proponerse. En el teléfono, lo pendiente se ve sin deslizar las pestañas.
  * - El horario del equipo se elige con días y horas, y lo dice como lo dirá Sofi.
  * En escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`.
  */
@@ -83,8 +83,22 @@ test("Sofi se elige con ejemplos y la prueba dice por qué respondió así", asy
 
 test("lo que no supo se responde una vez y pasa a «Lo que sabe»", async ({ page }) => {
   await as("rosa")
+  // En el teléfono las pestañas se deslizan y «Lo que aprendió» queda al final: lo pendiente se
+  // ve igual, con su botón, sin deslizar.
+  await page.setViewportSize(PHONE)
+  await page.goto(`${BASE}/configuracion/sofi`)
+  const pending = page.getByRole("button", { name: /^1 pregunta que Sofi no supo responder/ })
+  await expect(pending).toBeInViewport()
+  await shot(page, "sofi-pendiente-telefono")
+  await pending.click()
+  await expect(page.getByText("«¿Tienen sandalias talla 38?»")).toBeVisible()
+  await expect(pending).toBeHidden()
+  await noSideScroll(page)
+
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/configuracion/sofi`)
+  // En la pantalla ancha caben las pestañas: el número va en la suya y la línea no se repite.
+  await expect(pending).toBeHidden()
   await page.getByRole("tab", { name: "Lo que aprendió · 1" }).click()
   await expect(page.getByText("«¿Tienen sandalias talla 38?»")).toBeVisible()
   await shot(page, "sofi-lo-que-aprendio")
