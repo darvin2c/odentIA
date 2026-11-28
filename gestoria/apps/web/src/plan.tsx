@@ -43,8 +43,9 @@ import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Plan y pagos» (lienzo B, paso B7; lienzo «gestorIA · Configuración, de nuevo», tablero 10): lo
- * que la administración dice de la tienda, de arriba abajo: este mes en una frase, lo que hay por
- * pagar, cada pedido que cuenta (cuando el acuerdo lo mande), lo que se cobró y los pagos. Solo el
+ * que la administración dice de la tienda, de arriba abajo: lo que se debe y cuándo vence, el saldo
+ * usado y el tope, cada pedido que cuenta (cuando el acuerdo lo mande), lo que se cobró y los
+ * pagos. Nada se calcula aquí que la administración no mande. Solo el
  * Dueño (el plan, decisión 7). Se pregunta desde la Ayuda de arriba, como en toda la tienda. Si
  * la administración no responde, se ve lo último que se supo y de cuándo es: la tienda sigue
  * funcionando igual.
@@ -104,8 +105,8 @@ function PlanBody({ view }: { view: PlanView }) {
         })}
       {state ? (
         <>
-          <ThisMonth state={state} />
           <ToPay state={state} connected={view.connected} />
+          <Balance state={state} />
           <Movements />
           <Charges state={state} />
           <Payments state={state} view={view} />
@@ -136,28 +137,27 @@ const owedOf = (charge: Charge) =>
     : Math.max(0, charge.amountCents - charge.paidCents)
 
 /**
- * Este mes, en una frase (tablero 10): la cuota y lo que pasó del saldo, con lo que manda la
- * administración (`plan` y `budget` del acuerdo). gestorIA solo suma esas dos cifras si son de la
- * misma moneda: no calcula precios. Debajo, cuánto saldo queda, cuándo cierra el mes, con qué se
- * paga y el tope.
+ * El plan y su saldo (tablero 10), después de lo que se debe: el plan y su estado, cuánto del
+ * saldo se usó y cuánto queda, y el tope, con lo que manda la administración (`plan` y `budget`
+ * del acuerdo). No se dice «pagas X al mes» con el precio del plan: la cifra del mes la dirá la
+ * administración cuando la mande; mientras, lo que se paga es lo de «Por pagar», arriba.
  */
-function ThisMonth({ state }: { state: Known }) {
+function Balance({ state }: { state: Known }) {
   const { store } = useStoreContext()
   // Pedir otro tope es pedírselo a gestorIA: abre la Ayuda con el mensaje a soporte ya escrito,
   // para que la persona lo lea, lo complete y lo envíe ella. Soporte no escribe.
   const canAsk = store.permissions.includes("ayuda.pedir")
   const { plan, access, budget } = state
-  const title = plan ? `Pagas ${money(plan.priceCents, plan.currency)} al mes` : "Sin plan todavía"
   // Lo que pasa del saldo lo dice la administración (`spentCents`); gestorIA no lo suma ni le
   // pone impuestos: cada cobro, con su total, sale en «Por pagar».
   const over = budget?.currency ? budget.spentCents : null
   const sentence = !plan
     ? "Te asignamos uno cuando tu cuenta esté lista. Mientras, tu tienda funciona igual."
     : over === null
-      ? `Plan ${plan.name}. Tu cuota vuelve como saldo para lo que usa Sofi.`
+      ? null
       : over > 0
-        ? `Plan ${plan.name}. Este mes, lo que usó Sofi pasó tu saldo en ${money(over, budget?.currency as string)}, sin impuestos: va en tu cobro.`
-        : `Plan ${plan.name}. Hasta hoy, lo que usó Sofi cabe en tu saldo.`
+        ? `Este mes, lo que usó Sofi pasó tu saldo en ${money(over, budget?.currency as string)}, sin impuestos: va en tu próximo cobro.`
+        : "Hasta hoy, lo que usó Sofi este mes cabe en tu saldo."
   const credit = budget?.currency && budget.creditCents > 0 ? budget : null
   const currency = credit?.currency ?? ""
   const used = credit ? Math.min(credit.creditUsedCents, credit.creditCents) : 0
@@ -165,13 +165,13 @@ function ThisMonth({ state }: { state: Known }) {
   const methods = state.paymentMethods.map((one) => one.name)
   return (
     <section
-      aria-labelledby="plan-este-mes"
+      aria-labelledby="plan-saldo"
       className="elevated flex flex-col gap-5 rounded-xl border bg-card p-5 sm:p-6"
     >
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 id="plan-este-mes" className="text-2xl font-bold tracking-tight tabular-nums">
-            {title}
+          <h2 id="plan-saldo" className="text-lg font-bold">
+            {plan ? `Plan ${plan.name}` : "Sin plan todavía"}
           </h2>
           {access ? (
             <Badge variant={access.status === "activa" ? "secondary" : "outline"}>
@@ -179,10 +179,14 @@ function ThisMonth({ state }: { state: Known }) {
             </Badge>
           ) : null}
         </div>
-        <p className="text-sm text-muted-foreground">{sentence}</p>
+        {sentence ? <p className="text-sm text-muted-foreground">{sentence}</p> : null}
       </div>
       {credit ? (
         <div className="flex flex-col gap-2">
+          <p className="text-sm">
+            Usaste {money(used, currency)} de tu saldo de {money(credit.creditCents, currency)} ·{" "}
+            <span className="font-semibold">te quedan {money(left, currency)}</span>
+          </p>
           <div
             role="progressbar"
             aria-label="Saldo usado este mes"
@@ -197,35 +201,19 @@ function ThisMonth({ state }: { state: Known }) {
               style={{ width: `${(used / credit.creditCents) * 100}%` }}
             />
           </div>
-          <p className="text-sm">
-            Usaste {money(used, currency)} de tu saldo de {money(credit.creditCents, currency)} ·{" "}
-            <span className="font-medium">te quedan {money(left, currency)}</span>
-          </p>
         </div>
       ) : null}
       <dl className="grid gap-4 border-t pt-4 text-sm sm:grid-cols-3">
-        {access?.readOnlyAt ? (
-          <Fact
-            term="Para seguir"
-            value={`Paga antes del ${day(access.readOnlyAt)}`}
-            note="Después tu tienda queda solo para mirar hasta que pagues."
-          />
-        ) : access?.trialEndsAt ? (
-          <Fact term="Tu prueba" value={`Hasta el ${day(access.trialEndsAt)}`} />
-        ) : budget ? (
-          <Fact term="Tu mes cierra" value={day(budget.periodEnd)} note="Ese día sale tu cobro." />
-        ) : null}
-        {methods.length > 0 ? (
-          <Fact term="Pagas con" value={listText(methods)} note="Y subes el comprobante aquí." />
-        ) : null}
         {budget?.currency ? (
           <Fact
             term="Tu tope del mes"
             value={budget.capCents !== null ? money(budget.capCents, budget.currency) : "Sin tope"}
             note={
-              budget.capCents !== null
-                ? `Llevas ${money(budget.spentCents, budget.currency)} por encima de tu saldo. Si te acercas, te avisamos.`
-                : "Si quieres uno, pídelo."
+              budget.capCents === null
+                ? "Si quieres uno, pídelo."
+                : budget.spentCents > 0
+                  ? `Llevas ${money(budget.spentCents, budget.currency)} por encima de tu saldo. Si te acercas, te avisamos.`
+                  : "Si te acercas, te avisamos."
             }
             action={
               canAsk ? (
@@ -246,6 +234,20 @@ function ThisMonth({ state }: { state: Known }) {
               ) : null
             }
           />
+        ) : null}
+        {access?.readOnlyAt ? (
+          <Fact
+            term="Para seguir"
+            value={`Paga antes del ${day(access.readOnlyAt)}`}
+            note="Después tu tienda queda solo para mirar hasta que pagues."
+          />
+        ) : access?.trialEndsAt ? (
+          <Fact term="Tu prueba" value={`Hasta el ${day(access.trialEndsAt)}`} />
+        ) : budget ? (
+          <Fact term="Tu mes cierra" value={day(budget.periodEnd)} note="Ese día sale tu cobro." />
+        ) : null}
+        {methods.length > 0 ? (
+          <Fact term="Pagas con" value={listText(methods)} note="Y subes el comprobante aquí." />
         ) : null}
       </dl>
     </section>
@@ -274,40 +276,56 @@ function Fact({
 }
 
 /**
- * Lo que hay por pagar (tablero 10, paso 4), arriba y a la vista: cuánto, hasta cuándo, cómo se
- * paga y «Subir comprobante». Lo pagado va abajo, en «Lo que se te cobró».
+ * Lo que se debe, lo primero de la página (tablero 10, paso 4): cada cobro por pagar con su cifra,
+ * su vencimiento, cómo se paga y «Subir comprobante». Las cifras son las del cobro que manda la
+ * administración. Sin nada por pagar, se dice en una línea. Lo pagado va abajo.
  */
 function ToPay({ state, connected }: { state: Known; connected: boolean }) {
   const [paying, setPaying] = useState<Charge | null>(null)
   const due = state.charges.filter((charge) => owedOf(charge) > 0)
   // Se sube un comprobante si hay cómo pagar y gestorIA está conectada a la administración.
   const canSend = connected && state.paymentMethods.length > 0
-  if (due.length === 0) return null
+  if (due.length === 0)
+    return (
+      <section
+        aria-labelledby="plan-por-pagar"
+        className="elevated flex flex-col gap-1 rounded-xl border bg-card p-5 sm:p-6"
+      >
+        <h2 id="plan-por-pagar" className="text-2xl font-bold tracking-tight">
+          Nada por pagar
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {state.charges.length === 0
+            ? "Todavía no tienes cobros."
+            : "Tus cobros están pagados: los ves más abajo, en «Lo que se te cobró»."}
+        </p>
+      </section>
+    )
   return (
-    <section aria-labelledby="plan-por-pagar" className="flex flex-col gap-3">
-      <h2 id="plan-por-pagar" className="text-lg font-bold">
-        Por pagar
-      </h2>
+    <section aria-label="Por pagar" className="flex flex-col gap-3">
       {due.map((charge) => (
         <article
           key={charge.id}
-          className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
+          aria-labelledby={`por-pagar-${charge.id}`}
+          className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6"
         >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-medium">
-                Cobro del {day(charge.periodStart)} al {day(charge.periodEnd)}
-              </span>
-              <span className="text-sm text-muted-foreground">
-                {charge.paidCents > 0
-                  ? `Pagaste ${money(charge.paidCents, charge.currency)} · `
-                  : ""}
-                {charge.dueAt ? `Vence el ${day(charge.dueAt)}` : "Por pagar"}
-              </span>
-            </div>
-            <span className="text-2xl font-bold tabular-nums">
-              {money(owedOf(charge), charge.currency)}
-            </span>
+          <div className="flex flex-col gap-1">
+            <h2
+              id={`por-pagar-${charge.id}`}
+              className="text-2xl font-bold tracking-tight tabular-nums"
+            >
+              Por pagar {money(owedOf(charge), charge.currency)}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {charge.dueAt ? (
+                <span className="font-medium text-foreground">Vence el {day(charge.dueAt)}</span>
+              ) : null}
+              {charge.dueAt ? " · " : ""}
+              Cobro del {day(charge.periodStart)} al {day(charge.periodEnd)}
+              {charge.paidCents > 0
+                ? ` · ya pagaste ${money(charge.paidCents, charge.currency)}`
+                : ""}
+            </p>
           </div>
           <ChargeLines charge={charge} />
           {state.paymentMethods.length > 0 ? (

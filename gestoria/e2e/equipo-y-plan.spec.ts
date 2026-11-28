@@ -9,8 +9,8 @@ import { ACCOUNT, STORE_ID, surface, type Who } from "./entorno"
  * - Invitar al equipo con nombre, celular, correo y rol; «Enviar por WhatsApp» abre el WhatsApp con
  *   el mensaje y la lista dice «Enviada por ti por WhatsApp», nunca que llegó.
  * - Invitar a un repartidor con lo que se le paga por entrega; cambiar su pago y sacarlo.
- * - Plan y pagos dice este mes en una frase, lo que hay por pagar y, sin movimientos en el
- *   acuerdo, qué se verá; sin formulario de ayuda en la página.
+ * - Plan y pagos dice primero lo que se debe y cuándo vence; después el saldo y el tope y, sin
+ *   movimientos en el acuerdo, qué se verá; sin formulario de ayuda en la página.
  * - La tarjeta para instalar la app va en Inicio, no en Pedidos.
  * Cada pantalla en escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`
  * (o a `CAPTURAS`).
@@ -117,15 +117,21 @@ test("Rosa suma a Kevin con su pago por entrega, lo cambia y lo saca", async ({ 
   await expect(couriers.getByRole("listitem").filter({ hasText: "Kevin Ramos" })).toHaveCount(0)
 })
 
-test("Plan y pagos: este mes en una frase, lo que hay por pagar y qué se verá de cada pedido", async ({
+test("Plan y pagos: primero lo que se debe, después el saldo y el tope, y qué se verá de cada pedido", async ({
   page,
 }) => {
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/configuracion/plan`)
-  await expect(page.getByRole("heading", { name: /^Pagas .* al mes$/ })).toBeVisible()
+  // Lo primero es lo que se debe, con su vencimiento; el precio del plan no es la cifra del mes.
+  const owed = page.getByRole("heading", { name: /^Por pagar USD/ })
+  await expect(owed).toBeVisible()
+  await expect(page.getByText(/^Vence el /)).toBeVisible()
+  await expect(page.getByRole("heading", { name: /^Pagas / })).toHaveCount(0)
+  const balance = page.getByRole("heading", { name: "Plan Tienda" })
+  const [owedBox, balanceBox] = [await owed.boundingBox(), await balance.boundingBox()]
+  expect(owedBox && balanceBox && owedBox.y < balanceBox.y, "lo que se debe va primero").toBe(true)
   await expect(page.getByText(/^Usaste .* de tu saldo de /)).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Por pagar" })).toBeVisible()
   await expect(
     page.getByText("Aquí verás cada pedido que cuenta para tu cobro", { exact: true }),
   ).toBeVisible()
@@ -145,7 +151,7 @@ test("Plan y pagos: este mes en una frase, lo que hay por pagar y qué se verá 
   await shot(page, "plan-escritorio")
   await page.setViewportSize(PHONE)
   await page.reload()
-  await expect(page.getByRole("heading", { name: /^Pagas .* al mes$/ })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /^Por pagar USD/ })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "plan-telefono")
   // En el teléfono, lo mismo: la Ayuda se abre encima, con el mensaje ya escrito.
