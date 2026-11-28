@@ -1,0 +1,1950 @@
+/* El Inicio de gestorIA (web v5, versión clara). Sin la clase `mueve` (sin JavaScript o con
+   «reducir movimiento») todo está a la vista y quieto; con ella, src/scripts/inicio.ts lo hace entrar. */
+
+/* ================================================================ héroe */
+.heroe {
+  position: relative;
+  padding: calc(var(--cabecera) + clamp(36px, 6vh, 80px)) 0 clamp(70px, 9vh, 110px);
+  background: linear-gradient(180deg, #ffffff, var(--papel-2));
+  overflow: clip;
+  isolation: isolate;
+}
+.heroe__fondo {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background-image: radial-gradient(rgba(17, 17, 19, 0.09) 1.1px, transparent 1.3px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 70% 40%, #000 10%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 70% 40%, #000 10%, transparent 75%);
+}
+.heroe__luz {
+  position: absolute;
+  width: 900px;
+  height: 900px;
+  right: -200px;
+  top: -200px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(254, 79, 2, 0.16), transparent);
+  animation: luz-a 16s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes luz-a {
+  to {
+    transform: translate3d(-120px, 90px, 0) scale(1.12);
+  }
+}
+.heroe__marco {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  align-items: center;
+  gap: clamp(32px, 5vw, 72px);
+}
+.heroe__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--linea);
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  color: var(--texto-2);
+}
+.heroe__punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--naranja-vivo);
+  box-shadow: 0 0 0 4px rgba(254, 79, 2, 0.16);
+  animation: latido 2.4s ease-in-out infinite;
+}
+@keyframes latido {
+  50% {
+    box-shadow: 0 0 0 7px rgba(254, 79, 2, 0.04);
+  }
+}
+.heroe__h {
+  margin-top: 24px;
+  font-size: clamp(46px, 6vw, 88px);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+.heroe__h .linea {
+  display: block;
+  overflow: hidden;
+  padding: 0.04em 0 0.12em;
+  margin-bottom: -0.12em;
+}
+.heroe__h .linea > span {
+  display: inline-block;
+}
+.heroe__bajada {
+  margin-top: 24px;
+  max-width: 30em;
+  font-size: clamp(17px, 1.3vw, 19px);
+  line-height: 1.55;
+  color: var(--texto-2);
+}
+.heroe__botones {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.heroe__canales {
+  margin-top: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  font-size: 14.5px;
+  color: var(--texto-3);
+}
+.heroe__canales li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* El chat que se puede tocar: el teléfono sobre una tarjeta naranja, Sofi y las preguntas. */
+.chat {
+  display: grid;
+  gap: 16px;
+}
+.chat__escena {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 26px 0 30px;
+}
+.chat__tarjeta {
+  position: absolute;
+  inset: 54px 0 0 70px;
+  border-radius: 32px;
+  background: var(--naranja-card);
+  box-shadow: 0 40px 80px -36px rgba(254, 79, 2, 0.6);
+}
+.chat__sofi {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 150px;
+  height: 150px;
+  z-index: 3;
+}
+.chat__cel {
+  width: 300px;
+  height: 560px;
+}
+.chat__cel .cel__chat {
+  scroll-behavior: smooth;
+}
+.chat__panel {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--linea);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--sombra-2);
+}
+.chat__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chat__chip {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--linea-2);
+  background: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    transform 0.2s var(--suave);
+}
+.chat__chip:hover {
+  background: var(--durazno);
+  border-color: var(--naranja-vivo);
+  transform: translateY(-1px);
+}
+.chat__chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+.chat__chip.es-sugerida {
+  border-color: var(--naranja-vivo);
+  box-shadow: 0 0 0 4px rgba(254, 79, 2, 0.12);
+}
+.chat__otra {
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--texto-2);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.chat__nota {
+  font-size: 13px;
+  color: var(--texto-3);
+}
+html:not(.js) .chat__chips {
+  display: none;
+}
+html.js [data-sin-js] {
+  display: none;
+}
+html:not(.js) .chat__cel {
+  height: auto;
+}
+
+/* El teléfono: marco, isla, chat. */
+.cel {
+  position: relative;
+  width: 270px;
+  height: 540px;
+  padding: 9px;
+  border-radius: 44px;
+  background: linear-gradient(145deg, #3a3a3d, #111113 40%, #232326);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.14),
+    0 50px 90px -30px rgba(0, 0, 0, 0.75),
+    0 20px 40px -20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cel::after {
+  /* La pantalla. */
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 36px;
+  background: #f5f5f6;
+  z-index: 0;
+}
+.cel > * {
+  position: relative;
+  z-index: 1;
+}
+.cel__isla {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  translate: -50% 0;
+  width: 84px;
+  height: 24px;
+  border-radius: 999px;
+  background: #0b0b0c;
+  z-index: 3;
+}
+.cel__estado {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 40px;
+  padding: 6px 26px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--texto);
+}
+.cel__senal {
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+}
+.cel__senal i {
+  width: 3px;
+  background: currentColor;
+  border-radius: 1px;
+}
+.cel__senal i:nth-child(1) {
+  height: 5px;
+}
+.cel__senal i:nth-child(2) {
+  height: 7px;
+}
+.cel__senal i:nth-child(3) {
+  height: 9px;
+}
+.cel__cabeza {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid rgba(17, 17, 19, 0.07);
+  color: var(--texto);
+}
+.cel__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #ffb27f, #fe4f02);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.cel__quien {
+  display: grid;
+  line-height: 1.2;
+}
+.cel__quien b {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.cel__quien small {
+  font-size: 11px;
+  color: var(--verde);
+}
+.cel__chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  overflow: hidden;
+}
+.msj {
+  position: relative;
+  max-width: 84%;
+  padding: 7px 10px 16px;
+  border-radius: 14px;
+  font-size: 12px;
+  line-height: 1.38;
+  color: var(--texto);
+  box-shadow: 0 1px 1px rgba(17, 17, 19, 0.06);
+  flex: none;
+}
+.msj--ella {
+  align-self: flex-end;
+  background: #ffe3d6;
+  border-bottom-right-radius: 4px;
+}
+.msj--sofi {
+  align-self: flex-start;
+  background: #fff;
+  border-bottom-left-radius: 4px;
+}
+.msj__hora {
+  position: absolute;
+  right: 9px;
+  bottom: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: #8a8a91;
+}
+.msj-escribe {
+  align-self: flex-start;
+  display: none;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
+}
+.msj-escribe.esta {
+  display: inline-flex;
+}
+.msj-escribe i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b5b5ba;
+  animation: escribe 1s infinite;
+}
+.msj-escribe i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.msj-escribe i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes escribe {
+  30% {
+    transform: translateY(-3px);
+    background: var(--naranja);
+  }
+}
+.cel__entrada {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 12px;
+}
+.cel__entrada span {
+  flex: 1;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  color: #8a8a91;
+}
+.cel__entrada i {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--naranja);
+}
+
+@media (max-width: 1023px) {
+  .heroe__marco {
+    grid-template-columns: 1fr;
+  }
+  .chat {
+    width: min(100%, 560px);
+    margin-inline: auto;
+  }
+}
+@media (max-width: 639px) {
+  .heroe {
+    padding-top: calc(var(--cabecera) + 24px);
+  }
+  .heroe__h {
+    font-size: clamp(40px, 11.6vw, 54px);
+  }
+  .heroe__botones .boton {
+    flex: 1 1 100%;
+  }
+  .chat__tarjeta {
+    inset: 54px 0 0 0;
+  }
+  .chat__sofi {
+    left: auto;
+    right: -6px;
+    width: 104px;
+    height: 104px;
+  }
+  .chat__cel {
+    width: 272px;
+    height: 520px;
+  }
+  .chat__chip {
+    font-size: 14.5px;
+    padding: 0 14px;
+  }
+}
+
+/* ================================================================ Sofi trabajando */
+.trabajo {
+  padding-block: clamp(70px, 9vw, 120px);
+}
+.trabajo__grilla {
+  margin-top: clamp(36px, 4vw, 56px);
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+.trabajo__sofi {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 440px;
+  padding: 24px;
+  border-radius: 32px;
+  background: var(--naranja-card);
+  color: #fff;
+  box-shadow: 0 40px 80px -40px rgba(254, 79, 2, 0.6);
+}
+.trabajo__canales {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trabajo__canales li {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 13px;
+}
+.trabajo__canales .es-activo {
+  background: #fff;
+  color: var(--texto);
+  font-weight: 500;
+}
+.trabajo__ancla {
+  align-self: center;
+  width: 200px;
+  height: 200px;
+}
+.trabajo__sofi p {
+  font-size: 15px;
+  line-height: 1.45;
+}
+.trabajo__pasos {
+  display: grid;
+  gap: 12px;
+}
+.tpaso {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-1);
+  transition:
+    border-color 0.4s,
+    box-shadow 0.4s,
+    opacity 0.4s;
+}
+.tpaso__fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.tpaso__n {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--naranja);
+}
+.tpaso__estado {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--verde-claro);
+  color: var(--verde);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.tpaso b {
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.tpaso__d {
+  font-size: 14px;
+  color: var(--texto-3);
+}
+.tpaso code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--naranja);
+  background: var(--durazno);
+  padding: 6px 8px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.tpaso.es-pensando {
+  border-color: var(--naranja-vivo);
+  box-shadow: 0 0 0 4px rgba(254, 79, 2, 0.1);
+}
+.tpaso.es-pensando .tpaso__estado {
+  background: #fff3d1;
+  color: #8a5a00;
+}
+.tpaso.es-esperando {
+  opacity: 0.5;
+}
+.tpaso.es-esperando .tpaso__estado {
+  background: var(--papel-2);
+  color: var(--texto-3);
+}
+.trabajo__tienda {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #fff, #fff6f1);
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+}
+.trabajo__tienda-cabeza {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 15px;
+}
+.trabajo__tienda-cabeza span {
+  color: var(--texto-3);
+  font-size: 14px;
+}
+.trabajo__cifras {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.trabajo__cifras li {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid var(--linea);
+}
+.trabajo__cifras span {
+  font-size: 13px;
+  color: var(--texto-3);
+}
+.trabajo__cifras b {
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.trabajo__cifras .es-acento b {
+  color: var(--naranja);
+}
+.trabajo__nota {
+  font-size: 13px;
+  color: var(--texto-3);
+}
+.ventana {
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: 0 40px 80px -46px rgba(17, 17, 19, 0.45);
+}
+.ventana__barra {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--papel-2);
+  border-bottom: 1px solid var(--linea);
+}
+.ventana__barra i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #dcdce0;
+}
+.ventana__barra span {
+  margin: 0 auto;
+  padding: 2px 14px;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 11px;
+  color: var(--texto-3);
+  font-family: var(--mono);
+}
+.ventana img {
+  width: 100%;
+}
+@media (max-width: 1099px) {
+  .trabajo__grilla {
+    grid-template-columns: 1fr 1fr;
+  }
+  .trabajo__sofi {
+    grid-column: 1 / -1;
+    min-height: 0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .trabajo__ancla {
+    width: 130px;
+    height: 130px;
+  }
+  .trabajo__sofi p {
+    flex: 1 1 200px;
+  }
+}
+@media (max-width: 719px) {
+  .trabajo__grilla {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================ Sofi hace, tú decides */
+.decides {
+  padding-block: clamp(80px, 10vw, 130px);
+}
+.decides__grilla {
+  margin-top: clamp(36px, 4vw, 56px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px minmax(0, 1fr);
+  align-items: center;
+}
+.decides__caja {
+  display: grid;
+  gap: 16px;
+  padding: clamp(24px, 3vw, 36px);
+  border-radius: 28px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+  font-size: 17px;
+}
+.decides__caja--persona {
+  background: var(--tinta);
+  color: #fff;
+  border-color: var(--tinta);
+}
+.decides__caja--persona .etiqueta {
+  color: var(--naranja-claro);
+}
+.decides__caja--persona .lista-ok li {
+  color: #e4e4e7;
+}
+.decides__puente {
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--naranja-vivo) 0 8px, transparent 8px 16px);
+  transform-origin: left;
+}
+@media (max-width: 860px) {
+  .decides__grilla {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .decides__puente {
+    width: 2px;
+    height: 48px;
+    margin-inline: auto;
+    background: repeating-linear-gradient(180deg, var(--naranja-vivo) 0 8px, transparent 8px 16px);
+    transform-origin: top;
+  }
+}
+
+/* ================================================================ rubros: un mar de puntos */
+.rubros {
+  position: relative;
+  padding-block: clamp(80px, 10vw, 130px) clamp(50px, 6vw, 80px);
+  background: var(--papel-2);
+  overflow: hidden;
+  isolation: isolate;
+}
+.rubros__puntos {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+}
+.rubros__tarjetas {
+  margin-top: clamp(36px, 4vw, 56px);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+.rubro {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--linea);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--sombra-2);
+}
+.rubro b {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.rubro__ella,
+.rubro__sofi {
+  max-width: 88%;
+  padding: 8px 11px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.rubro__ella {
+  justify-self: end;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--durazno-2);
+}
+.rubro__sofi {
+  border-radius: 14px 14px 14px 4px;
+  background: #fff;
+  border: 1px solid var(--linea);
+}
+.rubros__nota {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--texto-3);
+}
+@media (max-width: 1023px) {
+  .rubros__tarjetas {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 559px) {
+  .rubros__tarjetas {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================ Argos y la clienta */
+.dupla {
+  padding-block: clamp(80px, 10vw, 130px);
+}
+.dupla__grilla {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: stretch;
+}
+.dupla__caja {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: clamp(24px, 3vw, 40px);
+  border-radius: 28px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+  overflow: hidden;
+}
+.dupla__caja h2 {
+  font-size: clamp(30px, 3vw, 40px);
+  font-weight: 300;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+.dupla__caja > p {
+  color: var(--texto-2);
+}
+.dupla__caja--argos {
+  background:
+    radial-gradient(ellipse 60% 60% at 90% 0%, rgba(254, 79, 2, 0.3), transparent 70%), var(--tinta);
+  color: #fff;
+  border-color: var(--tinta);
+}
+.dupla__caja--argos .etiqueta {
+  color: var(--naranja-claro);
+}
+.dupla__caja--argos > p {
+  color: #b4b4ba;
+}
+.dupla__ojo {
+  position: absolute;
+  right: -30px;
+  bottom: -30px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(254, 79, 2, 0.3);
+  background: radial-gradient(circle, rgba(254, 79, 2, 0.18), transparent 70%);
+  opacity: 0.8;
+}
+.dupla__ojo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(254, 79, 2, 0.45), transparent 30%);
+  animation: gira 4.5s linear infinite;
+}
+.dupla__ojo svg {
+  position: relative;
+  width: 64px;
+  --identity-ink: #fff;
+}
+.argos__lista {
+  position: relative;
+  z-index: 1;
+}
+@media (max-width: 900px) {
+  .dupla__grilla {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================ precio y preguntas */
+.precio {
+  padding-block: clamp(80px, 10vw, 130px);
+  background: var(--papel-2);
+}
+.precio__marco {
+  display: grid;
+  grid-template-columns: minmax(0, 440px) minmax(0, 1fr);
+  gap: clamp(40px, 6vw, 88px);
+  align-items: start;
+}
+.plan {
+  position: sticky;
+  top: calc(var(--cabecera) + 32px);
+  display: grid;
+  gap: 18px;
+  padding: clamp(26px, 3vw, 36px);
+  border-radius: 32px;
+  background: var(--naranja-card);
+  color: #fff;
+  box-shadow: 0 40px 80px -36px rgba(254, 79, 2, 0.6);
+}
+.plan__rotulo {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.plan__precio {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.plan__moneda {
+  font-size: 22px;
+}
+.plan__cifra {
+  font-size: clamp(88px, 9vw, 120px);
+  font-weight: 400;
+  line-height: 0.9;
+  letter-spacing: -0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.plan__mes {
+  font-size: 16px;
+}
+.plan__saldo {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 15.5px;
+}
+.plan__lista {
+  display: grid;
+  gap: 10px;
+  font-size: 15px;
+}
+.plan__lista li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.plan__lista svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+.plan__boton {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--texto);
+  font-weight: 500;
+  transition: transform 0.25s var(--suave);
+}
+.plan__boton:hover {
+  transform: translateY(-1px);
+}
+.preguntas .acordeon {
+  margin-top: 28px;
+}
+.preguntas__mas {
+  margin-top: 22px;
+  color: var(--texto-3);
+}
+@media (max-width: 900px) {
+  .precio__marco {
+    grid-template-columns: 1fr;
+  }
+  .plan {
+    position: static;
+  }
+}
+
+/* Lo que entra de costado no ensancha la página en el celular. */
+.trabajo,
+.conoce,
+.venta,
+.cobro,
+.decides,
+.dupla,
+.precio {
+  overflow-x: clip;
+}
+/* ---------------------------------------------------------------- conoce tu tienda */
+.conoce {
+  padding-block: clamp(40px, 5vw, 72px) clamp(56px, 7vw, 100px);
+}
+.mapa {
+  position: relative;
+  margin-top: clamp(40px, 5vw, 64px);
+  padding: clamp(28px, 4vw, 56px);
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(254, 79, 2, 0.1), transparent 55%),
+    radial-gradient(rgba(17, 17, 19, 0.07) 1px, transparent 1.2px) 0 0 / 22px 22px,
+    var(--papel-2);
+  border: 1px solid var(--linea);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px) minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+  overflow: hidden;
+}
+.mapa__lineas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.mapa__lineas .base {
+  fill: none;
+  stroke: rgba(17, 17, 19, 0.12);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+}
+.mapa__lineas .trazo {
+  fill: none;
+  stroke: url(#mapa-degradado);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.mapa__lineas .pulso {
+  fill: var(--naranja);
+}
+.mapa__fuentes,
+.mapa__hace {
+  position: relative;
+  display: grid;
+  gap: 12px;
+}
+.mapa__fuentes {
+  justify-items: start;
+}
+.mapa__hace {
+  justify-items: end;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 290px);
+  padding: 11px 16px 11px 11px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-1);
+  transition:
+    border-color 0.4s,
+    box-shadow 0.4s,
+    transform 0.4s var(--suave);
+}
+.chip b {
+  display: block;
+  font-size: 15px;
+  font-weight: 580;
+  letter-spacing: -0.01em;
+}
+.chip small {
+  display: block;
+  font-size: 13px;
+  color: var(--texto-3);
+}
+.chip__icono {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--durazno);
+  color: var(--naranja);
+}
+.chip__icono svg {
+  width: 19px;
+  height: 19px;
+}
+.chip.encendido {
+  border-color: rgba(254, 79, 2, 0.45);
+  box-shadow:
+    0 0 0 4px rgba(254, 79, 2, 0.08),
+    var(--sombra-2);
+  transform: translateX(4px);
+}
+.chip--hace .chip__icono {
+  background: var(--naranja);
+  color: #fff;
+}
+.chip--hace.encendido {
+  transform: translateX(-4px);
+}
+.mapa__centro {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+}
+.mapa__sofi {
+  width: 62%;
+  height: 62%;
+}
+.mapa__anillo {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(254, 79, 2, 0.28);
+  animation: gira 40s linear infinite;
+}
+.mapa__anillo--b {
+  inset: 16%;
+  border-style: solid;
+  border-color: rgba(254, 79, 2, 0.12);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.2) 70%);
+  animation: none;
+}
+@keyframes gira {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.mapa__nombre {
+  position: absolute;
+  bottom: 2%;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--naranja);
+}
+@media (max-width: 960px) {
+  .mapa {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 20px 16px;
+  }
+  .mapa__fuentes {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .mapa__fuentes .chip {
+    width: 100%;
+    padding: 9px 10px 9px 9px;
+    gap: 9px;
+  }
+  .mapa__fuentes .chip small {
+    display: none;
+  }
+  .mapa__fuentes .chip b {
+    font-size: 13.5px;
+  }
+  .mapa__fuentes .chip__icono {
+    width: 30px;
+    height: 30px;
+  }
+  .mapa__centro {
+    width: min(240px, 66vw);
+    margin: 8px auto;
+  }
+  .mapa__hace {
+    justify-items: stretch;
+  }
+  .mapa__hace .chip {
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------- la venta de punta a punta */
+.venta {
+  position: relative;
+  background: linear-gradient(180deg, var(--papel) 0%, var(--durazno) 100%);
+}
+.venta__pin {
+  position: relative;
+  padding-block: 40px 80px;
+}
+.venta__marco {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+.venta__texto .titulo-3 {
+  margin-top: 14px;
+  max-width: 15em;
+}
+.pasos {
+  margin-top: 32px;
+  display: grid;
+  gap: 4px;
+}
+.paso {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 4px;
+  padding: 14px 16px 14px 4px;
+  border-radius: 16px;
+  transition:
+    opacity 0.5s var(--suave),
+    background-color 0.5s;
+}
+.paso__n {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--naranja);
+  padding: 4px 0 0 12px;
+}
+.paso h3 {
+  font-size: 19px;
+  font-weight: 580;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.paso p {
+  margin-top: 6px;
+  font-size: 15.5px;
+  color: var(--texto-2);
+  line-height: 1.5;
+}
+.paso__avance {
+  display: none;
+}
+.venta__escena {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  --kv: 1;
+}
+.venta__cel {
+  width: 300px;
+  height: 600px;
+  zoom: var(--kv);
+}
+.venta__cel .msj {
+  font-size: 12.5px;
+}
+.venta__sofi {
+  position: absolute;
+  top: calc(-28px * var(--kv));
+  left: calc(50% + 96px * var(--kv));
+  width: calc(116px * var(--kv));
+  height: calc(116px * var(--kv));
+}
+.tarjeta {
+  width: 290px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-3);
+  font-size: 13.5px;
+}
+.tarjeta__titulo {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+.tarjeta__nota {
+  margin-top: 30px;
+  font-size: 13px;
+  color: var(--texto-2);
+}
+.tarjeta__fila {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+}
+.tarjeta--pedido > small {
+  display: block;
+  color: var(--texto-3);
+  margin-bottom: 6px;
+}
+.tarjeta__total {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px solid var(--linea);
+  font-weight: 600;
+}
+.tarjeta__pronto {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--texto-2);
+}
+.estado {
+  position: relative;
+  display: inline-grid;
+  font-size: 12px;
+  font-weight: 560;
+}
+.estado > span {
+  grid-area: 1 / 1;
+  padding: 2px 9px;
+  border-radius: 999px;
+  transition:
+    opacity 0.4s,
+    transform 0.5s var(--suave);
+}
+.estado__a {
+  background: #fff3d1;
+  color: #8a5a00;
+}
+.estado__b {
+  background: var(--verde-claro);
+  color: var(--verde);
+  opacity: 0;
+  transform: scale(0.8);
+}
+.estado.confirmado .estado__a {
+  opacity: 0;
+  transform: scale(0.8);
+}
+.estado.confirmado .estado__b {
+  opacity: 1;
+  transform: none;
+}
+html:not(.mueve) .estado__b {
+  display: none;
+}
+
+/* La regla de precios de la negociación. */
+.regla {
+  position: relative;
+  margin: 46px 6px 0;
+  height: 6px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #ececef, #ffd2bd);
+}
+.regla__piso {
+  position: absolute;
+  left: 0;
+  top: -12px;
+  bottom: -12px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--tinta);
+}
+.regla__marca {
+  position: absolute;
+  left: var(--x);
+  bottom: 14px;
+  translate: -50% 0;
+  display: grid;
+  justify-items: center;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.regla__marca b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.regla__marca small {
+  font-size: 10.5px;
+  color: var(--texto-3);
+}
+.regla__marca--min {
+  translate: 0 0;
+  justify-items: start;
+}
+.regla__marca--lista {
+  translate: -100% 0;
+  justify-items: end;
+}
+.regla__marca--pide {
+  bottom: auto;
+  top: 14px;
+}
+.regla__marca--pide b {
+  color: #b3261e;
+  text-decoration: line-through;
+}
+.regla__marca--oferta b {
+  color: var(--naranja);
+}
+.regla__marca--oferta {
+  bottom: auto;
+  top: 14px;
+}
+.regla__punto {
+  position: absolute;
+  top: 50%;
+  left: 69%;
+  width: 18px;
+  height: 18px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--naranja);
+  box-shadow:
+    0 0 0 5px rgba(254, 79, 2, 0.2),
+    0 4px 10px rgba(254, 79, 2, 0.5);
+}
+.ruta {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.ruta__base {
+  fill: none;
+  stroke: #e4e4e7;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.ruta__trazo {
+  fill: none;
+  stroke: var(--naranja);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 4 7;
+}
+.ruta__a {
+  fill: #fff;
+  stroke: var(--tinta);
+  stroke-width: 2.5;
+}
+.ruta__b {
+  fill: var(--naranja);
+  stroke: #fff;
+  stroke-width: 3;
+}
+.tarjeta--ruta p:first-of-type {
+  margin-top: 8px;
+}
+
+/* Con movimiento y en computadora: la escena se fija y las tarjetas flotan alrededor del celular. */
+@media (min-width: 1024px) {
+  .mueve .venta__pin {
+    height: 100vh;
+    padding-block: calc(var(--cabecera) + 12px) 24px;
+    display: flex;
+    align-items: center;
+  }
+  .mueve .venta__escena {
+    display: block;
+    height: 600px;
+  }
+  .mueve .venta__cel {
+    margin-left: 8%;
+  }
+  .mueve .venta__sofi {
+    left: calc(8% + 232px * var(--kv));
+  }
+  .mueve .tarjeta {
+    position: absolute;
+    right: 0;
+  }
+  .mueve [data-tarjeta="1"] {
+    top: 34%;
+  }
+  .mueve [data-tarjeta="2"] {
+    top: 24%;
+  }
+  .mueve [data-tarjeta="4"] {
+    top: 42%;
+  }
+  .mueve .paso {
+    opacity: 0.36;
+  }
+  .mueve .paso.activo {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: var(--sombra-1);
+  }
+  .mueve .paso__avance {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 3px;
+    border-radius: 3px;
+    background: rgba(17, 17, 19, 0.08);
+    overflow: hidden;
+  }
+  .mueve .paso__avance i {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--naranja);
+    transform-origin: top;
+    transform: scaleY(0);
+  }
+}
+@media (min-width: 1024px) and (max-height: 820px) {
+  .mueve .paso p {
+    display: none;
+  }
+  .mueve .paso.activo p {
+    display: block;
+  }
+}
+/* Con movimiento en el celular: el celular arriba y el paso que toca abajo, uno a la vez. */
+@media (max-width: 1023px) {
+  .venta__marco {
+    grid-template-columns: 1fr;
+  }
+  .mueve .venta__pin {
+    height: 100svh;
+    padding-block: calc(var(--cabecera) + 8px) 12px;
+    display: flex;
+  }
+  .mueve .venta__marco {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+  }
+  .mueve .venta__texto {
+    display: contents;
+  }
+  .mueve .venta__texto .etiqueta {
+    display: none;
+  }
+  .mueve .venta__texto .titulo-3 {
+    order: 0;
+    font-size: 21px;
+    margin: 0;
+    text-align: center;
+    max-width: none;
+  }
+  .mueve .venta__escena {
+    order: 1;
+    flex: 1;
+    min-height: 0;
+    display: block;
+  }
+  .mueve .venta__cel {
+    margin-inline: auto;
+  }
+  .mueve .pasos {
+    order: 2;
+    margin: 0;
+    display: grid;
+    min-height: 118px;
+  }
+  .mueve .paso {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transform: translateY(10px);
+    transition:
+      opacity 0.4s,
+      transform 0.5s var(--suave);
+    padding: 12px 14px;
+    background: #fff;
+    box-shadow: var(--sombra-2);
+    align-self: end;
+  }
+  .mueve .paso.activo {
+    opacity: 1;
+    transform: none;
+  }
+  .mueve .paso h3 {
+    font-size: 17px;
+  }
+  .mueve .paso p {
+    font-size: 14px;
+    margin-top: 3px;
+  }
+  .mueve .tarjeta {
+    position: absolute;
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    width: min(290px, calc(100vw - 32px));
+    bottom: 8px;
+  }
+  /* En la esquina del teléfono, sobre la parte vacía de su cabecera: ni el título ni el chat. */
+  .mueve .venta__sofi {
+    top: calc(6px * var(--kv));
+    left: calc(50% + 86px * var(--kv));
+    width: calc(66px * var(--kv));
+    height: calc(66px * var(--kv));
+  }
+}
+/* Sin movimiento: el chat completo y las tarjetas debajo, todo a la vista. */
+html:not(.mueve) .venta__cel {
+  height: auto;
+}
+html:not(.mueve) .venta__cel .cel__chat {
+  overflow: visible;
+}
+html:not(.mueve) .venta__sofi {
+  display: none;
+}
+
+/* Los capítulos: número grande en serif, «Verlo en el teléfono» y lo que se está viendo. */
+.paso {
+  grid-template-columns: 64px 1fr;
+}
+.paso__n {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 46px;
+  line-height: 0.9;
+  color: var(--naranja-vivo);
+  padding: 0 0 0 10px;
+}
+.paso__pronto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+.paso__ver {
+  display: none;
+  margin-top: 10px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--linea-2);
+  background: #fff;
+  font-size: 14px;
+  font-weight: 500;
+}
+.paso__ver:hover {
+  border-color: var(--naranja-vivo);
+  background: var(--durazno);
+}
+.venta__ahora {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .mueve .paso.activo .paso__ver {
+    display: none;
+  }
+  .mueve .paso:not(.activo) .paso__ver {
+    display: none;
+  }
+  .mueve .paso:hover .paso__ver,
+  .mueve .paso:focus-within .paso__ver {
+    display: inline-flex;
+  }
+  .mueve .venta__ahora {
+    display: flex;
+    position: absolute;
+    left: 8%;
+    bottom: -44px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid var(--linea);
+    font-size: 14px;
+    white-space: nowrap;
+  }
+  .mueve .venta__ahora > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--naranja-vivo);
+  }
+}
+/* ================================================================ el pago confirmado */
+.cobro {
+  position: relative;
+  padding-block: clamp(80px, 10vw, 140px);
+  background: var(--durazno);
+}
+.cobro__escena {
+  margin-top: clamp(40px, 5vw, 72px);
+  display: grid;
+  grid-template-columns: auto minmax(120px, 260px) auto;
+  justify-content: center;
+  align-items: center;
+  gap: clamp(16px, 3vw, 40px);
+}
+.cobro__pantalla {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+}
+.cobro__pantalla figcaption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15.5px;
+  color: var(--texto-2);
+  text-align: center;
+}
+.paso-chip {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--tinta);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+  flex: none;
+}
+.cel--imagen {
+  width: 280px;
+  height: auto;
+  padding: 9px;
+}
+.cel--imagen::after {
+  display: none;
+}
+.cel--imagen img {
+  border-radius: 36px;
+}
+.hojita {
+  position: relative;
+  width: 340px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    var(--sombra-3),
+    0 0 0 1px var(--linea);
+}
+.hojita__onda {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(14, 138, 79, 0.18) 45%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.cobro__flujo {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 14px;
+  min-height: 200px;
+}
+.cobro__linea {
+  position: absolute;
+  left: -24px;
+  right: -24px;
+  top: 50%;
+  border-top: 2.5px dashed var(--naranja);
+  transform-origin: left;
+}
+.cobro__toque {
+  position: relative;
+  z-index: 1;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: #b0124f;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 560;
+  box-shadow: 0 12px 28px -10px rgba(176, 18, 79, 0.6);
+}
+.cobro__sofi {
+  position: absolute;
+  top: calc(50% - 150px);
+  width: 104px;
+  height: 104px;
+}
+.cobro__datos {
+  margin-top: clamp(48px, 6vw, 80px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+.cobro__datos li {
+  padding-top: 18px;
+  border-top: 1px solid var(--linea-2);
+  font-size: 15.5px;
+  color: var(--texto-2);
+}
+.cobro__datos b {
+  color: var(--texto);
+  font-weight: 580;
+}
+@media (max-width: 900px) {
+  .cobro__escena {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .cobro__flujo {
+    min-height: 170px;
+    width: 100%;
+  }
+  .cobro__linea {
+    left: 50%;
+    right: auto;
+    top: -16px;
+    bottom: -16px;
+    border-top: 0;
+    border-left: 2.5px dashed var(--naranja);
+    transform-origin: top;
+  }
+  .cobro__sofi {
+    top: 50%;
+    left: calc(50% + 80px);
+    translate: 0 -50%;
+    width: 84px;
+    height: 84px;
+  }
+  .cel--imagen {
+    width: 240px;
+  }
+  .hojita {
+    width: min(320px, 100%);
+  }
+  .cobro__datos {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .cobro__datos li {
+    padding-block: 16px;
+  }
+}
+
+/* Los avisos de Argos. */
+.argos__lista {
+  display: grid;
+  gap: 12px;
+}
+.alerta {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.alerta b {
+  display: block;
+  font-weight: 560;
+  font-size: 15.5px;
+}
+.alerta small {
+  display: block;
+  margin-top: 2px;
+  color: #a1a1a8;
+  font-size: 14px;
+}
+.alerta__punto {
+  flex: none;
+  margin-top: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3ddc84;
+  box-shadow: 0 0 0 4px rgba(61, 220, 132, 0.15);
+}
+.alerta__punto--a {
+  background: #ffc247;
+  box-shadow: 0 0 0 4px rgba(255, 194, 71, 0.15);
+}
+.alerta__punto--c {
+  background: var(--naranja-claro);
+  box-shadow: 0 0 0 4px rgba(255, 122, 47, 0.18);
+}
+/* ---------------------------------------------------------------- las cintas de rubros */
+.cintas {
+  margin-top: clamp(40px, 5vw, 64px);
+  display: grid;
+  gap: 8px;
+}
+.cinta {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+.cinta__pista {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+}
+.cinta__pista span {
+  display: inline-flex;
+  align-items: center;
+  font-size: clamp(38px, 6.4vw, 92px);
+  font-weight: 560;
+  letter-spacing: -0.045em;
+  line-height: 1.12;
+  white-space: nowrap;
+}
+.cinta__pista span::after {
+  content: "";
+  width: 0.2em;
+  height: 0.2em;
+  margin: 0 0.5em;
+  border-radius: 0.04em;
+  background: var(--naranja);
+  transform: rotate(45deg);
+}
+.cinta--b .cinta__pista span {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--texto);
+}
+html:not(.mueve) .cinta__pista {
+  flex-wrap: wrap;
+  width: auto;
+  justify-content: center;
+}
+html:not(.mueve) .cinta__pista span:nth-child(n + 13) {
+  display: none;
+}
+
+/* Lo que hace Argos, en la tarjeta del Inicio. */
+.argos__poderes {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.argos__poderes li {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.argos__poderes b {
+  font-size: 16px;
+  font-weight: 500;
+  color: #fff;
+}
+.argos__poderes span {
+  font-size: 13.5px;
+  color: #b4b4ba;
+  line-height: 1.4;
+}
+.argos__pronto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.argos__pronto .pronto {
+  color: var(--naranja-claro);
+}
+.argos__mas {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  color: var(--naranja-claro);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .argos__poderes {
+    grid-template-columns: 1fr;
+  }
+}

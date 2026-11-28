@@ -431,34 +431,107 @@ describe("Inicio y los primeros pasos (tableros 5 y 16)", () => {
   })
 })
 
+describe("Configuración: lo que falta para vender", () => {
+  it("quien configura ve cómo está cada parte con lo guardado; Ventas no, y nunca las llaves", async () => {
+    const rosa = await call("rosa", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)
+    expect(rosa.status).toBe(200)
+    // Lo mismo que los primeros pasos de Inicio, con «No lo necesito» aplicado.
+    const steps = Object.fromEntries(
+      (rosa.json.steps as { step: string; state: string }[]).map((s) => [s.step, s.state]),
+    )
+    expect(steps).toMatchObject({ catalogo: "falta", sofi: "saltado", chats: "pronto" })
+    expect(rosa.json).toMatchObject({
+      paymentLink: null,
+      payments: [],
+      deliveries: [],
+      catalog: { withStock: 0 },
+      team: { members: 3, supportAsks: 0 },
+      sofi: { enabled: false, tried: false },
+    })
+    // El plan es del Dueño: al Administrador no le llega.
+    const mario = await call("mario", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)
+    expect(mario.status).toBe(200)
+    expect(mario.json.plan).toBeNull()
+    expect(
+      (await call("lucia", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)).status,
+    ).toBe(403)
+    expect(
+      (await call("ajena", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)).status,
+    ).toBe(404)
+    expect(JSON.stringify(rosa.json)).not.toMatch(/token|secret|Enc"/i)
+  })
+
+  it("un link de pago sin pasarela no cobra: no cuenta como forma de pago, ni aquí ni en Inicio", async () => {
+    const base = `/api/tiendas/${storeId}`
+    const link = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      name: "Link de pago",
+      typeCode: "68",
+      collection: "link",
+    })
+    expect(link.status).toBe(201)
+    const pagos = (list: { step: string; state: string }[]) =>
+      list.find((s) => s.step === "pagos")?.state
+    expect(pagos((await call("rosa", "GET", `${base}/configuracion/resumen`)).json.steps)).toBe(
+      "falta",
+    )
+    expect(pagos((await call("rosa", "GET", `${base}/inicio`)).json.setup.steps)).toBe("falta")
+    expect(
+      (await call("rosa", "DELETE", `${base}/medios-de-pago/${link.json.method.id}`)).status,
+    ).toBe(204)
+  })
+})
+
 describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
   /** Un PNG de 1 × 1 rosado: lo que se mira es su contenido, no su nombre. */
   const PNG = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4H8bwHwAE/wJ/l6pZhwAAAABJRU5ErkJggg==",
     "base64",
   )
-  async function upload(who: Who, kind: string, bytes: Uint8Array) {
+  /** «Guardar» de Tu marca: los campos y, si cambian, el logo y la portada, en un formulario. */
+  async function saveBrand(
+    who: Who,
+    fields: { publicName?: string; brandColor?: string; link?: string | null },
+    images: { logo?: Uint8Array; portada?: Uint8Array; quitar?: string[] } = {},
+  ) {
     const p = people[who]
+    const form = new FormData()
+    form.set("publicName", fields.publicName ?? "")
+    form.set("brandColor", fields.brandColor ?? "")
+    if (fields.link) form.set("link", fields.link)
+    for (const kind of ["logo", "portada"] as const) {
+      const bytes = images[kind]
+      if (bytes) form.set(kind, new Blob([bytes]), kind)
+    }
+    for (const kind of images.quitar ?? []) form.append("quitar", kind)
     const response = await app.request(
-      `https://servidor.gestoria.test/api/tiendas/${storeId}/marca/${kind}`,
+      `https://servidor.gestoria.test/api/tiendas/${storeId}/marca`,
       {
         method: "POST",
         headers: {
           origin: WEB,
-          "content-type": "application/octet-stream",
           authorization: `Bearer ${await tokenFor(p.id, p.email, p.name)}`,
         },
-        body: bytes,
+        body: form,
       },
     )
-    return response
+    return {
+      status: response.status,
+      json: (await response.json()) as Record<string, any>,
+    }
+  }
+  async function checkLink(name: string) {
+    return call(
+      "rosa",
+      "GET",
+      `/api/tiendas/${storeId}/marca/link?nombre=${encodeURIComponent(name)}`,
+    )
   }
 
   it("Ventas ve la marca y no la cambia; el Dueño cambia los datos y queda anotado", async () => {
     expect((await call("lucia", "GET", `/api/tiendas/${storeId}/marca`)).status).toBe(200)
     const data = { name: "Calzados Rosa", country: "PE", timeZone: "America/Lima" }
     expect((await call("lucia", "PATCH", `/api/tiendas/${storeId}/datos`, data)).status).toBe(403)
-    expect((await upload("lucia", "logo", PNG)).status).toBe(403)
+    expect((await saveBrand("lucia", {}, { logo: PNG })).status).toBe(403)
     const bad = await call("rosa", "PATCH", `/api/tiendas/${storeId}/datos`, {
       ...data,
       timeZone: "America/Narnia",
@@ -471,7 +544,8 @@ describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
   })
 
   it("el color se guarda como se escribe en la base y el nombre del link rechaza los reservados", async () => {
-    const brand = (body: unknown) => call("rosa", "PATCH", `/api/tiendas/${storeId}/marca`, body)
+    const brand = (body: { publicName: string; brandColor: string; link: string }) =>
+      saveBrand("rosa", body)
     const reserved = await brand({ publicName: "", brandColor: "", link: "4dm1n" })
     expect(reserved.status).toBe(400)
     expect(reserved.json.error.fields).toHaveProperty("link")
@@ -495,34 +569,48 @@ describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
     await db.ownerDb
       .insert(storeLink)
       .values({ name: "zapatos-ana", storeId: other!.id, createdBy: "u-ajena" })
-    const brand = (link: string) =>
-      call("rosa", "PATCH", `/api/tiendas/${storeId}/marca`, {
-        publicName: "",
-        brandColor: "",
-        link,
-      })
-    const taken = await brand("zapatos-ana")
+    const brand = (link: string, images = {}) =>
+      saveBrand("rosa", { publicName: "", brandColor: "", link }, images)
+    // La pantalla lo dice al escribirlo, con uno libre parecido; de la otra tienda no sabe nada más.
+    expect((await checkLink("zapatos-ana")).json.check).toEqual({
+      name: "zapatos-ana",
+      state: "ocupado",
+      message: "Ese nombre ya es de otra tienda.",
+      suggestion: "zapatos-ana-lima",
+    })
+    expect((await checkLink("zapatos-rosa")).json.check.state).toBe("libre")
+    expect((await checkLink("pago")).json.check.state).toBe("no-vale")
+    expect(
+      (await call("lucia", "GET", `/api/tiendas/${storeId}/marca/link?nombre=zapatos-ana`)).status,
+    ).toBe(403)
+    // Si el link no se puede, no se guarda nada: tampoco el logo que iba con él.
+    const taken = await brand("zapatos-ana", { logo: PNG })
     expect(taken.status).toBe(409)
     expect(taken.json.error.fields).toHaveProperty("link")
+    expect((await call("rosa", "GET", `/api/tiendas/${storeId}/marca`)).json.brand.logo).toBeNull()
     expect((await brand("calzadosrosa")).json.brand.link).toBe("calzadosrosa")
+    expect((await checkLink("calzadosrosa")).json.check.state).toBe("vigente")
     // Volver al de antes lo vuelve a usar, sin chocar consigo mismo.
     expect((await brand("calzados-rosa")).json.brand).toMatchObject({
       link: "calzados-rosa",
       publicName: null,
       brandColor: null,
     })
+    expect((await checkLink("calzadosrosa")).json.check.state).toBe("tuyo")
     const links = await db.ownerDb.select().from(storeLink).where(eq(storeLink.storeId, storeId))
     expect(links.filter((l) => l.current).map((l) => l.name)).toEqual(["calzados-rosa"])
     expect(links.map((l) => l.name).sort()).toEqual(["calzados-rosa", "calzadosrosa"])
   })
 
-  it("el logo se mira por su contenido, se ve con su tipo y se quita", async () => {
-    expect((await upload("rosa", "logo", Buffer.from("<svg></svg>"))).status).toBe(400)
-    expect((await upload("rosa", "fondo", PNG)).status).toBe(404)
-    const put = await upload("rosa", "logo", PNG)
+  it("el logo y la portada se guardan con lo demás, se miran por su contenido y se quitan", async () => {
+    const svg = await saveBrand("rosa", {}, { logo: Buffer.from("<svg></svg>") })
+    expect(svg.status).toBe(400)
+    expect(svg.json.error.fields).toHaveProperty("logo")
+    const put = await saveBrand("rosa", { brandColor: "#be185d" }, { logo: PNG, portada: PNG })
     expect(put.status).toBe(200)
-    const body = (await put.json()) as { brand: { logo: { version: number } | null } }
-    expect(body.brand.logo?.version).toBeGreaterThan(0)
+    expect(put.json.brand.logo?.version).toBeGreaterThan(0)
+    expect(put.json.brand.cover?.version).toBeGreaterThan(0)
+    expect(put.json.brand.brandColor).toBe("#be185d")
     const p = people.lucia
     const seen = await app.request(
       `https://servidor.gestoria.test/api/tiendas/${storeId}/marca/logo`,
@@ -531,8 +619,17 @@ describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
       },
     )
     expect(seen.headers.get("content-type")).toBe("image/png")
-    const removed = await call("rosa", "DELETE", `/api/tiendas/${storeId}/marca/logo`)
+    // Lo que no se manda no cambia: quitar el logo deja la portada.
+    const removed = await saveBrand("rosa", { brandColor: "#be185d" }, { quitar: ["logo"] })
     expect(removed.json.brand.logo).toBeNull()
+    expect(removed.json.brand.cover).not.toBeNull()
+    const events = await db.ownerDb.select().from(storeEvent).where(eq(storeEvent.storeId, storeId))
+    expect(events.filter((e) => e.action === "configuracion.marca").map((e) => e.detail)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ logo: "cambiado", portada: "cambiado" }),
+        { logo: "quitado" },
+      ]),
+    )
   })
 })
 
@@ -857,7 +954,26 @@ describe("la tienda de ejemplo", () => {
       ]),
     )
     expect(home.setup).toBeNull()
-    const help = (await (await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda`)).json()) as {
+    // «Lo que falta» (Configuración): Calzados Rosa vende, pero le falta la pasarela y probar a
+    // Sofi, y soporte pide mirar la tienda (se responde en Equipo y repartidores).
+    const overview = (await (
+      await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/configuracion/resumen`)
+    ).json()) as {
+      paymentLink: unknown
+      plan: { name: string; status: string; toPay: boolean } | null
+      sofi: { enabled: boolean; tried: boolean }
+      team: { supportAsks: number }
+      catalog: { withStock: number }
+    }
+    expect(overview.paymentLink).toBeNull()
+    // El cobro de la semilla espera su pago: el plan lleva su punto.
+    expect(overview.plan).toMatchObject({ name: "Tienda", status: "activa", toPay: true })
+    expect(overview.sofi).toEqual({ enabled: true, tried: false })
+    expect(overview.team.supportAsks).toBe(1)
+    expect(overview.catalog.withStock).toBeGreaterThan(0)
+    const help = (await (
+      await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda/casos`)
+    ).json()) as {
       questions: { question: string; replies: unknown[] }[]
     }
     expect(help.questions).toEqual([

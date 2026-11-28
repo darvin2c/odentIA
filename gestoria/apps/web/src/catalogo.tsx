@@ -1,22 +1,19 @@
+import { Badge, Button, Field, FieldGroup, FieldLabel, Input, toast } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  Input,
-  toast,
-} from "@odentia/ui"
-import { Textarea } from "@odentia/ui/components/textarea"
-import { EmptyState, SubmitButton } from "@odentia/ui-patterns"
+  EmptyState,
+  ErrorState,
+  type FieldControl,
+  FormDrawer,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { Download, FileSpreadsheet, Package, Plus, Trash2, Upload } from "lucide-react"
+import { Download, Package, Plus, Trash2, Upload } from "lucide-react"
 import { useId, useRef, useState } from "react"
+import { z } from "zod"
+import { MoneyInput } from "./campos"
 import { api } from "./lib/api"
 import {
   type CatalogItem,
@@ -26,17 +23,8 @@ import {
   readMoney,
   valuesSummary,
 } from "./lib/tienda"
-import {
-  download,
-  FormAlert,
-  FormSheet,
-  fieldErrors,
-  MoneyField,
-  Photo,
-  TextField,
-  useDirty,
-} from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { download, Photo } from "./piezas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * El catálogo (lienzo B, tablero 7): lo único de lo que habla Sofi. Cada producto agrupa sus
@@ -102,7 +90,7 @@ export function CatalogPage() {
         <p className="text-sm text-muted-foreground">Cargando el catálogo…</p>
       ) : null}
       {catalog.isError ? (
-        <ErrorBlock error={catalog.error} onRetry={() => void catalog.refetch()} />
+        <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />
       ) : null}
       {catalog.data && products.length === 0 ? (
         <EmptyState
@@ -205,89 +193,120 @@ export function optionsOf(drafts: OptionDraft[]): ProductOption[] {
     .map((d) => ({ name: d.name.trim(), values: readValues(d.values) }))
 }
 
-/** Las hasta tres opciones de un producto (talla, color, material). */
+/** La ayuda del grupo «Opciones» (`field.Group`), la misma al crear y al editar un producto. */
+export const OPTIONS_HELP =
+  "Hasta tres, como talla, color o material. Se arman todas las combinaciones; después borras las que no vendes. Para tallas seguidas escribe «35 a 42»."
+
+const OPTIONS_PROBLEM = "Cada opción necesita su nombre y al menos un valor"
+
+/** Lo que el formulario dice de las opciones antes de enviarlas. */
+export const optionsSchema = z
+  .array(z.object({ name: z.string(), values: z.string() }))
+  .refine(
+    (drafts) => !optionsOf(drafts).some((o) => !o.name || o.values.length === 0),
+    OPTIONS_PROBLEM,
+  )
+
+/** Lo que el servidor señala de las opciones (`options.0.values`) se dice en el grupo. */
+export function optionsField(serverField: string): string | undefined {
+  return serverField === "options" || serverField.startsWith("options.") ? "drafts" : undefined
+}
+
+/**
+ * Las hasta tres opciones de un producto (talla, color, material). Va dentro de `field.Group`,
+ * que pone su nombre, su ayuda y su error: aquí solo cada fila.
+ */
 export function OptionsEditor({
+  control,
   drafts,
   onChange,
-  error,
   disabled,
 }: {
+  control: FieldControl
   drafts: OptionDraft[]
   onChange: (drafts: OptionDraft[]) => void
-  error?: string
   disabled?: boolean
 }) {
   const combinations = optionsOf(drafts).reduce((n, o) => n * Math.max(1, o.values.length), 1)
   return (
-    <FieldSet>
-      <FieldLegend variant="label">Opciones</FieldLegend>
-      <FieldDescription>
-        Hasta tres, como talla, color o material. Se arman todas las combinaciones; después borras
-        las que no vendes. Para tallas seguidas escribe «35 a 42».
-      </FieldDescription>
-      <div className="flex flex-col gap-2">
-        {drafts.map((draft, i) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: el orden de las opciones es su identidad
-            key={i}
-            className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)_auto] items-end gap-2"
-          >
-            <TextField
-              label={`Opción ${i + 1}`}
+    <div className="flex flex-col gap-2">
+      {drafts.map((draft, i) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: el orden de las opciones es su identidad
+          key={i}
+          className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)_auto] items-end gap-2"
+        >
+          <Field>
+            <FieldLabel htmlFor={`${control.id}-${i}-nombre`}>{`Opción ${i + 1}`}</FieldLabel>
+            <Input
+              id={`${control.id}-${i}-nombre`}
               value={draft.name}
-              onChange={(name) => onChange(drafts.map((d, j) => (j === i ? { ...d, name } : d)))}
+              onChange={(e) =>
+                onChange(drafts.map((d, j) => (j === i ? { ...d, name: e.target.value } : d)))
+              }
               placeholder={["Color", "Talla", "Material"][i]}
               maxLength={30}
+              aria-invalid={control.invalid || undefined}
             />
-            <TextField
-              label="Valores"
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${control.id}-${i}-valores`}>Valores</FieldLabel>
+            <Input
+              id={`${control.id}-${i}-valores`}
               value={draft.values}
-              onChange={(values) =>
-                onChange(drafts.map((d, j) => (j === i ? { ...d, values } : d)))
+              onChange={(e) =>
+                onChange(drafts.map((d, j) => (j === i ? { ...d, values: e.target.value } : d)))
               }
               placeholder={["blanca, negra", "35 a 42", "cuero, gamuza"][i]}
+              aria-invalid={control.invalid || undefined}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={disabled}
-              aria-label={`Quitar la opción ${i + 1}`}
-              onClick={() => onChange(drafts.filter((_, j) => j !== i))}
-            >
-              <Trash2 aria-hidden />
-            </Button>
-          </div>
-        ))}
-        {drafts.length < 3 ? (
+          </Field>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            className="self-start"
+            variant="ghost"
+            size="icon"
             disabled={disabled}
-            onClick={() => onChange([...drafts, { name: "", values: "" }])}
+            aria-label={`Quitar la opción ${i + 1}`}
+            onClick={() => onChange(drafts.filter((_, j) => j !== i))}
           >
-            <Plus aria-hidden />
-            {drafts.length === 0 ? "Agregar una opción" : "Otra opción"}
+            <Trash2 aria-hidden />
           </Button>
-        ) : null}
-      </div>
+        </div>
+      ))}
+      {drafts.length < 3 ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="self-start"
+          disabled={disabled}
+          onClick={() => onChange([...drafts, { name: "", values: "" }])}
+        >
+          <Plus aria-hidden />
+          {drafts.length === 0 ? "Agregar una opción" : "Otra opción"}
+        </Button>
+      ) : null}
       {drafts.length > 0 ? (
         <p className="text-sm text-muted-foreground" aria-live="polite">
           {combinations} {combinations === 1 ? "combinación" : "combinaciones"}
         </p>
       ) : null}
-      {error ? <FieldError>{error}</FieldError> : null}
-    </FieldSet>
+    </div>
   )
 }
 
-/** El primer error de las opciones que dice el servidor (`options.0.values`). */
-export function optionsError(errors: Record<string, string>): string | undefined {
+/** Las categorías que ya usa la tienda, para elegirlas al escribir (`list` del campo). */
+export function CategoryOptions({ id, storeId }: { id: string; storeId: string }) {
+  const catalog = useCatalog(storeId)
+  const categories = [
+    ...new Set((catalog.data?.products ?? []).map((p) => p.category).filter(Boolean)),
+  ]
   return (
-    Object.entries(errors).find(([key]) => key === "options" || key.startsWith("options."))?.[1] ??
-    errors[""]
+    <datalist id={id}>
+      {categories.map((c) => (
+        <option key={c} value={c ?? ""} />
+      ))}
+    </datalist>
   )
 }
 
@@ -295,27 +314,44 @@ function NewProduct({ onClose }: { onClose: () => void }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const catalog = useCatalog(store.id)
-  const [name, setName] = useState("")
-  const [category, setCategory] = useState("")
-  const [price, setPrice] = useState("")
-  const [drafts, setDrafts] = useState<OptionDraft[]>([])
-  const [description, setDescription] = useState("")
-  const [errors, setErrors] = useState<Record<string, string>>({})
   const categoriesId = useId()
-  const descriptionId = useId()
-  const dirty = useDirty({ name, category, price, drafts, description })
-  const categories = [
-    ...new Set((catalog.data?.products ?? []).map((p) => p.category).filter(Boolean)),
-  ]
-
   const create = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api<{ product: { id: string } }>(`/api/tiendas/${store.id}/productos`, {
         method: "POST",
         body,
       }),
-    onSuccess: async ({ product }) => {
+  })
+  const form = useAppForm({
+    defaultValues: {
+      name: "",
+      category: "",
+      price: "",
+      drafts: [] as OptionDraft[],
+      description: "",
+    },
+    validators: {
+      onSubmit: z.object({
+        name: z.string().trim().min(1, "Escribe el nombre del producto"),
+        category: z.string(),
+        price: z
+          .string()
+          .refine(
+            (price) => Boolean(readMoney(price, store.currency)),
+            "Escribe el precio, como 129 o 129.90",
+          ),
+        drafts: optionsSchema,
+        description: z.string(),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const { product } = await create.mutateAsync({
+        name: value.name,
+        category: value.category || null,
+        description: value.description,
+        listPriceCents: readMoney(value.price, store.currency),
+        options: optionsOf(value.drafts),
+      })
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
       toast.success("Producto agregado. Ahora suma sus fotos y su stock.")
       onClose()
@@ -324,91 +360,84 @@ function NewProduct({ onClose }: { onClose: () => void }) {
         params: { id: store.id, productId: product.id },
       })
     },
-    onError: (error) => setErrors(fieldErrors(error)),
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => (key === "listPriceCents" ? "price" : optionsField(key)),
   })
 
-  function submit() {
-    const next: Record<string, string> = {}
-    if (!name.trim()) next.name = "Escribe el nombre del producto"
-    const listPriceCents = readMoney(price, store.currency)
-    if (!listPriceCents) next.listPriceCents = "Escribe el precio, como 129 o 129.90"
-    const options = optionsOf(drafts)
-    if (options.some((o) => !o.name || o.values.length === 0))
-      next.options = "Cada opción necesita su nombre y al menos un valor"
-    setErrors(next)
-    if (Object.keys(next).length > 0) return
-    create.mutate({ name, category: category || null, description, listPriceCents, options })
-  }
-
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title="Nuevo producto"
-      dirty={dirty}
       description="Después le sumas sus fotos, su stock y lo que Sofi puede negociar."
       onClose={onClose}
-      onSubmit={submit}
-      footer={
-        <>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={create.isPending}>
-            Agregar producto
-          </SubmitButton>
-        </>
-      }
+      submitLabel="Agregar producto"
     >
       <FieldGroup className="gap-5">
-        <TextField
-          label="Nombre"
-          value={name}
-          onChange={setName}
-          error={errors.name}
-          placeholder="Zapatilla urbana"
-          maxLength={120}
-          autoFocus
-        />
-        <Field>
-          <FieldLabel htmlFor={`${categoriesId}-input`}>Categoría (opcional)</FieldLabel>
-          <Input
-            id={`${categoriesId}-input`}
-            list={categoriesId}
-            value={category}
-            maxLength={60}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="Zapatillas"
-          />
-          <datalist id={categoriesId}>
-            {categories.map((c) => (
-              <option key={c} value={c ?? ""} />
-            ))}
-          </datalist>
-        </Field>
-        <MoneyField
-          label="Precio de lista"
-          currency={store.currency}
-          value={price}
-          onChange={setPrice}
-          error={errors.listPriceCents}
-          help="El de siempre. Si una variante cuesta distinto, se lo pones en el producto."
-        />
-        <OptionsEditor drafts={drafts} onChange={setDrafts} error={optionsError(errors)} />
-        <Field data-invalid={errors.description ? true : undefined}>
-          <FieldLabel htmlFor={descriptionId}>Lo que Sofi puede contar</FieldLabel>
-          <Textarea
-            id={descriptionId}
-            rows={3}
-            maxLength={2000}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Cuero sintético, planta de goma. Horma normal: pide tu talla de siempre."
-          />
-          {errors.description ? <FieldError>{errors.description}</FieldError> : null}
-        </Field>
-        <FormAlert error={create.error} />
+        <form.AppField name="name">
+          {(field) => (
+            <field.TextField
+              label="Nombre"
+              placeholder="Zapatilla urbana"
+              maxLength={120}
+              autoFocus
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="category">
+          {(field) => (
+            <field.TextField
+              label="Categoría (opcional)"
+              list={categoriesId}
+              maxLength={60}
+              placeholder="Zapatillas"
+            />
+          )}
+        </form.AppField>
+        <CategoryOptions id={categoriesId} storeId={store.id} />
+        <form.AppField name="price">
+          {(field) => (
+            <field.Control
+              label="Precio de lista"
+              description="El de siempre. Si una variante cuesta distinto, se lo pones en el producto."
+            >
+              {(control) => (
+                <MoneyInput
+                  control={control}
+                  currency={store.currency}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="drafts">
+          {(field) => (
+            <field.Group legend="Opciones" description={OPTIONS_HELP}>
+              {(control) => (
+                <OptionsEditor
+                  control={control}
+                  drafts={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.AppField name="description">
+          {(field) => (
+            <field.TextareaField
+              label="Lo que Sofi puede contar"
+              rows={3}
+              maxLength={2000}
+              placeholder="Cuero sintético, planta de goma. Horma normal: pide tu talla de siempre."
+            />
+          )}
+        </form.AppField>
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
 }
 
@@ -488,31 +517,23 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
   const result = preview.data
   const ready = result && result.errors.length === 0 && result.products.length > 0
   const variants = result?.products.reduce((n, p) => n + p.variants, 0) ?? 0
+  const failed = preview.error ?? save.error
 
   return (
-    <FormSheet
+    <FormDrawer
       open
       title="Subir una hoja"
       description="Una fila por variante: el producto, sus opciones, el precio y el stock. Las fotos se agregan después en cada producto."
       onClose={onClose}
       onSubmit={() => (ready && file ? save.mutate(file.text) : input.current?.click())}
-      footer={
-        <>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-          {ready ? (
-            <SubmitButton type="submit" pending={save.isPending}>
-              Crear {result.products.length}{" "}
-              {result.products.length === 1 ? "producto" : "productos"}
-            </SubmitButton>
-          ) : (
-            <Button type="submit" variant={file ? "outline" : "default"}>
-              <FileSpreadsheet aria-hidden />
-              {file ? "Elegir otra hoja" : "Elegir la hoja"}
-            </Button>
-          )}
-        </>
+      isSubmitting={save.isPending}
+      error={failed ? submitErrorMessage(failed) : null}
+      submitLabel={
+        ready
+          ? `Crear ${result.products.length} ${result.products.length === 1 ? "producto" : "productos"}`
+          : file
+            ? "Elegir otra hoja"
+            : "Elegir la hoja"
       }
     >
       <div className="flex flex-col gap-5">
@@ -554,7 +575,6 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
         {preview.isPending ? (
           <p className="text-sm text-muted-foreground">Revisando la hoja…</p>
         ) : null}
-        <FormAlert error={preview.error ?? save.error} />
         {result && result.errors.length > 0 ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-danger/40 p-4">
             <p className="text-sm font-semibold">
@@ -595,6 +615,6 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
       </div>
-    </FormSheet>
+    </FormDrawer>
   )
 }

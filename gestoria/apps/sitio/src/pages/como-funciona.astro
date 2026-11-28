@@ -1,0 +1,46 @@
+---
+// Cómo funciona (web v5): una venta por chat en seis capítulos, en la escena del teléfono que
+// avanza con el scroll (la misma del Inicio), con lo que hace Sofi, lo que hace la tienda y lo que
+// vigila Argos. Lo que viene («Pagar ahora», gestorIA Reparto) va como «pronto».
+import { Image } from "astro:assets"
+import pedidoPorConfirmar from "../assets/pantallas/pedido-por-confirmar.png"
+import Proceso from "../components/escenas/Proceso.astro"
+import Venta from "../components/escenas/Venta.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { PASOS_VENTA } from "../lib/venta"
+import "../styles/inicio.css"
+import "../styles/proceso.css"
+
+const howTo = {
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  name: "Cómo vende gestorIA por chat",
+  step: PASOS_VENTA.map((c, i) => ({ "@type": "HowToStep", position: i + 1, name: c.t, text: c.d })),
+}
+---
+<Base
+  sofiPropia
+  title="Cómo funciona gestorIA: una venta por chat en seis pasos"
+  description="De la pregunta al envío: Sofi atiende, negocia sin bajar de tu mínimo y pide el pago; tu equipo confirma, empaca y entrega con el pago confirmado."
+  ld={[howTo]}
+>
+  <PaginaHeroe
+    etiqueta="Cómo funciona"
+    titulo="Una venta por chat"
+    acento="en seis capítulos"
+    bajada="Sofi hace casi todo sola y te deja lo que pide manos: confirmar un pago, empacar y entregar."
+    segundo={{ href: "#venta", label: "Verla en el teléfono" }}
+  >
+    <div class="p-cel" slot="visual">
+      <Image src={pedidoPorConfirmar} alt="Un pedido con el pago por Yape por confirmar, en la app de gestorIA: así lo ve tu equipo" widths={[300, 600]} sizes="300px" />
+    </div>
+  </PaginaHeroe>
+  <Venta />
+  <Proceso />
+</Base>
+
+<script>
+  import { iniciarComoFunciona } from "../scripts/agentes"
+  iniciarComoFunciona()
+</script>

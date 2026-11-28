@@ -1,5 +1,12 @@
 import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
-import { AgentMark, AgentSurface, KpiCard, ViewTabs } from "@odentia/ui-patterns"
+import {
+  AgentMark,
+  AgentSurface,
+  ErrorState,
+  KpiCard,
+  LoadingState,
+  ViewTabs,
+} from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
@@ -8,7 +15,7 @@ import { api } from "./lib/api"
 import { CHANNELS, when } from "./lib/pedidos"
 import { type ArgosBoard, type StoreReport, usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Reportes» (lienzo B, tablero 13): cómo va la tienda y lo que hizo Argos; lo que le toca al
@@ -43,9 +50,9 @@ export function ReportsPage() {
         onValueChange={setPeriod}
         options={PERIODS}
       />
-      {report.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
+      {report.isPending ? <LoadingState message="Cargando el reporte…" /> : null}
       {report.isError ? (
-        <ErrorBlock error={report.error} onRetry={() => void report.refetch()} />
+        <ErrorState error={report.error} onRetry={() => void report.refetch()} />
       ) : null}
       {r ? (
         <>
@@ -226,7 +233,7 @@ function Argos() {
         </div>
       </div>
       {board.isError ? (
-        <ErrorBlock error={board.error} onRetry={() => void board.refetch()} />
+        <ErrorState error={board.error} onRetry={() => void board.refetch()} />
       ) : null}
       {b ? (
         <>

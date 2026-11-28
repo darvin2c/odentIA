@@ -1,16 +1,23 @@
 import { Button, FieldGroup, toast } from "@odentia/ui"
-import { ConfirmDialog, EmptyState } from "@odentia/ui-patterns"
+import {
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Banknote, ChevronLeft, ChevronRight } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
+import { z } from "zod"
+import { MoneyInput } from "./campos"
 import { api } from "./lib/api"
 import { CASH_KEY, type CashBox, fromWhom } from "./lib/caja"
 import { DISPATCH_KEY } from "./lib/despachos"
 import { HOME_KEY } from "./lib/inicio"
 import { dayName, nextDay, storeToday, when } from "./lib/pedidos"
 import { money, moneyInput, readMoney } from "./lib/tienda"
-import { fieldErrors, MoneyField, TextField } from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * Caja (entrega 3 del lienzo «gestorIA como odentIA», tableros 4, 6 y 23): solo la caja del día,
@@ -66,7 +73,7 @@ export function CashPage() {
         ) : null}
       </nav>
       {box.isPending ? <p className="text-sm text-muted-foreground">Cargando la caja…</p> : null}
-      {box.isError ? <ErrorBlock error={box.error} onRetry={() => void box.refetch()} /> : null}
+      {box.isError ? <ErrorState error={box.error} onRetry={() => void box.refetch()} /> : null}
       {data ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -193,7 +200,10 @@ function CashGroup({ group }: { group: CashBox["toReceive"][number] }) {
   )
 }
 
-/** «Recibí»: lo que cuadra, o la diferencia con lo que pasó. Queda quién lo recibió y cuándo. */
+/**
+ * «Recibí»: lo que cuadra, o la diferencia con lo que pasó. Queda quién lo recibió y cuándo. Va
+ * siempre en un cajón aparte (`dock={false}`): lo recibido solo se agrega, no se deshace.
+ */
 function ReceiveDialog({
   group,
   onClose,
@@ -204,65 +214,92 @@ function ReceiveDialog({
   const { store } = useStoreContext()
   const cur = store.currency
   const queryClient = useQueryClient()
-  const [amount, setAmount] = useState(moneyInput(group.cents, cur))
-  const [note, setNote] = useState("")
-  const received = readMoney(amount, cur)
-  const differs = received !== null && received !== group.cents
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (body: { receivedCents: number; note: string }) =>
       api(`/api/tiendas/${store.id}/caja/recibi`, {
         method: "POST",
         body: {
           courierId: group.courierId,
           paymentIds: group.payments.map((p) => p.id),
-          receivedCents: received ?? 0,
-          note: differs ? note : "",
+          ...body,
         },
       }),
-    onSuccess: async () => {
+  })
+  // Lo escrito en «¿Cuánto recibiste?», para el botón y para preguntar por qué no cuadra.
+  const [amount, setAmount] = useState(moneyInput(group.cents, cur))
+  const received = readMoney(amount, cur)
+  const differs = received !== null && received !== group.cents
+  const form = useAppForm({
+    defaultValues: { amount: moneyInput(group.cents, cur), note: "" },
+    validators: {
+      onSubmit: z.object({ amount: z.string(), note: z.string() }).superRefine((value, ctx) => {
+        const cents = readMoney(value.amount, cur)
+        if (cents === null)
+          ctx.addIssue({
+            code: "custom",
+            path: ["amount"],
+            message: "Escribe cuánto recibiste, como 169 o 169.50",
+          })
+        else if (cents !== group.cents && value.note.trim().length < 3)
+          ctx.addIssue({ code: "custom", path: ["note"], message: "Escribe por qué no cuadra" })
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const cents = readMoney(value.amount, cur) ?? 0
+      const differ = cents !== group.cents
+      await save.mutateAsync({ receivedCents: cents, note: differ ? value.note : "" })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: CASH_KEY(store.id) }),
         queryClient.invalidateQueries({ queryKey: DISPATCH_KEY(store.id) }),
         queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) }),
       ])
-      toast.success(differs ? "Recibido, con la diferencia anotada" : "Recibido: cuadra")
+      toast.success(differ ? "Recibido, con la diferencia anotada" : "Recibido: cuadra")
       onClose()
     },
   })
-  const errors = fieldErrors(save.error)
+  const surface = useFormSurface(form, { fieldMap: { receivedCents: "amount" } })
   return (
-    <ConfirmDialog
+    <FormDrawer
+      {...surface}
       open
-      variant="default"
+      dock={false}
       title={`Recibí de ${fromWhom(group.name)}`}
       description={`Debía entregar ${money(group.cents, cur)} en efectivo. Queda a tu nombre, con la hora.`}
-      confirmLabel={received === null ? "Recibí" : `Recibí ${money(received, cur)}`}
+      submitLabel={received === null ? "Recibí" : `Recibí ${money(received, cur)}`}
       cancelLabel="Volver"
-      pending={save.isPending}
-      confirmDisabled={received === null || (differs && note.trim().length < 3)}
-      error={save.isError && !errors.note ? save.error.message : null}
-      onConfirm={() => save.mutate()}
       onClose={onClose}
     >
-      <FieldGroup className="gap-3">
-        <MoneyField label="¿Cuánto recibiste?" currency={cur} value={amount} onChange={setAmount} />
+      <FieldGroup className="gap-5">
+        <form.AppField name="amount" listeners={{ onChange: ({ value }) => setAmount(value) }}>
+          {(field) => (
+            <field.Control label="¿Cuánto recibiste?">
+              {(control) => (
+                <MoneyInput
+                  control={control}
+                  currency={cur}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
         {differs ? (
-          <TextField
-            label="¿Por qué no cuadra?"
-            value={note}
-            onChange={setNote}
-            maxLength={300}
-            error={errors.note}
-            help={
-              received !== null
-                ? received < group.cents
-                  ? `Faltan ${money(group.cents - received, cur)}.`
-                  : `Sobran ${money(received - group.cents, cur)}.`
-                : undefined
-            }
-          />
+          <form.AppField name="note">
+            {(field) => (
+              <field.TextField
+                label="¿Por qué no cuadra?"
+                maxLength={300}
+                description={
+                  received < group.cents
+                    ? `Faltan ${money(group.cents - received, cur)}.`
+                    : `Sobran ${money(received - group.cents, cur)}.`
+                }
+              />
+            )}
+          </form.AppField>
         ) : null}
       </FieldGroup>
-    </ConfirmDialog>
+    </FormDrawer>
   )
 }

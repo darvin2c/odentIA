@@ -147,3 +147,30 @@ export function SectionBody({
     </>
   )
 }
+
+/** Configuración de una tienda: la portada abre con «Lo que falta», suelta y antes de los grupos. */
+export const tiendaPortada = "/configuracion"
+
+export const tiendaSueltas: SectionNavItem[] = [
+  { label: "Lo que falta", to: "/configuracion/falta", badge: 3, badgeTone: "pending", badgeLabel: "3 por hacer" },
+]
+
+export const tiendaGrupos: SectionNavGroup[] = [
+  {
+    label: "Tu tienda",
+    items: [
+      { label: "Datos de la tienda", to: "/configuracion/datos" },
+      { label: "Tu marca", to: "/configuracion/marca" },
+    ],
+  },
+  {
+    label: "Vender",
+    items: [
+      { label: "Sofi", to: "/configuracion/sofi" },
+      { label: "Cobros", to: "/configuracion/cobros" },
+      { label: "Entregas", to: "/configuracion/entregas" },
+    ],
+  },
+  { label: "Conexiones", items: [{ label: "Integraciones", to: "/configuracion/integraciones" }] },
+  { label: "Tu equipo", items: [{ label: "Equipo y repartidores", to: "/configuracion/equipo" }] },
+]

@@ -1,23 +1,23 @@
-import {
-  Badge,
-  Button,
-  Checkbox,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  Input,
-  toast,
-} from "@odentia/ui"
+import { Badge, Button, FieldGroup, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { Textarea } from "@odentia/ui/components/textarea"
-import { ConfirmDialog, EmptyState, SubmitButton } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  clockMinutes,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  RadioChips,
+  SubmitButton,
+  submitErrorMessage,
+  TimeSelect,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Clock, CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
+import { z } from "zod"
+import { MoneyInput, ToggleField } from "./campos"
 import { api } from "./lib/api"
 import type { Slot } from "./lib/despachos"
 import {
@@ -36,20 +36,10 @@ import {
   readMoney,
 } from "./lib/tienda"
 import { PaymentLinkSection } from "./link-de-pago"
-import {
-  FormAlert,
-  FormSheet,
-  fieldErrors,
-  MoneyField,
-  SELECT_CLASSES,
-  SwitchField,
-  TextField,
-  useDirty,
-} from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
- * Configuración › Medios de pago y › Formas de entrega y zonas (lienzo B, tablero 6; «gestorIA como
+ * Configuración › Cobros y › Entregas (lienzo B, tablero 6; «gestorIA como
  * odentIA», tablero 10): con qué le pagan a la tienda y cómo llega el pedido. Igual que «Medios de
  * pago» de odentIA: un nombre libre y un tipo de una lista estándar. Lo que se apaga, Sofi deja de
  * ofrecerlo. Los cambia quien tiene `configuracion`; soporte los mira sin cambiarlos.
@@ -85,17 +75,20 @@ function PaymentsAndDeliveries({ part }: { part: "pagos" | "entregas" }) {
     <>
       {part === "pagos" ? (
         <StoreHeader
-          title="Medios de pago"
+          title="Cobros"
           subtitle="Con qué te pagan. Lo que apagues, Sofi deja de ofrecerlo."
         />
       ) : (
         <StoreHeader
-          title="Formas de entrega y zonas"
+          title="Entregas"
           subtitle="Cómo llega el pedido y cuánto cuesta. Lo que apagues, Sofi deja de ofrecerlo."
         />
       )}
       {lists.isError ? (
-        <ErrorBlock error={lists.error} onRetry={() => void lists.refetch()} />
+        <ErrorState
+          error={lists.error instanceof Error ? lists.error : "No se pudo cargar"}
+          onRetry={() => void lists.refetch()}
+        />
       ) : null}
       {part === "pagos" ? (
         <>
@@ -229,7 +222,7 @@ function ActiveSwitch({
       await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
       toast.success(isActive ? `${name}: encendido` : `${name}: apagado, Sofi ya no lo ofrece`)
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const shown = toggle.isPending ? Boolean(toggle.variables) : active
   if (!canEdit) return <Badge variant="outline">{active ? "Encendido" : "Apagado"}</Badge>
@@ -395,7 +388,7 @@ function DeleteButton({
       <Button
         type="button"
         variant="ghost"
-        className="mr-auto text-danger"
+        className="self-start text-danger"
         onClick={() => setAsking(true)}
       >
         <Trash2 aria-hidden />
@@ -407,13 +400,29 @@ function DeleteButton({
         description="Sofi deja de ofrecerlo. Si solo es por un tiempo, mejor apágalo."
         confirmLabel="Borrar"
         pending={remove.isPending}
-        error={remove.error?.message ?? null}
+        error={remove.isError ? submitErrorMessage(remove.error) : null}
         onConfirm={() => remove.mutate()}
         onClose={() => setAsking(false)}
       />
     </>
   )
 }
+
+/** Lo que el servidor llama distinto que el formulario. */
+const DELIVERY_FIELDS = {
+  priceCents: "price",
+  maxDiscountCents: "maxDiscount",
+  freeFromCents: "freeFrom",
+  acceptsPayOnDelivery: "payOnDelivery",
+}
+
+const paymentSchema = z.object({
+  name: z.string().trim().min(1, "Escribe cómo lo dirá Sofi"),
+  typeCode: z.custom<PaymentTypeCode>(),
+  collection: z.custom<PaymentCollection>(),
+  details: z.string(),
+  isActive: z.boolean(),
+})
 
 function PaymentForm({
   storeId,
@@ -425,155 +434,212 @@ function PaymentForm({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const [name, setName] = useState(method?.name ?? "")
-  const [typeCode, setTypeCode] = useState<PaymentTypeCode>(method?.typeCode ?? "68")
-  const [collection, setCollection] = useState<PaymentCollection>(
-    method?.collection ?? "comprobante",
-  )
-  const [details, setDetails] = useState(method?.details ?? "")
-  const [isActive, setIsActive] = useState(method?.isActive ?? true)
-  const [errors, setErrors] = useState<Record<string, string>>({})
   const save = useMutation({
-    mutationFn: () => {
-      const body = { name, typeCode, collection, details, isActive }
-      return method
+    mutationFn: (body: {
+      name: string
+      typeCode: PaymentTypeCode
+      collection: PaymentCollection
+      details: string
+      isActive: boolean
+    }) =>
+      method
         ? api(`/api/tiendas/${storeId}/medios-de-pago/${method.id}`, { method: "PATCH", body })
-        : api(`/api/tiendas/${storeId}/medios-de-pago`, { method: "POST", body })
+        : api(`/api/tiendas/${storeId}/medios-de-pago`, { method: "POST", body }),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      name: method?.name ?? "",
+      typeCode: (method?.typeCode ?? "68") as PaymentTypeCode,
+      collection: (method?.collection ?? "comprobante") as PaymentCollection,
+      details: method?.details ?? "",
+      isActive: method?.isActive ?? true,
     },
-    onSuccess: async () => {
+    validators: { onSubmit: paymentSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value)
       await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
       toast.success(method ? "Medio de pago guardado" : "Medio de pago agregado")
       onClose()
     },
-    onError: (error) => setErrors(fieldErrors(error)),
   })
-  const dirty = useDirty({ name, typeCode, collection, details, isActive })
-  const cash = typeCode === "10"
-  const detailsId = useId()
-
-  function submit() {
-    if (!name.trim()) return setErrors({ name: "Escribe cómo lo dirá Sofi" })
-    setErrors({})
-    save.mutate()
-  }
+  const surface = useFormSurface(form)
 
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title={method ? method.name : "Nuevo medio de pago"}
-      dirty={dirty}
       description="Así se agrega cualquier medio, aunque no se parezca a los de la lista."
       onClose={onClose}
-      onSubmit={submit}
-      footer={
-        <>
-          {method ? (
-            <DeleteButton
-              what={method.name}
-              path={`/api/tiendas/${storeId}/medios-de-pago/${method.id}`}
-              storeId={storeId}
-              onDone={onClose}
-            />
-          ) : null}
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={save.isPending}>
-            Guardar
-          </SubmitButton>
-        </>
-      }
+      submitLabel="Guardar"
     >
       <FieldGroup className="gap-5">
-        <TextField
-          label="Nombre"
-          value={name}
-          onChange={setName}
-          error={errors.name}
-          help="Como lo dirá Sofi al cliente, por ejemplo «Yape» o «Transferencia BCP»."
-          maxLength={80}
-          autoFocus
-        />
-        <Field>
-          <FieldLabel htmlFor="payment-type">Tipo</FieldLabel>
-          <select
-            id="payment-type"
-            className={SELECT_CLASSES}
-            value={typeCode}
-            onChange={(e) => {
-              const next = e.target.value as PaymentTypeCode
-              setTypeCode(next)
-              if (next === "10") setCollection("al_recibir")
-            }}
-          >
-            {(Object.keys(PAYMENT_TYPES) as PaymentTypeCode[]).map((code) => (
-              <option key={code} value={code}>
-                {PAYMENT_TYPES[code]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <FieldSet>
-          <FieldLegend variant="label">Cómo se confirma el pago</FieldLegend>
-          <div className="flex flex-col gap-2">
-            {(Object.keys(COLLECTIONS) as PaymentCollection[]).map((option) => {
-              const disabled = cash && option !== "al_recibir"
-              return (
-                <label
-                  key={option}
-                  className={`flex items-start gap-3 rounded-lg border p-3 has-checked:border-primary has-checked:bg-primary-soft/40 has-focus-visible:ring-3 has-focus-visible:ring-ring/30 ${disabled ? "opacity-50" : "cursor-pointer"}`}
-                >
-                  <input
-                    type="radio"
-                    name="collection"
-                    value={option}
-                    checked={collection === option}
-                    disabled={disabled}
-                    onChange={() => setCollection(option)}
-                    className="mt-1 accent-[var(--primary-fill)]"
-                  />
-                  <span className="flex flex-col">
-                    <span className="text-sm font-semibold">{COLLECTIONS[option].name}</span>
-                    <span className="text-sm text-muted-foreground">
-                      {COLLECTIONS[option].hint}
-                    </span>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-          {cash ? <FieldDescription>El efectivo se cobra al entregar.</FieldDescription> : null}
-          {errors.collection ? <FieldError>{errors.collection}</FieldError> : null}
-        </FieldSet>
-        <Field data-invalid={errors.details ? true : undefined}>
-          <FieldLabel htmlFor={detailsId}>Lo que envía Sofi para pagar</FieldLabel>
-          <Textarea
-            id={detailsId}
-            rows={3}
-            maxLength={500}
-            value={details}
-            onChange={(e) => setDetails(e.target.value)}
-            placeholder={collection === "link" ? "" : "987 654 321 · a nombre de Rosa Quispe"}
-          />
-          {errors.details ? (
-            <FieldError>{errors.details}</FieldError>
-          ) : (
-            <FieldDescription>
-              {collection === "link"
-                ? "Con el link de pago, Sofi enviará un enlace por cada pedido cuando se conecte el proveedor."
-                : "El número, la cuenta o a nombre de quién. Lo envía tal cual."}
-            </FieldDescription>
+        <form.AppField name="name">
+          {(field) => (
+            <field.TextField
+              label="Nombre"
+              description="Como lo dirá Sofi al cliente, por ejemplo «Yape» o «Transferencia BCP»."
+              maxLength={80}
+              autoFocus
+            />
           )}
-        </Field>
-        <SwitchField
-          checked={isActive}
-          onChange={setIsActive}
-          label={isActive ? "Encendido: Sofi lo ofrece" : "Apagado: Sofi no lo ofrece"}
-        />
-        <FormAlert error={save.error} />
+        </form.AppField>
+        <form.AppField
+          name="typeCode"
+          listeners={{
+            // El efectivo se cobra al entregar: no hay otra forma de confirmarlo.
+            onChange: ({ value }) => {
+              if (value === "10") form.setFieldValue("collection", "al_recibir")
+            },
+          }}
+        >
+          {(field) => (
+            <field.SelectField
+              label="Tipo"
+              id="payment-type"
+              options={(Object.keys(PAYMENT_TYPES) as PaymentTypeCode[]).map((code) => ({
+                value: code,
+                label: PAYMENT_TYPES[code],
+              }))}
+            />
+          )}
+        </form.AppField>
+        <form.Subscribe selector={(state) => state.values.typeCode === "10"}>
+          {(cash) => (
+            <form.AppField name="collection">
+              {(field) => (
+                <field.Group
+                  legend="Cómo se confirma el pago"
+                  description={cash ? "El efectivo se cobra al entregar." : undefined}
+                >
+                  {(control) => (
+                    <div className="flex flex-col gap-2">
+                      {(Object.keys(COLLECTIONS) as PaymentCollection[]).map((option) => {
+                        const disabled = cash && option !== "al_recibir"
+                        return (
+                          <label
+                            key={option}
+                            className={`flex items-start gap-3 rounded-lg border p-3 has-checked:border-primary has-checked:bg-primary-soft/40 has-focus-visible:ring-3 has-focus-visible:ring-ring/30 ${disabled ? "opacity-50" : "cursor-pointer"}`}
+                          >
+                            <input
+                              type="radio"
+                              name={control.name}
+                              value={option}
+                              checked={field.state.value === option}
+                              disabled={disabled}
+                              aria-invalid={control.invalid || undefined}
+                              onChange={() => field.handleChange(option)}
+                              className="mt-1 accent-[var(--primary-fill)]"
+                            />
+                            <span className="flex flex-col">
+                              <span className="text-sm font-semibold">
+                                {COLLECTIONS[option].name}
+                              </span>
+                              <span className="text-sm text-muted-foreground">
+                                {COLLECTIONS[option].hint}
+                              </span>
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
+          )}
+        </form.Subscribe>
+        <form.Subscribe selector={(state) => state.values.collection === "link"}>
+          {(link) => (
+            <form.AppField name="details">
+              {(field) => (
+                <field.TextareaField
+                  label="Lo que envía Sofi para pagar"
+                  rows={3}
+                  maxLength={500}
+                  placeholder={link ? "" : "987 654 321 · a nombre de Rosa Quispe"}
+                  description={
+                    link
+                      ? "Con el link de pago, Sofi enviará un enlace por cada pedido cuando se conecte el proveedor."
+                      : "El número, la cuenta o a nombre de quién. Lo envía tal cual."
+                  }
+                />
+              )}
+            </form.AppField>
+          )}
+        </form.Subscribe>
+        <form.AppField name="isActive">
+          {() => (
+            <ToggleField
+              label={(on) => (on ? "Encendido: Sofi lo ofrece" : "Apagado: Sofi no lo ofrece")}
+            />
+          )}
+        </form.AppField>
+        {method ? (
+          <DeleteButton
+            what={method.name}
+            path={`/api/tiendas/${storeId}/medios-de-pago/${method.id}`}
+            storeId={storeId}
+            onDone={onClose}
+          />
+        ) : null}
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
+}
+
+/** Un monto que puede ir vacío: null si está vacío, undefined si no se entiende. */
+function optionalMoney(text: string, currency: string): number | null | undefined {
+  if (!text.trim()) return null
+  return readMoney(text, currency) ?? undefined
+}
+
+/** Las reglas de una forma de entrega, con la moneda de la tienda. */
+function deliverySchema(currency: string) {
+  return z
+    .object({
+      name: z.string(),
+      type: z.custom<DeliveryType>(),
+      details: z.string(),
+      cost: z.custom<DeliveryCost>(),
+      price: z.string(),
+      zones: z.array(z.object({ name: z.string(), price: z.string() })),
+      eta: z.string(),
+      payOnDelivery: z.boolean(),
+      maxDiscount: z.string(),
+      freeFrom: z.string(),
+      isActive: z.boolean(),
+    })
+    .superRefine((value, ctx) => {
+      // Todo en un solo refinamiento: zod no corre el refinamiento si ya hay otro error.
+      if (!value.name.trim())
+        ctx.addIssue({ code: "custom", path: ["name"], message: "Escribe cómo lo dirá Sofi" })
+      if (value.cost === "fijo" && readMoney(value.price, currency) === null)
+        ctx.addIssue({
+          code: "custom",
+          path: ["price"],
+          message: "Escribe el precio, como 8 o 8.50",
+        })
+      if (
+        value.cost === "por_zona" &&
+        value.zones.some((zone) => !zone.name.trim() || readMoney(zone.price, currency) === null)
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["zones"],
+          message: "Cada zona necesita su nombre y su precio",
+        })
+      if (value.cost === "fijo" || value.cost === "por_zona")
+        for (const key of ["maxDiscount", "freeFrom"] as const) {
+          const amount = optionalMoney(value[key], currency)
+          if (amount === undefined || amount === 0)
+            ctx.addIssue({
+              code: "custom",
+              path: [key],
+              message: "Escribe un monto mayor que 0, o déjalo vacío",
+            })
+        }
+    })
 }
 
 function DeliveryForm({
@@ -588,290 +654,264 @@ function DeliveryForm({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const [name, setName] = useState(method?.name ?? "")
-  const [type, setType] = useState<DeliveryType>(method?.type ?? "DeliveryModeOwnFleet")
-  const [details, setDetails] = useState(method?.details ?? "")
-  const [cost, setCost] = useState<DeliveryCost>(method?.cost ?? "fijo")
-  const [price, setPrice] = useState(moneyInput(method?.priceCents ?? null, currency))
-  const [zones, setZones] = useState(
-    (method?.zones.length ? method.zones : [{ name: "", priceCents: 0 }]).map((z) => ({
-      name: z.name,
-      price: method?.zones.length ? moneyInput(z.priceCents, currency) : "",
-    })),
-  )
-  const [eta, setEta] = useState(method?.eta ?? "")
-  const [payOnDelivery, setPayOnDelivery] = useState(method?.acceptsPayOnDelivery ?? false)
-  const [maxDiscount, setMaxDiscount] = useState(
-    moneyInput(method?.maxDiscountCents ?? null, currency),
-  )
-  const [freeFrom, setFreeFrom] = useState(moneyInput(method?.freeFromCents ?? null, currency))
-  const [isActive, setIsActive] = useState(method?.isActive ?? true)
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const negotiable = cost === "fijo" || cost === "por_zona"
-  const dirty = useDirty({
-    name,
-    type,
-    details,
-    cost,
-    price,
-    zones,
-    eta,
-    payOnDelivery,
-    maxDiscount,
-    freeFrom,
-    isActive,
-  })
-  const payId = useId()
-
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       method
         ? api(`/api/tiendas/${storeId}/formas-de-entrega/${method.id}`, { method: "PATCH", body })
         : api(`/api/tiendas/${storeId}/formas-de-entrega`, { method: "POST", body }),
-    onSuccess: async () => {
+  })
+  const form = useAppForm({
+    defaultValues: {
+      name: method?.name ?? "",
+      type: (method?.type ?? "DeliveryModeOwnFleet") as DeliveryType,
+      details: method?.details ?? "",
+      cost: (method?.cost ?? "fijo") as DeliveryCost,
+      price: moneyInput(method?.priceCents ?? null, currency),
+      zones: (method?.zones.length ? method.zones : [{ name: "", priceCents: 0 }]).map((z) => ({
+        name: z.name,
+        price: method?.zones.length ? moneyInput(z.priceCents, currency) : "",
+      })),
+      eta: method?.eta ?? "",
+      payOnDelivery: method?.acceptsPayOnDelivery ?? false,
+      maxDiscount: moneyInput(method?.maxDiscountCents ?? null, currency),
+      freeFrom: moneyInput(method?.freeFromCents ?? null, currency),
+      isActive: method?.isActive ?? true,
+    },
+    validators: { onSubmit: deliverySchema(currency) },
+    onSubmit: async ({ value }) => {
+      const negotiable = value.cost === "fijo" || value.cost === "por_zona"
+      await save.mutateAsync({
+        name: value.name,
+        type: value.type,
+        details: value.details,
+        cost: value.cost,
+        priceCents: value.cost === "fijo" ? readMoney(value.price, currency) : null,
+        zones:
+          value.cost === "por_zona"
+            ? value.zones.map((z) => ({
+                name: z.name.trim(),
+                priceCents: readMoney(z.price, currency),
+              }))
+            : [],
+        eta: value.eta,
+        acceptsPayOnDelivery: value.payOnDelivery,
+        maxDiscountCents: negotiable ? (optionalMoney(value.maxDiscount, currency) ?? null) : null,
+        freeFromCents: negotiable ? (optionalMoney(value.freeFrom, currency) ?? null) : null,
+        isActive: value.isActive,
+      })
       await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
       toast.success(method ? "Forma de entrega guardada" : "Forma de entrega agregada")
       onClose()
     },
-    onError: (error) => setErrors(fieldErrors(error)),
   })
+  const surface = useFormSurface(form, { fieldMap: DELIVERY_FIELDS })
+  const costId = useId()
 
-  function submit() {
-    const next: Record<string, string> = {}
-    if (!name.trim()) next.name = "Escribe cómo lo dirá Sofi"
-    const priceCents = cost === "fijo" ? readMoney(price, currency) : null
-    if (cost === "fijo" && priceCents === null) next.priceCents = "Escribe el precio, como 8 o 8.50"
-    const zoneValues = zones.map((z) => ({
-      name: z.name.trim(),
-      priceCents: readMoney(z.price, currency),
-    }))
-    if (cost === "por_zona" && zoneValues.some((z) => !z.name || z.priceCents === null))
-      next.zones = "Cada zona necesita su nombre y su precio"
-    const read = (text: string, key: string) => {
-      if (!negotiable || !text.trim()) return null
-      const value = readMoney(text, currency)
-      if (!value) next[key] = "Escribe un monto mayor que 0, o déjalo vacío"
-      return value
-    }
-    const maxDiscountCents = read(maxDiscount, "maxDiscountCents")
-    const freeFromCents = read(freeFrom, "freeFromCents")
-    setErrors(next)
-    if (Object.keys(next).length > 0) return
-    save.mutate({
-      name,
-      type,
-      details,
-      cost,
-      priceCents,
-      zones: cost === "por_zona" ? zoneValues : [],
-      eta,
-      acceptsPayOnDelivery: payOnDelivery,
-      maxDiscountCents,
-      freeFromCents,
-      isActive,
-    })
-  }
+  const moneyField = (
+    name: "price" | "maxDiscount" | "freeFrom",
+    label: string,
+    description?: string,
+  ) => (
+    <form.AppField name={name}>
+      {(field) => (
+        <field.Control label={label} description={description}>
+          {(control) => (
+            <MoneyInput
+              control={control}
+              currency={currency}
+              value={field.state.value}
+              onChange={field.handleChange}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
 
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title={method ? method.name : "Nueva forma de entrega"}
-      dirty={dirty}
       description="Así se agrega cualquier forma, aunque no se parezca a las de la lista."
       onClose={onClose}
-      onSubmit={submit}
-      footer={
-        <>
-          {method ? (
-            <DeleteButton
-              what={method.name}
-              path={`/api/tiendas/${storeId}/formas-de-entrega/${method.id}`}
-              storeId={storeId}
-              onDone={onClose}
-            />
-          ) : null}
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={save.isPending}>
-            Guardar
-          </SubmitButton>
-        </>
-      }
+      submitLabel="Guardar"
     >
       <FieldGroup className="gap-5">
-        <TextField
-          label="Nombre"
-          value={name}
-          onChange={setName}
-          error={errors.name}
-          help="Como lo dirá Sofi al cliente."
-          placeholder="Moto en San Juan de Lurigancho"
-          maxLength={80}
-          autoFocus
-        />
-        <Field>
-          <FieldLabel htmlFor="delivery-type">Tipo</FieldLabel>
-          <select
-            id="delivery-type"
-            className={SELECT_CLASSES}
-            value={type}
-            onChange={(e) => setType(e.target.value as DeliveryType)}
-          >
-            {(Object.keys(DELIVERY_TYPES) as DeliveryType[]).map((option) => (
-              <option key={option} value={option}>
-                {DELIVERY_TYPES[option]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <TextField
-          label="Detalle (opcional)"
-          value={details}
-          onChange={setDetails}
-          error={errors.details}
-          help="Lo que ayuda a elegirla: la dirección del recojo, la agencia."
-          maxLength={300}
-        />
-        <FieldSet>
-          <FieldLegend variant="label">Costo</FieldLegend>
-          <div className="grid grid-cols-2 gap-2">
-            {(Object.keys(DELIVERY_COSTS) as DeliveryCost[]).map((option) => (
-              <label
-                key={option}
-                className="flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 text-sm has-checked:border-primary has-checked:bg-primary-soft/40 has-focus-visible:ring-3 has-focus-visible:ring-ring/30"
-              >
-                <input
-                  type="radio"
-                  name="cost"
-                  value={option}
-                  checked={cost === option}
-                  onChange={() => setCost(option)}
-                  className="accent-[var(--primary-fill)]"
+        <form.AppField name="name">
+          {(field) => (
+            <field.TextField
+              label="Nombre"
+              description="Como lo dirá Sofi al cliente."
+              placeholder="Moto en San Juan de Lurigancho"
+              maxLength={80}
+              autoFocus
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="type">
+          {(field) => (
+            <field.SelectField
+              label="Tipo"
+              id="delivery-type"
+              options={(Object.keys(DELIVERY_TYPES) as DeliveryType[]).map((option) => ({
+                value: option,
+                label: DELIVERY_TYPES[option],
+              }))}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="details">
+          {(field) => (
+            <field.TextField
+              label="Detalle (opcional)"
+              description="Lo que ayuda a elegirla: la dirección del recojo, la agencia."
+              maxLength={300}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="cost">
+          {(field) => (
+            <field.Group legend={<span id={costId}>Costo</span>}>
+              {(control) => (
+                <RadioChips
+                  id={control.id}
+                  aria-labelledby={costId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  options={(Object.keys(DELIVERY_COSTS) as DeliveryCost[]).map((option) => ({
+                    value: option,
+                    label: DELIVERY_COSTS[option],
+                  }))}
+                  onChange={(next) => field.handleChange(next)}
                 />
-                {DELIVERY_COSTS[option]}
-              </label>
-            ))}
-          </div>
-        </FieldSet>
-        {cost === "fijo" ? (
-          <MoneyField
-            label="Precio del envío"
-            currency={currency}
-            value={price}
-            onChange={setPrice}
-            error={errors.priceCents}
-          />
-        ) : null}
-        {cost === "por_zona" ? (
-          <FieldSet>
-            <FieldLegend variant="label">Zonas</FieldLegend>
-            <div className="flex flex-col gap-2">
-              {zones.map((zone, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
-                <div key={i} className="flex items-end gap-2">
-                  <TextField
-                    label={`Zona ${i + 1}`}
-                    value={zone.name}
-                    onChange={(value) =>
-                      setZones(zones.map((z, j) => (j === i ? { ...z, name: value } : z)))
-                    }
-                    placeholder="Surco y Miraflores"
-                    maxLength={60}
-                    className="flex-1"
-                  />
-                  <MoneyField
-                    label="Precio"
-                    currency={currency}
-                    value={zone.price}
-                    onChange={(value) =>
-                      setZones(zones.map((z, j) => (j === i ? { ...z, price: value } : z)))
-                    }
-                    className="w-28"
-                  />
-                  {zones.length > 1 ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Quitar la zona ${i + 1}`}
-                      onClick={() => setZones(zones.filter((_, j) => j !== i))}
-                    >
-                      <Trash2 aria-hidden />
-                    </Button>
-                  ) : null}
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.Subscribe selector={(state) => state.values.cost}>
+          {(cost) => (
+            <>
+              {cost === "fijo" ? moneyField("price", "Precio del envío") : null}
+              {cost === "por_zona" ? (
+                <form.AppField name="zones" mode="array">
+                  {(field) => (
+                    <field.Group legend="Zonas">
+                      {() => (
+                        <div className="flex flex-col gap-2">
+                          {field.state.value.map((_, i) => (
+                            // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
+                            <div key={i} className="flex items-end gap-2">
+                              <form.AppField name={`zones[${i}].name`}>
+                                {(zone) => (
+                                  <zone.TextField
+                                    label={`Zona ${i + 1}`}
+                                    placeholder="Surco y Miraflores"
+                                    maxLength={60}
+                                    className="flex-1"
+                                  />
+                                )}
+                              </form.AppField>
+                              <form.AppField name={`zones[${i}].price`}>
+                                {(zone) => (
+                                  <zone.Control label="Precio" className="w-28">
+                                    {(control) => (
+                                      <MoneyInput
+                                        control={control}
+                                        currency={currency}
+                                        value={zone.state.value}
+                                        onChange={zone.handleChange}
+                                      />
+                                    )}
+                                  </zone.Control>
+                                )}
+                              </form.AppField>
+                              {field.state.value.length > 1 ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={`Quitar la zona ${i + 1}`}
+                                  onClick={() => field.removeValue(i)}
+                                >
+                                  <Trash2 aria-hidden />
+                                </Button>
+                              ) : null}
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="self-start"
+                            onClick={() => field.pushValue({ name: "", price: "" })}
+                          >
+                            <Plus aria-hidden />
+                            Otra zona
+                          </Button>
+                        </div>
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
+              ) : null}
+            </>
+          )}
+        </form.Subscribe>
+        <form.AppField name="eta">
+          {(field) => (
+            <field.TextField
+              label="Cuándo llega"
+              placeholder="El mismo día si pides antes de las 2 p. m."
+              maxLength={120}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="payOnDelivery">
+          {(field) => <field.CheckboxField label="Acepta pago al recibir" />}
+        </form.AppField>
+        <form.Subscribe
+          selector={(state) => state.values.cost === "fijo" || state.values.cost === "por_zona"}
+        >
+          {(negotiable) =>
+            negotiable ? (
+              <FieldGroup className="gap-3">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-medium">Lo que Sofi puede negociar del envío</p>
+                  <p className="text-sm text-muted-foreground">Déjalo vacío si no se negocia.</p>
                 </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="self-start"
-                onClick={() => setZones([...zones, { name: "", price: "" }])}
-              >
-                <Plus aria-hidden />
-                Otra zona
-              </Button>
-            </div>
-            {errors.zones ? <FieldError>{errors.zones}</FieldError> : null}
-          </FieldSet>
-        ) : null}
-        <TextField
-          label="Cuándo llega"
-          value={eta}
-          onChange={setEta}
-          error={errors.eta}
-          placeholder="El mismo día si pides antes de las 2 p. m."
-          maxLength={120}
-        />
-        <div className="flex items-center gap-3 text-sm">
-          <Checkbox
-            id={payId}
-            checked={payOnDelivery}
-            onCheckedChange={(v) => setPayOnDelivery(Boolean(v))}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {moneyField(
+                    "maxDiscount",
+                    "Rebajarlo hasta",
+                    "Lo mismo que cuesta: puede regalarlo.",
+                  )}
+                  {moneyField("freeFrom", "Gratis desde una compra de")}
+                </div>
+              </FieldGroup>
+            ) : null
+          }
+        </form.Subscribe>
+        <form.AppField name="isActive">
+          {() => (
+            <ToggleField
+              label={(on) => (on ? "Encendida: Sofi la ofrece" : "Apagada: Sofi no la ofrece")}
+            />
+          )}
+        </form.AppField>
+        {method ? (
+          <DeleteButton
+            what={method.name}
+            path={`/api/tiendas/${storeId}/formas-de-entrega/${method.id}`}
+            storeId={storeId}
+            onDone={onClose}
           />
-          <label htmlFor={payId}>Acepta pago al recibir</label>
-        </div>
-        {negotiable ? (
-          <FieldSet>
-            <FieldLegend variant="label">Lo que Sofi puede negociar del envío</FieldLegend>
-            <FieldDescription>Déjalo vacío si no se negocia.</FieldDescription>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MoneyField
-                label="Rebajarlo hasta"
-                currency={currency}
-                value={maxDiscount}
-                onChange={setMaxDiscount}
-                error={errors.maxDiscountCents}
-                help="Lo mismo que cuesta: puede regalarlo."
-              />
-              <MoneyField
-                label="Gratis desde una compra de"
-                currency={currency}
-                value={freeFrom}
-                onChange={setFreeFrom}
-                error={errors.freeFromCents}
-              />
-            </div>
-          </FieldSet>
         ) : null}
-        <SwitchField
-          checked={isActive}
-          onChange={setIsActive}
-          label={isActive ? "Encendida: Sofi la ofrece" : "Apagada: Sofi no la ofrece"}
-        />
-        <FormAlert error={save.error} />
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
-}
-
-/** «09:30» → 570 minutos; vacío o mal escrito, null. */
-function minutesOf(time: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time)
-  if (!match) return null
-  const minutes = Number(match[1]) * 60 + Number(match[2])
-  return minutes <= 24 * 60 ? minutes : null
 }
 
 /**
@@ -890,29 +930,71 @@ function SlotsSection({
 }) {
   const queryClient = useQueryClient()
   const id = useId()
-  const [start, setStart] = useState("")
-  const [end, setEnd] = useState("")
-  const save = useMutation({
-    mutationFn: (next: { start: number; end: number }[]) =>
-      api(`/api/tiendas/${storeId}/franjas`, { method: "PATCH", body: { slots: next } }),
+  const plain = slots.map((slot) => ({ start: slot.start, end: slot.end }))
+  const saveSlots = (next: { start: number; end: number }[]) =>
+    api(`/api/tiendas/${storeId}/franjas`, { method: "PATCH", body: { slots: next } })
+  const remove = useMutation({
+    mutationFn: saveSlots,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
-      setStart("")
-      setEnd("")
       toast.success("Franjas guardadas")
     },
   })
-  const from = minutesOf(start)
-  const to = minutesOf(end)
-  const plain = slots.map((slot) => ({ start: slot.start, end: slot.end }))
-  const problem =
-    from === null || to === null
-      ? null
-      : from >= to
-        ? "La franja termina después de empezar"
-        : plain.some((slot) => slot.start === from && slot.end === to)
-          ? "Esa franja ya está"
-          : null
+  const add = useMutation({ mutationFn: saveSlots })
+  const form = useAppForm({
+    defaultValues: { start: "", end: "" },
+    validators: {
+      onSubmit: z
+        .object({
+          start: z.string().min(1, "Elige desde qué hora"),
+          end: z.string().min(1, "Elige hasta qué hora"),
+        })
+        .superRefine((value, ctx) => {
+          const from = clockMinutes(value.start)
+          const to = clockMinutes(value.end)
+          if (from === null || to === null) return
+          if (from >= to)
+            ctx.addIssue({
+              code: "custom",
+              path: ["end"],
+              message: "La franja termina después de empezar",
+            })
+          else if (plain.some((slot) => slot.start === from && slot.end === to))
+            ctx.addIssue({ code: "custom", path: ["end"], message: "Esa franja ya está" })
+        }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      const from = clockMinutes(value.start) ?? 0
+      const to = clockMinutes(value.end) ?? 0
+      await add.mutateAsync([...plain, { start: from, end: to }])
+      await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
+      formApi.reset()
+      toast.success("Franjas guardadas")
+    },
+  })
+  const { onSubmit, isSubmitting: pending, error: addError } = useFormSurface(form)
+  const timeField = (name: "start" | "end", label: string) => (
+    <form.AppField name={name}>
+      {(field) => (
+        <field.Control label={label} className="w-36">
+          {(control) => (
+            <TimeSelect
+              id={control.id}
+              step={30}
+              value={field.state.value}
+              onChange={(next) => {
+                field.handleChange(next)
+                field.handleBlur()
+              }}
+              invalid={control.invalid}
+              aria-describedby={control.describedBy}
+              className="w-full"
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
   return (
     <section aria-labelledby={id} className="elevated overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-col gap-1 border-b px-5 py-4">
@@ -941,9 +1023,11 @@ function SlotsSection({
                     size="icon"
                     className="size-7"
                     aria-label={`Quitar la franja ${slot.label}`}
-                    disabled={save.isPending}
+                    disabled={remove.isPending || pending}
                     onClick={() =>
-                      save.mutate(plain.filter((s) => s.start !== slot.start || s.end !== slot.end))
+                      remove.mutate(
+                        plain.filter((s) => s.start !== slot.start || s.end !== slot.end),
+                      )
                     }
                   >
                     <Trash2 aria-hidden />
@@ -954,55 +1038,27 @@ function SlotsSection({
           </ul>
         )}
         {canEdit ? (
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (from !== null && to !== null && !problem)
-                save.mutate([...plain, { start: from, end: to }])
-            }}
-          >
+          <form noValidate className="flex flex-col gap-2" onSubmit={onSubmit}>
             <FieldGroup className="flex-row flex-wrap items-end gap-3">
-              <Field className="w-36">
-                <FieldLabel htmlFor={`${id}-desde`}>Desde</FieldLabel>
-                <Input
-                  id={`${id}-desde`}
-                  type="time"
-                  step={1800}
-                  value={start}
-                  onChange={(e) => setStart(e.target.value)}
-                />
-              </Field>
-              <Field className="w-36" data-invalid={problem ? true : undefined}>
-                <FieldLabel htmlFor={`${id}-hasta`}>Hasta</FieldLabel>
-                <Input
-                  id={`${id}-hasta`}
-                  type="time"
-                  step={1800}
-                  value={end}
-                  onChange={(e) => setEnd(e.target.value)}
-                  aria-invalid={problem ? true : undefined}
-                  aria-describedby={problem ? `${id}-problema` : undefined}
-                />
-              </Field>
-              <SubmitButton
-                type="submit"
-                variant="outline"
-                pending={save.isPending}
-                disabled={from === null || to === null || Boolean(problem)}
-              >
+              {timeField("start", "Desde")}
+              {timeField("end", "Hasta")}
+              <SubmitButton type="submit" variant="outline" pending={pending}>
                 <Plus aria-hidden />
                 Agregar franja
               </SubmitButton>
             </FieldGroup>
-            {problem ? (
-              <FieldError id={`${id}-problema`} className="basis-full">
-                {problem}
-              </FieldError>
+            {addError ? (
+              <p role="alert" className="text-sm text-danger">
+                {addError}
+              </p>
             ) : null}
           </form>
         ) : null}
-        <FormAlert error={save.error} />
+        {remove.isError ? (
+          <p role="alert" className="text-sm text-danger">
+            {submitErrorMessage(remove.error)}
+          </p>
+        ) : null}
       </div>
     </section>
   )

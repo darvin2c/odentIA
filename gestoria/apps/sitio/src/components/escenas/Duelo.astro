@@ -1,0 +1,42 @@
+---
+// El duelo (web v5): la misma venta con otra herramienta y con gestorIA, paso a paso. Del lado del
+// otro, cada paso es una tarea «Por hacer» para ti; del lado del ARM, el visto de quien lo hizo.
+// Al final, cuántas tareas te quedan en cada lado. Se anima con `duelo()` de scripts/arm.ts.
+import type { FilaDuelo } from "../../lib/arm"
+
+interface Props {
+  otro: string
+  filas: FilaDuelo[]
+}
+const { otro, filas } = Astro.props
+const tuyasOtro = filas.length
+const tuyasArm = filas.filter((f) => f.tuyo).length
+const visto =
+  '<svg class="duelo__visto" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+---
+<div class="duelo" data-duelo>
+  <p class="duelo__msg" data-duelo-msg><span>21:14 · Andrea, por WhatsApp</span>«¿Tienes la zapatilla blanca en talla 38?»</p>
+  <div class="duelo__tabla" role="table" aria-label={`La misma venta con ${otro.toLowerCase()} y con gestorIA`}>
+    <div class="duelo__fila duelo__fila--cabeza" role="row">
+      <span class="duelo__paso" role="columnheader">Paso</span>
+      <span class="duelo__celda duelo__celda--otro" role="columnheader">Con {otro.toLowerCase()}</span>
+      <span class="duelo__celda duelo__celda--arm" role="columnheader">Con <span class="marca-texto">gestorIA</span> <small>ARM</small></span>
+    </div>
+    {filas.map((f) => (
+      <div class="duelo__fila" role="row" data-duelo-fila>
+        <span class="duelo__paso" role="rowheader">{f.paso}</span>
+        <span class="duelo__celda duelo__celda--otro" role="cell">
+          <span>{f.otro}</span><em class="duelo__tag">Por hacer</em>
+        </span>
+        <span class={`duelo__celda duelo__celda--arm${f.tuyo ? " es-tuyo" : ""}`} role="cell">
+          <Fragment set:html={visto} /><span><b>{f.quien}</b> {f.arm}</span>
+        </span>
+      </div>
+    ))}
+    <div class="duelo__fila duelo__fila--fin" role="row">
+      <span class="duelo__paso" role="rowheader">Tareas para ti</span>
+      <span class="duelo__celda duelo__celda--otro" role="cell" data-duelo-fin><b data-cuenta-d={tuyasOtro}>{tuyasOtro}</b> de {filas.length}</span>
+      <span class="duelo__celda duelo__celda--arm" role="cell" data-duelo-fin><b data-cuenta-d={tuyasArm}>{tuyasArm}</b> de {filas.length}</span>
+    </div>
+  </div>
+</div>

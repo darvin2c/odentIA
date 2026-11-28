@@ -1,4 +1,10 @@
-import { type Db, MAX_PHOTO_BYTES, type PhotoType } from "@gestoria/db"
+import {
+  type Db,
+  MAX_PHOTO_BYTES,
+  type PhotoType,
+  STORE_IMAGE_KINDS,
+  type StoreImageKind,
+} from "@gestoria/db"
 import { APP_CONTRACT_PATHS, CONTRACT_MAX_RECEIPT_BYTES } from "@odentia/contract"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -7,18 +13,22 @@ import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
 import {
+  askAriadna,
   askForHelp,
   askSupport,
   type ContractConfig,
+  helpAskInput,
+  helpCases,
+  helpFeedbackInput,
   helpRequestInput,
-  helpView,
+  helpScreen,
   planReceiptInput,
   planView,
+  sendHelpFeedback,
   sendReceipt,
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
-import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   choicesInput,
   deviceInput,
@@ -29,6 +39,7 @@ import {
   storeChoices,
   subscribeInput,
 } from "./avisos.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   createExchange,
   exchangeInput,
@@ -64,6 +75,7 @@ import {
   updateCustomer,
 } from "./clientes.js"
 import {
+  configOverview,
   createDelivery,
   createPayment,
   deleteDelivery,
@@ -92,10 +104,10 @@ import { storeHome } from "./inicio.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
   brandInput,
+  checkLinkName,
+  type ImageChange,
   imageKindOf,
-  putStoreImage,
-  removeStoreImage,
-  setStoreBrand,
+  saveStoreBrand,
   setStoreData,
   storeBrand,
   storeDataInput,
@@ -145,6 +157,7 @@ import {
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import { correctFact, factInput } from "./perfil.js"
 import { skipInput, skipStep } from "./primeros-pasos.js"
 import { setDeliverySlots, slotsInput } from "./repartidores.js"
 import { argosBoard } from "./sofi/argos.js"
@@ -207,7 +220,9 @@ type Env = { Variables: { person: Person } }
 /** Lo más que pesa un aviso de la cuenta o un pedido de la app. */
 const MAX_BODY_BYTES = 64 * 1024
 /** Una foto (ya achicada por la pantalla) y una hoja del catálogo pesan más: su ruta tiene su tope. */
-const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/(productos\/[^/]+\/fotos|marca\/[^/]+)$/
+const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
+/** «Guardar» de Tu marca lleva el logo y la portada, cada una con su tope, y unos pocos campos. */
+const BRAND_SAVE = /^\/api\/tiendas\/[^/]+\/marca$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 /** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
 /** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
@@ -307,6 +322,10 @@ export function createApp(deps: AppDeps) {
     })
   const small = limit(MAX_BODY_BYTES, "Pedido demasiado grande")
   const photo = limit(MAX_PHOTO_BYTES, "La foto pesa demasiado. Prueba con otra más chica.")
+  const brandSave = limit(
+    2 * MAX_PHOTO_BYTES + 16 * 1024,
+    "El logo o la portada pesan demasiado. Prueba con otra más chica.",
+  )
   const sheet = limit(MAX_SHEET_BYTES, "La hoja es muy grande: divídela en partes")
   const receipt = limit(
     MAX_PHOTO_BYTES + 16 * 1024,
@@ -318,6 +337,7 @@ export function createApp(deps: AppDeps) {
   )
   app.use("*", (c, next) => {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
+    if (c.req.method === "POST" && BRAND_SAVE.test(c.req.path)) return brandSave(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
     if (c.req.method === "POST" && RECEIPT_UPLOAD.test(c.req.path)) return receipt(c, next)
     if (c.req.method === "POST" && PLAN_RECEIPT_UPLOAD.test(c.req.path)) return planReceipt(c, next)
@@ -418,26 +438,49 @@ export function createApp(deps: AppDeps) {
   app.get("/api/tiendas/:id/marca", async (c) =>
     c.json({ brand: await storeBrand(deps.appDb, c.get("person"), c.req.param("id")) }),
   )
-  app.patch("/api/tiendas/:id/marca", async (c) => {
-    const input = await bodyOf(c, brandInput)
+  // «Guardar» de Tu marca: todo de una vez, en un formulario con el logo y la portada si cambian.
+  app.post("/api/tiendas/:id/marca", async (c) => {
+    let form: FormData
+    try {
+      form = await c.req.formData()
+    } catch {
+      throw new StoreError(400, "VALIDATION_ERROR", "Tu marca no se pudo leer")
+    }
+    const parsed = brandInput.safeParse({
+      publicName: String(form.get("publicName") ?? ""),
+      brandColor: String(form.get("brandColor") ?? ""),
+      link: form.get("link") ? String(form.get("link")) : null,
+    })
+    if (!parsed.success) throw parsed.error
+    const remove = new Set(form.getAll("quitar").map(String))
+    const images: Partial<Record<StoreImageKind, ImageChange>> = {}
+    for (const kind of STORE_IMAGE_KINDS) {
+      const file = form.get(kind)
+      if (file instanceof File && file.size > 0)
+        images[kind] = new Uint8Array(await file.arrayBuffer())
+      else if (remove.has(kind)) images[kind] = "quitar"
+    }
     return c.json({
-      brand: await setStoreBrand(deps.appDb, c.get("person"), c.req.param("id"), input),
+      brand: await saveStoreBrand(
+        deps.appDb,
+        c.get("person"),
+        c.req.param("id"),
+        parsed.data,
+        images,
+      ),
     })
   })
-  // El logo o la portada: su contenido tal cual (se mira qué es por sus primeros bytes).
-  app.post("/api/tiendas/:id/marca/:kind", async (c) => {
-    const kind = imageKindOf(c.req.param("kind"))
-    const bytes = new Uint8Array(await c.req.arrayBuffer())
-    return c.json({
-      brand: await putStoreImage(deps.appDb, c.get("person"), c.req.param("id"), kind, bytes),
-    })
-  })
-  app.delete("/api/tiendas/:id/marca/:kind", async (c) => {
-    const kind = imageKindOf(c.req.param("kind"))
-    return c.json({
-      brand: await removeStoreImage(deps.appDb, c.get("person"), c.req.param("id"), kind),
-    })
-  })
+  // Lo que se dice del nombre del link mientras se escribe (antes que `:kind`).
+  app.get("/api/tiendas/:id/marca/link", async (c) =>
+    c.json({
+      check: await checkLinkName(
+        deps.appDb,
+        c.get("person"),
+        c.req.param("id"),
+        (c.req.query("nombre") ?? "").slice(0, 80),
+      ),
+    }),
+  )
   app.get("/api/tiendas/:id/marca/:kind", async (c) => {
     const kind = imageKindOf(c.req.param("kind"))
     const image = await storeImageContent(deps.appDb, c.get("person"), c.req.param("id"), kind)
@@ -486,6 +529,12 @@ export function createApp(deps: AppDeps) {
 
   app.post("/api/invitaciones/:id/aceptar", async (c) =>
     c.json(await acceptInvitation(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+
+  // Configuración abre con «Lo que falta para vender» (lienzo «gestorIA · Configuración, de
+  // nuevo», tablero 3): cómo está cada parte, con lo guardado en cada una.
+  app.get("/api/tiendas/:id/configuracion/resumen", async (c) =>
+    c.json(await configOverview(deps.appDb, c.get("person"), c.req.param("id"))),
   )
 
   // La configuración (B3): medios de pago y formas de entrega.
@@ -831,6 +880,12 @@ export function createApp(deps: AppDeps) {
     const { id, customerId } = c.req.param()
     return c.json(await separateCustomer(deps.appDb, c.get("person"), id, customerId))
   })
+  // «Corregir» un dato de «Lo que Argos sabe de ella»: queda «Lo puso la tienda».
+  app.post("/api/tiendas/:id/clientes/:customerId/datos", async (c) => {
+    const input = await bodyOf(c, factInput)
+    const { id, customerId } = c.req.param()
+    return c.json(await correctFact(deps.appDb, c.get("person"), id, customerId, input))
+  })
 
   // El link de pago de la tienda (B4): se conecta en Pagos y entregas.
   app.get("/api/tiendas/:id/link-de-pago", async (c) =>
@@ -873,8 +928,8 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/conversaciones/:conversationId/cliente", async (c) => {
     const input = await bodyOf(c, customerMessageInput)
     const { id, conversationId } = c.req.param()
-    // Primero el permiso: quien no es del equipo no gasta el cupo de la tienda.
-    await inStore(deps.appDb, c.get("person"), id, "ventas.atender", async () => {})
+    // Primero el permiso: quien no prueba a Sofi (Configuración) no gasta el cupo de la tienda.
+    await inStore(deps.appDb, c.get("person"), id, "configuracion", async () => {})
     const now = Date.now()
     const seen = testsBy.get(id)
     if (!seen || now - seen.since > TEST_WINDOW_MS) testsBy.set(id, { since: now, count: 1 })
@@ -943,16 +998,44 @@ export function createApp(deps: AppDeps) {
     return c.body(null, 204)
   })
 
-  // La Ayuda (entrega 7, tablero 19): la guía para el rol de quien la abre y sus preguntas, y
-  // «Pedir ayuda» para todo el equipo.
-  app.get("/api/tiendas/:id/ayuda", async (c) =>
-    c.json(await helpView(deps.appDb, contract, c.get("person"), c.req.param("id"))),
+  // La Ayuda (ADR 0227): el panel común de todas las apps pide aquí la pantalla, le pregunta a
+  // Ariadna con la guía de gestorIA, dice si le sirvió y escribe a soporte. «Tus casos con
+  // soporte» es de quien puede escribirle (`ayuda.pedir`).
+  app.get("/api/tiendas/:id/ayuda/screen", async (c) =>
+    c.json({
+      data: await helpScreen(
+        deps.appDb,
+        c.get("person"),
+        c.req.param("id"),
+        (c.req.query("path") ?? "/").slice(0, 300),
+      ),
+    }),
   )
-  app.post("/api/tiendas/:id/ayuda", async (c) => {
+  app.post("/api/tiendas/:id/ayuda/ask", async (c) => {
+    const input = await bodyOf(c, helpAskInput)
+    return c.json({
+      data: await askAriadna(deps.appDb, contract, c.get("person"), c.req.param("id"), input),
+    })
+  })
+  app.post("/api/tiendas/:id/ayuda/ask/:askId/feedback", async (c) => {
+    const { id, askId } = c.req.param()
+    const { helpful } = await bodyOf(c, helpFeedbackInput)
+    await sendHelpFeedback(deps.appDb, contract, c.get("person"), id, askId, { helpful })
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/ayuda/ask/:askId/none", async (c) => {
+    const { id, askId } = c.req.param()
+    await sendHelpFeedback(deps.appDb, contract, c.get("person"), id, askId, { noneFits: true })
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/ayuda/requests", async (c) => {
     const input = await bodyOf(c, helpRequestInput)
     await askForHelp(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
     return c.body(null, 204)
   })
+  app.get("/api/tiendas/:id/ayuda/casos", async (c) =>
+    c.json(await helpCases(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
 
   // Soporte de gestorIA (ADR 0214): el Dueño o un Administrador lo deja entrar, o no, y lo saca.
   app.post("/api/tiendas/:id/soporte/:accessId/aceptar", async (c) => {

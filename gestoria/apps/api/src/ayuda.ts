@@ -1,44 +1,215 @@
+import type { HelpAskAnswer, HelpGuideTopic } from "@odentia/contract"
 import { can, ROLE_NAMES, type StorePermission, type StoreSeat } from "./permisos.js"
 
 /**
- * La guía de la Ayuda de gestorIA (entrega 7 del lienzo «gestorIA como odentIA», tablero 19): una
- * pregunta por tarea, con su respuesta y quién puede hacerla. Es la misma idea de la guía de las
- * clínicas (`packages/services/src/help-guide.ts`), sin sus pantallas: las de una tienda son otras.
- * Más adelante, el asistente que contesta solo responde desde aquí (decisión 6).
+ * La guía de la Ayuda de gestorIA (entrega 7 del lienzo «gestorIA como odentIA», tablero 19; ADR
+ * 0227): una pregunta por tarea, con su respuesta y quién puede hacerla. Es la misma idea de la
+ * guía de las clínicas (`packages/services/src/help-guide.ts`), sin sus pantallas: las de una
+ * tienda son otras. Ariadna, la de todas las apps, responde solo desde aquí: viaja entera en cada
+ * pregunta (`helpTopics`) y vuelve en ids de esta guía, que aquí se hacen texto (`helpReplyOf`).
  *
  * - Dice solo lo que gestorIA hace hoy. Lo que todavía no existe no se promete: se suma cuando
  *   llega su pantalla, en el mismo cambio.
  * - Quién puede hacerlo sale de `permisos.ts` (`needs`), nunca del texto: las respuestas no nombran
  *   roles (lo prueba `ayuda.test.ts`).
- * - Cada pregunta lleva a su pantalla, si el rol de quien lee puede abrirla.
+ * - Cada respuesta lleva a su pantalla, si el rol de quien lee puede abrirla.
  */
 
-/** Las pantallas de la tienda a las que lleva una respuesta: su ruta y lo que hace falta para abrirla. */
+/**
+ * Las pantallas de la tienda a las que lleva una respuesta: su ruta, lo que hace falta para
+ * abrirla y, para Ariadna, para qué sirve y con qué palabras la busca la gente.
+ */
 export const HELP_SCREENS = {
-  inicio: { label: "Inicio", path: "/", opens: "ventas.atender" },
-  despachos: { label: "Despachos", path: "/despachos", opens: "entregas" },
-  pedidos: { label: "Pedidos", path: "/pedidos", opens: "ventas.atender" },
-  catalogo: { label: "Catálogo", path: "/catalogo", opens: "catalogo.ver" },
-  caja: { label: "Caja", path: "/caja", opens: "caja" },
-  reportes: { label: "Reportes", path: "/reportes", opens: "reportes.ver" },
-  // Configuración, al pie del menú: cada apartado lo abre quien puede cambiarlo.
-  datos: { label: "Datos de la tienda", path: "/configuracion", opens: "configuracion" },
-  marca: { label: "Tu marca", path: "/configuracion/marca", opens: "configuracion" },
-  equipo: { label: "Equipo", path: "/configuracion/equipo", opens: "equipo.gestionar" },
-  sofi: { label: "Sofi", path: "/configuracion/sofi", opens: "configuracion" },
-  pagos: { label: "Medios de pago", path: "/configuracion/medios-de-pago", opens: "configuracion" },
+  inicio: {
+    label: "Inicio",
+    path: "/",
+    opens: "ventas.atender",
+    purpose:
+      "Lo que toca hacer hoy en la tienda, con las cifras del día, y los primeros pasos de una tienda que empieza.",
+    terms: [
+      "inicio",
+      "hoy",
+      "pendientes",
+      "qué hago",
+      "primeros pasos",
+      "empezar",
+      "cifras del día",
+    ],
+  },
+  despachos: {
+    label: "Despachos",
+    path: "/despachos",
+    opens: "entregas",
+    purpose:
+      "Lo que sale cada día y quién lo lleva: marcar que salió o se entregó, el repartidor, la agencia, avisar a la clienta y lo que no se entregó.",
+    terms: [
+      "despachos",
+      "entregas",
+      "reparto",
+      "repartidor",
+      "delivery",
+      "agencia",
+      "número de envío",
+      "salió",
+      "no se entregó",
+      "otro día",
+    ],
+  },
+  pedidos: {
+    label: "Pedidos",
+    path: "/pedidos",
+    opens: "ventas.atender",
+    purpose:
+      "Los pedidos de la tienda: anotarlos, cobrarlos, confirmar sus pagos, corregirlos, anularlos y hacer cambios o devoluciones.",
+    terms: [
+      "pedidos",
+      "pedido",
+      "venta",
+      "cobrar",
+      "pago",
+      "captura",
+      "link de pago",
+      "anular",
+      "cambio",
+      "devolución",
+    ],
+  },
+  clientes: {
+    label: "Clientes",
+    path: "/clientes",
+    opens: "ventas.atender",
+    purpose:
+      "Cada clienta con sus compras y lo que Argos sabe de ella (talla, distrito, cumpleaños, canal), con su fuente, para corregirlo, y si acepta promociones.",
+    terms: [
+      "clientes",
+      "clientas",
+      "ficha",
+      "talla",
+      "distrito",
+      "cumpleaños",
+      "corregir",
+      "promociones",
+      "baja",
+      "Argos",
+    ],
+  },
+  catalogo: {
+    label: "Catálogo",
+    path: "/catalogo",
+    opens: "catalogo.ver",
+    purpose:
+      "Los productos de la tienda con sus variantes, fotos, precios, precio mínimo, promociones y stock.",
+    terms: ["catálogo", "productos", "stock", "inventario", "kardex", "tallas", "fotos", "precio"],
+  },
+  caja: {
+    label: "Caja",
+    path: "/caja",
+    opens: "caja",
+    purpose:
+      "El efectivo por recibir de cada repartidor y de la tienda, lo cobrado del día por medio de pago y lo que falta cobrar en las entregas del día.",
+    terms: ["caja", "efectivo", "recibir", "cuadrar", "repartidor", "cobrado hoy", "arqueo"],
+  },
+  reportes: {
+    label: "Reportes",
+    path: "/reportes",
+    opens: "reportes.ver",
+    purpose:
+      "Lo vendido y cobrado, lo que falta cobrar, lo más vendido, lo que se acaba y lo que hicieron Sofi y Argos.",
+    terms: ["reportes", "cuánto vendí", "ventas del mes", "cifras", "estadísticas", "Argos"],
+  },
+  // Configuración, al pie del menú: abre en «Lo que falta» y cada apartado lo abre quien puede
+  // cambiarlo.
+  configuracion: {
+    label: "Lo que falta",
+    path: "/configuracion",
+    opens: "configuracion",
+    purpose:
+      "La entrada de Configuración: lo que falta para vender, cada cosa con su botón, cómo está cada parte y el buscador de Configuración.",
+    terms: ["configuración", "lo que falta", "qué me falta", "ajustes", "buscar en configuración"],
+  },
+  datos: {
+    label: "Datos de la tienda",
+    path: "/configuracion/datos",
+    opens: "configuracion",
+    purpose: "El nombre de la tienda, su país y su hora.",
+    terms: ["datos de la tienda", "nombre", "hora", "zona horaria", "país", "moneda"],
+  },
+  marca: {
+    label: "Tu marca",
+    path: "/configuracion/marca",
+    opens: "configuracion",
+    purpose: "El logo, el color, la foto de portada y el nombre del link de la tienda.",
+    terms: ["marca", "logo", "color", "portada", "link de la tienda"],
+  },
+  equipo: {
+    label: "Equipo y repartidores",
+    path: "/configuracion/equipo",
+    opens: "equipo.gestionar",
+    purpose:
+      "Quiénes trabajan en la tienda y con qué rol, sus invitaciones, los repartidores, y si soporte pide mirar la tienda o quién la miró.",
+    terms: ["equipo", "invitar", "roles", "usuarios", "permisos", "soporte", "repartidores"],
+  },
+  sofi: {
+    label: "Sofi",
+    path: "/configuracion/sofi",
+    opens: "configuracion",
+    purpose:
+      "Cómo vende Sofi, la vendedora de la tienda: lo que debe saber, sus seguimientos y la prueba escribiéndole como cliente.",
+    terms: ["Sofi", "vendedora", "asistente", "bot", "probar", "seguimientos", "horario"],
+  },
+  pagos: {
+    label: "Cobros",
+    path: "/configuracion/medios-de-pago",
+    opens: "configuracion",
+    purpose:
+      "Los medios de pago que ofrece Sofi (Yape, Plin, transferencias) y la conexión con Mercado Pago para los links de pago.",
+    terms: [
+      "cobros",
+      "medios de pago",
+      "Yape",
+      "Plin",
+      "transferencia",
+      "cuenta bancaria",
+      "Mercado Pago",
+    ],
+  },
   entregas: {
-    label: "Formas de entrega y zonas",
+    label: "Entregas",
     path: "/configuracion/entregas",
     opens: "configuracion",
+    purpose:
+      "Las formas de entrega (reparto, recojo en tienda o agencia), su precio por zona, cuándo llega y desde qué compra es gratis.",
+    terms: ["entregas", "envío", "delivery", "zonas", "agencia", "recojo", "costo de envío"],
   },
-  avisos: { label: "Avisos al celular", path: "/configuracion/avisos", opens: "avisos.recibir" },
-  plan: { label: "Plan y pagos", path: "/configuracion/plan", opens: "plan" },
-} as const satisfies Record<string, { label: string; path: `/${string}`; opens: StorePermission }>
+  avisos: {
+    label: "Avisos al celular",
+    path: "/configuracion/avisos",
+    opens: "avisos.recibir",
+    purpose:
+      "Recibir en el celular los avisos de lo que tu rol puede resolver (pagos por confirmar, chats, entregas), aunque gestorIA esté cerrada, y elegir cuáles.",
+    terms: ["avisos", "notificaciones", "celular", "push", "instalar", "alertas"],
+  },
+  plan: {
+    label: "Plan y pagos",
+    path: "/configuracion/plan",
+    opens: "plan",
+    purpose: "El plan de la tienda, lo que se le cobró, sus pagos y los comprobantes.",
+    terms: ["plan", "cobro", "pagar el plan", "comprobante", "suscripción", "factura"],
+  },
+} as const satisfies Record<
+  string,
+  {
+    label: string
+    path: `/${string}`
+    opens: StorePermission
+    purpose: string
+    terms: readonly string[]
+  }
+>
 export type HelpScreen = keyof typeof HELP_SCREENS
 
 export interface HelpFaq {
-  /** Su nombre fijo: no cambia aunque se reescriba la pregunta (`?pregunta=` de la Ayuda). */
+  /** Su nombre fijo, único en la guía: es el que vuelve de Ariadna (`faq:<id>`). */
   id: string
   q: string
   /** La respuesta, en párrafos cortos. */
@@ -46,6 +217,11 @@ export interface HelpFaq {
   /** El permiso para hacer lo que explica: de ahí sale quién puede. */
   needs: StorePermission
   screen: HelpScreen
+  /**
+   * Se sugiere solo a quien NO tiene `needs`: la pregunta es por qué no puede (como Ventas en
+   * Configuración). Su respuesta lleva a quién pedírselo (`restrictionFor`).
+   */
+  forWhoCannot?: true
 }
 
 export interface HelpGroup {
@@ -155,7 +331,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo le mando un link de pago?",
         a: [
           "En el pedido por pagar, «Crear link de pago» y después «Copiar el link», para pegarlo en la conversación. Cuando paga, el pedido pasa a pagado solo.",
-          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Medios de pago, o venció el precio acordado.",
+          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Cobros, o venció el precio acordado.",
         ],
         needs: "ventas.atender",
         screen: "pedidos",
@@ -314,6 +490,44 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
     ],
   },
   {
+    id: "clientas",
+    title: "Clientas",
+    faqs: [
+      {
+        id: "lo-que-sabe-argos",
+        q: "¿De dónde saca Argos lo que sabe de una clienta?",
+        a: [
+          "En la ficha de cada clienta, «Lo que Argos sabe de ella»: su talla (o como se llame la medida en tu catálogo), su distrito, su cumpleaños, por dónde prefiere escribir, su Instagram y lo que le gusta. Nadie tiene que llenarlo: Argos lo anota solo, de sus compras y de lo que ella escribió en el chat.",
+          "Cada dato dice de dónde salió y cuándo: sus compras, la dirección de una entrega o lo que ella dijo, con sus palabras tal cual. Lo que ella no dijo, Argos no lo supone. Lo que no tiene claro, como dos tallas que compra por igual, lo usa igual y lo marca «Por confirmar»: no frena ninguna venta.",
+          "Lee cada conversación cuando ella deja de escribir un rato, nunca a media conversación, y no lee las de prueba. Tampoco junta fichas por el teléfono: si dos fichas son la misma clienta, lo decide una persona.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "corregir-dato",
+        q: "¿Cómo corrijo un dato de una clienta?",
+        a: [
+          "En su ficha, en «Lo que Argos sabe de ella», «Corregir» junto al dato. Lo que pones queda «Lo puso la tienda», con tu nombre, y Argos ya no lo cambia aunque ella diga otra cosa después.",
+          "Nada se borra: cada dato guarda su historial, con lo que anotó Argos antes y lo que corrigió la tienda. Si un dato está «Por confirmar», al corregirlo eliges el que es.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "no-quiere-promociones",
+        q: "¿Qué pasa si una clienta dice que no quiere promociones?",
+        a: [
+          "En su ficha, «Cuándo se le puede escribir» dice lo último que ella contestó sobre las «Promociones»: «Acepta», «Pidió que no le escriban» o «Sin permiso todavía». Sofi se lo pregunta en su primera compra y anota lo que ella responde, con sus palabras.",
+          "Si en el chat pide que no le escriban más, Sofi lo anota en ese momento y desde entonces no se le escriben promociones. Lo de sus pedidos, como el pago y la entrega, sigue igual.",
+          "Nadie del equipo puede decir por ella que sí: solo cambia si ella lo vuelve a escribir.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+    ],
+  },
+  {
     id: "catalogo",
     title: "Catálogo",
     faqs: [
@@ -367,11 +581,43 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "configuracion",
         q: "¿Dónde se ajusta la tienda y por qué hay quien no ve Configuración?",
         a: [
-          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega, tus avisos al celular y el plan. Se ajusta una vez y lo usan las demás pantallas.",
-          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración ve ahí solo sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En Configuración, al pie del menú, por tareas: «Tu tienda» (los datos de la tienda y Tu marca), «Vender» (Sofi, Cobros y Entregas), «Tu equipo» (Equipo y repartidores), «Para ti» (tus avisos al celular) y «Tu cuenta gestorIA» (el plan). Se ajusta una vez y lo usan las demás pantallas.",
+          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración, al abrir Configuración llega directo a sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En el celular, Configuración es una lista: cada parte se abre en su pantalla y «Configuración», arriba, vuelve a la lista.",
         ],
         needs: "configuracion",
-        screen: "datos",
+        screen: "configuracion",
+      },
+      {
+        id: "lo-que-falta",
+        q: "¿Qué me falta para vender y cómo está cada parte?",
+        a: [
+          "Configuración abre en «Lo que falta»: arriba, lo que falta para vender, cada cosa con su botón para hacerla (como «Probar a Sofi»); lo que ya está lleva su ✓. Es la misma cuenta que «Tu tienda está casi lista» de Inicio. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano.",
+          "Debajo, en «Para vender más», lo que ayuda pero no frena la venta, como tu logo o «Conectar pasarela» para cobrar por link: no se cuenta como falta. Cuando no falta nada, lo dice en una línea.",
+          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin probar» o «Por pagar». Toca la línea para abrirla.",
+        ],
+        needs: "configuracion",
+        screen: "configuracion",
+      },
+      {
+        id: "configuracion-sin-permiso",
+        q: "¿Por qué en Configuración solo veo mis avisos?",
+        a: [
+          "En Configuración cada quien ve lo que puede cambiar. Tus avisos al celular son tuyos: eliges tú qué te llega.",
+          "Los datos de la tienda, Tu marca, Sofi, Cobros, Entregas y el equipo los cambia quien configura la tienda. Tú sigues atendiendo y vendiendo con lo que ahí se puso; si algo hay que cambiar, pídeselo.",
+        ],
+        needs: "configuracion",
+        screen: "avisos",
+        forWhoCannot: true,
+      },
+      {
+        id: "buscar-en-configuracion",
+        q: "No encuentro dónde se cambia algo, ¿cómo lo busco?",
+        a: [
+          "Arriba de la lista de Configuración, en «Buscar en Configuración», escribe con tus palabras: «yape», «shalom», «envío gratis», «horario» o el nombre de alguien de tu equipo. Cada resultado dice en qué parte está; con las flechas eliges y con Enter lo abres.",
+        ],
+        needs: "configuracion",
+        screen: "configuracion",
       },
       {
         id: "hora-de-la-tienda",
@@ -386,8 +632,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "tu-marca",
         q: "¿Cómo pongo mi logo y el color de mi marca?",
         a: [
-          "En Configuración, en Tu marca: el logo, el nombre que ve el cliente, la foto de portada, el nombre del link de tu tienda y el color. Te sugerimos colores de tu logo y de una foto de tu letrero; cualquier color vale, y los tonos para que se lea bien se calculan solos.",
-          "El color se ve en gestorIA para todo tu equipo. El nombre del link va sin tildes ni espacios, y algunos nombres están reservados.",
+          "En Configuración, en Tu marca: suelta tu logo en el recuadro o pégalo con Ctrl + V; si aún no tienes logo, también lo eliges con «Elegir imagen», y si ya tienes uno, lo cambias con «Cambiar». Con «Ajustar» lo recortas. Salen los colores de tu logo: toca uno, o usa «Otro color». Cualquier color vale; si no se lee bien, te lo dice y los botones usan un tono más oscuro.",
+          "También pones la portada, el nombre que ve la clienta y tu link, sin tildes ni espacios: al escribirlo te dice si está libre. Al lado (en el celular, «Ver cómo queda») ves cómo lo verá tu clienta. Nada se guarda hasta «Guardar»; si sales antes, te pregunta.",
         ],
         needs: "configuracion",
         screen: "marca",
@@ -396,7 +642,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Medios de pago, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -405,7 +651,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Formas de entrega y zonas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
+          "En Configuración, en Entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
           "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
@@ -415,7 +661,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Medios de pago, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -435,7 +681,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "invitar",
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
-          "En Configuración, en Equipo, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
+          "En Configuración, en Equipo y repartidores, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -445,7 +691,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Qué ve soporte cuando lo dejo entrar y cómo sé si entró?",
         a: [
           "Soporte de gestorIA entra solo si lo dejan entrar, y por los minutos que pidió, que empiezan cuando lo dejan entrar. Ve tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Solo el equipo de gestorIA puede pedirlo.",
-          "En Configuración, en Equipo, ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
+          "Cuando soporte pide mirar tu tienda, lo ves una sola vez en la franja de arriba, en cualquier pantalla: «Revisar» te lleva a Configuración, en Equipo y repartidores, donde respondes «Dejar entrar» o «No». Mientras mira, la franja lo dice hasta que termina.",
+          "En Equipo y repartidores ves también quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -492,39 +739,259 @@ export function whoCan(permission: StorePermission): string {
   return `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
 }
 
-/** Una respuesta como la ve quien lee: quién puede, si puede quien lee y su pantalla, si la abre. */
-export interface HelpFaqView {
-  id: string
-  q: string
-  a: readonly string[]
-  /** «Dueño, Administrador y Ventas». */
-  who: string
-  /** Cuántos roles pueden: para decir «Lo puede hacer» o «Lo pueden hacer». */
-  whoCount: number
-  /** Si el rol de quien lee puede hacerlo. */
-  you: boolean
-  /** Su pantalla, solo si quien lee puede abrirla. */
-  screen: { label: string; path: string } | null
+/* ---------- Lo que la Ayuda muestra y lo que Ariadna lee ---------- */
+
+const SCREEN_KEYS = Object.keys(HELP_SCREENS) as HelpScreen[]
+const FAQS = HELP_GUIDE.flatMap((group) => group.faqs)
+
+/** Lo que dice cuando no responde. */
+export const HELP_WORDS = {
+  notInGuide: "Esto no está en la guía, y no quiero inventarlo.",
+  cannotSearch: "Ahora no puedo buscar bien en la guía.",
+  doubt: "No estoy segura de qué preguntas. ¿Es alguna de estas?",
+} as const
+
+/** Una respuesta de la guía como la muestra el panel común (`helpReply` de la Ayuda). */
+export interface HelpAnswerText {
+  topicId: string
+  where: string
+  text: string
+  /** Su pantalla en la tienda, solo si el rol de quien pregunta la abre. */
+  path: string | null
+  /** Si su rol no puede hacerlo: a quién pedírselo. */
+  restriction: string | null
 }
 
-/** La guía para un rol: todas las preguntas (cada una dice quién puede), con lo suyo marcado. */
-export function helpGuideFor(
+/** Lo que responde la Ayuda, con la forma del panel común (`helpReply` de `@odentia/ui-patterns`). */
+export interface HelpReplyBody {
+  askId: string
+  kind: "guia" | "duda" | "nada" | "datos"
+  say: string | null
+  written: string | null
+  answers: HelpAnswerText[]
+  blockers: { text: string; where: string | null; path: string | null }[]
+  choices: { question: string; where: string }[]
+  /** gestorIA no tiene un agente de las cifras en la Ayuda. */
+  argos: false
+  argosNote: null
+  basedOn: string
+}
+
+/** La ruta dentro de la tienda, sin lo que va tras `?` o `#`: `/tiendas/<id>/pedidos` → `/pedidos`. */
+export function storePath(path: string, storeId: string): string {
+  const base = `/tiendas/${storeId}`
+  const bare = path.split(/[?#]/, 1)[0] ?? ""
+  const inside = bare === base || bare.startsWith(`${base}/`) ? bare.slice(base.length) : bare
+  return (inside.startsWith("/") ? inside : `/${inside}`).slice(0, 200)
+}
+
+/** La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. */
+export function helpScreenOf(path: string): HelpScreen | null {
+  let found: HelpScreen | null = null
+  for (const key of SCREEN_KEYS) {
+    const screen: string = HELP_SCREENS[key].path
+    const inside = screen === "/" ? path === "/" : path === screen || path.startsWith(`${screen}/`)
+    if (inside && (!found || screen.length > HELP_SCREENS[found].path.length)) found = key
+  }
+  return found
+}
+
+/** El nombre de la pantalla y hasta tres preguntas suyas que el rol de quien la abre puede hacer. */
+export function helpScreenView(
   seat: StoreSeat,
-): { id: string; title: string; faqs: HelpFaqView[] }[] {
-  return HELP_GUIDE.map((group) => ({
-    id: group.id,
-    title: group.title,
-    faqs: group.faqs.map((faq) => {
-      const screen = HELP_SCREENS[faq.screen]
-      return {
+  path: string,
+): { title: string | null; suggestions: string[] } {
+  const screen = helpScreenOf(path)
+  if (!screen) return { title: null, suggestions: [] }
+  return {
+    title: HELP_SCREENS[screen].label,
+    suggestions: FAQS.filter(
+      (faq) =>
+        faq.screen === screen &&
+        (faq.forWhoCannot
+          ? !can(seat, faq.needs) && can(seat, HELP_SCREENS[screen].opens)
+          : can(seat, faq.needs)),
+    )
+      .slice(0, 3)
+      .map((faq) => faq.q),
+  }
+}
+
+/** La guía entera para Ariadna: un tema por pantalla, con sus preguntas. Nada de la tienda. */
+export function helpTopics(): HelpGuideTopic[] {
+  return SCREEN_KEYS.map((key) => {
+    const screen = HELP_SCREENS[key]
+    return {
+      id: key,
+      path: screen.path,
+      title: screen.label,
+      // Los apartados de Configuración cuelgan de ella en el menú.
+      parent: screen.path.startsWith("/configuracion") ? "Configuración" : null,
+      purpose: screen.purpose,
+      terms: [...screen.terms],
+      faqs: FAQS.filter((faq) => faq.screen === key).map((faq) => ({
         id: faq.id,
         q: faq.q,
-        a: faq.a,
-        who: whoCan(faq.needs),
-        whoCount: TEAM_ROLES.filter((role) => can(role, faq.needs)).length,
-        you: can(seat, faq.needs),
-        screen: can(seat, screen.opens) ? { label: screen.label, path: screen.path } : null,
-      }
-    }),
-  }))
+        a: faq.a.join("\n\n"),
+      })),
+    }
+  })
+}
+
+/** «Con tu rol (Ventas) no se puede: …», si el rol no tiene el permiso. */
+function restrictionFor(seat: StoreSeat, needs: StorePermission): string | null {
+  if (can(seat, needs)) return null
+  const many = TEAM_ROLES.filter((role) => can(role, needs)).length > 1
+  return `Con tu rol (${ROLE_NAMES[seat]}) no se puede: pídeselo a quien sí puede. ${many ? "Lo pueden hacer" : "Lo puede hacer"}: ${whoCan(needs)}.`
+}
+
+/** La pantalla en la tienda, si el rol la abre. */
+function pathFor(seat: StoreSeat, storeId: string, screen: HelpScreen): string | null {
+  const { path, opens } = HELP_SCREENS[screen]
+  if (!can(seat, opens)) return null
+  return `/tiendas/${storeId}${path === "/" ? "" : path}`
+}
+
+function isScreen(id: string): id is HelpScreen {
+  return Object.hasOwn(HELP_SCREENS, id)
+}
+
+/** Lo que la guía dice de un id de Ariadna (`faq:<id>` o `tema:<id>`) para ese rol; nulo si no es de la guía. */
+export function helpAnswerFor(
+  seat: StoreSeat,
+  storeId: string,
+  ref: string,
+): HelpAnswerText | null {
+  const at = ref.indexOf(":")
+  const kind = ref.slice(0, at)
+  const id = ref.slice(at + 1)
+  if (kind === "faq") {
+    const faq = FAQS.find((one) => one.id === id)
+    if (!faq) return null
+    return {
+      topicId: faq.screen,
+      where: HELP_SCREENS[faq.screen].label,
+      text: faq.a.join("\n\n"),
+      path: pathFor(seat, storeId, faq.screen),
+      restriction: restrictionFor(seat, faq.needs),
+    }
+  }
+  if (kind === "tema" && isScreen(id)) {
+    const screen = HELP_SCREENS[id]
+    return {
+      topicId: id,
+      where: screen.label,
+      text: screen.purpose,
+      path: pathFor(seat, storeId, id),
+      restriction: restrictionFor(seat, screen.opens),
+    }
+  }
+  return null
+}
+
+/** Una opción de la duda: tocarla pregunta su texto tal cual. */
+function choiceFor(ref: string): { question: string; where: string } | null {
+  const id = ref.slice(ref.indexOf(":") + 1)
+  if (ref.startsWith("faq:")) {
+    const faq = FAQS.find((one) => one.id === id)
+    return faq ? { question: faq.q, where: HELP_SCREENS[faq.screen].label } : null
+  }
+  if (ref.startsWith("tema:") && isScreen(id)) {
+    const { label } = HELP_SCREENS[id]
+    return { question: `¿Para qué sirve ${label}?`, where: label }
+  }
+  return null
+}
+
+function reply(
+  kind: HelpReplyBody["kind"],
+  parts: Partial<HelpReplyBody> & { askId: string },
+): HelpReplyBody {
+  return {
+    kind,
+    say: null,
+    written: null,
+    answers: [],
+    blockers: [],
+    choices: [],
+    argos: false,
+    argosNote: null,
+    basedOn: "",
+    ...parts,
+  }
+}
+
+function guideReply(askId: string, answers: HelpAnswerText[], written: string | null) {
+  const places = [...new Set(answers.map((answer) => answer.where))]
+  return reply("guia", {
+    askId,
+    written,
+    answers,
+    basedOn: `La guía de gestorIA: ${places.join(" y ")}.`,
+  })
+}
+
+/**
+ * Lo que respondió Ariadna (solo ids de esta guía) hecho texto para el rol de quien preguntó:
+ * cada respuesta con su pantalla, si la abre, y a quién pedírselo, si su rol no puede.
+ */
+export function helpReplyOf(
+  answer: HelpAskAnswer,
+  seat: StoreSeat,
+  storeId: string,
+): HelpReplyBody {
+  const { askId } = answer
+  if (answer.verdict === "seguro") {
+    const answers = answer.shown
+      .map((ref) => helpAnswerFor(seat, storeId, ref))
+      .filter((one): one is HelpAnswerText => one !== null)
+    if (answers.length > 0) return guideReply(askId, answers, answer.written)
+  }
+  if (answer.verdict === "duda") {
+    const choices = answer.offered
+      .map(choiceFor)
+      .filter((one): one is { question: string; where: string } => one !== null)
+    if (choices.length > 0) return reply("duda", { askId, say: HELP_WORDS.doubt, choices })
+  }
+  if (answer.verdict === "datos") {
+    const path = pathFor(seat, storeId, "reportes")
+    if (path)
+      return reply("datos", {
+        askId,
+        say: "Eso es de las cifras de tu tienda, y no está en la guía. Las ves en Reportes.",
+        answers: [{ topicId: "reportes", where: "Reportes", text: "", path, restriction: null }],
+      })
+    return reply("datos", {
+      askId,
+      say: `Eso es de las cifras de tu tienda, y no está en la guía. Pídeselo a quien ve Reportes: ${whoCan("reportes.ver")}.`,
+    })
+  }
+  return reply("nada", { askId, say: HELP_WORDS.notInGuide })
+}
+
+/** Para comparar una pregunta con las de la guía: sin tildes, signos ni mayúsculas. */
+function plain(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+}
+
+/**
+ * Sin Ariadna (sin el acuerdo, o la administración no respondió): una pregunta que es
+ * exactamente una de la guía se responde tal cual, sin modelo; cualquier otra, no se inventa.
+ */
+export function helpReplyWithoutAriadna(
+  question: string,
+  seat: StoreSeat,
+  storeId: string,
+  askId: string,
+): HelpReplyBody {
+  const asked = plain(question)
+  const faq = FAQS.find((one) => plain(one.q) === asked)
+  const answer = faq ? helpAnswerFor(seat, storeId, `faq:${faq.id}`) : null
+  if (answer) return guideReply(askId, [answer], null)
+  return reply("nada", { askId, say: HELP_WORDS.cannotSearch })
 }

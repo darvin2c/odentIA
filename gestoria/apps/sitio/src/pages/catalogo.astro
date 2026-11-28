@@ -1,0 +1,52 @@
+---
+// Catálogo (web v5): lo que Sofi sabe de cada producto. No hay captura de la pantalla de Catálogo:
+// el ejemplo es un resumen de los datos y lo dice, nunca una pantalla dibujada.
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+
+const variantes = [
+  ["Blanca · 38", "2", "S/ 129", "S/ 100"],
+  ["Blanca · 39", "4", "S/ 129", "S/ 100"],
+  ["Negra · 39", "1", "S/ 104", "S/ 95"],
+]
+---
+<Base
+  title="Catálogo de gestorIA: lo que Sofi sabe de cada producto"
+  description="Cada producto con hasta tres opciones, su stock por variante y su precio mínimo. Fotos en JPEG, PNG o WebP y carga por hoja CSV."
+>
+  <PaginaHeroe
+    etiqueta="Catálogo"
+    titulo="Tu catálogo,"
+    acento="lo que Sofi sabe"
+    bajada="Cada producto con sus opciones, su stock y su precio mínimo. Es todo lo que Sofi necesita para vender sin inventar nada."
+    segundo={{ href: "/inventario", label: "Ver inventario" }}
+  >
+    <div class="p-bloque" slot="visual" style="background:#fff;width:min(460px,100%)">
+      <p class="p-bloque__n">Ejemplo de un producto</p>
+      <h3>Zapatilla urbana</h3>
+      <p>Color: blanca y negra · Talla: 36 a 41</p>
+      <div class="p-tabla" role="table" aria-label="Variantes de ejemplo" style="margin-top:14px">
+        <span role="columnheader">Variante</span><span role="columnheader">Stock</span><span role="columnheader">Precio</span><span role="columnheader">Mínimo</span>
+        {variantes.map((v) => v.map((c, i) => <span role="cell" class:list={[{ "p-menos": i === 3 }]}>{c}</span>))}
+      </div>
+      <p class="p-bloque__n" style="margin-top:12px">Un resumen de los datos, no una pantalla de la app.</p>
+    </div>
+  </PaginaHeroe>
+  <section class="p-bloques" aria-label="Cómo se arma">
+    <div class="marco p-bloques__lista">
+      <div class="p-bloque" data-aparece><h3>Hasta tres opciones</h3><p>Talla, color, tamaño o lo que vendas. Cada combinación es una variante con su código, su stock y, si quieres, su precio y su foto.</p></div>
+      <div class="p-bloque" data-aparece><h3>Precio mínimo</h3><p>Sin precio mínimo, el producto no se negocia. Si el mínimo queda bajo tu costo, gestorIA te avisa.</p></div>
+      <div class="p-bloque" data-aparece><h3>Fotos y hoja</h3><p>Sube fotos en JPEG, PNG o WebP. Si tienes muchos productos, cárgalos con una hoja CSV.</p></div>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="probar-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Probar a Sofi</p>
+        <h2 id="probar-h" class="titulo-2">Pruébala con <span class="cur">tu catálogo</span></h2>
+        <p class="bajada">«Probar a Sofi» la pone a vender con tus productos, sin mover tu stock ni crear un link de pago real.</p>
+      </div>
+      <span class="p-heroe__sofi" data-sofi="atenta" data-sofi-escala="0.5" aria-hidden="true"></span>
+    </div>
+  </section>
+</Base>
