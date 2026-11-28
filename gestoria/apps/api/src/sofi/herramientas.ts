@@ -37,7 +37,7 @@ import {
   variantPrices,
 } from "../pedidos.js"
 import { familyIn, lastConsentIn } from "../perfil.js"
-import { autoUnitCents, type Quote } from "../precio.js"
+import { autoUnitCents, floorOf, type Quote } from "../precio.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"

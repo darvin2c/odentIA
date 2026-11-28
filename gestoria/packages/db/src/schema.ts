@@ -1153,7 +1153,7 @@ export const storeTemplateField = pgTable(
 
 /**
  * Lo que Sofi no supo de un producto (decisión 11): la pregunta de la clienta y su conversación, y
- * la respuesta de la tienda. Sofi solo la anota (`0035_reglas_la_ficha_del_producto.sql`). Ventas
+ * la respuesta de la tienda. Sofi solo la anota (`0056_reglas_la_ficha_del_producto.sql`). Ventas
  * responde y puede pedir que se guarde en la ficha (`save_requested`); el Dueño o el Administrador
  * la guardan (`saved_at`), y desde ahí Sofi la usa. Una persona también anota en la ficha una
  * pregunta ya respondida, sin conversación.
