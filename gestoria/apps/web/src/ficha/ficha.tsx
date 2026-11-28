@@ -43,7 +43,7 @@ import { anchorOf, cellKey, type Readiness, type RubroTemplate, type Sheet } fro
 import { money } from "../lib/tienda"
 import { Photo } from "../piezas"
 import { StoreHeader, useStoreContext } from "../tiendas"
-import { type SaveStatus, useFicha, useFichaStore } from "./borrador"
+import { type GridSaved, type SaveStatus, useFicha, useFichaStore } from "./borrador"
 import { HistoryDrawer, KardexDrawer, SearchDialog, ShortcutsDialog } from "./cajones"
 import { type Ficha, FichaContext } from "./contexto"
 import { DataCard, PRODUCT_KEY, useTemplates } from "./datos"
@@ -273,20 +273,16 @@ export function ProductPage() {
   const templates = useTemplates(store.id)
   const saveApi = useMemo(
     () => ({
-      get: () =>
-        api<{ product: Sheet }>(`/api/tiendas/${store.id}/productos/${productId}`).then(
-          (r) => r.product,
-        ),
       patch: (body: Record<string, unknown>) =>
         api<{ product: Sheet }>(`/api/tiendas/${store.id}/productos/${productId}`, {
           method: "PATCH",
           body,
         }).then((r) => r.product),
       grid: (body: unknown) =>
-        api<{ product: Sheet }>(`/api/tiendas/${store.id}/productos/${productId}/cuadricula`, {
+        api<GridSaved>(`/api/tiendas/${store.id}/productos/${productId}/cuadricula`, {
           method: "POST",
           body,
-        }).then((r) => r.product),
+        }),
     }),
     [store.id, productId],
   )
@@ -375,6 +371,12 @@ function ProductSheet({
         action: { label: "Deshacer", onClick: () => fichaStore.undo() },
       })
   }, [fichaStore])
+
+  // Lo que se vendió mientras se editaba: se dice, y lo escrito se sumó a eso.
+  const sold = state.sold
+  useEffect(() => {
+    if (sold) toast.info(sold, { id: "ficha-vendido", duration: 10_000 })
+  }, [sold])
 
   // Lo último que se cambió, con «Deshacer» a mano (como el prototipo).
   const last = state.last

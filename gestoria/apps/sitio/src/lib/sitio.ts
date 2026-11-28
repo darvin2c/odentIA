@@ -79,34 +79,18 @@ export function linksOf(pages: Pagina[]): NavLink[] {
 
 /** El mapa de la web, por grupos, en el orden del pie. */
 export const SITE_MAP = {
-  producto: [
-    {
-      label: "Sofi",
-      hint: "Atiende, negocia y cobra",
-      path: "/sofi",
-      lista: true,
-    },
-    {
-      label: "Cobros",
-      hint: "El pago de cada pedido",
-      path: "/cobros",
-      lista: true,
-    },
-    {
-      label: "Entregas",
-      hint: "Solo con el pago confirmado",
-      path: "/entregas",
-      lista: true,
-    },
-    {
-      label: "Clientes",
-      hint: "La ficha de cada clienta",
-      path: "/clientes",
-      lista: true,
-    },
+  /** Los agentes: trabajan solos, dentro de las reglas de la tienda. */
+  agentes: [
+    { label: "Sofi", hint: "Vendedora: atiende, negocia y cobra", path: "/sofi", lista: true },
+    { label: "Argos", hint: "Administrador: vende, cuida y ordena", path: "/argos", lista: true },
+  ],
+  /** Las funciones: lo que la tienda usa en la app. */
+  funciones: [
+    { label: "Cobros", hint: "El pago de cada pedido", path: "/cobros", lista: true },
+    { label: "Entregas", hint: "Solo con el pago confirmado", path: "/entregas", lista: true },
+    { label: "Clientes", hint: "La ficha de cada clienta", path: "/clientes", lista: true },
     { label: "Catálogo", hint: "Productos, opciones y mínimo", path: "/catalogo", lista: true },
     { label: "Inventario", hint: "Stock por variante", path: "/inventario", lista: true },
-    { label: "Argos", hint: "Vende, cuida y ordena", path: "/argos", lista: true },
   ],
   recursos: [
     { label: "Rubros", path: "/rubros", lista: true },
@@ -127,7 +111,7 @@ export const SITE_MAP = {
   ],
 } satisfies Record<string, Pagina[]>
 
-/** Las palabras de la cabecera; «Producto» abre su menú con las páginas del producto. */
+/** Las palabras de la cabecera; «Producto» abre su menú con los agentes y las funciones. */
 export const mainNav: NavLink[] = [
   { href: "/#venta", label: "Producto" },
   ...linksOf([
@@ -140,7 +124,8 @@ export const mainNav: NavLink[] = [
 
 /** El pie de todas las páginas: los grupos del mapa que hoy tienen enlaces. */
 export const footerGroups: { title: string; links: NavLink[] }[] = [
-  { title: "Producto", links: linksOf(SITE_MAP.producto) },
+  { title: "Agentes", links: linksOf(SITE_MAP.agentes) },
+  { title: "Funciones", links: linksOf(SITE_MAP.funciones) },
   { title: "Recursos", links: linksOf(SITE_MAP.recursos) },
   { title: "Empresa", links: linksOf(SITE_MAP.empresa) },
   {

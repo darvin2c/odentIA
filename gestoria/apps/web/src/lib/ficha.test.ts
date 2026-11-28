@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { rebase } from "../ficha/borrador"
 import {
   cellKey,
   type Draft,
@@ -229,6 +228,11 @@ describe("la cuadrícula", () => {
     const draft = copy(base)
     draft.grid!.rows[1]!.value = "negro"
     const body = gridBody(base.grid, draft.grid!)
+    // Cada celda lleva el stock que vio la pantalla: el servidor suma solo la diferencia.
+    expect(body.cells.find((c) => c.row === "negro" && c.column === "36")).toMatchObject({
+      stock: 2,
+      seenStock: 2,
+    })
     expect(body.rows?.values[1]).toEqual(expect.objectContaining({ was: "negra", value: "negro" }))
     expect(body.rows?.values[0]).not.toHaveProperty("was")
     expect(body.cells).toHaveLength(4)
@@ -250,26 +254,6 @@ describe("la cuadrícula", () => {
       if (key.startsWith(`${negra!.id}|`)) delete gone.grid!.cells[key]
     // La negra 36 tenía 2: quitarla pide motivo; la 35 estaba en 0.
     expect(loweredCells(base.grid, gone.grid)).toBe(1)
-  })
-
-  it("lo cambiado se suma al stock de ahora: una venta de mientras tanto no se pisa", () => {
-    const base = draftOf(sheet())
-    const draft = copy(base)
-    const [blanca] = draft.grid!.rows
-    const [t35, t36] = draft.grid!.columns
-    draft.grid!.cells[cellKey(blanca!.id, t35!.id)]!.stock = 5 // +2
-    // En el servidor se vendió una blanca 36 (3 → 2) y una 35 (3 → 2).
-    const now = gridOf(
-      sheet({
-        variants: sheet().variants.map((v) =>
-          v.id === "v1" || v.id === "v2" ? { ...v, stock: 2 } : v,
-        ),
-      }),
-      idsOf(base.grid),
-    )
-    const target = rebase(base.grid, draft.grid!, now)
-    expect(target.cells[cellKey(blanca!.id, t35!.id)]!.stock).toBe(4)
-    expect(target.cells[cellKey(blanca!.id, t36!.id)]!.stock).toBe(2)
   })
 })
 
