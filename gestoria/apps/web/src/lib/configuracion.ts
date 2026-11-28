@@ -619,8 +619,12 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   { text: "Moneda", section: "datos", terms: ["moneda", "soles", "dólares"] },
   { text: "Logo y portada", section: "marca", terms: ["logo", "portada", "foto", "imagen"] },
   { text: "Color de tu marca", section: "marca", terms: ["color", "colores"] },
-  { text: "Nombre que ve el cliente", section: "marca", terms: ["nombre", "marca", "cliente"] },
-  { text: "Nombre de tu link", section: "marca", terms: ["link", "enlace", "url", "dirección"] },
+  {
+    text: "Nombre que ve la clienta",
+    section: "marca",
+    terms: ["nombre", "marca", "cliente", "clienta"],
+  },
+  { text: "Tu link", section: "marca", terms: ["link", "enlace", "url", "dirección", "dominio"] },
   { text: "Encender o apagar a Sofi", section: "sofi", terms: ["sofi", "vendedora", "apagar"] },
   {
     text: "Lo que Sofi debe saber",

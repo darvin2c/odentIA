@@ -253,6 +253,13 @@
       "when": 1795812754479,
       "tag": "0051_reglas_perfil_de_la_clienta",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795844732033,
+      "tag": "0052_el_link_libre",
+      "breakpoints": true
     }
   ]
 }
