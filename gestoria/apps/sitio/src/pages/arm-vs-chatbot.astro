@@ -1,0 +1,66 @@
+---
+// ARM vs chatbot (web v5): la misma clienta en dos teléfonos, un chatbot de menú y Sofi; la tabla
+// punto por punto y las preguntas. Se compara con la categoría, nunca con una marca.
+import Acordeon from "../components/Acordeon.astro"
+import Comparativa from "../components/escenas/Comparativa.astro"
+import Golpe from "../components/escenas/Golpe.astro"
+import Telefonos from "../components/escenas/Telefonos.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { PREGUNTAS_CHATBOT, TABLA_CHATBOT } from "../lib/arm"
+import { faqLd } from "../lib/contenido"
+import "../styles/arm.css"
+---
+<Base
+  title="ARM vs chatbot: un chatbot contesta, un ARM vende y cobra"
+  description="Un chatbot responde con menús. Sofi, la vendedora con IA de gestorIA, entiende, negocia sin bajar de tu mínimo, cobra y anota el pedido. Mira la misma clienta con los dos."
+  ld={[faqLd(PREGUNTAS_CHATBOT)]}
+>
+  <PaginaHeroe
+    etiqueta="ARM vs chatbot"
+    titulo="Un chatbot contesta."
+    acento="Un ARM vende."
+    bajada="Un chatbot responde con menús y, cuando se traba, te pasa el chat. Sofi conversa como una vendedora: entiende, negocia sin bajar de tu mínimo, cobra y anota el pedido."
+    humor="feliz"
+    segundo={{ href: "#telefonos", label: "Mira la misma clienta" }}
+  />
+
+  <section class="p-bloques" id="telefonos" aria-labelledby="tel-h">
+    <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
+        <p class="etiqueta">La misma clienta, dos teléfonos</p>
+        <h2 id="tel-h" class="titulo-2">La misma clienta. <span class="cur">Solo uno vende.</span></h2>
+        <p class="bajada">Andrea escribe lo mismo a los dos. Mira la charla y lo que pasa después: con Sofi, el trabajo completo se hace solo.</p>
+      </div>
+      <Telefonos />
+    </div>
+  </section>
+
+  <Golpe frase="Un chatbot te pasa el chat." acento="Sofi te pasa la venta." />
+
+  <section class="p-bloques p-bloques--suave" aria-labelledby="tabla-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Punto por punto</p>
+        <h2 id="tabla-h" class="titulo-2">Chatbot vs ARM, <span class="cur">sin vueltas</span></h2>
+      </div>
+      <Comparativa otro="Un chatbot" filas={TABLA_CHATBOT} titulo="Un chatbot comparado con gestorIA, un ARM" />
+    </div>
+  </section>
+
+  <section class="p-bloques" aria-labelledby="preg-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Preguntas</p>
+        <h2 id="preg-h" class="titulo-2">ARM vs <span class="cur">chatbot</span></h2>
+        <p class="bajada"><a class="enlace" href="/arm">Qué es un ARM</a> · <a class="enlace" href="/arm-vs-crm">ARM vs CRM</a></p>
+      </div>
+      <Acordeon preguntas={PREGUNTAS_CHATBOT} />
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { iniciarArm } from "../scripts/arm"
+  iniciarArm()
+</script>

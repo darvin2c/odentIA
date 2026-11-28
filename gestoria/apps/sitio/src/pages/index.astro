@@ -24,10 +24,12 @@ import Acordeon from "../components/Acordeon.astro"
 import Chat from "../components/escenas/Chat.astro"
 import Mapa from "../components/escenas/Mapa.astro"
 import Venta from "../components/escenas/Venta.astro"
+import Boleta from "../components/escenas/Boleta.astro"
 import Base from "../layouts/Base.astro"
 import { faqLd, PREGUNTAS, RUBROS } from "../lib/contenido"
 import { cta, LOGIN_URL, SITE_URL } from "../lib/sitio"
 import "../styles/inicio.css"
+import "../styles/arm.css"
 
 const webp = (src: ImageMetadata, widths: number[]) => getImage({ src, widths, format: "webp" })
 const [pedidosW, clientaW, porConfirmarW, pagadoW] = await Promise.all([
@@ -98,7 +100,7 @@ const app = {
     <div class="heroe__fondo" aria-hidden="true"><span class="heroe__luz"></span></div>
     <div class="marco heroe__marco">
       <div class="heroe__texto" data-heroe-texto>
-        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span>El primer ARM para tiendas que venden por chat</p>
+        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span><a href="/arm">El primer ARM para tiendas que venden por chat</a></p>
         <h1 id="heroe-h" class="heroe__h">
           <span class="linea"><span>De la venta</span></span>
           <span class="linea"><span>a la entrega,</span></span>
@@ -126,31 +128,10 @@ const app = {
       <div class="cuenta__texto">
         <p class="etiqueta">De la venta a la entrega</p>
         <h2 id="cuenta-h" class="titulo-2">Saca la cuenta de un pedido: <span class="cur">el total lo hacemos nosotros.</span></h2>
-        <p class="bajada">Esta es la boleta de una venta de Calzados Rosa. Mira quién hizo cada paso: de los 8, a tu equipo le tocaron 2.</p>
+        <p class="bajada">Esta es la boleta de una venta de Calzados Rosa. Mira quién hizo cada paso: de los 8, a tu equipo le tocaron 2. Eso es un ARM.</p>
+        <a class="enlace cuenta__enlace" href="/arm">Qué es un ARM y en qué se diferencia de un CRM →</a>
       </div>
-      <div class="boleta__sombra" data-boleta>
-      <figure class="boleta">
-        <figcaption class="boleta__cabeza">
-          <b>Calzados Rosa</b>
-          <span>Pedido 1042 · Andrea Castillo</span>
-        </figcaption>
-        <ol class="boleta__lineas">
-          <li data-linea-b><time>21:14</time><span>Le respondió por WhatsApp</span><i>Sofi</i></li>
-          <li data-linea-b><time>21:15</time><span>Encontró la talla 38 en tu catálogo</span><i>Sofi</i></li>
-          <li data-linea-b><time>21:16</time><span>Cerró en S/ 129, sobre tu mínimo</span><i>Sofi</i></li>
-          <li data-linea-b><time>21:18</time><span>Cobró con el link de pago</span><i>Sofi</i></li>
-          <li data-linea-b><time>21:18</time><span>Descontó el par de tu stock</span><i>Argos</i></li>
-          <li data-linea-b class="es-tuyo"><time>09:30</time><span>Empacó el pedido</span><i>Tu equipo</i></li>
-          <li data-linea-b class="es-tuyo"><time>15:40</time><span>Lo entregó en Surco</span><i>Tu equipo</i></li>
-          <li data-linea-b><time>15:41</time><span>Guardó la compra en la ficha de Andrea</span><i>Argos</i></li>
-        </ol>
-        <div class="boleta__total" data-total-b>
-          <span>Total</span>
-          <b><span class="boleta__marca">gestorIA</span> <em>6</em> · Tu equipo <em>2</em></b>
-        </div>
-        <p class="boleta__sello" data-sello-b aria-hidden="true">Entregado</p>
-      </figure>
-      </div>
+      <Boleta />
     </div>
   </section>
 

@@ -1,0 +1,1060 @@
+/* El ARM (web v5): la boleta de un pedido y las páginas «Qué es un ARM», «ARM vs CRM» y «ARM vs
+   chatbot». Sin movimiento, todo está completo y quieto: las animaciones viven en scripts/arm.ts. */
+
+/* La cuenta de un pedido: una boleta que dice quién hizo cada paso. */
+.cuenta {
+  padding-block: clamp(56px, 7vw, 96px);
+}
+.cuenta__marco {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
+  align-items: center;
+  gap: clamp(32px, 5vw, 80px);
+}
+.cuenta__texto .titulo-2 {
+  margin-top: 14px;
+  text-wrap: balance;
+}
+.cuenta__texto .bajada {
+  margin-top: 18px;
+  max-width: 30em;
+}
+/* La sombra va afuera: la máscara de los dientes la cortaría. */
+.boleta__sombra {
+  filter: drop-shadow(0 24px 40px rgba(17, 17, 19, 0.16))
+    drop-shadow(0 2px 4px rgba(17, 17, 19, 0.06));
+  rotate: 1.2deg;
+}
+.boleta {
+  position: relative;
+  padding: 26px 26px 34px;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  /* el borde de abajo, cortado en dientes como el papel de la ticketera */
+  -webkit-mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - 10px) no-repeat,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / 16px 10px
+    repeat-x;
+  mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - 10px) no-repeat,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / 16px 10px
+    repeat-x;
+}
+.boleta__marca {
+  text-transform: none;
+}
+.boleta__cabeza {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--linea-2);
+  text-align: center;
+}
+.boleta__cabeza b {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.boleta__cabeza span {
+  color: var(--texto-3);
+}
+.boleta__lineas {
+  display: grid;
+  gap: 9px;
+  padding-block: 16px;
+  border-bottom: 1px dashed var(--linea-2);
+}
+.boleta__lineas li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+}
+.boleta__lineas time {
+  color: var(--texto-3);
+}
+.boleta__lineas i {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--naranja);
+}
+.boleta__lineas .es-tuyo i {
+  color: var(--texto);
+}
+.boleta__total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-top: 14px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.boleta__total em {
+  font-style: normal;
+  color: var(--naranja-vivo);
+}
+.boleta__sello {
+  position: absolute;
+  right: 18px;
+  bottom: 62px;
+  padding: 4px 12px;
+  border: 2.5px solid var(--verde);
+  border-radius: 6px;
+  color: var(--verde);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  rotate: -12deg;
+  opacity: 0.85;
+}
+@media (max-width: 860px) {
+  .cuenta__marco {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .boleta__sombra {
+    rotate: 0deg;
+    width: min(100%, 460px);
+    margin-inline: auto;
+  }
+}
+@media (max-width: 420px) {
+  .boleta {
+    padding-inline: 18px;
+    font-size: 12.5px;
+  }
+  .boleta__lineas li {
+    gap: 8px;
+  }
+}
+.cuenta__enlace {
+  display: inline-block;
+  margin-top: 18px;
+}
+.cuenta--suave {
+  background: var(--papel-2);
+}
+
+/* ---------- Las tres letras ---------- */
+.letras {
+  padding-block: clamp(64px, 8vw, 120px);
+}
+.letras__caja {
+  position: relative;
+  margin-top: clamp(32px, 4vw, 56px);
+}
+.letras__linea {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: clamp(60px, 7vw, 96px);
+  height: 2px;
+  background: var(--degradado);
+  opacity: 0.35;
+}
+.letras__lista {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(20px, 3vw, 40px);
+}
+.letra {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.letra__g {
+  display: block;
+  overflow: hidden;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(120px, 14vw, 200px);
+  line-height: 0.9;
+  padding-bottom: 0.06em;
+}
+.letra__g > span {
+  display: inline-block;
+  padding-right: 0.08em;
+  background: var(--degradado);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.letra__palabra {
+  font-size: clamp(22px, 2.2vw, 28px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.letra__texto {
+  color: var(--texto-2);
+  line-height: 1.55;
+  max-width: 28em;
+}
+
+/* ---------- Las tarjetas que llevan a cada comparación ---------- */
+.versus {
+  margin-top: 40px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  perspective: 900px;
+}
+.versus__tarjeta {
+  display: grid;
+  gap: 18px;
+  height: 100%;
+  padding: clamp(24px, 3vw, 36px);
+  border-radius: var(--radio-g);
+  background: var(--tinta);
+  color: #fff;
+  text-decoration: none;
+  transform-style: preserve-3d;
+  box-shadow: var(--sombra-3);
+  transition: box-shadow 0.3s;
+}
+.versus__tarjeta:hover {
+  box-shadow: 0 30px 80px -30px rgba(254, 79, 2, 0.55);
+}
+.versus__vs {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: clamp(34px, 4vw, 52px);
+  font-weight: 300;
+  letter-spacing: -0.04em;
+}
+.versus__vs b:first-child {
+  font-weight: 500;
+  background: var(--degradado-oscuro);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.versus__vs i {
+  font-family: var(--serif);
+  font-size: 0.6em;
+  color: rgba(255, 255, 255, 0.5);
+}
+.versus__frase {
+  font-size: clamp(20px, 2vw, 26px);
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+.versus__frase .cur {
+  color: var(--naranja-claro);
+}
+.versus__ir {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ---------- El duelo con un CRM ---------- */
+.duelo {
+  margin-top: clamp(32px, 4vw, 56px);
+}
+.duelo__msg {
+  display: grid;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  padding: 12px 18px;
+  border-radius: 18px 18px 18px 4px;
+  background: #fff;
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-2);
+  font-size: 17px;
+}
+.duelo__msg span {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--texto-3);
+}
+.duelo__tabla {
+  margin-top: 28px;
+  display: grid;
+  gap: 8px;
+}
+.duelo__fila {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+.duelo__paso {
+  align-self: center;
+  font-weight: 500;
+}
+.duelo__celda {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.duelo__celda--otro {
+  justify-content: space-between;
+  background: var(--papel-2);
+  color: var(--texto-2);
+  border: 1px dashed var(--linea-2);
+}
+.duelo__celda--arm {
+  background: var(--durazno);
+  color: var(--texto);
+}
+.duelo__celda--arm b {
+  color: var(--naranja);
+}
+.duelo__celda--arm.es-tuyo {
+  background: var(--papel-2);
+}
+.duelo__celda--arm.es-tuyo b {
+  color: var(--texto);
+}
+.duelo__tag {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fde8e4;
+  color: #b42318;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.duelo__visto {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--verde);
+  color: #fff;
+}
+.duelo__visto path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+}
+.es-tuyo .duelo__visto {
+  background: var(--texto-3);
+}
+.duelo__fila--cabeza {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+.duelo__fila--cabeza .duelo__celda {
+  padding-block: 4px;
+  background: none;
+  border: 0;
+  font-size: inherit;
+}
+.duelo__fila--cabeza .duelo__celda--arm {
+  color: var(--naranja);
+}
+.duelo__fila--cabeza small {
+  font-size: inherit;
+  opacity: 0.6;
+}
+.duelo__fila--fin {
+  margin-top: 8px;
+}
+.duelo__fila--fin .duelo__celda {
+  justify-content: flex-start;
+  align-items: baseline;
+  font-size: 15px;
+}
+.duelo__fila--fin b {
+  font-size: clamp(34px, 4vw, 48px);
+  font-weight: 300;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+.duelo__fila--fin .duelo__celda--otro b {
+  color: #b42318;
+}
+.duelo__fila--fin .duelo__celda--arm {
+  background: var(--degradado);
+  color: #fff;
+}
+.duelo__fila--fin .duelo__celda--arm b {
+  color: #fff;
+}
+
+/* ---------- Dos teléfonos ---------- */
+.telefonos {
+  margin-top: clamp(32px, 4vw, 56px);
+}
+.telefonos__escena {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin-inline: auto;
+  max-width: 34em;
+  text-align: center;
+  font-size: clamp(18px, 1.6vw, 21px);
+  color: var(--texto-2);
+}
+.telefonos__hora {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--tinta);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.telefonos__par {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 380px));
+  justify-content: center;
+  align-items: start;
+  gap: clamp(20px, 4vw, 56px);
+}
+.tel-lado {
+  display: grid;
+  gap: 16px;
+  transition:
+    filter 0.6s,
+    opacity 0.6s,
+    transform 0.6s;
+}
+.tel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border-radius: 36px;
+  border: 8px solid var(--tinta);
+  background: #efeae2;
+  overflow: hidden;
+  box-shadow: var(--sombra-3);
+}
+.tel__barra {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--linea);
+}
+.tel__barra small {
+  display: block;
+  font-size: 12px;
+  color: var(--texto-3);
+}
+.tel__avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--texto-3);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tel--sofi .tel__avatar {
+  background: var(--degradado);
+  font-size: 15px;
+}
+.tel__chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 12px 18px;
+  min-height: 560px;
+}
+.tel__msg {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  max-width: 88%;
+  padding: 8px 12px 6px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  background: #fff;
+  box-shadow: 0 1px 1px rgba(17, 17, 19, 0.08);
+}
+.tel__msg time {
+  justify-self: end;
+  font-size: 10.5px;
+  color: var(--texto-3);
+}
+.tel__msg--ella {
+  align-self: flex-end;
+  background: #d9fdd3;
+  border-bottom-right-radius: 4px;
+}
+.tel__msg--otro,
+.tel__msg--sofi {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  margin-bottom: 18px;
+}
+.tel__msg--otro .tel__texto {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--texto-2);
+}
+.tel__nota {
+  position: absolute;
+  left: 4px;
+  top: calc(100% + 4px);
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+.tel__msg--sofi .tel__nota {
+  color: var(--naranja);
+}
+.tel__msg--sofi .tel__nota::before {
+  content: "↳ ";
+}
+.tel__msg--otro .tel__nota {
+  color: #b42318;
+}
+.tel__msg--otro .tel__nota::before {
+  content: "✕ ";
+}
+.tel__tarjeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--durazno);
+  border: 1px solid var(--durazno-2);
+}
+.tel__tarjeta small {
+  display: block;
+  font-size: 12px;
+  color: var(--texto-2);
+}
+.tel__tarjeta strong {
+  font-size: 16px;
+  color: var(--naranja);
+}
+.tel__pagar {
+  grid-column: 1 / -1;
+  padding: 7px;
+  border-radius: 8px;
+  background: var(--naranja);
+  color: #fff;
+  font-weight: 600;
+  text-align: center;
+}
+.tel__escribe {
+  display: flex;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
+  visibility: hidden;
+  opacity: 0;
+}
+.tel__escribe i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--texto-3);
+  animation: escribe 1s infinite ease-in-out;
+}
+.tel__escribe i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.tel__escribe i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes escribe {
+  50% {
+    transform: translateY(-4px);
+    opacity: 0.5;
+  }
+}
+.despues {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--linea);
+  background: var(--papel);
+}
+.despues--sofi {
+  border-color: var(--durazno-2);
+  box-shadow: 0 20px 50px -30px rgba(254, 79, 2, 0.5);
+}
+.despues__t {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+.despues__lista {
+  display: grid;
+  gap: 8px;
+}
+.despues__lista li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 14.5px;
+}
+.despues__lista svg {
+  width: 20px;
+  height: 20px;
+  padding: 3px;
+  border-radius: 50%;
+  color: #fff;
+}
+.despues--sofi svg {
+  background: var(--verde);
+}
+.despues--otro svg {
+  background: #d4d4d8;
+  color: #52525b;
+}
+.despues--otro li span {
+  color: var(--texto-2);
+}
+.despues__lista time,
+.despues__lista em {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-style: normal;
+  color: var(--texto-3);
+}
+.despues--otro em {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fde8e4;
+  color: #b42318;
+}
+.despues__sello {
+  justify-self: start;
+  padding: 6px 12px;
+  border: 2.5px solid currentColor;
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  rotate: -3deg;
+}
+.despues__sello--otro {
+  color: #b42318;
+}
+.despues__sello--sofi {
+  color: var(--verde);
+}
+/* Al final del duelo: el chatbot se apaga y Sofi se adelanta. */
+.tel-lado.es-perdio {
+  filter: grayscale(1);
+  opacity: 0.6;
+  transform: scale(0.97);
+}
+.tel-lado.es-gano {
+  transform: scale(1.02);
+}
+
+/* ---------- La tabla comparativa ---------- */
+.comp {
+  margin-top: 32px;
+  overflow-x: auto;
+}
+.comp table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 16px;
+}
+.comp th,
+.comp td {
+  padding: 16px 18px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--linea);
+}
+.comp thead th {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+.comp tbody th {
+  font-weight: 500;
+  width: 26%;
+}
+.comp td {
+  color: var(--texto-2);
+}
+.comp .comp__arm {
+  background: var(--durazno);
+  color: var(--texto);
+}
+.comp thead .comp__arm {
+  border-radius: 14px 14px 0 0;
+  color: var(--naranja);
+}
+.comp tbody tr:last-child .comp__arm {
+  border-radius: 0 0 14px 14px;
+}
+.comp small {
+  font-size: inherit;
+  opacity: 0.6;
+}
+.p-bloque--arm {
+  background: var(--durazno);
+  border-color: var(--durazno-2);
+}
+
+@media (max-width: 860px) {
+  .letras__lista,
+  .versus {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .letras__linea {
+    display: none;
+  }
+  .letra {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 18px;
+  }
+  .letra__g {
+    grid-row: span 2;
+    font-size: 96px;
+  }
+  .telefonos__par {
+    grid-template-columns: minmax(0, 380px);
+  }
+  .tel__chat {
+    min-height: 0;
+  }
+}
+@media (max-width: 640px) {
+  .duelo__fila {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .duelo__paso {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    font-size: 15px;
+  }
+  .duelo__fila--cabeza .duelo__paso {
+    display: none;
+  }
+  .duelo__celda {
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 13.5px;
+    padding: 10px;
+  }
+  .duelo__fila--fin .duelo__celda {
+    flex-direction: row;
+    align-items: baseline;
+  }
+}
+
+/* En el celular, la tabla se apila: cada punto con sus dos respuestas, sin deslizar de lado. */
+@media (max-width: 640px) {
+  .comp table {
+    min-width: 0;
+  }
+  .comp thead {
+    display: none;
+  }
+  .comp tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding-block: 14px;
+    border-bottom: 1px solid var(--linea);
+  }
+  .comp tbody th {
+    grid-column: 1 / -1;
+    width: auto;
+    padding: 0;
+    border: 0;
+  }
+  .comp td {
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--papel);
+    font-size: 14.5px;
+  }
+  .comp td::before {
+    content: attr(data-quien);
+    display: block;
+    margin-bottom: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--texto-3);
+  }
+  .comp td.comp__arm::before {
+    color: var(--naranja);
+  }
+  .comp tbody tr:last-child .comp__arm {
+    border-radius: 12px;
+  }
+}
+
+/* ---------- El golpe: una frase grande que se enciende palabra a palabra al bajar ---------- */
+.golpe {
+  position: relative;
+  overflow: hidden;
+  padding-block: clamp(90px, 12vw, 170px);
+  background: var(--tinta);
+  color: #fff;
+}
+.golpe__luz {
+  position: absolute;
+  inset: auto -10% -40% auto;
+  width: 60vw;
+  height: 60vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(254, 79, 2, 0.35), transparent 65%);
+  pointer-events: none;
+}
+.golpe__frase {
+  position: relative;
+  max-width: 17em;
+  font-size: clamp(40px, 6.4vw, 92px);
+  font-weight: 300;
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  text-wrap: balance;
+}
+.golpe__frase .cur {
+  color: var(--naranja-claro);
+}
+.mueve .golpe__frase .palabra {
+  opacity: 0.14;
+}
+
+/* Los títulos de las páginas del ARM entran palabra por palabra (scripts/arm.ts). */
+.palabra {
+  display: inline-block;
+}
+.palabra--m {
+  overflow: hidden;
+  vertical-align: top;
+  padding-bottom: 0.08em;
+  margin-bottom: -0.08em;
+}
+.palabra > span {
+  display: inline-block;
+}
+.marca-texto {
+  text-transform: none;
+}
+
+/* ---------- El ciclo completo (por qué somos un ARM) ---------- */
+.ciclo {
+  padding-block: clamp(64px, 8vw, 120px) clamp(40px, 5vw, 64px);
+  overflow: hidden;
+}
+.ciclo__ventana {
+  margin-top: clamp(32px, 4vw, 48px);
+  padding-inline: max(16px, calc((100vw - var(--ancho)) / 2 + 40px));
+}
+/* Sin movimiento o en el celular: una grilla que se lee entera. */
+.ciclo__pista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+/* Con movimiento en computadora: una sola fila que corre de lado mientras se baja (arm.ts). */
+.ciclo--corre .ciclo__pista {
+  display: flex;
+  width: max-content;
+}
+.ciclo--corre .paso {
+  width: 320px;
+  flex: none;
+}
+.paso {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 300px;
+  padding: 24px;
+  border-radius: var(--radio-g);
+  background: var(--tinta);
+  color: #fff;
+  overflow: hidden;
+}
+.paso::after {
+  content: "";
+  position: absolute;
+  inset: auto -30% -50% auto;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(254, 79, 2, 0.45), transparent 65%);
+  pointer-events: none;
+}
+.paso--tuyo {
+  background: var(--papel);
+  color: var(--texto);
+  border: 1px solid var(--linea-2);
+}
+.paso--tuyo::after {
+  display: none;
+}
+.paso__n {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 56px;
+  line-height: 0.9;
+  background: var(--degradado-oscuro);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.paso__quien {
+  justify-self: start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.paso--tuyo .paso__quien {
+  background: var(--papel-2);
+  color: var(--texto-2);
+}
+.paso__verbo {
+  margin-top: 6px;
+  font-size: clamp(30px, 3vw, 38px);
+  font-weight: 300;
+  letter-spacing: -0.04em;
+}
+.paso__texto {
+  font-size: 15px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
+}
+.paso--tuyo .paso__texto {
+  color: var(--texto-2);
+}
+.paso__pronto {
+  font-size: 13.5px;
+}
+.paso__ir {
+  position: relative;
+  z-index: 1;
+  align-self: end;
+  margin-top: auto;
+  font-size: 14.5px;
+  color: var(--naranja-claro);
+}
+.paso--tuyo .paso__ir {
+  color: var(--naranja);
+}
+.ciclo__barra {
+  display: none;
+}
+.ciclo--corre .ciclo__barra {
+  display: block;
+  margin-top: 28px;
+  height: 3px;
+  max-width: var(--ancho);
+  border-radius: 3px;
+  background: var(--linea);
+}
+.ciclo__barra span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--degradado);
+  transform-origin: left;
+}
+
+/* ---------- Cuánto del ciclo cubre cada uno ---------- */
+.cobertura {
+  padding-block: clamp(48px, 6vw, 96px);
+}
+.cobertura__lista {
+  margin-top: 36px;
+  display: grid;
+  gap: 22px;
+}
+.barra {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 20px;
+}
+.barra__nombre {
+  font-size: 18px;
+  font-weight: 500;
+}
+.barra__riel {
+  height: 22px;
+  border-radius: 999px;
+  background: var(--papel-2);
+  overflow: hidden;
+}
+.barra__lleno {
+  display: block;
+  height: 100%;
+  width: calc(var(--n) * 100%);
+  border-radius: inherit;
+  background: #a1a1aa;
+}
+.barra--arm .barra__riel {
+  height: 34px;
+}
+.barra--arm .barra__lleno {
+  background: var(--degradado);
+  box-shadow: 0 12px 30px -12px rgba(254, 79, 2, 0.7);
+}
+.barra__cifra {
+  grid-column: 2;
+  font-size: 15px;
+  color: var(--texto-2);
+}
+.barra__cifra b {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--texto);
+}
+.barra--arm .barra__cifra b {
+  color: var(--naranja-vivo);
+}
+@media (max-width: 640px) {
+  .barra {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .barra__cifra {
+    grid-column: 1;
+  }
+}

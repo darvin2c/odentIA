@@ -56,9 +56,10 @@ const howTo = {
   </PaginaHeroe>
   <section class="p-bloques" aria-label="Los seis capítulos">
     <div class="marco">
-      <ol class="p-capitulos">
+      <ol class="p-capitulos" data-capitulos>
+        <span class="p-riel" data-riel aria-hidden="true"><span></span></span>
         {capitulos.map((c, i) => (
-          <li class="p-capitulo" data-aparece>
+          <li class="p-capitulo" data-capitulo>
             <span class="p-capitulo__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
             <div>
               <h2>{c.t}</h2>
@@ -78,3 +79,8 @@ const howTo = {
     </div>
   </section>
 </Base>
+
+<script>
+  import { iniciarCapitulos } from "../scripts/arm"
+  iniciarCapitulos()
+</script>

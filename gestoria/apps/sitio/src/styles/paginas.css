@@ -401,8 +401,46 @@
   color: #8a5a00;
 }
 .p-capitulos {
+  position: relative;
   margin-top: 8px;
   display: grid;
+}
+/* El riel de los capítulos: se llena con el scroll y cada capítulo se enciende al llegar
+   (scripts/arm.ts). Sin movimiento no se dibuja y todo está encendido. */
+.p-riel {
+  display: none;
+}
+.capitulos-vivos .p-riel {
+  display: block;
+  position: absolute;
+  left: -18px;
+  top: 30px;
+  bottom: 30px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--linea);
+}
+.p-riel span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--degradado);
+  transform-origin: top;
+}
+.capitulos-vivos .p-capitulo {
+  opacity: 0.32;
+  transition: opacity 0.5s;
+}
+.capitulos-vivos .p-capitulo.es-activo {
+  opacity: 1;
+}
+.capitulos-vivos .p-capitulo__n {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--naranja-vivo);
+  transition: color 0.4s;
+}
+.capitulos-vivos .es-activo .p-capitulo__n {
+  color: var(--naranja-vivo);
 }
 .p-capitulo {
   display: grid;
@@ -558,6 +596,9 @@
   }
   .p-capitulo__n {
     font-size: 48px;
+  }
+  .capitulos-vivos .p-riel {
+    left: -10px;
   }
   .p-tabla {
     font-size: 13px;

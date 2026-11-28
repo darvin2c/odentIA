@@ -1,0 +1,27 @@
+---
+// La boleta de un pedido (web v5): ocho pasos de una venta de ejemplo, cada uno con quién lo
+// hizo. La usan el Inicio y «Qué es un ARM»; se imprime línea a línea con `boleta()` de arm.ts.
+---
+<div class="boleta__sombra" data-boleta>
+<figure class="boleta">
+  <figcaption class="boleta__cabeza">
+    <b>Calzados Rosa</b>
+    <span>Pedido 1042 · Andrea Castillo</span>
+  </figcaption>
+  <ol class="boleta__lineas">
+    <li data-linea-b><time>21:14</time><span>Le respondió por WhatsApp</span><i>Sofi</i></li>
+    <li data-linea-b><time>21:15</time><span>Encontró la talla 38 en tu catálogo</span><i>Sofi</i></li>
+    <li data-linea-b><time>21:16</time><span>Cerró en S/ 129, sobre tu mínimo</span><i>Sofi</i></li>
+    <li data-linea-b><time>21:18</time><span>Cobró con el link de pago</span><i>Sofi</i></li>
+    <li data-linea-b><time>21:18</time><span>Bajó el par de tu stock</span><i>gestorIA</i></li>
+    <li data-linea-b class="es-tuyo"><time>09:30</time><span>Empacó el pedido</span><i>Tu equipo</i></li>
+    <li data-linea-b class="es-tuyo"><time>15:40</time><span>Lo entregó en Surco</span><i>Tu equipo</i></li>
+    <li data-linea-b><time>15:41</time><span>Guardó la compra en la ficha de Andrea</span><i>gestorIA</i></li>
+  </ol>
+  <div class="boleta__total" data-total-b>
+    <span>Total</span>
+    <b><span class="boleta__marca">gestorIA</span> <em>6</em> · Tu equipo <em>2</em></b>
+  </div>
+  <p class="boleta__sello" data-sello-b aria-hidden="true">Entregado</p>
+</figure>
+</div>

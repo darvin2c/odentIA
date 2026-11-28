@@ -1,0 +1,72 @@
+---
+// Dos teléfonos, la misma clienta (web v5): martes 21:14, la tienda ya cerró y Andrea escribe por
+// WhatsApp. A la izquierda un chatbot de menú, a la derecha Sofi. Debajo de cada respuesta, qué hizo
+// quien contesta; y, después del chat, lo que pasa: con Sofi se hace solo, con el chatbot queda para
+// ti. Se anima con `telefonos()` de scripts/arm.ts; sin movimiento, todo está completo.
+import { CHAT_BOT, CHAT_CLIENTA, CHAT_SOFI, DESPUES_BOT, DESPUES_SOFI, type Msg } from "../../lib/arm"
+
+const mezclar = (respuestas: Msg[]) =>
+  CHAT_CLIENTA.flatMap((m) => [m, ...respuestas.filter((r) => r.turno === m.turno)])
+const lados = [
+  { nombre: "Un chatbot", sub: "Respuestas automáticas", msgs: mezclar(CHAT_BOT), clase: "otro" },
+  { nombre: "Sofi", sub: "Calzados Rosa · con gestorIA", msgs: mezclar(CHAT_SOFI), clase: "sofi" },
+]
+const visto =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const equis =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+---
+<div class="telefonos" data-telefonos>
+  <p class="telefonos__escena" data-tel-escena>
+    <span class="telefonos__hora">Martes · 21:14</span>
+    Calzados Rosa ya cerró. Andrea le escribe por WhatsApp.
+  </p>
+  <div class="telefonos__par">
+    {lados.map((l) => (
+      <div class={`tel-lado tel-lado--${l.clase}`} data-tel-lado={l.clase}>
+        <figure class={`tel tel--${l.clase}`}>
+          <figcaption class="tel__barra">
+            <span class="tel__avatar" aria-hidden="true">{l.clase === "sofi" ? "S" : "Bot"}</span>
+            <span><b>{l.nombre}</b><small>{l.sub}</small></span>
+          </figcaption>
+          <ol class="tel__chat">
+            {l.msgs.map((m) => (
+              <li class={`tel__msg tel__msg--${m.de}`} data-turno={m.turno}>
+                <span class="tel__texto">{m.texto}</span>
+                {m.tarjeta && (
+                  <span class="tel__tarjeta">
+                    <span><b>{m.tarjeta.titulo}</b><small>{m.tarjeta.detalle}</small></span>
+                    <strong>{m.tarjeta.cifra}</strong>
+                    {m.tarjeta.boton && <span class="tel__pagar">{m.tarjeta.boton}</span>}
+                  </span>
+                )}
+                <time>{m.hora}</time>
+                {m.nota && <span class="tel__nota">{m.nota}</span>}
+              </li>
+            ))}
+            <li class="tel__escribe" aria-hidden="true"><i></i><i></i><i></i></li>
+          </ol>
+        </figure>
+        <div class={`despues despues--${l.clase}`}>
+          <p class="despues__t">Después del chat</p>
+          {l.clase === "sofi" ? (
+            <ol class="despues__lista">
+              {DESPUES_SOFI.map(([h, t]) => (
+                <li data-despues><Fragment set:html={visto} /><span>{t}</span><time>{h}</time></li>
+              ))}
+            </ol>
+          ) : (
+            <ol class="despues__lista">
+              {DESPUES_BOT.map((t) => (
+                <li data-despues><Fragment set:html={equis} /><span>{t}</span><em>Tú</em></li>
+              ))}
+            </ol>
+          )}
+          <p class={`despues__sello despues__sello--${l.clase}`} data-tel-fin>
+            {l.clase === "sofi" ? "Venta cerrada · S/ 139 pagados" : "Sin venta · Andrea sigue esperando"}
+          </p>
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
