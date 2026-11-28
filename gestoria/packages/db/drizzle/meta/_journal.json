@@ -316,6 +316,69 @@
       "when": 1795849090305,
       "tag": "0060_reglas_equipo_y_repartidores",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795849757155,
+      "tag": "0061_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795849758155,
+      "tag": "0062_reglas_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1795849759155,
+      "tag": "0063_el_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1795849760155,
+      "tag": "0064_reglas_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1795849898324,
+      "tag": "0065_las_fotos_y_videos_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1795849899324,
+      "tag": "0066_reglas_fotos_y_videos",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795849951838,
+      "tag": "0067_la_ia_de_fotos",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795849952838,
+      "tag": "0068_reglas_ia_de_fotos",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1795849953838,
+      "tag": "0069_reglas_uso_ia_de_fotos",
+      "breakpoints": true
     }
   ]
 }

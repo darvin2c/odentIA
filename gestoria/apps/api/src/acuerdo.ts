@@ -104,7 +104,7 @@ async function enqueue(
   tx: Db,
   storeId: string,
   event: OutboxEvent,
-  extra: { dedupe?: string; conversationId?: string } = {},
+  extra: { id?: string; dedupe?: string; conversationId?: string } = {},
 ): Promise<void> {
   const payload = appEvent.parse(event) as OutboxEvent
   await tx
@@ -292,6 +292,44 @@ export async function countConversation(
       },
     },
     { dedupe: `uso:${conversation.id}:${start}:${outcome}`, conversationId: conversation.id },
+  )
+}
+
+/**
+ * Lo que miró la IA de fotos (`propuestas.ts`), del saldo del plan: una vez por mirada, con la id
+ * de la mirada como clave del aviso (no cambia al reintentar), sus fotos y lo que le costó al
+ * proveedor. Va en la transacción que cierra el `ai_look`. No cuenta lo que no llegó a responder
+ * (no se pagó) ni lo del modelo de desarrollo (`fake`).
+ */
+export async function countPhotoLook(
+  tx: Db,
+  storeId: string,
+  look: {
+    id: string
+    photos: number
+    model: string
+    outputTokens: number | null
+    costMicros: number | null
+  },
+  now = new Date(),
+): Promise<void> {
+  if (look.model === "fake" || !look.outputTokens) return
+  await enqueue(
+    tx,
+    storeId,
+    {
+      type: "uso.contado",
+      timestamp: now.toISOString(),
+      data: {
+        account: storeId,
+        kind: "ia_fotos",
+        look: look.id,
+        photos: look.photos,
+        costMicros: look.costMicros,
+        occurredAt: now.toISOString(),
+      },
+    },
+    { id: look.id, dedupe: `ia_fotos:${look.id}` },
   )
 }
 

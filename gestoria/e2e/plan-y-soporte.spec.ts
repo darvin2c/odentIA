@@ -272,8 +272,8 @@ test("la Ayuda responde con la guía para tu rol, y lo que escribes a soporte qu
   // Ariadna responde con la guía: la respuesta, de dónde sale y su pantalla.
   const stock = await askHelp(help, "¿Cómo cambio el stock?")
   await expect(stock).toContainText("El stock solo cambia con un movimiento.")
-  await expect(stock).toContainText("La guía de gestorIA: Catálogo.")
-  await expect(stock.getByRole("link", { name: "Llévame a Catálogo" })).toBeVisible()
+  await expect(stock).toContainText("La guía de gestorIA: Ficha del producto.")
+  await expect(stock.getByRole("link", { name: "Llévame a Ficha del producto" })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "ayuda-escritorio")
 

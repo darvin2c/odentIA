@@ -127,10 +127,28 @@ export interface CatalogItem {
   listPriceCents: number
   minPriceCents: number | null
   options: ProductOption[]
+  /** Cuál de las opciones es el color (sus filas en la cuadrícula); null si no tiene. */
+  colorOption: number | null
+  rubro: "calzado" | "ropa" | "cosmetica" | "tecnologia" | "hogar" | null
+  colors: { value: string; hex: string | null; hex2: string | null }[]
+  state: "disponible" | "agotado" | "encargo" | "cupo" | "preventa" | "liquidacion" | "no_se_vende"
+  /** Qué tan lista está para Sofi (`readinessOf` del servidor, la misma de la ficha). */
+  readiness: {
+    level: "basica" | "falta_poco" | "lista"
+    sellsAlone: boolean
+    complete: boolean
+    done: number
+    total: number
+    neededMissing: number
+  }
   variantCount: number
   stock: number
+  /** Cuántas variantes están en 0. */
+  soldOut: number
   fromCents: number
   toCents: number
+  /** El precio de venta de hoy, desde (con su promoción, el que da Sofi); nulo si no se vende. */
+  saleFromCents: number | null
   photoId: string | null
 }
 
@@ -231,6 +249,8 @@ export function money(cents: number, currency: string): string {
     })
     formats.set(key, format)
   }
+  // Lo negativo con el signo menos (U+2212), como en el resto de la app: «−S/ 6», no «-S/ 6».
+  if (cents < 0) return `−${format.format(-cents / 10 ** digits)}`
   return format.format(cents / 10 ** digits)
 }
 
