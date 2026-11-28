@@ -120,6 +120,48 @@ export const HELP_SCREENS = {
       "código de barras",
     ],
   },
+  // «Agregar desde fotos» es un panel del catálogo, sin dirección propia: comparte la del
+  // catálogo (que gana al buscar la pantalla, por ir antes) y su enlace lleva allí, al botón.
+  agregar: {
+    label: "Agregar desde fotos",
+    path: "/catalogo",
+    opens: "configuracion",
+    purpose:
+      "Subir un producto empezando por sus fotos: la IA propone el nombre, la categoría, los colores y lo que se ve, pregunta lo que no ve y nunca pone el precio. Nada se guarda hasta «Guardar y abrir la ficha».",
+    terms: [
+      "agregar desde fotos",
+      "subir un producto",
+      "producto nuevo",
+      "me llegaron",
+      "con sus fotos",
+      "tomar fotos",
+      "cámara",
+      "mirar las fotos",
+      "la IA propone",
+      "aplicar todos",
+      "punteado",
+    ],
+  },
+  cargar: {
+    label: "Cargar muchos",
+    path: "/catalogo/cargar",
+    opens: "configuracion",
+    purpose:
+      "Cargar muchos productos de una vez desde sus fotos sueltas y la hoja de la tienda: cada foto arma un producto, se juntan, se les pone precio a varios a la vez y nada pasa al catálogo hasta «Crear».",
+    terms: [
+      "cargar muchos",
+      "muchos productos",
+      "todas las fotos",
+      "fotos sueltas",
+      "juntar",
+      "juntar con IA",
+      "carga",
+      "descartar la carga",
+      "no crear este",
+      "excel",
+      "hoja",
+    ],
+  },
   caja: {
     label: "Caja",
     path: "/caja",
@@ -576,11 +618,11 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo agrego un producto desde sus fotos?",
         a: [
           "En Catálogo, «Agregar desde fotos»: suelta o elige hasta 8 fotos del producto (de frente, de lado, el detalle, puesto) y toca «Mirar las fotos». En el celular, «Tomar fotos» abre la cámara.",
-          "La IA propone el nombre, la categoría, los colores con sus fotos y una descripción para vender. Lo punteado (✦) es lo que propone: con «Usar» lo tomas, con «Cambiar» lo escribes a tu manera y con «Descartar» lo quitas. Lo que no se ve en una foto, como cómo calza, lo pregunta en amarillo.",
+          "La IA propone el nombre, la categoría, los colores con sus fotos y una descripción para vender. Lo punteado (✦) es lo que propone: «Aplicar todos» lo usa de una vez; o toca ✦ en cada dato para «Usar», «Cambiar» (lo escribes a tu manera) o «Descartar». Lo que no se ve en una foto, como cómo calza, lo pregunta en amarillo.",
           "El precio lo pones tú: la IA nunca lo propone. «Ver cómo queda» muestra cómo se vería en tu vitrina y en WhatsApp antes de guardar. Con «Guardar y abrir la ficha» se crea; lo que no usaste te espera en la ficha.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "agregar",
       },
       {
         id: "que-hace-la-ia",
@@ -591,7 +633,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Mira un número de fotos por día y sale del saldo de tu plan. Si llega a su tope o no está, lo dice y sigues cargando a mano: nada se frena. En «Cargar muchos», «Juntar con IA» propone qué fotos son del mismo producto y tú confirmas cada grupo.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "agregar",
       },
       {
         id: "subir-hoja",
@@ -612,7 +654,55 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Nada pasa al catálogo hasta «Crear»: si a alguno le falta el nombre o el precio, no se crea ninguno y se marca qué falta. «Descartar la carga» la cierra sin crear nada.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "cargar",
+      },
+      {
+        id: "cargar-no-crear",
+        q: "¿Qué pasa si marco «No crear este» o descarto la carga?",
+        a: [
+          "«No crear este» lo deja aparte: el aviso trae «Deshacer» y abajo de la tabla sigue con «Volver a incluir». Al «Crear», lo que quedó aparte no pasa al catálogo y sus fotos se borran.",
+          "«Descartar la carga» primero te pregunta: si sigues, se borran sus fotos y sus productos por crear, y nada pasa al catálogo. No se puede deshacer.",
+        ],
+        needs: "configuracion",
+        screen: "cargar",
+      },
+      {
+        id: "cargar-de-quien",
+        q: "¿Quién más ve la carga que abrí?",
+        a: [
+          "La carga abierta es de la tienda: la ve y la puede cambiar quien puede cambiar el catálogo. Arriba dice quién la abrió y cuándo; si la abrió otra persona, lo que cambies, crees o descartes cambia también para ella.",
+          "«Agregar desde fotos» también usa una carga mientras miras las fotos: si alguien la crea o la descarta desde «Cargar muchos», al guardar te dice quién lo hizo.",
+        ],
+        needs: "configuracion",
+        screen: "cargar",
+      },
+      {
+        id: "juntar-con-ia",
+        q: "¿Qué hace «Juntar con IA»?",
+        a: [
+          "Mira las fotos sueltas de la carga y propone qué fotos son del mismo producto. Cada grupo lo confirmas tú; nada se junta solo.",
+          "Si no encuentra fotos del mismo producto, lo deja escrito junto a la tabla y no cambia nada: júntalas tú con «Juntar en uno» si son del mismo.",
+        ],
+        needs: "configuracion",
+        screen: "cargar",
+      },
+      {
+        id: "agregar-sin-guardar",
+        q: "¿Qué pasa si cierro «Agregar desde fotos» sin guardar?",
+        a: [
+          "Nada pasa al catálogo y las fotos que subiste se borran; antes de cerrar te lo pregunta. Lo que miró la IA ya contó para su tope del día.",
+        ],
+        needs: "configuracion",
+        screen: "agregar",
+      },
+      {
+        id: "agregar-preguntas",
+        q: "¿Qué hago con lo que la IA pregunta en amarillo?",
+        a: [
+          "Es lo que no se ve en las fotos, como cómo calza. Respóndelo con sus opciones o escríbelo, o déjalo: nada se frena. Lo que respondes queda en la ficha y en su historial a tu nombre.",
+        ],
+        needs: "configuracion",
+        screen: "agregar",
       },
       {
         id: "fotos-y-video",
@@ -982,7 +1072,7 @@ export function helpScreenView(
     title: HELP_SCREENS[screen].label,
     suggestions: FAQS.filter(
       (faq) =>
-        faq.screen === screen &&
+        HELP_SCREENS[faq.screen].path === HELP_SCREENS[screen].path &&
         (faq.forWhoCannot
           ? !can(seat, faq.needs) && can(seat, HELP_SCREENS[screen].opens)
           : can(seat, faq.needs)),

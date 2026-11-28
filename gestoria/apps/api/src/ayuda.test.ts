@@ -147,6 +147,37 @@ describe("la pantalla donde está", () => {
     expect(helpScreenView("owner", "/no-existe")).toEqual({ title: null, suggestions: [] })
   })
 
+  it("«Cargar muchos» tiene su pantalla; «Agregar desde fotos», la suya dentro del catálogo", () => {
+    expect(helpScreenOf("/catalogo/cargar")).toBe("cargar")
+    // El panel no tiene dirección propia: en el catálogo sigue siendo el catálogo.
+    expect(helpScreenOf("/catalogo")).toBe("catalogo")
+    const cargar = helpScreenView("owner", "/catalogo/cargar")
+    expect(cargar.title).toBe("Cargar muchos")
+    expect(cargar.suggestions[0]).toBe("¿Cómo cargo muchos productos con sus fotos de una vez?")
+    // En el catálogo se sugiere también «Agregar desde fotos», como antes.
+    expect(helpScreenView("owner", "/catalogo").suggestions).toContain(
+      "¿Cómo agrego un producto desde sus fotos?",
+    )
+    const topics = helpTopics()
+    const agregar = topics.find((t) => t.id === "agregar")!
+    expect(agregar.title).toBe("Agregar desde fotos")
+    expect(agregar.faqs.map((f) => f.id)).toEqual(
+      expect.arrayContaining(["agregar-desde-fotos", "que-hace-la-ia", "agregar-sin-guardar"]),
+    )
+    expect(topics.find((t) => t.id === "cargar")!.faqs.map((f) => f.id)).toEqual(
+      expect.arrayContaining(["cargar-muchos", "cargar-no-crear", "juntar-con-ia"]),
+    )
+    // Su respuesta dice dónde, y el enlace del panel lleva al catálogo, donde está el botón.
+    expect(helpAnswerFor("owner", STORE, "faq:agregar-desde-fotos")).toMatchObject({
+      where: "Agregar desde fotos",
+      path: `/tiendas/${STORE}/catalogo`,
+    })
+    expect(helpAnswerFor("owner", STORE, "faq:cargar-muchos")).toMatchObject({
+      where: "Cargar muchos",
+      path: `/tiendas/${STORE}/catalogo/cargar`,
+    })
+  })
+
   it("a quien no configura la tienda le explica por qué en Configuración solo ve sus avisos", () => {
     const why = "¿Por qué en Configuración solo veo mis avisos?"
     expect(helpScreenView("sales", "/configuracion/avisos").suggestions).toContain(why)
