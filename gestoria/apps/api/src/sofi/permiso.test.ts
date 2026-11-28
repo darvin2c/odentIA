@@ -348,3 +348,77 @@ describe("el permiso", () => {
     })
   })
 })
+
+describe("la cita es lo que acaba de decir", () => {
+  it("una frase de un mensaje anterior no se anota: solo la del último", async () => {
+    const id = await newConversation()
+    await write(id, "quiero promociones", say("¿Qué talla buscas?"))
+    const reply = await write(
+      id,
+      "Ok gracias",
+      use("anotar_permiso", { respuesta: "si", cita: "quiero promociones" }),
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: false })
+        return { content: "De nada." }
+      },
+    )
+    expect((reply.detail as Json).tools).toEqual([
+      { name: "anotar_permiso", ok: false, code: "SIN_CITA" },
+    ])
+    expect(await consents(id)).toHaveLength(0)
+  })
+
+  it("una cita de menos de dos caracteres sin espacios no se anota", async () => {
+    const id = await newConversation()
+    await write(id, "Sí", use("anotar_permiso", { respuesta: "si", cita: "S" }), (r) => {
+      expect(lastTool(r)).toMatchObject({ ok: false })
+      return { content: "¿Me confirmas?" }
+    })
+    expect(await consents(id)).toHaveLength(0)
+    await write(id, "Sí", use("anotar_permiso", { respuesta: "si", cita: "Sí" }), say("¡Listo!"))
+    expect(await consents(id)).toHaveLength(1)
+  })
+})
+
+describe("la ficha donde se anota", () => {
+  it("en la ficha propia del pedido del chat, no en la que se ve: «Separar» se la lleva", async () => {
+    const [older] = await db.ownerDb
+      .insert(customer)
+      .values({ storeId, name: "Paola Ruiz", createdBy: "banco" })
+      .returning({ id: customer.id })
+    const [newer] = await db.ownerDb
+      .insert(customer)
+      .values({ storeId, name: "Paola Ruiz", createdBy: "banco", mergedInto: older!.id })
+      .returning({ id: customer.id })
+    const id = await newConversation()
+    await boughtWith(id, newer!.id)
+    await write(
+      id,
+      "Sí, avísame",
+      use("anotar_permiso", { respuesta: "si", cita: "Sí, avísame" }),
+      say("¡Listo!"),
+    )
+    expect((await consents(id))[0]?.customerId).toBe(newer!.id)
+  })
+
+  it("si el chat tiene pedidos de dos familias, sin ficha: quien escribe puede no ser ella", async () => {
+    const [ana] = await db.ownerDb
+      .insert(customer)
+      .values({ storeId, name: "Ana Paz", createdBy: "banco" })
+      .returning({ id: customer.id })
+    const [bea] = await db.ownerDb
+      .insert(customer)
+      .values({ storeId, name: "Bea Paz", createdBy: "banco" })
+      .returning({ id: customer.id })
+    const id = await newConversation()
+    await boughtWith(id, ana!.id)
+    await boughtWith(id, bea!.id)
+    await write(
+      id,
+      "Sí, avísame",
+      use("anotar_permiso", { respuesta: "si", cita: "Sí, avísame" }),
+      say("¡Listo!"),
+    )
+    expect((await consents(id))[0]).toMatchObject({ state: "si", customerId: null })
+  })
+})

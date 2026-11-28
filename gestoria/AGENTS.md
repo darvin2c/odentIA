@@ -231,8 +231,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   se descarta. Lee cada mensaje una vez (`argos_reading`), nunca a media conversación ni «Probar a
   Sofi». Las cifras (la medida de sus compras, su canal) y toda decisión siguen siendo cuentas fijas.
   Lo que cuesta leer queda en el registro de la vuelta: no se cobra.
-- El permiso para escribirle (`customer_consent`) lo anota solo Sofi, de un mensaje de ella y con sus
-  palabras. Nadie del equipo dice por ella que sí.
+- El permiso para escribirle (`customer_consent`) lo anota solo Sofi, del último mensaje de ella y con
+  sus palabras. Nadie del equipo dice por ella que sí.
+- Argos y Sofi anotan en la ficha propia del pedido del chat (`conversationFichasIn`), no en la que se
+  ve: «Separar» se lleva lo suyo. Un chat con pedidos de familias distintas puede no ser de ella: no
+  se le anota nada de lo que dice y su permiso queda sin ficha, que no cuenta para nadie.
 
 ## El acuerdo con la administración (B7)
 

@@ -47,7 +47,9 @@ import { useStoreContext } from "./tiendas"
 /**
  * El perfil de la clienta en su ficha (ADR 0240): «Lo que Argos sabe de ella», cada dato con su
  * fuente y su historial, y «Cuándo se le puede escribir». Argos lo anota solo; lo que corrige una
- * persona queda suyo y Argos no lo vuelve a pisar. Soporte lo mira sin «Corregir» (`canCorrect`).
+ * persona queda suyo y Argos no lo vuelve a pisar. La ficha la ve solo quien atiende
+ * (`ventas.atender`), que es quien puede «Corregir»: soporte no la ve. `canCorrect` queda por si un
+ * día la ve alguien con otro permiso.
  */
 
 /** «Lo hizo Argos»: la marca del agente junto a lo que anotó. */
@@ -261,10 +263,7 @@ function FactRow({
                       key={option.raw}
                       size="xs"
                       variant="outline"
-                      pending={
-                        pick.isPending &&
-                        pick.variables?.value === option.raw
-                      }
+                      pending={pick.isPending && pick.variables?.value === option.raw}
                       disabled={pick.isPending}
                       onClick={() =>
                         pick.mutate(
