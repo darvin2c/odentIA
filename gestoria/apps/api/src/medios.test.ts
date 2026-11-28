@@ -694,7 +694,7 @@ describe("cargar muchos", () => {
     // Su historial empieza como el de cualquier producto: «Creó el producto», a nombre de Mario.
     const history = (await call("rosa", "GET", `${base}/productos/${made!.id}/historial`)).json
     expect(history.events).toEqual([
-      expect.objectContaining({ action: "creado", actorName: "Mario Huamán" }),
+      expect.objectContaining({ action: "creado", actorName: "Mario Huamán", reason: null }),
     ])
     // La misma carpeta: nada se copió ni se anotó para borrar.
     expect(folders).toEqual(expect.arrayContaining(photos.map((p) => p.objectKey)))
