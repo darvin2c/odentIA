@@ -628,8 +628,11 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
   })
 
   it("el dueño la enciende y queda escrito quién", async () => {
+    // Nunca eligió nada: encender no le pone versión (una pestaña abierta puede guardar igual).
+    expect((await call("rosa", "GET", `${base}/sofi`)).json.version).toBeNull()
     const on = await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })
     expect(on.status).toBe(200)
+    expect((await call("rosa", "GET", `${base}/sofi`)).json.version).toBeNull()
     const save = await saveSofi({ displayName: "Sofi, de Calzados Rosa" })
     expect(save.status).toBe(200)
     const [row] = await db.ownerDb.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))

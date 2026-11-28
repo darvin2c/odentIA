@@ -133,7 +133,13 @@ export async function agentSettings(
 }
 
 /** La versión de lo elegido: la hora del último cambio de opciones; null si nunca se eligió. */
-const versionOf = (row: { updatedAt: Date } | undefined) => row?.updatedAt.toISOString() ?? null
+/**
+ * La versión de lo elegido: la hora del último cambio de opciones; null si nunca se eligió. Una fila
+ * que nació sin elegir nada (al encender, o para tomar el candado) lleva la hora cero.
+ */
+const NEVER = new Date(0)
+const versionOf = (row: { updatedAt: Date } | undefined) =>
+  row && row.updatedAt.getTime() !== NEVER.getTime() ? row.updatedAt.toISOString() : null
 
 const STALE = () =>
   new StoreError(
@@ -141,6 +147,23 @@ const STALE = () =>
     "STALE",
     "Alguien cambió a Sofi mientras tenías esto abierto. Ciérralo y vuelve a abrirlo para ver lo nuevo antes de guardar.",
   )
+
+/**
+ * La fila de Sofi de la tienda, con candado. Si no existe, nace con lo de siempre y sin versión:
+ * así también el primer guardado (y el primer «Encender») espera al otro y no lo pisa.
+ */
+async function lockedAgent(tx: Db, storeId: string, person: Person) {
+  await tx
+    .insert(storeAgent)
+    .values({ storeId, updatedBy: person.userId, updatedAt: NEVER })
+    .onConflictDoNothing({ target: storeAgent.storeId })
+  const [row] = await tx
+    .select()
+    .from(storeAgent)
+    .where(eq(storeAgent.storeId, storeId))
+    .for("update")
+  return row!
+}
 
 /**
  * Guarda solo lo que cambió, si la versión que vio quien guarda es la de ahora. La fila se lee con
@@ -154,17 +177,12 @@ export async function saveAgentSettings(
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const { version, ...change } = input
-    const [before] = await tx
-      .select()
-      .from(storeAgent)
-      .where(eq(storeAgent.storeId, storeId))
-      .for("update")
+    const before = await lockedAgent(tx, storeId, person)
     if (versionOf(before) !== version) throw STALE()
-    const values = { ...change, updatedBy: person.userId, updatedAt: new Date() }
     const [row] = await tx
-      .insert(storeAgent)
-      .values({ storeId, ...values })
-      .onConflictDoUpdate({ target: storeAgent.storeId, set: values })
+      .update(storeAgent)
+      .set({ ...change, updatedBy: person.userId, updatedAt: new Date() })
+      .where(eq(storeAgent.storeId, storeId))
       .returning()
     return { version: versionOf(row) }
   })
@@ -181,16 +199,12 @@ export async function setAgentEnabled(
   input: z.infer<typeof agentStateInput>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [before] = await tx
-      .select({ enabled: storeAgent.enabled })
-      .from(storeAgent)
-      .where(eq(storeAgent.storeId, storeId))
-      .for("update")
-    if ((before?.enabled ?? false) === input.enabled) return input
+    const before = await lockedAgent(tx, storeId, person)
+    if (before.enabled === input.enabled) return input
     await tx
-      .insert(storeAgent)
-      .values({ storeId, enabled: input.enabled, updatedBy: person.userId })
-      .onConflictDoUpdate({ target: storeAgent.storeId, set: { enabled: input.enabled } })
+      .update(storeAgent)
+      .set({ enabled: input.enabled })
+      .where(eq(storeAgent.storeId, storeId))
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
