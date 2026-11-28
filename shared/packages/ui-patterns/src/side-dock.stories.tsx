@@ -1,8 +1,19 @@
-import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
+import {
+  Button,
+  Field,
+  FieldLabel,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+} from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
 import { useEffect, useState } from "react"
 import { DetailDrawer } from "./detail/detail-drawer.js"
 import { useDraftSaved } from "./docked-surface.js"
+import { FormDrawer } from "./form/form-drawer.js"
 import { FormPanel } from "./form/form-panel.js"
 import { MasterDetail } from "./master-detail.js"
 import { SideDockProvider, SideDockSlot } from "./side-dock.js"
@@ -113,6 +124,59 @@ export const SeGuardaSolo: Story = {
           <DetailDrawer open title="Evaluación de endodoncia" description="Se guarda solo mientras lo completas." onClose={() => {}}>
             <AutosavedNotes />
           </DetailDrawer>
+        </div>
+        <SideDockSlot />
+      </div>
+    </SideDockProvider>
+  ),
+}
+
+function DetailWithNestedForm() {
+  const [open, setOpen] = useState(false)
+  const [method, setMethod] = useState<string | null>(null)
+  return (
+    <DetailDrawer open title="Cobros" description="Lo que ya está configurado." onClose={() => {}}>
+      <div className="flex flex-col gap-3 text-sm">
+        <p>Yape y Plin a tu número · efectivo al recibir.</p>
+        <Button type="button" variant="outline" className="w-fit" onClick={() => setOpen(true)}>
+          Agregar un medio de pago
+        </Button>
+      </div>
+      <FormDrawer open={open} title="Nuevo medio de pago" onClose={() => setOpen(false)} onSubmit={() => setOpen(false)}>
+        <Field>
+          <FieldLabel htmlFor="nested-method">Medio</FieldLabel>
+          <Select
+            items={{ yape: "Yape", plin: "Plin", efectivo: "Efectivo al recibir" }}
+            value={method}
+            onValueChange={(value) => setMethod(value as string | null)}
+          >
+            <SelectTrigger id="nested-method" className="w-full">
+              <SelectValue placeholder="Elige uno" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="yape">Yape</SelectItem>
+              <SelectItem value="plin">Plin</SelectItem>
+              <SelectItem value="efectivo">Efectivo al recibir</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </FormDrawer>
+    </DetailDrawer>
+  )
+}
+
+/**
+ * Lo que se toca o se escribe en un cajón abierto desde la columna (y en su lista desplegable,
+ * que vive en otro portal) es del cajón: la columna sigue sin nada escrito y salir no pregunta.
+ */
+export const CajonDesdeLaColumna: Story = {
+  render: () => (
+    <SideDockProvider draftGuard={GuardStatus}>
+      <div className="flex min-h-svh">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 p-6">
+          <h1 className="text-2xl font-bold tracking-tight">Configuración</h1>
+          <p className="text-muted-foreground">Abre el cajón, elige un medio y ciérralo: la columna sigue sin cambios.</p>
+          <DetailWithNestedForm />
         </div>
         <SideDockSlot />
       </div>

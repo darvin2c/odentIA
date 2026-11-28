@@ -1,0 +1,15 @@
+---
+// El golpe (web v5): una banda oscura con una sola frase grande, que se enciende palabra a palabra
+// mientras se baja (`golpe()` de scripts/arm.ts). Sin movimiento, se lee entera.
+interface Props {
+  frase: string
+  acento: string
+}
+const { frase, acento } = Astro.props
+---
+<section class="golpe">
+  <span class="golpe__luz" aria-hidden="true"></span>
+  <div class="marco">
+    <p class="golpe__frase" data-golpe>{frase} <span class="cur">{acento}</span></p>
+  </div>
+</section>

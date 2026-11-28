@@ -96,6 +96,11 @@ export class ApiError extends Error {
   ) {
     super(message)
   }
+
+  /** Lo que leen los formularios comunes (`submitErrorOf` de `@odentia/ui-patterns`). */
+  get shape(): { code: string; message: string; fields: Record<string, string> } {
+    return { code: this.code, message: this.message, fields: this.fields }
+  }
 }
 
 /** Sin sesión de la cuenta: la pantalla manda a entrar. */

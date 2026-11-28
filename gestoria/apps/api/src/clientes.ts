@@ -14,6 +14,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { customerProfileIn } from "./perfil.js"
 import { balancesIn, unpaidBalance } from "./saldo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -460,7 +461,7 @@ export async function customerDetail(
   customerId: string,
 ) {
   uuidOr404(customerId)
-  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx, seat) => {
     const head = await rootRow(tx, storeId, customerId)
     const members = await tx
       .select()
@@ -736,6 +737,8 @@ export async function customerDetail(
         name: similarNames.get(id)?.name ?? "",
         phone: similarNames.get(id)?.phone ?? null,
       })),
+      /** «Lo que Argos sabe de ella» y cuándo se le puede escribir (`perfil.ts`). */
+      profile: await customerProfileIn(tx, storeId, head.id, seat),
     }
   })
 }
@@ -986,7 +989,7 @@ export async function customerForOrderIn(
  * La ficha de la clienta de una conversación (la que se ve, si quedó dentro de otra): la del último
  * pedido de ese chat que tiene ficha. Nunca se busca por el teléfono ni por el nombre.
  */
-async function conversationCustomerIn(
+export async function conversationCustomerIn(
   tx: Db,
   storeId: string,
   conversationId: string,
@@ -1004,6 +1007,39 @@ async function conversationCustomerIn(
     .orderBy(desc(saleOrder.createdAt))
     .limit(1)
   return previous?.customerId ? rootRow(tx, storeId, previous.customerId) : null
+}
+
+export interface ConversationFichas {
+  /** La ficha propia del último pedido con ficha de ese chat (no la que se ve): ahí se anota. */
+  own: string
+  /** La ficha que se ve de esa (`coalesce(merged_into, id)`). */
+  root: string
+  /**
+   * Si los pedidos del chat son de fichas de familias distintas: quien escribe puede no ser la
+   * clienta (interlocutora ≠ clienta), y lo que dice el chat no se le anota a ninguna.
+   */
+  mixed: boolean
+}
+
+/**
+ * Las fichas de los pedidos de una conversación (ADR 0240): la propia del último, su raíz y si hay
+ * pedidos de otra familia. Null si ningún pedido tiene ficha. Nunca por el teléfono ni el nombre.
+ */
+export async function conversationFichasIn(
+  tx: Db,
+  storeId: string,
+  conversationId: string,
+): Promise<ConversationFichas | null> {
+  const rows = await tx
+    .select({ id: customer.id, mergedInto: customer.mergedInto })
+    .from(saleOrder)
+    .innerJoin(customer, eq(customer.id, saleOrder.customerId))
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.conversationId, conversationId)))
+    .orderBy(desc(saleOrder.createdAt))
+  const last = rows[0]
+  if (!last) return null
+  const roots = new Set(rows.map((r) => r.mergedInto ?? r.id))
+  return { own: last.id, root: last.mergedInto ?? last.id, mixed: roots.size > 1 }
 }
 
 /**

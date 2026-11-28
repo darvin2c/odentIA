@@ -62,10 +62,35 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en
   «Gestión», Catálogo, Caja y Reportes); al pie, Configuración. La Ayuda está en la cabecera, no en
   el menú. Una pantalla nueva entra en su lugar del tablero 4, no antes.
-- Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`: cada apartado
+- Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`, con nombres
+  de tarea (Tu tienda, Vender, Conexiones, Tu equipo, Para ti, Tu cuenta gestorIA): cada apartado
   lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
-  quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo. Sus nombres y
-  rutas son los de `HELP_SCREENS` de la Ayuda.
+  quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo; quien no ve «Lo
+  que falta» (Ventas) entra directo a lo suyo. Sus nombres y rutas son los de `HELP_SCREENS` de la
+  Ayuda. Integraciones espera su pantalla (`INTEGRATIONS_READY`).
+- Abre en «Lo que falta» (`/configuracion`; Datos de la tienda en `/configuracion/datos`): lo que
+  falta para vender, cada cosa con su botón, y cada parte en una línea con su estado y un punto
+  con texto si tiene algo pendiente. Todo sale de `GET /api/tiendas/:id/configuracion/resumen`
+  (`configOverview` de `apps/api/src/configuracion.ts`): lo guardado en cada apartado y los mismos
+  datos de los primeros pasos (`setupFactsIn`), nunca marcas a mano. Lo que todavía no existe no
+  viene ni se dibuja. Soporte lo mira sin Sofi ni el plan; a nadie le llegan llaves, costos ni
+  datos de cobro. Una parte nueva suma su línea ahí y en `configLines`.
+- Inicio y «Lo que falta» cuentan con la misma función (`setupProgress` de
+  `apps/web/src/lib/configuracion.ts`), sobre los pasos del servidor y su `sells`: lo que no frena
+  la venta (invitar al equipo, Tu marca, el link de pago) se muestra, pero nunca se cuenta como
+  falta ni deja abierta la lista. Un link de pago sin pasarela no es una forma de cobrar
+  (`chargingPaymentsIn`).
+- El buscador de Configuración no es el de Ctrl+K: es el `Combobox` común sobre `SEARCH_INDEX`
+  (lo que hay dentro de cada parte, con las palabras de quien vende) y los nombres que guardó la
+  tienda (`namesIndex`). Una pantalla que suma algo que se busca suma su entrada, solo de lo que
+  existe.
+- En el teléfono Configuración no lleva la barra de `SectionNav`: la portada es el índice y cada
+  parte vuelve a ella con «Configuración». `SectionNav` aún no tiene ese modo: `ConfigFrame` esconde
+  su barra (anotado para moverlo a `shared/` en su propio cambio).
+- El pedido de soporte para mirar la tienda y quién mira ahora salen una sola vez, en la franja
+  de arriba (`StoreStrip` de `tiendas.tsx`, una `NoticeStrip`), para quien puede responder
+  (`equipo.gestionar`), y se responden en Equipo y repartidores: nunca una tarjeta en cada
+  apartado.
 - «Tu marca» (`apps/api/src/marca.ts`): el color pinta la app con `brandColorCss` de
   `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
@@ -191,11 +216,31 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
-- Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
-  fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
+- Argos no decide con el modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son
+  textos fijos, uno por motivo y pedido. El modelo solo lee lo que dijo la clienta (abajo, «El perfil
+  de la clienta»). Solo Dueño y Administrador ven Reportes (`reportes.ver`).
 - Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
   `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
   las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
+
+## El perfil de la clienta (ADR 0240)
+
+- Argos perfila solo (`apps/api/src/sofi/perfilar.ts`, en su vuelta) y la ficha lo muestra
+  (`customerProfileIn` de `apps/api/src/perfil.ts`, sobre la familia de fichas unidas). Cada dato es
+  una fila de `customer_fact` con su fuente, su cita y su hora: nada se edita. El de hoy es el último
+  de la tienda o, si no hay, el último. Lo que corrige una persona («Corregir», `ventas.atender`)
+  queda «Lo puso la tienda» y Argos no lo vuelve a escribir; la base también se lo niega (`0051`).
+- Argos usa el modelo (el de Sofi) SOLO para leer lo que ella escribió y la dirección de su última
+  entrega: lo de ella va como mensaje del usuario y cada dato trae su cita, que el código comprueba
+  tal cual en el mensaje o la dirección, con la medida del catálogo y una fecha que existe; lo demás
+  se descarta. Lee cada mensaje una vez (`argos_reading`), nunca a media conversación ni «Probar a
+  Sofi». Las cifras (la medida de sus compras, su canal) y toda decisión siguen siendo cuentas fijas.
+  Lo que cuesta leer queda en el registro de la vuelta: no se cobra.
+- El permiso para escribirle (`customer_consent`) lo anota solo Sofi, del último mensaje de ella y con
+  sus palabras. Nadie del equipo dice por ella que sí.
+- Argos y Sofi anotan en la ficha propia del pedido del chat (`conversationFichasIn`), no en la que se
+  ve: «Separar» se lleva lo suyo. Un chat con pedidos de familias distintas puede no ser de ella: no
+  se le anota nada de lo que dice y su permiso queda sin ficha, que no cuenta para nadie.
 
 ## El acuerdo con la administración (B7)
 
@@ -305,6 +350,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`src/scripts/inicio.ts`): sin JavaScript o con «reducir movimiento», la página está completa y
   quieta (lo que se esconde para entrar depende de la clase `mueve`).
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
+
+## Las piezas comunes
+
+- gestorIA no repite lo de `@odentia/ui-patterns`: todo formulario es `useAppForm` con sus campos
+  (`field.TextField`, `field.SelectField`, `field.Control`, `RadioChips`) dentro de `FormDrawer` o
+  `FormPanel`, en la columna lateral del armazón (`SideDockProvider`/`SideDockSlot` en `Shell`), con
+  el aviso de borrador común (`useDraftSaved`, `UnsavedDialog`); detalles con `DetailDrawer`; estados
+  con `EmptyState`, `ErrorState`, `LoadingState`; fechas con los controles de `dates/`. Lo único
+  propio es lo que lo común no tiene (`campos.tsx`: el monto con la moneda de la tienda). Una pieza
+  que falta se suma a `shared/` en su propio cambio, no se copia aquí. Lo vigila
+  `apps/web/src/lib/sin-duplicar.test.ts`: falla si vuelve un `Sheet` propio de formulario o una de
+  las piezas que se quitaron (`FormSheet`, `useDirty`, `SELECT_CLASSES`, `FormAlert`, `ErrorBlock`…).
 
 ## Trabajo
 

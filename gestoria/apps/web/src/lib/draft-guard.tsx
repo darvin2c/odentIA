@@ -2,9 +2,9 @@ import { UnsavedDialog, useDraftBlocker } from "@odentia/ui-patterns"
 import { useEffect, useRef } from "react"
 
 /**
- * «¿Salir sin guardar?» para lo que se abre en la columna lateral del armazón (un formulario de
- * la cuenta, la Ayuda): ahí no es modal y se puede navegar con algo escrito. El mismo diálogo
- * (`UnsavedDialog`) que en las clínicas y en el panel de la cuenta.
+ * El aviso de borrador de la columna lateral (`SideDockProvider`): con algo escrito en el
+ * formulario de la columna, salir por el menú o cerrar la pestaña pregunta lo mismo que × y
+ * Escape (`UnsavedDialog`). Es el pegamento de la app con el router; el diálogo es el común.
  */
 export function DraftGuard({ dirty }: { dirty: boolean }) {
   const dirtyRef = useRef(dirty)
@@ -14,7 +14,6 @@ export function DraftGuard({ dirty }: { dirty: boolean }) {
     enableBeforeUnload: false,
     shouldBlockFn: () => dirtyRef.current,
   })
-
   useEffect(() => {
     if (!dirty) return
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -24,7 +23,6 @@ export function DraftGuard({ dirty }: { dirty: boolean }) {
     window.addEventListener("beforeunload", beforeUnload)
     return () => window.removeEventListener("beforeunload", beforeUnload)
   }, [dirty])
-
   const blocked = blocker.status === "blocked"
   return (
     <UnsavedDialog

@@ -23,7 +23,6 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
-import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   choicesInput,
   deviceInput,
@@ -34,6 +33,7 @@ import {
   storeChoices,
   subscribeInput,
 } from "./avisos.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   createExchange,
   exchangeInput,
@@ -69,6 +69,7 @@ import {
   updateCustomer,
 } from "./clientes.js"
 import {
+  configOverview,
   createDelivery,
   createPayment,
   deleteDelivery,
@@ -150,6 +151,7 @@ import {
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import { correctFact, factInput } from "./perfil.js"
 import { skipInput, skipStep } from "./primeros-pasos.js"
 import { setDeliverySlots, slotsInput } from "./repartidores.js"
 import { argosBoard } from "./sofi/argos.js"
@@ -491,6 +493,12 @@ export function createApp(deps: AppDeps) {
 
   app.post("/api/invitaciones/:id/aceptar", async (c) =>
     c.json(await acceptInvitation(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+
+  // Configuración abre con «Lo que falta para vender» (lienzo «gestorIA · Configuración, de
+  // nuevo», tablero 3): cómo está cada parte, con lo guardado en cada una.
+  app.get("/api/tiendas/:id/configuracion/resumen", async (c) =>
+    c.json(await configOverview(deps.appDb, c.get("person"), c.req.param("id"))),
   )
 
   // La configuración (B3): medios de pago y formas de entrega.
@@ -835,6 +843,12 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/clientes/:customerId/separar", async (c) => {
     const { id, customerId } = c.req.param()
     return c.json(await separateCustomer(deps.appDb, c.get("person"), id, customerId))
+  })
+  // «Corregir» un dato de «Lo que Argos sabe de ella»: queda «Lo puso la tienda».
+  app.post("/api/tiendas/:id/clientes/:customerId/datos", async (c) => {
+    const input = await bodyOf(c, factInput)
+    const { id, customerId } = c.req.param()
+    return c.json(await correctFact(deps.appDb, c.get("person"), id, customerId, input))
   })
 
   // El link de pago de la tienda (B4): se conecta en Pagos y entregas.

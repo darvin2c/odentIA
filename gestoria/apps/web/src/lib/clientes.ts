@@ -7,6 +7,7 @@ import {
   type OrderState,
   storeToday,
 } from "./pedidos"
+import type { CustomerProfile } from "./perfil"
 import { money, type PaymentCollection } from "./tienda"
 
 /**
@@ -112,6 +113,8 @@ export interface CustomerDetail {
   history: CustomerHistoryItem[]
   repeat: RepeatDraft | null
   similar: { id: string; name: string; phone: string | null }[]
+  /** Lo que Argos sabe de ella y cuándo se le puede escribir (ADR 0240). */
+  profile?: CustomerProfile | null
 }
 
 /** «WhatsApp · Instagram», sin «otro». */

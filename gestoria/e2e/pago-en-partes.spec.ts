@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * El pago en partes en un navegador (lienzo «gestorIA como odentIA», tablero 7), contra su
@@ -118,10 +118,10 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
-  const sheet = page.getByRole("dialog", { name: `Pedido ${order.number} · Diana Flores` })
+  const sheet = surface(page, `Pedido ${order.number} · Diana Flores`)
   await expect(sheet).toBeVisible()
   await sheet.getByRole("button", { name: "Anotar captura del pago" }).click()
-  const capture = page.getByRole("dialog", { name: `Captura del pago · pedido ${order.number}` })
+  const capture = surface(page, `Captura del pago · pedido ${order.number}`)
   await expect(capture.getByText("Si paga una parte, anota lo que pagó.")).toBeVisible()
   await capture.getByLabel("Monto").fill("80")
   await capture.getByRole("button", { name: "Anotar captura" }).click()
@@ -167,12 +167,11 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
   await expect(sheet).toBeVisible()
   await sheet.getByRole("button", { name: "Entregado y cobrado" }).click()
-  const deliver = page.getByRole("alertdialog")
+  // Abierto desde el pedido, que ya está en la columna: va en cajón.
+  const deliver = page.getByRole("dialog", { name: "Cobrar S/ 37 y entregar" })
   await expect(deliver.getByLabel("Cobraste")).toHaveValue("37")
   await expect(deliver.getByText("Falta cobrar S/ 37 de S/ 117.")).toBeVisible()
-  await expect(deliver.getByLabel("Medio").locator("option:checked")).toHaveText(
-    "Efectivo al recibir",
-  )
+  await expect(deliver.getByLabel("Medio")).toHaveText("Efectivo al recibir")
   await expect(deliver.getByText("Suma S/ 37: es lo que falta.")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "pago-en-partes-entregar-telefono")

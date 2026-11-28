@@ -1,29 +1,33 @@
+import { Badge, Button, FieldGroup, Input, toast } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  Input,
-  toast,
-} from "@odentia/ui"
-import { Textarea } from "@odentia/ui/components/textarea"
-import { ConfirmDialog, DatePickerButton, ErrorState, SubmitButton } from "@odentia/ui-patterns"
+  ConfirmDialog,
+  clearSubmitErrors,
+  DatePickerButton,
+  ErrorState,
+  FormDrawer,
+  RadioChips,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { ArrowLeft, ImagePlus, Plus, Trash2, X } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
+import { z } from "zod"
+import { MoneyInput } from "./campos"
 import {
   CATALOG_KEY,
+  CategoryOptions,
   draftsOf,
-  type OptionDraft,
+  OPTIONS_HELP,
   OptionsEditor,
-  optionsError,
+  optionsField,
   optionsOf,
+  optionsSchema,
   useCatalog,
 } from "./catalogo"
 import { api } from "./lib/api"
@@ -40,18 +44,8 @@ import {
   type Variant,
   variantName,
 } from "./lib/tienda"
-import {
-  FormAlert,
-  FormSheet,
-  fieldErrors,
-  MoneyField,
-  Photo,
-  SELECT_CLASSES,
-  shrinkPhoto,
-  TextField,
-  useDirty,
-} from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { Photo, shrinkPhoto } from "./piezas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * Un producto del catálogo (lienzo B, tableros 7 y 14): sus datos y opciones, el precio y lo que
@@ -124,7 +118,7 @@ export function ProductPage() {
       <>
         {back}
         <StoreHeader title="Producto" />
-        <ErrorBlock error={product.error} onRetry={() => void product.refetch()} />
+        <ErrorState error={product.error} onRetry={() => void product.refetch()} />
       </>
     )
   const p = product.data.product
@@ -183,91 +177,87 @@ function useSaveProduct(product: ProductDetail, done: string) {
 
 function DataCard({ product, canEdit }: { product: ProductDetail; canEdit: boolean }) {
   const { store } = useStoreContext()
-  const catalog = useCatalog(store.id)
-  const [name, setName] = useState(product.name)
-  const [category, setCategory] = useState(product.category ?? "")
-  const [description, setDescription] = useState(product.description)
-  const [drafts, setDrafts] = useState<OptionDraft[]>(draftsOf(product.options))
   const save = useSaveProduct(product, "Producto guardado")
-  const errors = fieldErrors(save.error)
-  const [local, setLocal] = useState<Record<string, string>>({})
-  const descriptionId = useId()
   const categoriesId = useId()
-  const categories = [
-    ...new Set((catalog.data?.products ?? []).map((c) => c.category).filter(Boolean)),
-  ]
-
-  function submit() {
-    const options = optionsOf(drafts)
-    const next: Record<string, string> = {}
-    if (!name.trim()) next.name = "Escribe el nombre del producto"
-    if (options.some((o) => !o.name || o.values.length === 0))
-      next.options = "Cada opción necesita su nombre y al menos un valor"
-    setLocal(next)
-    if (Object.keys(next).length > 0) return
-    // Las opciones van solo si se tocaron: guardar el nombre no rehace las variantes.
-    const touched = JSON.stringify(drafts) !== JSON.stringify(draftsOf(product.options))
-    save.mutate({ name, category: category || null, description, ...(touched ? { options } : {}) })
-  }
-  const shown = { ...errors, ...local }
+  const form = useAppForm({
+    defaultValues: {
+      name: product.name,
+      category: product.category ?? "",
+      description: product.description,
+      drafts: draftsOf(product.options),
+    },
+    validators: {
+      onSubmit: z.object({
+        name: z.string().trim().min(1, "Escribe el nombre del producto"),
+        category: z.string(),
+        description: z.string(),
+        drafts: optionsSchema,
+      }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      // Las opciones van solo si se tocaron: guardar el nombre no rehace las variantes.
+      const touched = JSON.stringify(value.drafts) !== JSON.stringify(draftsOf(product.options))
+      await save.mutateAsync({
+        name: value.name,
+        category: value.category || null,
+        description: value.description,
+        ...(touched ? { options: optionsOf(value.drafts) } : {}),
+      })
+      formApi.reset(value)
+    },
+  })
+  const submit = useFormSubmit(form, { fieldMap: optionsField })
+  const error = useFormSubmitError(form)
 
   return (
     <Card title="Datos y opciones">
-      <form
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault()
-          submit()
-        }}
-      >
+      <form noValidate onSubmit={submit}>
         <fieldset disabled={!canEdit} className="contents">
           <FieldGroup className="gap-5">
-            <TextField
-              label="Nombre"
-              value={name}
-              onChange={setName}
-              error={shown.name}
-              maxLength={120}
-            />
-            <Field>
-              <FieldLabel htmlFor={`${categoriesId}-input`}>Categoría</FieldLabel>
-              <Input
-                id={`${categoriesId}-input`}
-                list={categoriesId}
-                value={category}
-                maxLength={60}
-                onChange={(e) => setCategory(e.target.value)}
-              />
-              <datalist id={categoriesId}>
-                {categories.map((c) => (
-                  <option key={c} value={c ?? ""} />
-                ))}
-              </datalist>
-            </Field>
-            <Field data-invalid={shown.description ? true : undefined}>
-              <FieldLabel htmlFor={descriptionId}>Lo que Sofi puede contar</FieldLabel>
-              <Textarea
-                id={descriptionId}
-                rows={3}
-                maxLength={2000}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              <FieldDescription>
-                Material, horma, cuidados. Sofi no inventa lo que no está aquí.
-              </FieldDescription>
-            </Field>
-            <OptionsEditor
-              drafts={drafts}
-              onChange={setDrafts}
-              error={optionsError(shown)}
-              disabled={!canEdit}
-            />
-            <FormAlert error={save.error} />
+            <form.AppField name="name">
+              {(field) => <field.TextField label="Nombre" maxLength={120} />}
+            </form.AppField>
+            <form.AppField name="category">
+              {(field) => <field.TextField label="Categoría" list={categoriesId} maxLength={60} />}
+            </form.AppField>
+            <CategoryOptions id={categoriesId} storeId={store.id} />
+            <form.AppField name="description">
+              {(field) => (
+                <field.TextareaField
+                  label="Lo que Sofi puede contar"
+                  rows={3}
+                  maxLength={2000}
+                  description="Material, horma, cuidados. Sofi no inventa lo que no está aquí."
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="drafts">
+              {(field) => (
+                <field.Group legend="Opciones" description={OPTIONS_HELP}>
+                  {(control) => (
+                    <OptionsEditor
+                      control={control}
+                      drafts={field.state.value}
+                      onChange={field.handleChange}
+                      disabled={!canEdit}
+                    />
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
+            {error ? (
+              <p role="alert" className="text-sm text-danger">
+                {error}
+              </p>
+            ) : null}
             {canEdit ? (
-              <SubmitButton type="submit" pending={save.isPending} className="self-start">
-                Guardar
-              </SubmitButton>
+              <form.Subscribe selector={(state) => state.isSubmitting}>
+                {(pending) => (
+                  <SubmitButton type="submit" pending={pending} className="self-start">
+                    Guardar
+                  </SubmitButton>
+                )}
+              </form.Subscribe>
             ) : null}
           </FieldGroup>
         </fieldset>
@@ -297,61 +287,95 @@ function CostNotice({ product }: { product: ProductDetail }) {
   )
 }
 
+/** Lo que el servidor señala del precio (`quantityPrices.0.unitPriceCents`), en su campo. */
+function priceField(serverField: string): string | undefined {
+  if (serverField === "listPriceCents") return "list"
+  if (serverField === "minPriceCents") return "min"
+  if (serverField === "quantityPrices" || serverField.startsWith("quantityPrices.")) return "tiers"
+  if (serverField === "promotions" || serverField.startsWith("promotions.")) return "promos"
+  return undefined
+}
+
 function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: boolean }) {
   const { store } = useStoreContext()
   const currency = store.currency
-  const [list, setList] = useState(moneyInput(product.listPriceCents, currency))
-  const [min, setMin] = useState(moneyInput(product.minPriceCents, currency))
-  const [tiers, setTiers] = useState(
-    product.quantityPrices.map((t) => ({
-      quantity: String(t.minQuantity),
-      price: moneyInput(t.unitPriceCents, currency),
-    })),
-  )
-  const [promos, setPromos] = useState<Promotion[]>(product.promotions)
   const save = useSaveProduct(product, "Precios guardados")
-  const [local, setLocal] = useState<Record<string, string>>({})
-  const shown = { ...fieldErrors(save.error), ...local }
-  const listCents = readMoney(list, currency)
-  const minCents = min.trim() ? readMoney(min, currency) : null
+  const form = useAppForm({
+    defaultValues: {
+      list: moneyInput(product.listPriceCents, currency),
+      min: moneyInput(product.minPriceCents, currency),
+      tiers: product.quantityPrices.map((t) => ({
+        quantity: String(t.minQuantity),
+        price: moneyInput(t.unitPriceCents, currency),
+      })),
+      promos: product.promotions as Promotion[],
+    },
+    validators: {
+      onSubmit: z
+        .object({
+          list: z.string(),
+          min: z.string(),
+          tiers: z.array(z.object({ quantity: z.string(), price: z.string() })),
+          promos: z.array(
+            z.object({
+              name: z.string(),
+              percentOff: z.number(),
+              startsOn: z.string(),
+              endsOn: z.string(),
+            }),
+          ),
+        })
+        .superRefine((value, ctx) => {
+          const issue = (path: string, message: string) =>
+            ctx.addIssue({ code: "custom", path: [path], message })
+          const listCents = readMoney(value.list, currency)
+          const minCents = value.min.trim() ? readMoney(value.min, currency) : null
+          if (!listCents) issue("list", "Escribe el precio, como 129 o 129.90")
+          if (value.min.trim() && !minCents)
+            issue("min", "Escribe el precio mínimo, o déjalo vacío")
+          if (listCents && minCents && minCents > listCents)
+            issue("min", "El mínimo no puede ser mayor que el de lista")
+          if (
+            value.tiers.some((t) => {
+              const n = Number(t.quantity)
+              return !Number.isInteger(n) || n < 2 || !readMoney(t.price, currency)
+            })
+          )
+            issue(
+              "tiers",
+              "Cada precio por cantidad necesita desde cuántas unidades (2 o más) y su precio",
+            )
+          if (
+            value.promos.some(
+              (p) =>
+                !p.name.trim() ||
+                !p.startsOn ||
+                !p.endsOn ||
+                !(p.percentOff >= 1 && p.percentOff <= 90),
+            )
+          )
+            issue(
+              "promos",
+              "Cada promoción necesita su nombre, el porcentaje (1 a 90) y sus fechas",
+            )
+        }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      await save.mutateAsync({
+        listPriceCents: readMoney(value.list, currency),
+        minPriceCents: value.min.trim() ? readMoney(value.min, currency) : null,
+        quantityPrices: value.tiers.map((t) => ({
+          minQuantity: Number(t.quantity),
+          unitPriceCents: readMoney(t.price, currency),
+        })),
+        promotions: value.promos,
+      })
+      formApi.reset(value)
+    },
+  })
+  const submit = useFormSubmit(form, { fieldMap: priceField })
+  const error = useFormSubmitError(form)
   const differs = product.fromCents !== product.toCents
-
-  function submit() {
-    const next: Record<string, string> = {}
-    if (!listCents) next.listPriceCents = "Escribe el precio, como 129 o 129.90"
-    if (min.trim() && !minCents) next.minPriceCents = "Escribe el precio mínimo, o déjalo vacío"
-    if (listCents && minCents && minCents > listCents)
-      next.minPriceCents = "El mínimo no puede ser mayor que el de lista"
-    const quantityPrices = tiers.map((t) => ({
-      minQuantity: Number(t.quantity),
-      unitPriceCents: readMoney(t.price, currency),
-    }))
-    if (
-      quantityPrices.some(
-        (t) => !Number.isInteger(t.minQuantity) || t.minQuantity < 2 || !t.unitPriceCents,
-      )
-    )
-      next.quantityPrices =
-        "Cada precio por cantidad necesita desde cuántas unidades (2 o más) y su precio"
-    if (
-      promos.some(
-        (p) =>
-          !p.name.trim() || !p.startsOn || !p.endsOn || !(p.percentOff >= 1 && p.percentOff <= 90),
-      )
-    )
-      next.promotions = "Cada promoción necesita su nombre, el porcentaje (1 a 90) y sus fechas"
-    setLocal(next)
-    if (Object.keys(next).length > 0) return
-    save.mutate({
-      listPriceCents: listCents,
-      minPriceCents: minCents,
-      quantityPrices,
-      promotions: promos,
-    })
-  }
-
-  const firstError = (prefix: string) =>
-    Object.entries(shown).find(([key]) => key === prefix || key.startsWith(`${prefix}.`))?.[1]
 
   return (
     <Card
@@ -362,207 +386,284 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
           : `Sofi siempre da un número: «Cuesta ${money(product.fromCents, currency)}».`
       }
     >
-      <form
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault()
-          submit()
-        }}
-      >
+      <form noValidate onSubmit={submit}>
         <fieldset disabled={!canEdit} className="contents">
-          <FieldGroup className="gap-5">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <MoneyField
-                label="Precio de lista"
-                currency={currency}
-                value={list}
-                onChange={setList}
-                error={shown.listPriceCents}
-              />
-              <MoneyField
-                label="Precio mínimo de venta"
-                currency={currency}
-                value={min}
-                onChange={setMin}
-                error={shown.minPriceCents}
-                help={
-                  listCents && minCents && minCents <= listCents
-                    ? `Sofi puede ceder hasta ${money(listCents - minCents, currency)} por unidad.`
-                    : "Vacío: no se negocia."
-                }
-              />
-            </div>
-            <CostNotice product={product} />
-            <FieldSet>
-              <FieldLegend variant="label">Precio por cantidad</FieldLegend>
-              <FieldDescription>
-                No se suma con una promoción: va el mejor para el cliente.
-              </FieldDescription>
-              {tiers.map((tier, i) => {
-                const unit = readMoney(tier.price, currency)
-                const qty = Number(tier.quantity)
-                return (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
-                  <div key={i} className="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-end gap-2">
-                    <TextField
-                      label="Desde"
-                      inputMode="numeric"
-                      value={tier.quantity}
-                      onChange={(quantity) =>
-                        setTiers(tiers.map((t, j) => (j === i ? { ...t, quantity } : t)))
-                      }
-                      help="unidades"
-                    />
-                    <MoneyField
-                      label="Cada una a"
-                      currency={currency}
-                      value={tier.price}
-                      onChange={(price) =>
-                        setTiers(tiers.map((t, j) => (j === i ? { ...t, price } : t)))
-                      }
-                      help={
-                        unit && qty >= 2 ? `${qty} cuestan ${money(unit * qty, currency)}` : " "
-                      }
-                    />
-                    {canEdit ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="mb-6"
-                        aria-label={`Quitar el precio desde ${tier.quantity || "esta cantidad"}`}
-                        onClick={() => setTiers(tiers.filter((_, j) => j !== i))}
+          <form.Subscribe selector={(state) => state.values}>
+            {(values) => {
+              const listCents = readMoney(values.list, currency)
+              const minCents = values.min.trim() ? readMoney(values.min, currency) : null
+              return (
+                <FieldGroup className="gap-5">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <form.AppField name="list">
+                      {(field) => (
+                        <field.Control label="Precio de lista">
+                          {(control) => (
+                            <MoneyInput
+                              control={control}
+                              currency={currency}
+                              value={field.state.value}
+                              onChange={field.handleChange}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                    <form.AppField name="min">
+                      {(field) => (
+                        <field.Control
+                          label="Precio mínimo de venta"
+                          description={
+                            listCents && minCents && minCents <= listCents
+                              ? `Sofi puede ceder hasta ${money(listCents - minCents, currency)} por unidad.`
+                              : "Vacío: no se negocia."
+                          }
+                        >
+                          {(control) => (
+                            <MoneyInput
+                              control={control}
+                              currency={currency}
+                              value={field.state.value}
+                              onChange={field.handleChange}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                  </div>
+                  <CostNotice product={product} />
+                  <form.AppField name="tiers" mode="array">
+                    {(tiers) => (
+                      <tiers.Group
+                        legend="Precio por cantidad"
+                        description="No se suma con una promoción: va el mejor para el cliente."
                       >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    ) : null}
-                  </div>
-                )
-              })}
-              {canEdit && tiers.length < 5 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-start"
-                  onClick={() => setTiers([...tiers, { quantity: "2", price: "" }])}
-                >
-                  <Plus aria-hidden />
-                  Precio por cantidad
-                </Button>
-              ) : null}
-              {tiers.length === 0 && !canEdit ? (
-                <p className="text-sm text-muted-foreground">Sin precio por cantidad.</p>
-              ) : null}
-              {firstError("quantityPrices") ? (
-                <FieldError>{firstError("quantityPrices")}</FieldError>
-              ) : null}
-            </FieldSet>
-            <FieldSet>
-              <FieldLegend variant="label">Promociones</FieldLegend>
-              <FieldDescription>
-                Un porcentaje menos, de un día a otro. No se pisan ni se suman.
-              </FieldDescription>
-              {promos.map((promo, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
-                <div key={i} className="flex flex-col gap-2 rounded-lg border p-3">
-                  <div className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2">
-                    <TextField
-                      label="Nombre"
-                      value={promo.name}
-                      onChange={(name) =>
-                        setPromos(promos.map((p, j) => (j === i ? { ...p, name } : p)))
-                      }
-                      maxLength={60}
-                      placeholder="Cyber"
-                    />
-                    <TextField
-                      label="% menos"
-                      inputMode="numeric"
-                      value={promo.percentOff ? String(promo.percentOff) : ""}
-                      onChange={(v) =>
-                        setPromos(
-                          promos.map((p, j) =>
-                            j === i ? { ...p, percentOff: Number(v.replace(/\D/g, "")) } : p,
-                          ),
-                        )
-                      }
-                    />
-                    {canEdit ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Quitar la promoción ${promo.name || i + 1}`}
-                        onClick={() => setPromos(promos.filter((_, j) => j !== i))}
+                        {() => (
+                          <>
+                            {tiers.state.value.map((tier, i) => {
+                              const unit = readMoney(tier.price, currency)
+                              const qty = Number(tier.quantity)
+                              return (
+                                <div
+                                  // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
+                                  key={i}
+                                  className="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-end gap-2"
+                                >
+                                  <form.AppField name={`tiers[${i}].quantity`}>
+                                    {(field) => (
+                                      <field.TextField
+                                        label="Desde"
+                                        inputMode="numeric"
+                                        description="unidades"
+                                      />
+                                    )}
+                                  </form.AppField>
+                                  <form.AppField name={`tiers[${i}].price`}>
+                                    {(field) => (
+                                      <field.Control
+                                        label="Cada una a"
+                                        description={
+                                          unit && qty >= 2
+                                            ? `${qty} cuestan ${money(unit * qty, currency)}`
+                                            : " "
+                                        }
+                                      >
+                                        {(control) => (
+                                          <MoneyInput
+                                            control={control}
+                                            currency={currency}
+                                            value={field.state.value}
+                                            onChange={field.handleChange}
+                                          />
+                                        )}
+                                      </field.Control>
+                                    )}
+                                  </form.AppField>
+                                  {canEdit ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="mb-6"
+                                      aria-label={`Quitar el precio desde ${tier.quantity || "esta cantidad"}`}
+                                      onClick={() => tiers.removeValue(i)}
+                                    >
+                                      <Trash2 aria-hidden />
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                            {canEdit && tiers.state.value.length < 5 ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="self-start"
+                                onClick={() => tiers.pushValue({ quantity: "2", price: "" })}
+                              >
+                                <Plus aria-hidden />
+                                Precio por cantidad
+                              </Button>
+                            ) : null}
+                            {tiers.state.value.length === 0 && !canEdit ? (
+                              <p className="text-sm text-muted-foreground">
+                                Sin precio por cantidad.
+                              </p>
+                            ) : null}
+                          </>
+                        )}
+                      </tiers.Group>
+                    )}
+                  </form.AppField>
+                  <form.AppField name="promos" mode="array">
+                    {(promos) => (
+                      <promos.Group
+                        legend="Promociones"
+                        description="Un porcentaje menos, de un día a otro. No se pisan ni se suman."
                       >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel>Desde</FieldLabel>
-                      <DatePickerButton
-                        value={promo.startsOn}
-                        disabled={!canEdit}
-                        onChange={(startsOn) =>
-                          setPromos(promos.map((p, j) => (j === i ? { ...p, startsOn } : p)))
-                        }
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel>Hasta</FieldLabel>
-                      <DatePickerButton
-                        value={promo.endsOn}
-                        min={promo.startsOn || undefined}
-                        disabled={!canEdit}
-                        onChange={(endsOn) =>
-                          setPromos(promos.map((p, j) => (j === i ? { ...p, endsOn } : p)))
-                        }
-                      />
-                    </Field>
-                  </div>
-                  {promo.percentOff >= 1 &&
-                  listCents &&
-                  minCents &&
-                  Math.round(listCents * (1 - promo.percentOff / 100)) < minCents ? (
-                    <p className="text-sm text-muted-foreground">
-                      Con esta promoción cuesta{" "}
-                      {money(Math.round(listCents * (1 - promo.percentOff / 100)), currency)}, menos
-                      que el mínimo.
+                        {() => (
+                          <>
+                            {promos.state.value.map((promo, i) => {
+                              const promoCents = Math.round(
+                                (listCents ?? 0) * (1 - promo.percentOff / 100),
+                              )
+                              return (
+                                <div
+                                  // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
+                                  key={i}
+                                  className="flex flex-col gap-2 rounded-lg border p-3"
+                                >
+                                  <div className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2">
+                                    <form.AppField name={`promos[${i}].name`}>
+                                      {(field) => (
+                                        <field.TextField
+                                          label="Nombre"
+                                          maxLength={60}
+                                          placeholder="Cyber"
+                                        />
+                                      )}
+                                    </form.AppField>
+                                    <form.AppField name={`promos[${i}].percentOff`}>
+                                      {(field) => (
+                                        <field.Control label="% menos">
+                                          {(control) => (
+                                            <Input
+                                              {...control.props}
+                                              inputMode="numeric"
+                                              value={
+                                                field.state.value ? String(field.state.value) : ""
+                                              }
+                                              onChange={(e) =>
+                                                field.handleChange(
+                                                  Number(e.target.value.replace(/\D/g, "")),
+                                                )
+                                              }
+                                            />
+                                          )}
+                                        </field.Control>
+                                      )}
+                                    </form.AppField>
+                                    {canEdit ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        aria-label={`Quitar la promoción ${promo.name || i + 1}`}
+                                        onClick={() => promos.removeValue(i)}
+                                      >
+                                        <Trash2 aria-hidden />
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    <form.AppField name={`promos[${i}].startsOn`}>
+                                      {(field) => (
+                                        <field.Control label="Desde">
+                                          {(control) => (
+                                            <DatePickerButton
+                                              {...control.props}
+                                              value={field.state.value}
+                                              disabled={!canEdit}
+                                              onChange={field.handleChange}
+                                            />
+                                          )}
+                                        </field.Control>
+                                      )}
+                                    </form.AppField>
+                                    <form.AppField name={`promos[${i}].endsOn`}>
+                                      {(field) => (
+                                        <field.Control label="Hasta">
+                                          {(control) => (
+                                            <DatePickerButton
+                                              {...control.props}
+                                              value={field.state.value}
+                                              min={promo.startsOn || undefined}
+                                              disabled={!canEdit}
+                                              onChange={field.handleChange}
+                                            />
+                                          )}
+                                        </field.Control>
+                                      )}
+                                    </form.AppField>
+                                  </div>
+                                  {promo.percentOff >= 1 &&
+                                  listCents &&
+                                  minCents &&
+                                  promoCents < minCents ? (
+                                    <p className="text-sm text-muted-foreground">
+                                      Con esta promoción cuesta {money(promoCents, currency)}, menos
+                                      que el mínimo.
+                                    </p>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                            {canEdit && promos.state.value.length < 10 ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="self-start"
+                                onClick={() =>
+                                  promos.pushValue({
+                                    name: "",
+                                    percentOff: 10,
+                                    startsOn: "",
+                                    endsOn: "",
+                                  })
+                                }
+                              >
+                                <Plus aria-hidden />
+                                Promoción
+                              </Button>
+                            ) : null}
+                            {promos.state.value.length === 0 && !canEdit ? (
+                              <p className="text-sm text-muted-foreground">Sin promociones.</p>
+                            ) : null}
+                          </>
+                        )}
+                      </promos.Group>
+                    )}
+                  </form.AppField>
+                  {error ? (
+                    <p role="alert" className="text-sm text-danger">
+                      {error}
                     </p>
                   ) : null}
-                </div>
-              ))}
-              {canEdit && promos.length < 10 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-start"
-                  onClick={() =>
-                    setPromos([...promos, { name: "", percentOff: 10, startsOn: "", endsOn: "" }])
-                  }
-                >
-                  <Plus aria-hidden />
-                  Promoción
-                </Button>
-              ) : null}
-              {promos.length === 0 && !canEdit ? (
-                <p className="text-sm text-muted-foreground">Sin promociones.</p>
-              ) : null}
-              {firstError("promotions") ? (
-                <FieldError>{firstError("promotions")}</FieldError>
-              ) : null}
-            </FieldSet>
-            <FormAlert error={save.error} />
-            {canEdit ? (
-              <SubmitButton type="submit" pending={save.isPending} className="self-start">
-                Guardar precios
-              </SubmitButton>
-            ) : null}
-          </FieldGroup>
+                  {canEdit ? (
+                    <form.Subscribe selector={(state) => state.isSubmitting}>
+                      {(pending) => (
+                        <SubmitButton type="submit" pending={pending} className="self-start">
+                          Guardar precios
+                        </SubmitButton>
+                      )}
+                    </form.Subscribe>
+                  ) : null}
+                </FieldGroup>
+              )
+            }}
+          </form.Subscribe>
         </fieldset>
       </form>
     </Card>
@@ -746,6 +847,8 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
       </ul>
       {kardexOf ? (
         <KardexSheet
+          // En la columna lateral se puede abrir otro kardex sin cerrar este: cada variante, su formulario.
+          key={kardexOf.id}
           product={product}
           variant={kardexOf}
           canEdit={canEdit}
@@ -753,7 +856,12 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
         />
       ) : null}
       {editing ? (
-        <VariantSheet product={product} variant={editing} onClose={() => setEditing(null)} />
+        <VariantSheet
+          key={editing.id}
+          product={product}
+          variant={editing}
+          onClose={() => setEditing(null)}
+        />
       ) : null}
       <ConfirmDialog
         open={Boolean(removing)}
@@ -788,100 +896,120 @@ function VariantSheet({
 }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
-  const [sku, setSku] = useState(variant.sku)
-  const [price, setPrice] = useState(moneyInput(variant.priceCents, store.currency))
-  const [photoId, setPhotoId] = useState(variant.photoId ?? "")
-  const [local, setLocal] = useState<Record<string, string>>({})
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/variantes/${variant.id}`, {
         method: "PATCH",
         body,
       }),
-    onSuccess: async (result) => {
+  })
+  const form = useAppForm({
+    defaultValues: {
+      sku: variant.sku,
+      price: moneyInput(variant.priceCents, store.currency),
+      photoId: variant.photoId ?? "",
+    },
+    validators: {
+      onSubmit: z.object({
+        sku: z
+          .string()
+          .refine(
+            (sku) => /^[A-Za-z0-9._/-]{1,40}$/.test(sku.trim()),
+            "Hasta 40 letras, números, puntos o guiones, sin espacios",
+          ),
+        price: z
+          .string()
+          .refine(
+            (price) => !price.trim() || Boolean(readMoney(price, store.currency)),
+            "Escribe el precio, o déjalo vacío para usar el del producto",
+          ),
+        photoId: z.string(),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const result = await save.mutateAsync({
+        sku: value.sku.trim(),
+        priceCents: value.price.trim() ? readMoney(value.price, store.currency) : null,
+        photoId: value.photoId || null,
+      })
       queryClient.setQueryData(PRODUCT_KEY(store.id, product.id), result)
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" })
       toast.success("Variante guardada")
       onClose()
     },
   })
-  const shown = { ...fieldErrors(save.error), ...local }
-  const photoSelect = useId()
-  const dirty = useDirty({ sku, price, photoId })
-  function submit() {
-    const priceCents = price.trim() ? readMoney(price, store.currency) : null
-    const next: Record<string, string> = {}
-    if (price.trim() && !priceCents)
-      next.priceCents = "Escribe el precio, o déjalo vacío para usar el del producto"
-    if (!/^[A-Za-z0-9._/-]{1,40}$/.test(sku.trim()))
-      next.sku = "Hasta 40 letras, números, puntos o guiones, sin espacios"
-    setLocal(next)
-    if (Object.keys(next).length > 0) return
-    save.mutate({ sku: sku.trim(), priceCents, photoId: photoId || null })
-  }
+  const surface = useFormSurface(form, { fieldMap: { priceCents: "price" } })
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title={variantName(variant)}
       description={product.name}
-      dirty={dirty}
       onClose={onClose}
-      onSubmit={submit}
-      footer={
-        <>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={save.isPending}>
-            Guardar
-          </SubmitButton>
-        </>
-      }
+      submitLabel="Guardar"
     >
       <FieldGroup className="gap-5">
-        <TextField
-          label="Código"
-          value={sku}
-          onChange={setSku}
-          error={shown.sku}
-          maxLength={40}
-          help="El de tu inventario o el de Meta. Único en la tienda."
-        />
-        <MoneyField
-          label="Precio propio (opcional)"
-          currency={store.currency}
-          value={price}
-          onChange={setPrice}
-          error={shown.priceCents}
-          help={`Vacío: usa el del producto, ${money(product.listPriceCents, store.currency)}.`}
-        />
-        <Field>
-          <FieldLabel htmlFor={photoSelect}>Foto</FieldLabel>
-          <select
-            id={photoSelect}
-            className={SELECT_CLASSES}
-            value={photoId}
-            onChange={(e) => setPhotoId(e.target.value)}
-          >
-            <option value="">La del producto</option>
-            {product.photos.map((photo, i) => (
-              <option key={photo.id} value={photo.id}>
-                Foto {i + 1}
-              </option>
-            ))}
-          </select>
-          {photoId ? (
-            <Photo storeId={store.id} photoId={photoId} alt="La foto elegida" className="size-20" />
-          ) : null}
-          {product.photos.length === 0 ? (
-            <FieldDescription>Sube fotos en el producto para elegir una aquí.</FieldDescription>
-          ) : null}
-        </Field>
-        <FormAlert error={save.error} />
+        <form.AppField name="sku">
+          {(field) => (
+            <field.TextField
+              label="Código"
+              maxLength={40}
+              description="El de tu inventario o el de Meta. Único en la tienda."
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="price">
+          {(field) => (
+            <field.Control
+              label="Precio propio (opcional)"
+              description={`Vacío: usa el del producto, ${money(product.listPriceCents, store.currency)}.`}
+            >
+              {(control) => (
+                <MoneyInput
+                  control={control}
+                  currency={store.currency}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="photoId">
+          {(field) => (
+            <div className="flex flex-col gap-2">
+              <field.SelectField
+                label="Foto"
+                options={[
+                  { value: "", label: "La del producto" },
+                  ...product.photos.map((photo, i) => ({
+                    value: photo.id,
+                    label: `Foto ${i + 1}`,
+                  })),
+                ]}
+                description={
+                  product.photos.length === 0
+                    ? "Sube fotos en el producto para elegir una aquí."
+                    : undefined
+                }
+              />
+              {field.state.value ? (
+                <Photo
+                  storeId={store.id}
+                  photoId={field.state.value}
+                  alt="La foto elegida"
+                  className="size-20"
+                />
+              ) : null}
+            </div>
+          )}
+        </form.AppField>
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
 }
+
+type MovementKind = "entrada" | "ajuste"
 
 function KardexSheet({
   product,
@@ -904,212 +1032,221 @@ function KardexSheet({
         `/api/tiendas/${store.id}/variantes/${variant.id}/kardex`,
       ),
   })
-  const [kind, setKind] = useState<"entrada" | "ajuste">("entrada")
-  const [quantity, setQuantity] = useState("")
-  const [cost, setCost] = useState("")
-  const [reason, setReason] = useState("")
-  const [local, setLocal] = useState<Record<string, string>>({})
   const move = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api(`/api/tiendas/${store.id}/variantes/${variant.id}/movimientos`, { method: "POST", body }),
-    onSuccess: async () => {
+  })
+  // Lo elegido en «Entrada o ajuste»: cambia lo que se pregunta y el botón.
+  const [kind, setKind] = useState<MovementKind>("entrada")
+  const form = useAppForm({
+    defaultValues: { kind: "entrada" as MovementKind, quantity: "", cost: "", reason: "" },
+    validators: {
+      onSubmit: z
+        .object({
+          kind: z.enum(["entrada", "ajuste"]),
+          quantity: z.string(),
+          cost: z.string(),
+          reason: z.string(),
+        })
+        .superRefine((value, ctx) => {
+          const n = Number(value.quantity)
+          const issue = (path: string, message: string) =>
+            ctx.addIssue({ code: "custom", path: [path], message })
+          if (value.kind === "entrada") {
+            if (!Number.isInteger(n) || n < 1) issue("quantity", "Escribe cuántas entran")
+            if (value.cost.trim() && readMoney(value.cost, store.currency) === null)
+              issue("cost", "Escribe el costo, como 68 o 68.50, o déjalo vacío")
+          } else {
+            if (value.quantity.trim() === "" || !Number.isInteger(n) || n < 0)
+              issue("quantity", "Escribe cuántas hay de verdad, 0 o más")
+            if (value.reason.trim().length < 3)
+              issue("reason", "Escribe el motivo del ajuste, como «par dañado»")
+          }
+        }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      const n = Number(value.quantity)
+      await move.mutateAsync(
+        value.kind === "entrada"
+          ? {
+              kind: value.kind,
+              quantity: n,
+              unitCostCents: value.cost.trim() ? readMoney(value.cost, store.currency) : null,
+              reason: value.reason.trim() || undefined,
+            }
+          : { kind: value.kind, counted: n, reason: value.reason },
+      )
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: key }),
         queryClient.invalidateQueries({ queryKey: PRODUCT_KEY(store.id, product.id) }),
         queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" }),
       ])
-      toast.success(kind === "entrada" ? "Entrada anotada" : "Ajuste anotado")
-      setQuantity("")
-      setCost("")
-      setReason("")
+      toast.success(value.kind === "entrada" ? "Entrada anotada" : "Ajuste anotado")
+      formApi.reset({ kind: value.kind, quantity: "", cost: "", reason: "" })
     },
   })
-  const shown = { ...fieldErrors(move.error), ...local }
-  const reasonId = useId()
+  const surface = useFormSurface(form, {
+    fieldMap: { unitCostCents: "cost", counted: "quantity" },
+  })
   const stock = kardex.data?.stock ?? variant.stock
-
-  function submit() {
-    const n = Number(quantity)
-    const next: Record<string, string> = {}
-    if (kind === "entrada") {
-      if (!Number.isInteger(n) || n < 1) next.quantity = "Escribe cuántas entran"
-      const costCents = cost.trim() ? readMoney(cost, store.currency) : null
-      if (cost.trim() && costCents === null)
-        next.unitCostCents = "Escribe el costo, como 68 o 68.50, o déjalo vacío"
-      setLocal(next)
-      if (Object.keys(next).length > 0) return
-      move.mutate({
-        kind,
-        quantity: n,
-        unitCostCents: costCents,
-        reason: reason.trim() || undefined,
-      })
-    } else {
-      if (quantity.trim() === "" || !Number.isInteger(n) || n < 0)
-        next.counted = "Escribe cuántas hay de verdad, 0 o más"
-      if (reason.trim().length < 3) next.reason = "Escribe el motivo del ajuste, como «par dañado»"
-      setLocal(next)
-      if (Object.keys(next).length > 0) return
-      move.mutate({ kind, counted: n, reason })
-    }
-  }
 
   const when = (iso: string) =>
     new Date(iso).toLocaleDateString("es", { day: "numeric", month: "short" })
 
   return (
-    <FormSheet
-      open
-      title={`Kardex · ${variantName(variant)}`}
-      dirty={Boolean(quantity.trim() || cost.trim() || reason.trim())}
-      description={`${product.name} · ${variant.sku} · quedan ${stock}`}
-      onClose={onClose}
-      onSubmit={canEdit ? submit : onClose}
-      footer={
-        canEdit ? (
-          <>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cerrar
-            </Button>
-            <SubmitButton type="submit" pending={move.isPending}>
-              {kind === "entrada" ? "Anotar la entrada" : "Anotar el ajuste"}
-            </SubmitButton>
-          </>
-        ) : (
-          <Button type="submit">Listo</Button>
+    // Cambiar entre entrada y ajuste no es escribir: cerrar pregunta solo si hay algo escrito.
+    <form.Subscribe
+      selector={(state) =>
+        Boolean(
+          state.values.quantity.trim() || state.values.cost.trim() || state.values.reason.trim(),
         )
       }
     >
-      <div className="flex flex-col gap-5">
-        {canEdit ? (
-          <FieldGroup className="gap-4">
-            <FieldSet>
-              <FieldLegend variant="label">Entrada o ajuste</FieldLegend>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    ["entrada", "Entrada", "Llegó mercadería"],
-                    ["ajuste", "Ajuste", "Contaste y no cuadra"],
-                  ] as const
-                ).map(([value, title, hint]) => (
-                  <label
-                    key={value}
-                    className="flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 has-checked:border-primary has-checked:bg-primary-soft/40 has-focus-visible:ring-3 has-focus-visible:ring-ring/30"
-                  >
-                    <input
-                      type="radio"
-                      name="movement-kind"
-                      value={value}
-                      checked={kind === value}
-                      onChange={() => {
-                        setKind(value)
-                        setLocal({})
-                        move.reset()
-                      }}
-                      className="mt-1 accent-[var(--primary-fill)]"
+      {(typed) => (
+        <FormDrawer
+          {...surface}
+          isDirty={typed}
+          open
+          title={`Kardex · ${variantName(variant)}`}
+          description={`${product.name} · ${variant.sku} · quedan ${stock}`}
+          onClose={onClose}
+          cancelLabel="Cerrar"
+          hideSubmit={!canEdit}
+          submitLabel={kind === "entrada" ? "Anotar la entrada" : "Anotar el ajuste"}
+        >
+          <div className="flex flex-col gap-5">
+            {canEdit ? (
+              <FieldGroup className="gap-4">
+                <form.AppField
+                  name="kind"
+                  listeners={{
+                    onChange: ({ value }) => {
+                      setKind(value)
+                      // Lo que se dijo de la otra forma ya no corresponde.
+                      clearSubmitErrors(form)
+                    },
+                  }}
+                >
+                  {(field) => (
+                    <field.Group
+                      legend="Entrada o ajuste"
+                      description="Entrada: llegó mercadería. Ajuste: contaste y no cuadra."
+                    >
+                      {(control) => (
+                        <RadioChips
+                          aria-label="Entrada o ajuste"
+                          value={field.state.value}
+                          options={[
+                            { value: "entrada", label: "Entrada" },
+                            { value: "ajuste", label: "Ajuste" },
+                          ]}
+                          onChange={field.handleChange}
+                          invalid={control.invalid}
+                        />
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
+                {kind === "entrada" ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <form.AppField name="quantity">
+                      {(field) => <field.TextField label="Cuántas entran" inputMode="numeric" />}
+                    </form.AppField>
+                    <form.AppField name="cost">
+                      {(field) => (
+                        <field.Control
+                          label="Costo por unidad"
+                          description="Opcional. Con él se avisa si el mínimo queda cerca."
+                        >
+                          {(control) => (
+                            <MoneyInput
+                              control={control}
+                              currency={store.currency}
+                              value={field.state.value}
+                              onChange={field.handleChange}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                  </div>
+                ) : (
+                  <form.AppField name="quantity">
+                    {(field) => (
+                      <field.TextField
+                        label="Cuántas hay de verdad"
+                        inputMode="numeric"
+                        description={`Hoy dice ${stock}. El ajuste es la diferencia.`}
+                      />
+                    )}
+                  </form.AppField>
+                )}
+                <form.AppField name="reason">
+                  {(field) => (
+                    <field.TextareaField
+                      label={kind === "ajuste" ? "Motivo" : "Nota (opcional)"}
+                      rows={2}
+                      maxLength={300}
+                      placeholder={
+                        kind === "ajuste"
+                          ? "par dañado, conteo de fin de mes"
+                          : "compra al proveedor"
+                      }
                     />
-                    <span className="flex flex-col">
-                      <span className="text-sm font-semibold">{title}</span>
-                      <span className="text-xs text-muted-foreground">{hint}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </FieldSet>
-            {kind === "entrada" ? (
-              <div className="grid grid-cols-2 gap-3">
-                <TextField
-                  label="Cuántas entran"
-                  inputMode="numeric"
-                  value={quantity}
-                  onChange={setQuantity}
-                  error={shown.quantity}
-                />
-                <MoneyField
-                  label="Costo por unidad"
-                  currency={store.currency}
-                  value={cost}
-                  onChange={setCost}
-                  error={shown.unitCostCents}
-                  help="Opcional. Con él se avisa si el mínimo queda cerca."
-                />
-              </div>
-            ) : (
-              <TextField
-                label="Cuántas hay de verdad"
-                inputMode="numeric"
-                value={quantity}
-                onChange={setQuantity}
-                error={shown.counted}
-                help={`Hoy dice ${stock}. El ajuste es la diferencia.`}
-              />
-            )}
-            <Field data-invalid={shown.reason ? true : undefined}>
-              <FieldLabel htmlFor={reasonId}>
-                {kind === "ajuste" ? "Motivo" : "Nota (opcional)"}
-              </FieldLabel>
-              <Textarea
-                id={reasonId}
-                rows={2}
-                maxLength={300}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder={
-                  kind === "ajuste" ? "par dañado, conteo de fin de mes" : "compra al proveedor"
-                }
-                aria-invalid={shown.reason ? true : undefined}
-              />
-              {shown.reason ? <FieldError>{shown.reason}</FieldError> : null}
-            </Field>
-            <FormAlert error={move.error} />
-          </FieldGroup>
-        ) : null}
-        <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold">Movimientos</h3>
-          {kardex.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-          {kardex.isError ? (
-            <ErrorState error={kardex.error} onRetry={() => void kardex.refetch()} />
-          ) : null}
-          {kardex.data && kardex.data.movements.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Todavía sin movimientos: el stock es 0.</p>
-          ) : null}
-          {kardex.data && kardex.data.movements.length > 0 ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="py-1.5 pr-2 font-semibold">Fecha</th>
-                  <th className="py-1.5 pr-2 font-semibold">Movimiento</th>
-                  <th className="py-1.5 pr-2 text-right font-semibold">Cant.</th>
-                  <th className="py-1.5 text-right font-semibold">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {kardex.data.movements.map((m) => (
-                  <tr key={m.id} className="border-b align-top last:border-0">
-                    <td className="py-1.5 pr-2 whitespace-nowrap">{when(m.createdAt)}</td>
-                    <td className="py-1.5 pr-2">
-                      {MOVEMENT_NAMES[m.kind]}
-                      {m.reference ? ` ${m.reference}` : ""}
-                      {m.reason ? ` · «${m.reason}»` : ""}
-                      {m.unitCostCents !== null
-                        ? ` · ${money(m.unitCostCents, store.currency)} c/u`
-                        : ""}
-                      {m.actorName ? (
-                        <span className="text-muted-foreground"> · {m.actorName}</span>
-                      ) : null}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums">
-                      {m.quantity > 0 ? `+${m.quantity}` : `−${-m.quantity}`}
-                    </td>
-                    <td className="py-1.5 text-right tabular-nums">{m.balance}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : null}
-        </div>
-      </div>
-    </FormSheet>
+                  )}
+                </form.AppField>
+              </FieldGroup>
+            ) : null}
+            <div className="flex flex-col gap-2">
+              <h3 className="text-sm font-semibold">Movimientos</h3>
+              {kardex.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
+              {kardex.isError ? (
+                <ErrorState error={kardex.error} onRetry={() => void kardex.refetch()} />
+              ) : null}
+              {kardex.data && kardex.data.movements.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Todavía sin movimientos: el stock es 0.
+                </p>
+              ) : null}
+              {kardex.data && kardex.data.movements.length > 0 ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-muted-foreground">
+                      <th className="py-1.5 pr-2 font-semibold">Fecha</th>
+                      <th className="py-1.5 pr-2 font-semibold">Movimiento</th>
+                      <th className="py-1.5 pr-2 text-right font-semibold">Cant.</th>
+                      <th className="py-1.5 text-right font-semibold">Saldo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kardex.data.movements.map((m) => (
+                      <tr key={m.id} className="border-b align-top last:border-0">
+                        <td className="py-1.5 pr-2 whitespace-nowrap">{when(m.createdAt)}</td>
+                        <td className="py-1.5 pr-2">
+                          {MOVEMENT_NAMES[m.kind]}
+                          {m.reference ? ` ${m.reference}` : ""}
+                          {m.reason ? ` · «${m.reason}»` : ""}
+                          {m.unitCostCents !== null
+                            ? ` · ${money(m.unitCostCents, store.currency)} c/u`
+                            : ""}
+                          {m.actorName ? (
+                            <span className="text-muted-foreground"> · {m.actorName}</span>
+                          ) : null}
+                        </td>
+                        <td className="py-1.5 pr-2 text-right tabular-nums">
+                          {m.quantity > 0 ? `+${m.quantity}` : `−${-m.quantity}`}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">{m.balance}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+            </div>
+          </div>
+        </FormDrawer>
+      )}
+    </form.Subscribe>
   )
 }
 
@@ -1119,16 +1256,29 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
   const { store } = useStoreContext()
   const catalog = useCatalog(store.id)
   const save = useSaveProduct(product, "Recomendaciones guardadas")
-  const [other, setOther] = useState("")
+  const drop = useSaveProduct(product, "Recomendaciones guardadas")
+  // Lo elegido en «Cómo», para no ofrecer lo que ya está con esa relación.
   const [kind, setKind] = useState<Relation>("parecido")
-  const selectId = useId()
-  const kindId = useId()
+  const current = product.links.map((l) => ({ productId: l.productId, kind: l.kind }))
+  const form = useAppForm({
+    defaultValues: { kind: "parecido" as Relation, other: "" },
+    validators: {
+      onSubmit: z.object({
+        kind: z.enum(["parecido", "combina"]),
+        other: z.string().min(1, "Elige un producto"),
+      }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      await save.mutateAsync({ links: [...current, { productId: value.other, kind: value.kind }] })
+      formApi.reset({ kind: value.kind, other: "" })
+    },
+  })
+  const submit = useFormSubmit(form, { fieldMap: { links: "other" } })
+  const error = useFormSubmitError(form)
   const options = (catalog.data?.products ?? []).filter(
     (p) =>
       p.id !== product.id && !product.links.some((l) => l.productId === p.id && l.kind === kind),
   )
-  const links = (next: { productId: string; kind: Relation }[]) => save.mutate({ links: next })
-  const current = product.links.map((l) => ({ productId: l.productId, kind: l.kind }))
   return (
     <Card
       title="Sofi lo recomienda con"
@@ -1162,12 +1312,15 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
                       size="icon-sm"
                       className="rounded-full"
                       aria-label={`Quitar ${l.name}`}
-                      disabled={save.isPending}
+                      disabled={drop.isPending}
                       onClick={() =>
-                        links(
-                          current.filter(
-                            (c) => !(c.productId === l.productId && c.kind === l.kind),
-                          ),
+                        drop.mutate(
+                          {
+                            links: current.filter(
+                              (c) => !(c.productId === l.productId && c.kind === l.kind),
+                            ),
+                          },
+                          { onError: (failure) => toast.error(submitErrorMessage(failure)) },
                         )
                       }
                     >
@@ -1181,53 +1334,51 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
         )
       })}
       {canEdit ? (
-        <form
-          noValidate
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!other) return
-            links([...current, { productId: other, kind }])
-            setOther("")
-          }}
-        >
-          <Field className="w-36">
-            <FieldLabel htmlFor={kindId}>Cómo</FieldLabel>
-            <select
-              id={kindId}
-              className={SELECT_CLASSES}
-              value={kind}
-              onChange={(e) => setKind(e.target.value as Relation)}
-            >
-              {(Object.keys(RELATIONS) as Relation[]).map((k) => (
-                <option key={k} value={k}>
-                  {RELATIONS[k]}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field className="min-w-40 flex-1">
-            <FieldLabel htmlFor={selectId}>Producto</FieldLabel>
-            <select
-              id={selectId}
-              className={SELECT_CLASSES}
-              value={other}
-              onChange={(e) => setOther(e.target.value)}
-            >
-              <option value="">Elige un producto</option>
-              {options.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <SubmitButton type="submit" variant="outline" pending={save.isPending} disabled={!other}>
-            Agregar
-          </SubmitButton>
+        <form noValidate className="flex flex-col gap-3" onSubmit={submit}>
+          <form.AppField name="kind" listeners={{ onChange: ({ value }) => setKind(value) }}>
+            {(field) => (
+              <field.Group legend="Cómo">
+                {(control) => (
+                  <RadioChips
+                    aria-label="Cómo"
+                    value={field.state.value}
+                    options={(Object.keys(RELATIONS) as Relation[]).map((k) => ({
+                      value: k,
+                      label: RELATIONS[k],
+                    }))}
+                    onChange={field.handleChange}
+                    invalid={control.invalid}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          <div className="flex flex-wrap items-end gap-2">
+            <form.AppField name="other">
+              {(field) => (
+                <field.SelectField
+                  label="Producto"
+                  className="min-w-40 flex-1"
+                  placeholder="Elige un producto"
+                  options={options.map((p) => ({ value: p.id, label: p.name }))}
+                />
+              )}
+            </form.AppField>
+            <form.Subscribe selector={(state) => state.isSubmitting}>
+              {(pending) => (
+                <SubmitButton type="submit" variant="outline" pending={pending}>
+                  Agregar
+                </SubmitButton>
+              )}
+            </form.Subscribe>
+          </div>
+          {error ? (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          ) : null}
         </form>
       ) : null}
-      <FormAlert error={save.error} />
     </Card>
   )
 }

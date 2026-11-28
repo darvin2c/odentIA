@@ -1,6 +1,7 @@
 import {
   conversation,
   conversationMessage,
+  customerConsent,
   type Db,
   saleOrder,
   storeAgent,
@@ -141,6 +142,8 @@ const TOOL_WORDS: Record<string, string> = {
   ver_pedidos: "Miró los pedidos",
   avisar_cuando_vuelva: "Quedó en avisar cuando vuelva",
   pasar_a_persona: "La pasó a una persona",
+  anotar_permiso: "Anotó si quiere promociones",
+  anotar_baja: "Anotó la baja de promociones",
 }
 
 /**
@@ -198,6 +201,19 @@ async function viewIn(tx: Db, storeId: string, conversationId: string, role: Sto
     tx,
     orders.map((o) => o.id),
   )
+  // Lo que anotó Sofi del permiso para escribirle, junto al mensaje de ella que lo causó.
+  const consents = await tx
+    .select({
+      id: customerConsent.id,
+      state: customerConsent.state,
+      createdAt: customerConsent.createdAt,
+      messageId: customerConsent.messageId,
+    })
+    .from(customerConsent)
+    .where(
+      and(eq(customerConsent.storeId, storeId), eq(customerConsent.conversationId, conversationId)),
+    )
+    .orderBy(asc(customerConsent.createdAt))
   const cost = messages.reduce(
     (sum, m) => sum + (typeof m.detail.costo === "number" ? m.detail.costo : 0),
     0,
@@ -224,6 +240,12 @@ async function viewIn(tx: Db, storeId: string, conversationId: string, role: Sto
       ...o,
       number: pad(o.number),
       balance: balances.get(o.id) ?? unpaidBalance(o.totalCents),
+    })),
+    consentNotes: consents.map((c) => ({
+      id: c.id,
+      state: c.state,
+      createdAt: c.createdAt.toISOString(),
+      messageId: c.messageId,
     })),
   }
 }
