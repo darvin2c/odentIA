@@ -1,5 +1,5 @@
 {
-  "id": "da698fce-925f-4101-9149-359d66314e4f",
+  "id": "70be4259-c970-4c41-b298-7e8a58e0e901",
   "prevId": "db65f957-6bbf-4bbc-a1db-9c1d5a610676",
   "version": "7",
   "dialect": "postgresql",
@@ -80,15 +80,15 @@
           "columns": [
             {
               "expression": "lower(\"email\")",
-              "asc": true,
               "isExpression": true,
+              "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "account_copy_reviewed_idx": {
           "name": "account_copy_reviewed_idx",
@@ -101,9 +101,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -191,17 +191,17 @@
         "argos_reading_conversation_fkey": {
           "name": "argos_reading_conversation_fkey",
           "tableFrom": "argos_reading",
-          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
+          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -291,50 +291,50 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "cash_handover_store_id_fkey": {
           "name": "cash_handover_store_id_fkey",
           "tableFrom": "cash_handover",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "cash_handover_courier_fkey": {
           "name": "cash_handover_courier_fkey",
           "tableFrom": "cash_handover",
-          "tableTo": "store_courier",
           "columnsFrom": [
             "store_id",
             "courier_id"
           ],
+          "tableTo": "store_courier",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "cash_handover_store_id_key": {
           "name": "cash_handover_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -385,41 +385,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "cash_handover_payment_handover_fkey": {
           "name": "cash_handover_payment_handover_fkey",
           "tableFrom": "cash_handover_payment",
-          "tableTo": "cash_handover",
           "columnsFrom": [
             "store_id",
             "handover_id"
           ],
+          "tableTo": "cash_handover",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "cash_handover_payment_payment_fkey": {
           "name": "cash_handover_payment_payment_fkey",
           "tableFrom": "cash_handover_payment",
-          "tableTo": "order_payment",
           "columnsFrom": [
             "store_id",
             "payment_id"
           ],
+          "tableTo": "order_payment",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -534,9 +534,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "contract_outbox_pending_idx": {
           "name": "contract_outbox_pending_idx",
@@ -555,10 +555,10 @@
             }
           ],
           "isUnique": false,
-          "where": "sent_at is null and rejected_at is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "sent_at is null and rejected_at is null",
+          "concurrently": false
         },
         "contract_outbox_sent_idx": {
           "name": "contract_outbox_sent_idx",
@@ -571,10 +571,10 @@
             }
           ],
           "isUnique": false,
-          "where": "sent_at is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "sent_at is not null",
+          "concurrently": false
         },
         "contract_outbox_store_idx": {
           "name": "contract_outbox_store_idx",
@@ -599,9 +599,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "contract_outbox_conversation_idx": {
           "name": "contract_outbox_conversation_idx",
@@ -620,24 +620,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "contract_outbox_store_id_fkey": {
           "name": "contract_outbox_store_id_fkey",
           "tableFrom": "contract_outbox",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -746,15 +746,15 @@
         "contract_state_store_id_fkey": {
           "name": "contract_state_store_id_fkey",
           "tableFrom": "contract_state",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -850,35 +850,35 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "conversation_store_id_fkey": {
           "name": "conversation_store_id_fkey",
           "tableFrom": "conversation",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "conversation_store_id_key": {
           "name": "conversation_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -927,15 +927,15 @@
           "primaryKey": false,
           "notNull": true,
           "identity": {
-            "type": "always",
             "name": "conversation_message_seq_seq",
-            "schema": "public",
             "increment": "1",
-            "startWith": "1",
             "minValue": "1",
             "maxValue": "9223372036854775807",
+            "startWith": "1",
             "cache": "1",
-            "cycle": false
+            "cycle": false,
+            "schema": "public",
+            "type": "always"
           }
         },
         "author": {
@@ -1014,9 +1014,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "conversation_message_follow_uidx": {
           "name": "conversation_message_follow_uidx",
@@ -1047,27 +1047,27 @@
             }
           ],
           "isUnique": true,
-          "where": "follow_up is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "follow_up is not null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "conversation_message_conversation_fkey": {
           "name": "conversation_message_conversation_fkey",
           "tableFrom": "conversation_message",
-          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
+          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1128,8 +1128,8 @@
           "primaryKey": false,
           "notNull": false,
           "generated": {
-            "as": "nullif(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), '')",
-            "type": "stored"
+            "type": "stored",
+            "as": "nullif(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), '')"
           }
         },
         "note": {
@@ -1196,9 +1196,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "customer_phone_idx": {
           "name": "customer_phone_idx",
@@ -1217,9 +1217,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "customer_name_idx": {
           "name": "customer_name_idx",
@@ -1232,56 +1232,56 @@
             },
             {
               "expression": "lower(\"name\")",
-              "asc": true,
               "isExpression": true,
+              "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "customer_store_id_fkey": {
           "name": "customer_store_id_fkey",
           "tableFrom": "customer",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "customer_merged_into_fkey": {
           "name": "customer_merged_into_fkey",
           "tableFrom": "customer",
-          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "merged_into"
           ],
+          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "customer_store_id_key": {
           "name": "customer_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -1392,9 +1392,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "customer_consent_conversation_idx": {
           "name": "customer_consent_conversation_idx",
@@ -1419,41 +1419,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "customer_consent_customer_fkey": {
           "name": "customer_consent_customer_fkey",
           "tableFrom": "customer_consent",
-          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "customer_id"
           ],
+          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "customer_consent_conversation_fkey": {
           "name": "customer_consent_conversation_fkey",
           "tableFrom": "customer_consent",
-          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
+          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1548,9 +1548,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "customer_event_other_idx": {
           "name": "customer_event_other_idx",
@@ -1569,41 +1569,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "customer_event_customer_fkey": {
           "name": "customer_event_customer_fkey",
           "tableFrom": "customer_event",
-          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "customer_id"
           ],
+          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "customer_event_other_fkey": {
           "name": "customer_event_other_fkey",
           "tableFrom": "customer_event",
-          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "other_id"
           ],
+          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1731,26 +1731,26 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "customer_fact_customer_fkey": {
           "name": "customer_fact_customer_fkey",
           "tableFrom": "customer_fact",
-          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "customer_id"
           ],
+          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1776,269 +1776,6 @@
         "customer_fact_birthday_check": {
           "name": "customer_fact_birthday_check",
           "value": "\"customer_fact\".\"key\" <> 'cumpleanos' or \"customer_fact\".\"value\" ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.customer_group": {
-      "name": "customer_group",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "filters": {
-          "name": "filters",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "customer_group_store_idx": {
-          "name": "customer_group_store_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "customer_group_store_fkey": {
-          "name": "customer_group_store_fkey",
-          "tableFrom": "customer_group",
-          "tableTo": "store",
-          "columnsFrom": [
-            "store_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "customer_group_name_check": {
-          "name": "customer_group_name_check",
-          "value": "char_length(btrim(\"customer_group\".\"name\")) between 1 and 60"
-        },
-        "customer_group_filters_check": {
-          "name": "customer_group_filters_check",
-          "value": "jsonb_typeof(\"customer_group\".\"filters\") = 'object'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.customer_profile": {
-      "name": "customer_profile",
-      "schema": "",
-      "columns": {
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "customer_id": {
-          "name": "customer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "segment": {
-          "name": "segment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "why": {
-          "name": "why",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "orders_count": {
-          "name": "orders_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_cents": {
-          "name": "total_cents",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_bought_on": {
-          "name": "last_bought_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "rhythm_days": {
-          "name": "rhythm_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "measures": {
-          "name": "measures",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "categories": {
-          "name": "categories",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "districts": {
-          "name": "districts",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "price_sensitivity": {
-          "name": "price_sensitivity",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "computed_for": {
-          "name": "computed_for",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "computed_at": {
-          "name": "computed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "customer_profile_segment_idx": {
-          "name": "customer_profile_segment_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "segment",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "customer_profile_customer_fkey": {
-          "name": "customer_profile_customer_fkey",
-          "tableFrom": "customer_profile",
-          "tableTo": "customer",
-          "columnsFrom": [
-            "store_id",
-            "customer_id"
-          ],
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "customer_profile_store_id_customer_id_pk": {
-          "name": "customer_profile_store_id_customer_id_pk",
-          "columns": [
-            "store_id",
-            "customer_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "customer_profile_segment_check": {
-          "name": "customer_profile_segment_check",
-          "value": "segment IN ('vip','frecuente','nueva','riesgo','dormida','perdida','sin_compras')"
-        },
-        "customer_profile_sensitivity_check": {
-          "name": "customer_profile_sensitivity_check",
-          "value": "\"customer_profile\".\"price_sensitivity\" is null or price_sensitivity IN ('rebaja','liquidacion')"
-        },
-        "customer_profile_counts_check": {
-          "name": "customer_profile_counts_check",
-          "value": "\"customer_profile\".\"orders_count\" >= 0 and (\"customer_profile\".\"rhythm_days\" is null or \"customer_profile\".\"rhythm_days\" >= 0) and char_length(\"customer_profile\".\"why\") between 1 and 200"
         }
       },
       "isRLSEnabled": false
@@ -2072,15 +1809,15 @@
           "primaryKey": false,
           "notNull": true,
           "identity": {
-            "type": "always",
             "name": "order_event_seq_seq",
-            "schema": "public",
             "increment": "1",
-            "startWith": "1",
             "minValue": "1",
             "maxValue": "9223372036854775807",
+            "startWith": "1",
             "cache": "1",
-            "cycle": false
+            "cycle": false,
+            "schema": "public",
+            "type": "always"
           }
         },
         "actor_user_id": {
@@ -2128,26 +1865,26 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "order_event_order_fkey": {
           "name": "order_event_order_fkey",
           "tableFrom": "order_event",
-          "tableTo": "sale_order",
           "columnsFrom": [
             "store_id",
             "order_id"
           ],
+          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2306,10 +2043,10 @@
             }
           ],
           "isUnique": true,
-          "where": "provider_ref is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "provider_ref is not null",
+          "concurrently": false
         },
         "order_payment_order_idx": {
           "name": "order_payment_order_idx",
@@ -2328,52 +2065,52 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "order_payment_order_fkey": {
           "name": "order_payment_order_fkey",
           "tableFrom": "order_payment",
-          "tableTo": "sale_order",
           "columnsFrom": [
             "store_id",
             "order_id"
           ],
+          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "order_payment_courier_fkey": {
           "name": "order_payment_courier_fkey",
           "tableFrom": "order_payment",
-          "tableTo": "store_courier",
           "columnsFrom": [
             "store_id",
             "courier_id"
           ],
+          "tableTo": "store_courier",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "order_payment_store_id_key": {
           "name": "order_payment_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -2482,9 +2219,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "order_refund_store_idx": {
           "name": "order_refund_store_idx",
@@ -2503,26 +2240,26 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "order_refund_order_fkey": {
           "name": "order_refund_order_fkey",
           "tableFrom": "order_refund",
-          "tableTo": "sale_order",
           "columnsFrom": [
             "store_id",
             "order_id"
           ],
+          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2622,41 +2359,41 @@
             },
             {
               "expression": "lower(\"name\")",
-              "asc": true,
               "isExpression": true,
+              "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_store_id_fkey": {
           "name": "product_store_id_fkey",
           "tableFrom": "product",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "product_store_id_key": {
           "name": "product_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -2729,41 +2466,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_link_a_fkey": {
           "name": "product_link_a_fkey",
           "tableFrom": "product_link",
-          "tableTo": "product",
           "columnsFrom": [
             "store_id",
             "product_a"
           ],
+          "tableTo": "product",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_link_b_fkey": {
           "name": "product_link_b_fkey",
           "tableFrom": "product_link",
-          "tableTo": "product",
           "columnsFrom": [
             "store_id",
             "product_b"
           ],
+          "tableTo": "product",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -2864,37 +2601,37 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_photo_product_fkey": {
           "name": "product_photo_product_fkey",
           "tableFrom": "product_photo",
-          "tableTo": "product",
           "columnsFrom": [
             "store_id",
             "product_id"
           ],
+          "tableTo": "product",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "product_photo_store_id_key": {
           "name": "product_photo_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -2983,26 +2720,26 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_promotion_product_fkey": {
           "name": "product_promotion_product_fkey",
           "tableFrom": "product_promotion",
-          "tableTo": "product",
           "columnsFrom": [
             "store_id",
             "product_id"
           ],
+          "tableTo": "product",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -3058,17 +2795,17 @@
         "product_quantity_price_product_fkey": {
           "name": "product_quantity_price_product_fkey",
           "tableFrom": "product_quantity_price",
-          "tableTo": "product",
           "columnsFrom": [
             "store_id",
             "product_id"
           ],
+          "tableTo": "product",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -3182,16 +2919,16 @@
             },
             {
               "expression": "lower(\"sku\")",
-              "asc": true,
               "isExpression": true,
+              "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "where": "removed_at is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "removed_at is null",
+          "concurrently": false
         },
         "product_variant_values_uidx": {
           "name": "product_variant_values_uidx",
@@ -3210,10 +2947,10 @@
             }
           ],
           "isUnique": true,
-          "where": "removed_at is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "removed_at is null",
+          "concurrently": false
         },
         "product_variant_product_idx": {
           "name": "product_variant_product_idx",
@@ -3226,52 +2963,52 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_variant_product_fkey": {
           "name": "product_variant_product_fkey",
           "tableFrom": "product_variant",
-          "tableTo": "product",
           "columnsFrom": [
             "store_id",
             "product_id"
           ],
+          "tableTo": "product",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_variant_photo_fkey": {
           "name": "product_variant_photo_fkey",
           "tableFrom": "product_variant",
-          "tableTo": "product_photo",
           "columnsFrom": [
             "store_id",
             "photo_id"
           ],
+          "tableTo": "product_photo",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "product_variant_store_id_key": {
           "name": "product_variant_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -3342,17 +3079,17 @@
         "push_choice_member_fkey": {
           "name": "push_choice_member_fkey",
           "tableFrom": "push_choice",
-          "tableTo": "store_member",
           "columnsFrom": [
             "store_id",
             "user_id"
           ],
+          "tableTo": "store_member",
           "columnsTo": [
             "store_id",
             "user_id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -3441,34 +3178,34 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "push_device_user_id_fkey": {
           "name": "push_device_user_id_fkey",
           "tableFrom": "push_device",
-          "tableTo": "account_copy",
           "columnsFrom": [
             "user_id"
           ],
+          "tableTo": "account_copy",
           "columnsTo": [
             "user_id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "push_device_endpoint_key": {
           "name": "push_device_endpoint_key",
-          "nullsNotDistinct": false,
           "columns": [
             "endpoint"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -3792,9 +3529,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "sale_order_conversation_idx": {
           "name": "sale_order_conversation_idx",
@@ -3807,9 +3544,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "sale_order_state_idx": {
           "name": "sale_order_state_idx",
@@ -3834,9 +3571,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "sale_order_customer_idx": {
           "name": "sale_order_customer_idx",
@@ -3855,9 +3592,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "sale_order_exchange_idx": {
           "name": "sale_order_exchange_idx",
@@ -3870,103 +3607,103 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "sale_order_courier_fkey": {
           "name": "sale_order_courier_fkey",
           "tableFrom": "sale_order",
-          "tableTo": "store_courier",
           "columnsFrom": [
             "store_id",
             "courier_id"
           ],
+          "tableTo": "store_courier",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "sale_order_store_id_fkey": {
           "name": "sale_order_store_id_fkey",
           "tableFrom": "sale_order",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "sale_order_conversation_fkey": {
           "name": "sale_order_conversation_fkey",
           "tableFrom": "sale_order",
-          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
+          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "sale_order_customer_fkey": {
           "name": "sale_order_customer_fkey",
           "tableFrom": "sale_order",
-          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "customer_id"
           ],
+          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "sale_order_exchange_fkey": {
           "name": "sale_order_exchange_fkey",
           "tableFrom": "sale_order",
-          "tableTo": "sale_order",
           "columnsFrom": [
             "store_id",
             "exchange_of_id"
           ],
+          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "sale_order_store_id_key": {
           "name": "sale_order_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         },
         "sale_order_number_key": {
           "name": "sale_order_number_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "number"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -4133,9 +3870,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "sale_order_line_variant_idx": {
           "name": "sale_order_line_variant_idx",
@@ -4148,41 +3885,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "sale_order_line_order_fkey": {
           "name": "sale_order_line_order_fkey",
           "tableFrom": "sale_order_line",
-          "tableTo": "sale_order",
           "columnsFrom": [
             "store_id",
             "order_id"
           ],
+          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "sale_order_line_variant_fkey": {
           "name": "sale_order_line_variant_fkey",
           "tableFrom": "sale_order_line",
-          "tableTo": "product_variant",
           "columnsFrom": [
             "store_id",
             "variant_id"
           ],
+          "tableTo": "product_variant",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4302,9 +4039,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "sale_order_return_variant_idx": {
           "name": "sale_order_return_variant_idx",
@@ -4317,41 +4054,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "sale_order_return_order_fkey": {
           "name": "sale_order_return_order_fkey",
           "tableFrom": "sale_order_return",
-          "tableTo": "sale_order",
           "columnsFrom": [
             "store_id",
             "order_id"
           ],
+          "tableTo": "sale_order",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "sale_order_return_variant_fkey": {
           "name": "sale_order_return_variant_fkey",
           "tableFrom": "sale_order_return",
-          "tableTo": "product_variant",
           "columnsFrom": [
             "store_id",
             "variant_id"
           ],
+          "tableTo": "product_variant",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4465,9 +4202,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "stock_movement_reference_uidx": {
           "name": "stock_movement_reference_uidx",
@@ -4498,27 +4235,27 @@
             }
           ],
           "isUnique": true,
-          "where": "reference is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "reference is not null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "stock_movement_variant_fkey": {
           "name": "stock_movement_variant_fkey",
           "tableFrom": "stock_movement",
-          "tableTo": "product_variant",
           "columnsFrom": [
             "store_id",
             "variant_id"
           ],
+          "tableTo": "product_variant",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -4613,10 +4350,10 @@
             }
           ],
           "isUnique": true,
-          "where": "notified_at is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "notified_at is null",
+          "concurrently": false
         },
         "stock_request_store_idx": {
           "name": "stock_request_store_idx",
@@ -4635,41 +4372,41 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "stock_request_variant_fkey": {
           "name": "stock_request_variant_fkey",
           "tableFrom": "stock_request",
-          "tableTo": "product_variant",
           "columnsFrom": [
             "store_id",
             "variant_id"
           ],
+          "tableTo": "product_variant",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "stock_request_conversation_fkey": {
           "name": "stock_request_conversation_fkey",
           "tableFrom": "stock_request",
-          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
+          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -4752,15 +4489,15 @@
         "store_created_by_fkey": {
           "name": "store_created_by_fkey",
           "tableFrom": "store",
-          "tableTo": "account_copy",
           "columnsFrom": [
             "created_by"
           ],
+          "tableTo": "account_copy",
           "columnsTo": [
             "user_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4875,15 +4612,15 @@
         "store_agent_store_id_fkey": {
           "name": "store_agent_store_id_fkey",
           "tableFrom": "store_agent",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -4965,10 +4702,10 @@
             }
           ],
           "isUnique": true,
-          "where": "user_id is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "user_id is not null",
+          "concurrently": false
         },
         "store_courier_name_uidx": {
           "name": "store_courier_name_uidx",
@@ -4981,55 +4718,55 @@
             },
             {
               "expression": "lower(btrim(\"name\"))",
-              "asc": true,
               "isExpression": true,
+              "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "where": "user_id is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "user_id is null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_courier_store_id_fkey": {
           "name": "store_courier_store_id_fkey",
           "tableFrom": "store_courier",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "store_courier_user_fkey": {
           "name": "store_courier_user_fkey",
           "tableFrom": "store_courier",
-          "tableTo": "account_copy",
           "columnsFrom": [
             "user_id"
           ],
+          "tableTo": "account_copy",
           "columnsTo": [
             "user_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "store_courier_store_id_key": {
           "name": "store_courier_store_id_key",
-          "nullsNotDistinct": false,
           "columns": [
             "store_id",
             "id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -5156,24 +4893,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_delivery_method_store_id_fkey": {
           "name": "store_delivery_method_store_id_fkey",
           "tableFrom": "store_delivery_method",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5283,24 +5020,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_event_store_id_fkey": {
           "name": "store_event_store_id_fkey",
           "tableFrom": "store_event",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5361,15 +5098,15 @@
         "store_image_store_id_fkey": {
           "name": "store_image_store_id_fkey",
           "tableFrom": "store_image",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -5490,10 +5227,10 @@
             }
           ],
           "isUnique": true,
-          "where": "accepted_at is null and revoked_at is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "accepted_at is null and revoked_at is null",
+          "concurrently": false
         },
         "store_invitation_email_idx": {
           "name": "store_invitation_email_idx",
@@ -5506,37 +5243,37 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_invitation_store_id_fkey": {
           "name": "store_invitation_store_id_fkey",
           "tableFrom": "store_invitation",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "store_invitation_invited_by_fkey": {
           "name": "store_invitation_invited_by_fkey",
           "tableFrom": "store_invitation",
-          "tableTo": "account_copy",
           "columnsFrom": [
             "invited_by"
           ],
+          "tableTo": "account_copy",
           "columnsTo": [
             "user_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5607,25 +5344,25 @@
             }
           ],
           "isUnique": true,
-          "where": "\"store_link\".\"current\"",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"store_link\".\"current\"",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_link_store_id_fkey": {
           "name": "store_link_store_id_fkey",
           "tableFrom": "store_link",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5687,50 +5424,50 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_member_store_id_fkey": {
           "name": "store_member_store_id_fkey",
           "tableFrom": "store_member",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "store_member_user_id_fkey": {
           "name": "store_member_user_id_fkey",
           "tableFrom": "store_member",
-          "tableTo": "account_copy",
           "columnsFrom": [
             "user_id"
           ],
+          "tableTo": "account_copy",
           "columnsTo": [
             "user_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "store_member_added_by_fkey": {
           "name": "store_member_added_by_fkey",
           "tableFrom": "store_member",
-          "tableTo": "account_copy",
           "columnsFrom": [
             "added_by"
           ],
+          "tableTo": "account_copy",
           "columnsTo": [
             "user_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -5805,15 +5542,15 @@
         "store_payment_link_store_id_fkey": {
           "name": "store_payment_link_store_id_fkey",
           "tableFrom": "store_payment_link",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5907,24 +5644,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_payment_method_store_id_fkey": {
           "name": "store_payment_method_store_id_fkey",
           "tableFrom": "store_payment_method",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5996,15 +5733,15 @@
         "store_setup_store_id_fkey": {
           "name": "store_setup_store_id_fkey",
           "tableFrom": "store_setup",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6134,9 +5871,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "store_support_access_staff_idx": {
           "name": "store_support_access_staff_idx",
@@ -6155,24 +5892,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "store_support_access_store_id_fkey": {
           "name": "store_support_access_store_id_fkey",
           "tableFrom": "store_support_access",
-          "tableTo": "store",
           "columnsFrom": [
             "store_id"
           ],
+          "tableTo": "store",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6201,11 +5938,10 @@
   },
   "enums": {},
   "schemas": {},
-  "sequences": {},
-  "roles": {},
-  "policies": {},
   "views": {
     "public.order_balance": {
+      "name": "order_balance",
+      "schema": "public",
       "columns": {
         "order_id": {
           "name": "order_id",
@@ -6262,12 +5998,13 @@
           "notNull": true
         }
       },
-      "name": "order_balance",
-      "schema": "public",
-      "isExisting": true,
-      "materialized": false
+      "materialized": false,
+      "isExisting": true
     }
   },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
   "_meta": {
     "columns": {},
     "schemas": {},

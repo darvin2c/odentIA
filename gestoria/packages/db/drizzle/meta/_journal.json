@@ -257,15 +257,22 @@
     {
       "idx": 52,
       "version": "7",
-      "when": 1795821174864,
-      "tag": "0052_los_grupos_de_clientas",
+      "when": 1795844732033,
+      "tag": "0052_el_link_libre",
       "breakpoints": true
     },
     {
       "idx": 53,
       "version": "7",
-      "when": 1795821180752,
-      "tag": "0053_reglas_grupos_de_clientas",
+      "when": 1795845295270,
+      "tag": "0053_los_grupos_de_clientas",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795845296710,
+      "tag": "0054_reglas_grupos_de_clientas",
       "breakpoints": true
     }
   ]

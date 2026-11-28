@@ -409,7 +409,7 @@ function TestChat({ overview }: { overview: SofiOverview }) {
           {shownError}
         </p>
       ) : null}
-      {view && view.costMicros > 0 ? (
+      {view?.costMicros ? (
         <p className="text-xs text-muted-foreground">Esta prueba costó {usd(view.costMicros)}.</p>
       ) : null}
     </section>
