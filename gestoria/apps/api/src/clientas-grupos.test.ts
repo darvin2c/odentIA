@@ -237,7 +237,7 @@ beforeAll(async () => {
       type: "DeliveryModeOwnFleet",
       cost: "por_zona",
       zones: [
-        { name: "Surco", priceCents: 1000 },
+        { name: "Surco", priceCents: 1000, payOnDelivery: true },
         { name: "San Isidro", priceCents: 1000 },
       ],
     })
