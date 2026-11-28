@@ -253,6 +253,20 @@
       "when": 1795812754479,
       "tag": "0051_reglas_perfil_de_la_clienta",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795821174864,
+      "tag": "0052_los_grupos_de_clientas",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795821180752,
+      "tag": "0053_reglas_grupos_de_clientas",
+      "breakpoints": true
     }
   ]
 }
