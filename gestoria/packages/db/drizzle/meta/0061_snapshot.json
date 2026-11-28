@@ -1,6 +1,6 @@
 {
-  "id": "c5f45916-d7b7-4e98-822f-d8af7299c9ce",
-  "prevId": "2ab24f7a-9019-4f9f-96fc-c741c3793dd7",
+  "id": "c611cc4c-69e3-470a-8c30-9d698df2b4c8",
+  "prevId": "cbbe5d0d-9339-4d99-bfe2-4b41550eeeef",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2030,51 +2030,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "wholesale_min_quantity": {
-          "name": "wholesale_min_quantity",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "wholesale_price_cents": {
-          "name": "wholesale_price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "combo_percent_off": {
-          "name": "combo_percent_off",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "offer_delivery": {
-          "name": "offer_delivery",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "offer_discount": {
-          "name": "offer_discount",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "offer_second_unit": {
-          "name": "offer_second_unit",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "offer_gift": {
-          "name": "offer_gift",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2185,14 +2140,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "product_wholesale_check": {
-          "name": "product_wholesale_check",
-          "value": "(\"product\".\"wholesale_min_quantity\" is null) = (\"product\".\"wholesale_price_cents\" is null) and (\"product\".\"wholesale_min_quantity\" is null or (\"product\".\"wholesale_min_quantity\" between 2 and 10000 and \"product\".\"wholesale_price_cents\" > 0 and \"product\".\"wholesale_price_cents\" < \"product\".\"list_price_cents\"))"
-        },
-        "product_offers_check": {
-          "name": "product_offers_check",
-          "value": "(\"product\".\"combo_percent_off\" is null or \"product\".\"combo_percent_off\" between 1 and 90) and (\"product\".\"offer_gift\" is null or char_length(btrim(\"product\".\"offer_gift\")) between 1 and 80)"
-        },
         "product_color_option_check": {
           "name": "product_color_option_check",
           "value": "\"product\".\"color_option\" is null or \"product\".\"color_option\" between 0 and 2"
@@ -2794,18 +2741,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "option_index": {
-          "name": "option_index",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "option_value": {
-          "name": "option_value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2869,10 +2804,6 @@
         "product_promotion_dates_check": {
           "name": "product_promotion_dates_check",
           "value": "\"product_promotion\".\"ends_on\" >= \"product_promotion\".\"starts_on\""
-        },
-        "product_promotion_scope_check": {
-          "name": "product_promotion_scope_check",
-          "value": "(\"product_promotion\".\"option_index\" is null) = (\"product_promotion\".\"option_value\" is null) and (\"product_promotion\".\"option_index\" is null or (\"product_promotion\".\"option_index\" between 0 and 2 and char_length(btrim(\"product_promotion\".\"option_value\")) between 1 and 30))"
         }
       },
       "isRLSEnabled": false
@@ -5096,6 +5027,25 @@
           "notNull": true,
           "default": true
         },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pay_cents": {
+          "name": "pay_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_trip_paid": {
+          "name": "failed_trip_paid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -5200,6 +5150,10 @@
         "store_courier_name_check": {
           "name": "store_courier_name_check",
           "value": "char_length(btrim(\"store_courier\".\"name\")) between 1 and 80"
+        },
+        "store_courier_pay_check": {
+          "name": "store_courier_pay_check",
+          "value": "(\"store_courier\".\"pay_cents\" is null or \"store_courier\".\"pay_cents\" between 0 and 100000000) and (\"store_courier\".\"phone\" is null or \"store_courier\".\"phone\" ~ '^[+][1-9][0-9]{6,14}$')"
         }
       },
       "isRLSEnabled": false
@@ -5512,7 +5466,7 @@
       "checkConstraints": {
         "store_event_action_check": {
           "name": "store_event_action_check",
-          "value": "action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla')"
+          "value": "action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','invitacion.enviada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla','repartidor.agregado','repartidor.cambiado','repartidor.quitado')"
         }
       },
       "isRLSEnabled": false
@@ -5673,6 +5627,30 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_at": {
+          "name": "shared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_by": {
+          "name": "shared_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -5749,6 +5727,10 @@
         "store_invitation_role_check": {
           "name": "store_invitation_role_check",
           "value": "role IN ('owner','admin','sales')"
+        },
+        "store_invitation_contact_check": {
+          "name": "store_invitation_contact_check",
+          "value": "(\"store_invitation\".\"name\" is null or char_length(btrim(\"store_invitation\".\"name\")) between 1 and 80) and (\"store_invitation\".\"phone\" is null or \"store_invitation\".\"phone\" ~ '^[+][1-9][0-9]{6,14}$') and ((\"store_invitation\".\"shared_at\" is null) = (\"store_invitation\".\"shared_by\" is null))"
         },
         "store_invitation_email_check": {
           "name": "store_invitation_email_check",

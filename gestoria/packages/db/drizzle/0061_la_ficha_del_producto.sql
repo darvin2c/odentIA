@@ -2,7 +2,7 @@
 -- ajusta cada tienda, los colores (su hex y su foto), a qué color pertenece cada foto, el estado que
 -- pone la tienda, el paquete para la agencia, el código del producto y el de barras de cada
 -- variante, las palabras con que lo buscan, si se ve en la web, lo que Sofi no supo y el historial
--- de cada cambio. Lo del precio va aparte (`0061_el_precio_de_la_ficha.sql`).
+-- de cada cambio. Lo del precio va aparte (`0063_el_precio_de_la_ficha.sql`).
 CREATE TABLE "product_color" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"store_id" uuid NOT NULL,
@@ -111,7 +111,7 @@ ALTER TABLE "product" ADD CONSTRAINT "product_package_check" CHECK (("product"."
 ALTER TABLE "product" ADD CONSTRAINT "product_keywords_check" CHECK (cardinality("product"."keywords") <= 30);--> statement-breakpoint
 ALTER TABLE "product" ADD CONSTRAINT "product_web_slug_check" CHECK ("product"."web_slug" is null or ("product"."web_slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and char_length("product"."web_slug") <= 80));--> statement-breakpoint
 ALTER TABLE "product_variant" ADD CONSTRAINT "product_variant_barcode_check" CHECK ("product_variant"."barcode" is null or "product_variant"."barcode" ~ '^([0-9]{8}|[0-9]{12,14})$');--> statement-breakpoint
-ALTER TABLE "store_event" ADD CONSTRAINT "store_event_action_check" CHECK (action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla'));--> statement-breakpoint
+ALTER TABLE "store_event" ADD CONSTRAINT "store_event_action_check" CHECK (action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','invitacion.enviada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla','repartidor.agregado','repartidor.cambiado','repartidor.quitado'));--> statement-breakpoint
 -- La opción del color de los productos que ya existen: la que se llama así.
 UPDATE "product" SET "color_option" = found.i
 FROM (
