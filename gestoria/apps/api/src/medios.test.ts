@@ -36,6 +36,7 @@ let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"]
 let jwk: JWK
 let app: ReturnType<typeof createApp>
 let off: ReturnType<typeof createApp>
+let limited: ReturnType<typeof createApp>
 const storage = memoryStorage()
 
 const people = {
@@ -117,6 +118,7 @@ beforeAll(async () => {
   }
   app = createApp({ ...deps, storage })
   off = createApp(deps)
+  limited = createApp({ ...deps, storage, showcaseLimits: { perIp: 2, perStore: 3 } })
   for (const who of Object.keys(people) as Who[]) await call(who, "GET", "/api/yo")
   await db.ownerDb
     .insert(store)
@@ -436,6 +438,29 @@ describe("el video corto", () => {
     // La vitrina nunca da la original.
     expect(JSON.stringify(shown.json)).not.toMatch(/original/)
     expect(shown.json.photos[0].vitrina).toMatch(/vence=3600/)
+  })
+
+  it("la vitrina tiene un tope por quien pide y por tienda; la visita normal no lo toca", async () => {
+    const visit = (ip: string) =>
+      limited.request(
+        "https://servidor.gestoria.test/vitrina/calzadosrosa/zapatilla-urbana/medios",
+        { headers: { "cf-connecting-ip": ip } },
+      )
+    expect((await visit("203.0.113.1")).status).toBe(200)
+    expect((await visit("203.0.113.1")).status).toBe(200)
+    const third = await visit("203.0.113.1")
+    expect(third.status).toBe(429)
+    expect(third.headers.get("retry-after")).toBe("60")
+    expect(third.headers.get("access-control-allow-origin")).toBe("*")
+    expect(((await third.json()) as { error: { code: string } }).error.code).toBe("TOO_MANY")
+    // Otra clienta entra igual, hasta el tope de la tienda (3 en esta prueba).
+    expect((await visit("203.0.113.2")).status).toBe(200)
+    expect((await visit("203.0.113.3")).status).toBe(429)
+    // Con los topes de siempre, unas cuantas visitas seguidas entran todas.
+    for (let i = 0; i < 10; i++)
+      expect(
+        (await call(null, "GET", "/vitrina/calzadosrosa/zapatilla-urbana/medios")).status,
+      ).toBe(200)
   })
 
   it("la vitrina no muestra lo que no está en la web ni lo de un link que no es", async () => {

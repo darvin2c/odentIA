@@ -120,6 +120,7 @@ import { gridInput, saveGrid, simulateInput, simulatePrice } from "./ficha.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
+import { clientIp, createRateLimit } from "./limite.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
   brandInput,
@@ -261,6 +262,8 @@ export interface AppDeps {
    * solo se ven las fotos que todavía están en la base.
    */
   storage?: Storage | null
+  /** Los topes de la vitrina pública por minuto (por IP y por tienda); las pruebas los bajan. */
+  showcaseLimits?: { perIp: number; perStore: number }
 }
 
 type Env = { Variables: { person: Person } }
@@ -434,16 +437,11 @@ export function createApp(deps: AppDeps) {
   // Los avisos del proveedor del link de pago (B4): de servidor a servidor. El pago se lee del
   // proveedor; el aviso solo dice cuál mirar. Cada aviso consulta al proveedor con la cuenta de
   // la tienda: con un tope por tienda, nadie la gasta mandando avisos inventados.
-  const noticesBy = new Map<string, { since: number; count: number }>()
+  const noticesBy = createRateLimit({ max: MAX_LINK_NOTICES, windowMs: LINK_NOTICE_WINDOW_MS })
   app.post("/avisos/link-de-pago/:storeId", async (c) => {
     const storeId = c.req.param("storeId")
-    const now = Date.now()
-    const seen = noticesBy.get(storeId)
-    if (!seen || now - seen.since > LINK_NOTICE_WINDOW_MS)
-      noticesBy.set(storeId, { since: now, count: 1 })
-    else if (++seen.count > MAX_LINK_NOTICES)
+    if (!noticesBy.hit(storeId))
       return c.json(errorBody(c, "TOO_MANY", "Demasiados avisos; reintenta en un minuto"), 429)
-    if (noticesBy.size > 10_000) noticesBy.clear()
     const body = await c.req.text()
     const result = await receiveLinkNotice(
       deps.ownerDb,
@@ -456,14 +454,31 @@ export function createApp(deps: AppDeps) {
 
   // La vitrina pública (`<tienda>.gestoria24.com/<producto>`): las fotos y los videos de un producto
   // que se ve en la web, con enlaces que vencen en una hora. Sin cuenta: es lo público de la tienda.
+  // Cualquiera la llama y cada pedido firma enlaces: un tope por quien pide y otro por tienda,
+  // holgados para una clienta que mira el catálogo.
+  const showcaseByIp = createRateLimit({ max: deps.showcaseLimits?.perIp ?? 60, windowMs: 60_000 })
+  const showcaseByStore = createRateLimit({
+    max: deps.showcaseLimits?.perStore ?? 1_200,
+    windowMs: 60_000,
+  })
   app.get("/vitrina/:link/:producto/medios", async (c) => {
+    c.header("access-control-allow-origin", "*")
+    if (
+      !showcaseByIp.hit(clientIp(c.req.raw.headers)) ||
+      !showcaseByStore.hit(c.req.param("link"))
+    ) {
+      c.header("retry-after", "60")
+      return c.json(
+        errorBody(c, "TOO_MANY", "Demasiadas visitas seguidas. Prueba en un minuto."),
+        429,
+      )
+    }
     const media = await publicMedia(
       deps.ownerDb,
       deps.storage,
       c.req.param("link"),
       c.req.param("producto"),
     )
-    c.header("access-control-allow-origin", "*")
     c.header("x-content-type-options", "nosniff")
     if (!media)
       return c.json(errorBody(c, "NOT_FOUND", "Ese producto no está en la web de la tienda"), 404)
