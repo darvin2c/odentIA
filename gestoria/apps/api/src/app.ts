@@ -85,6 +85,7 @@ import {
   updatePayment,
 } from "./cobros.js"
 import {
+  changeZone,
   configOverview,
   createDelivery,
   deleteDelivery,
@@ -92,6 +93,7 @@ import {
   deliveryPatch,
   paymentsAndDeliveries,
   updateDelivery,
+  zoneChange,
 } from "./configuracion.js"
 import {
   type AccountConfig,
@@ -103,6 +105,13 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
+import {
+  applyLimaTemplate,
+  deliveryRulesInput,
+  deliverySetup,
+  setDeliveryRules,
+  templateInput,
+} from "./entregas.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
@@ -175,15 +184,28 @@ import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
   agentSettingsInput,
+  agentStateInput,
   conversationView,
   customerMessageInput,
   newTestConversation,
   returnToSofi,
   saveAgentSettings,
+  setAgentEnabled,
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
 import { reportPeriod, storeReport } from "./sofi/reportes.js"
+import {
+  addAnswer,
+  answerGap,
+  answerInput,
+  changeAnswer,
+  dismissGap,
+  gapAnswerInput,
+  gapDismissInput,
+  knowledgeView,
+  removeAnswer,
+} from "./sofi/saber.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
@@ -617,10 +639,32 @@ export function createApp(deps: AppDeps) {
       method: await updateDelivery(deps.appDb, c.get("person"), id, methodId, patch),
     })
   })
+  // Una sola zona del reparto, sobre lo guardado ahora (lienzo de Configuración, tablero 7).
+  app.patch("/api/tiendas/:id/formas-de-entrega/:methodId/zonas", async (c) => {
+    const change = await bodyOf(c, zoneChange)
+    const { id, methodId } = c.req.param()
+    return c.json({
+      method: await changeZone(deps.appDb, c.get("person"), id, methodId, change),
+    })
+  })
   app.delete("/api/tiendas/:id/formas-de-entrega/:methodId", async (c) => {
     const { id, methodId } = c.req.param()
     await deleteDelivery(deps.appDb, c.get("person"), id, methodId)
     return c.body(null, 204)
+  })
+
+  // Entregas por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7).
+  app.get("/api/tiendas/:id/entregas", async (c) =>
+    c.json(await deliverySetup(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/entregas/reglas", async (c) => {
+    const input = await bodyOf(c, deliveryRulesInput)
+    return c.json(await setDeliveryRules(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  app.post("/api/tiendas/:id/entregas/plantilla-lima", async (c) => {
+    const input = await bodyOf(c, templateInput)
+    const method = await applyLimaTemplate(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ method })
   })
 
   // El catálogo (B3): productos, variantes, fotos, stock y la hoja.
@@ -966,9 +1010,39 @@ export function createApp(deps: AppDeps) {
   )
   app.patch("/api/tiendas/:id/sofi", async (c) => {
     const input = await bodyOf(c, agentSettingsInput)
-    return c.json({
-      settings: await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input),
-    })
+    return c.json(await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  // Encender o pausar: aparte de las opciones, para que guardar una opción nunca la cambie.
+  app.patch("/api/tiendas/:id/sofi/estado", async (c) => {
+    const input = await bodyOf(c, agentStateInput)
+    return c.json(await setAgentEnabled(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  // «Lo que sabe» y «Lo que aprendió» (ADR 0234): de quien cambia la configuración.
+  app.get("/api/tiendas/:id/sofi/sabe", async (c) =>
+    c.json(await knowledgeView(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/sofi/sabe", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    return c.json(await addAnswer(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.patch("/api/tiendas/:id/sofi/sabe/:answerId", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    const { id, answerId } = c.req.param()
+    return c.json(await changeAnswer(deps.appDb, c.get("person"), id, answerId, input))
+  })
+  app.delete("/api/tiendas/:id/sofi/sabe/:answerId", async (c) => {
+    const { id, answerId } = c.req.param()
+    await removeAnswer(deps.appDb, c.get("person"), id, answerId)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/sofi/aprendio/responder", async (c) => {
+    const input = await bodyOf(c, gapAnswerInput)
+    return c.json(await answerGap(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.post("/api/tiendas/:id/sofi/aprendio/quitar", async (c) => {
+    const input = await bodyOf(c, gapDismissInput)
+    await dismissGap(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.body(null, 204)
   })
   app.post("/api/tiendas/:id/sofi/pruebas", async (c) =>
     c.json(await newTestConversation(deps.appDb, c.get("person"), c.req.param("id")), 201),
