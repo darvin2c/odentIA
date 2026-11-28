@@ -210,7 +210,7 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   // En Tu marca solo mira: no se le ofrece soltar ni pegar con Ctrl + V.
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/configuracion/marca`)
-  await expect(page.getByRole("heading", { name: "Tu marca" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Tu marca", exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Portada" })).toBeVisible()
   await expect(page.getByText(/Ctrl \+ V/)).toHaveCount(0)
   await expect(page.getByText(/Suelta/)).toHaveCount(0)
