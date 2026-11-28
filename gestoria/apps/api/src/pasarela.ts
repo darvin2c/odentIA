@@ -10,7 +10,7 @@ import {
   storePaymentLinkTrial,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, count, desc, eq, gt, isNotNull, isNull, lt, or } from "drizzle-orm"
+import { and, count, desc, eq, gt, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { fractionDigits } from "./dinero.js"
@@ -132,14 +132,7 @@ export async function paymentLinkStatus(
       : []
     const [trial] = link
       ? await tx
-          .select({
-            id: storePaymentLinkTrial.id,
-            url: storePaymentLinkTrial.url,
-            amountCents: storePaymentLinkTrial.amountCents,
-            createdAt: storePaymentLinkTrial.createdAt,
-            paidAt: storePaymentLinkTrial.paidAt,
-            paidCents: storePaymentLinkTrial.paidCents,
-          })
+          .select(trialColumns)
           .from(storePaymentLinkTrial)
           .where(
             and(
@@ -359,9 +352,26 @@ export function trialCents(currency: string): number {
   return 10 ** fractionDigits(currency)
 }
 
+/** Cuánto vale reusar el link de prueba sin pagar: lo mismo que la pantalla espera su pago. */
+export const TRIAL_REUSE_MS = 15 * 60_000
+
+const trialColumns = {
+  id: storePaymentLinkTrial.id,
+  url: storePaymentLinkTrial.url,
+  amountCents: storePaymentLinkTrial.amountCents,
+  createdAt: storePaymentLinkTrial.createdAt,
+  paidAt: storePaymentLinkTrial.paidAt,
+  paidCents: storePaymentLinkTrial.paidCents,
+}
+
 /**
  * «Probar con S/ 1»: un link en la cuenta de la tienda, con las credenciales de prueba, que se paga
  * con la tarjeta de prueba. Solo en modo prueba (cobrando de verdad sería dinero real).
+ *
+ * Crear un link en Mercado Pago es un efecto de afuera: un doble toque o volver a tocar mientras se
+ * espera el pago no crea otro. Si hay uno sin pagar de los últimos 15 minutos (de esta conexión), se
+ * devuelve ese. El candado de la tienda se tiene mientras se crea, así dos pedidos a la vez esperan
+ * su turno y el segundo encuentra el link del primero (la llamada tiene su tiempo límite).
  */
 export async function createTrialLink(
   appDb: Db,
@@ -372,7 +382,8 @@ export async function createTrialLink(
 ) {
   const key = deps.secretsKey
   if (!key) throw unavailable()
-  const prepared = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`link-de-prueba:${storeId}`}))`)
     const link = await linkStateIn(tx, storeId, now)
     if (!link?.usable)
       throw new StoreError(409, "LINK_NOT_CONNECTED", "Primero conecta Mercado Pago.")
@@ -382,51 +393,51 @@ export async function createTrialLink(
         "LINK_REAL_MODE",
         "Ya cobras de verdad: el link de prueba es solo en modo prueba.",
       )
+    const [open] = await tx
+      .select(trialColumns)
+      .from(storePaymentLinkTrial)
+      .where(
+        and(
+          eq(storePaymentLinkTrial.storeId, storeId),
+          isNull(storePaymentLinkTrial.paidAt),
+          gt(storePaymentLinkTrial.createdAt, link.row.connectedAt),
+          gt(storePaymentLinkTrial.createdAt, new Date(now.getTime() - TRIAL_REUSE_MS)),
+        ),
+      )
+      .orderBy(desc(storePaymentLinkTrial.createdAt))
+      .limit(1)
+    if (open) return open
     const { name, currency } = await storeRow(tx, storeId)
-    return {
-      provider: link.row.provider,
-      name,
-      currency,
-      token: openSecret(key, storeId, await linkTokenIn(tx, storeId)),
-    }
-  })
-  const id = randomUUID()
-  const amountCents = trialCents(prepared.currency)
-  const created = await deps.adapters[prepared.provider].create(
-    prepared.token,
-    {
-      id,
-      reference: `prueba:${id}`,
-      number: "prueba",
-      title: `Prueba de gestorIA · ${prepared.name}`,
-      storeName: prepared.name,
-      totalCents: amountCents,
-      currency: prepared.currency,
-      expiresAt: null,
-      notificationURL: linkNotificationURL(deps, storeId),
-    },
-    { test: true },
-  )
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const token = openSecret(key, storeId, await linkTokenIn(tx, storeId))
+    const id = randomUUID()
+    const amountCents = trialCents(currency)
+    const created = await deps.adapters[link.row.provider].create(
+      token,
+      {
+        id,
+        reference: `prueba:${id}`,
+        number: "prueba",
+        title: `Prueba de gestorIA · ${name}`,
+        storeName: name,
+        totalCents: amountCents,
+        currency,
+        expiresAt: null,
+        notificationURL: linkNotificationURL(deps, storeId),
+      },
+      { test: true },
+    )
     const [trial] = await tx
       .insert(storePaymentLinkTrial)
       .values({
         id,
         storeId,
-        provider: prepared.provider,
+        provider: link.row.provider,
         amountCents,
         url: created.url,
         ref: created.ref,
         createdBy: person.userId,
       })
-      .returning({
-        id: storePaymentLinkTrial.id,
-        url: storePaymentLinkTrial.url,
-        amountCents: storePaymentLinkTrial.amountCents,
-        createdAt: storePaymentLinkTrial.createdAt,
-        paidAt: storePaymentLinkTrial.paidAt,
-        paidCents: storePaymentLinkTrial.paidCents,
-      })
+      .returning(trialColumns)
     return trial!
   })
 }

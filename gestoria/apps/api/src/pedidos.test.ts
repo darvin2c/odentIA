@@ -597,8 +597,18 @@ describe("el link de pago (Mercado Pago entrando a la cuenta, con un proveedor c
 
   it("el link de prueba de S/ 1 se paga con la tarjeta de prueba y queda pagado solo", async () => {
     expect((await call("lucia", "POST", `${base}/link-de-pago/prueba`)).status).toBe(403)
-    const made = await call("rosa", "POST", `${base}/link-de-pago/prueba`)
+    // Dos toques a la vez: un solo link en Mercado Pago, y los dos reciben el mismo.
+    const before = mp.preferences.length
+    const [made, twice] = await Promise.all([
+      call("rosa", "POST", `${base}/link-de-pago/prueba`),
+      call("rosa", "POST", `${base}/link-de-pago/prueba`),
+    ])
     expect(made.json.trial.url).toMatch(/^https:\/\/sandbox\.mercadopago\.test\//)
+    expect(twice.json.trial.id).toBe(made.json.trial.id)
+    // Volver a tocar mientras espera el pago: el mismo link, no otro.
+    const again = await call("rosa", "POST", `${base}/link-de-pago/prueba`)
+    expect(again.json.trial.id).toBe(made.json.trial.id)
+    expect(mp.preferences.length).toBe(before + 1)
     expect(mp.preferences.at(-1)).toMatchObject({
       external_reference: `prueba:${made.json.trial.id}`,
       items: [{ unit_price: 1, currency_id: "PEN" }],
@@ -624,6 +634,10 @@ describe("el link de pago (Mercado Pago entrando a la cuenta, con un proveedor c
     const status = (await call("rosa", "GET", `${base}/link-de-pago`)).json
     expect(status.trial).toMatchObject({ amountCents: 100, paidCents: 100 })
     expect(status.trial.paidAt).toBeTruthy()
+    // Ya pagado: otra prueba es otro link.
+    const next = await call("rosa", "POST", `${base}/link-de-pago/prueba`)
+    expect(next.json.trial.id).not.toBe(made.json.trial.id)
+    expect(mp.preferences.length).toBe(before + 2)
     // Un pago de prueba con la referencia de un pedido nunca lo paga.
     mp.payments.set("8003", {
       id: 8003,

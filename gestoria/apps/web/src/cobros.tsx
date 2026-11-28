@@ -346,6 +346,9 @@ function LinkCard({
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
+  // Un doble toque llega antes de que el botón se vea ocupado: el segundo no sale (y si sale, el
+  // servidor devuelve el mismo link).
+  const trialSent = useRef(false)
   const trial = useMutation({
     mutationFn: () =>
       api<{ trial: NonNullable<LinkStatus["trial"]> }>(
@@ -355,7 +358,15 @@ function LinkCard({
     // El link se abre con «Abrir el link de prueba»: abrirlo solo, tras esperar, lo bloquea el navegador.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: LINK_KEY(storeId) }),
     onError: (error) => toast.error(submitErrorMessage(error)),
+    onSettled: () => {
+      trialSent.current = false
+    },
   })
+  const tryLink = () => {
+    if (trialSent.current) return
+    trialSent.current = true
+    trial.mutate()
+  }
   const [removing, setRemoving] = useState(false)
   const data = status.data
   const connection = data?.connection ?? null
@@ -458,7 +469,8 @@ function LinkCard({
                   <Button
                     variant="outline"
                     disabled={trial.isPending}
-                    onClick={() => trial.mutate()}
+                    aria-busy={trial.isPending || undefined}
+                    onClick={tryLink}
                   >
                     {trial.isPending
                       ? "Creando el link…"
