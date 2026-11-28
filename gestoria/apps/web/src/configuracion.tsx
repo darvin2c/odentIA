@@ -225,7 +225,9 @@ export function ConfigSearch({
           // teléfono vive en la portada) y el foco no se queda perdido en la página.
           void navigate({ to: `/tiendas/${store.id}${result.section.path}` }).then(() =>
             requestAnimationFrame(() => {
-              const title = document.querySelector<HTMLElement>("main h1")
+              const title =
+                document.querySelector<HTMLElement>("main h1") ??
+                document.querySelector<HTMLElement>("main")
               if (!title) return
               title.tabIndex = -1
               title.focus()
@@ -314,8 +316,10 @@ function ToDoCard({ store, overview }: { store: MyStore; overview: ConfigOvervie
   const canChange = store.permissions.includes("configuracion")
   const { selling, more } = toDoItems(overview, store)
   const progress = setupProgress(overview.steps)
-  const withSofi = selling.find((item) => item.id === "sofi")?.state !== "saltado"
-  const title = toDoTitle(progress.left, withSofi)
+  // Sofi vende sola solo con los chats conectables y sin haberla saltado.
+  const chatsReady = overview.steps.some((s) => s.step === "chats" && s.state !== "pronto")
+  const sofiSells = chatsReady && selling.find((item) => item.id === "sofi")?.state !== "saltado"
+  const title = toDoTitle(progress.left, sofiSells)
   const moreLeft = more.filter((item) => item.state === "opcional")
   // Solo lo primero que falta lleva el botón principal; lo demás, el secundario.
   const first = selling.find((item) => item.state === "falta")?.id

@@ -535,9 +535,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "lo-que-falta",
         q: "¿Qué me falta para vender y cómo está cada parte?",
         a: [
-          "Configuración abre en «Lo que falta»: arriba, lo que falta para que Sofi venda sola, cada cosa con su botón para hacerla (como «Probar a Sofi»); lo que ya está lleva su ✓. Es la misma cuenta que «Tu tienda está casi lista» de Inicio. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano.",
+          "Configuración abre en «Lo que falta»: arriba, lo que falta para vender, cada cosa con su botón para hacerla (como «Probar a Sofi»); lo que ya está lleva su ✓. Es la misma cuenta que «Tu tienda está casi lista» de Inicio. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano.",
           "Debajo, en «Para vender más», lo que ayuda pero no frena la venta, como tu logo o «Conectar pasarela» para cobrar por link: no se cuenta como falta. Cuando no falta nada, lo dice en una línea.",
-          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin pasarela». Toca la línea para abrirla.",
+          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin probar» o «Por pagar». Toca la línea para abrirla.",
         ],
         needs: "configuracion",
         screen: "configuracion",
@@ -749,7 +749,11 @@ export function helpScreenView(
   return {
     title: HELP_SCREENS[screen].label,
     suggestions: FAQS.filter(
-      (faq) => faq.screen === screen && can(seat, faq.needs) !== Boolean(faq.forWhoCannot),
+      (faq) =>
+        faq.screen === screen &&
+        (faq.forWhoCannot
+          ? !can(seat, faq.needs) && can(seat, HELP_SCREENS[screen].opens)
+          : can(seat, faq.needs)),
     )
       .slice(0, 3)
       .map((faq) => faq.q),

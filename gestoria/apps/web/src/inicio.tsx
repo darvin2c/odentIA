@@ -7,7 +7,7 @@ import { type ReactNode, useId, useState } from "react"
 import { SimilarQueue } from "./clientes"
 import { api } from "./lib/api"
 import { fromWhom } from "./lib/caja"
-import { sellingStep, setupProgress } from "./lib/configuracion"
+import { setupProgress } from "./lib/configuracion"
 import {
   byWhen,
   FROM_HOME,
@@ -360,7 +360,7 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
   const id = useId()
   const progress = setupProgress(setup.steps)
   // La misma cuenta que «Lo que falta» de Configuración: lo que no frena la venta no se cuenta.
-  const next = setup.steps.find((s) => s.state === "falta" && sellingStep(s.step))?.step
+  const next = setup.steps.find((s) => s.state === "falta" && s.sells)?.step
   const done = setup.steps.filter((s) => s.state === "hecho")
   const skip = useMutation({
     mutationFn: (step: string) =>
@@ -416,7 +416,7 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="flex flex-wrap items-center gap-2 font-semibold">
                     {view.title}
-                    {s.state === "falta" && !sellingStep(s.step) ? (
+                    {s.state === "falta" && !s.sells ? (
                       <Badge variant="secondary">Opcional</Badge>
                     ) : (
                       <Badge variant={STATE_BADGES[s.state].variant}>

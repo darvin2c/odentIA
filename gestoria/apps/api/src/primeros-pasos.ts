@@ -35,6 +35,13 @@ import { inStore, StoreError } from "./tiendas.js"
 export const SKIPPABLE_STEPS: readonly SetupStep[] = ["sofi", "equipo"]
 
 /**
+ * Los pasos que no frenan la venta: con o sin equipo se vende. Se muestran, pero no se cuentan
+ * como falta (ni en Inicio ni en «Lo que falta» de Configuración) y no impiden que la lista quede
+ * lista.
+ */
+export const NOT_SELLING_STEPS: readonly SetupStep[] = ["equipo"]
+
+/**
  * Si ya se pueden conectar los chats. Mientras la Bandeja espera la app de Meta, no: el paso dice
  * «Muy pronto» y no cuenta para terminar. La entrega de la Bandeja lo enciende y dice cuándo un
  * canal queda conectado (`chats` de `SetupFacts`).
@@ -70,6 +77,8 @@ export interface SetupStepView {
   state: SetupStepState
   /** Se puede saltar con «No lo necesito». */
   skippable: boolean
+  /** Frena la venta mientras falta: se cuenta en «3 de 5». */
+  sells: boolean
 }
 
 function isDone(step: SetupStep, facts: SetupFacts): boolean | null {
@@ -104,13 +113,13 @@ export function setupSteps(facts: SetupFacts, skipped: readonly SetupStep[]): Se
           : skippable && skipped.includes(step)
             ? "saltado"
             : "falta"
-    return { step, state, skippable }
+    return { step, state, skippable, sells: !NOT_SELLING_STEPS.includes(step) }
   })
 }
 
-/** Lista: no falta ninguno (lo que todavía no se puede hacer no cuenta). */
+/** Lista: no falta nada que frene la venta (lo que todavía no se puede hacer no cuenta). */
 export function setupFinished(steps: readonly SetupStepView[]): boolean {
-  return steps.every((s) => s.state !== "falta")
+  return steps.every((s) => s.state !== "falta" || !s.sells)
 }
 
 /**

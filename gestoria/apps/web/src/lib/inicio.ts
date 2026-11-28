@@ -84,7 +84,7 @@ export interface StoreHome {
   waiting: { chats: unknown[] }
   /** Null: ya quedó lista, o quien lo ve no configura la tienda. */
   setup: {
-    steps: { step: SetupStep; state: SetupStepState; skippable: boolean }[]
+    steps: { step: SetupStep; state: SetupStepState; skippable: boolean; sells: boolean }[]
     facts: SetupFacts
   } | null
 }

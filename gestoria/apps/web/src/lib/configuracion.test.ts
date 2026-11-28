@@ -100,13 +100,13 @@ describe("qué ve cada rol en Configuración", () => {
 /** Calzados Rosa: tiene casi todo; le falta la pasarela y probar a Sofi. */
 const ROSA: ConfigOverview = {
   steps: [
-    { step: "datos", state: "hecho", skippable: false },
-    { step: "catalogo", state: "hecho", skippable: false },
-    { step: "pagos", state: "hecho", skippable: false },
-    { step: "entregas", state: "hecho", skippable: false },
-    { step: "chats", state: "pronto", skippable: false },
-    { step: "sofi", state: "falta", skippable: true },
-    { step: "equipo", state: "hecho", skippable: true },
+    { step: "datos", state: "hecho", skippable: false, sells: true },
+    { step: "catalogo", state: "hecho", skippable: false, sells: true },
+    { step: "pagos", state: "hecho", skippable: false, sells: true },
+    { step: "entregas", state: "hecho", skippable: false, sells: true },
+    { step: "chats", state: "pronto", skippable: false, sells: true },
+    { step: "sofi", state: "falta", skippable: true, sells: true },
+    { step: "equipo", state: "hecho", skippable: true, sells: false },
   ],
   brand: { publicName: "Calzados Rosa", brandColor: "#be185d", logo: true, link: "calzadosrosa" },
   catalog: { products: 32, withStock: 30 },
@@ -198,6 +198,8 @@ describe("lo que falta para vender", () => {
       path: "/configuracion/medios-de-pago",
     })
     expect(link?.detail).toContain("Yape y Plin")
+    // Los chats todavía dicen «Muy pronto»: Sofi no vende sola, y el título no lo promete.
+    expect(toDoTitle(setupProgress(ROSA.steps).left, false)).toBe("Para vender te falta 1 cosa")
     expect(toDoTitle(setupProgress(ROSA.steps).left, true)).toBe(
       "Para que Sofi venda sola te falta 1 cosa",
     )
@@ -279,7 +281,8 @@ describe("cómo está cada parte", () => {
     expect(lines.pagos).toMatchObject({
       summary: "Yape y Plin con captura · Efectivo al recibir",
       status: "Sin pasarela",
-      pending: true,
+      // Sin pasarela se vende igual: lo dice, sin punto.
+      pending: false,
     })
     // El nombre que ya dice cómo se cobra no lo repite.
     const named = configLines(

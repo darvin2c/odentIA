@@ -146,6 +146,8 @@ describe("la pantalla donde está", () => {
     // A quien sí la configura no se le pregunta.
     expect(helpScreenView("owner", "/configuracion/avisos").suggestions).not.toContain(why)
     expect(helpScreenView("admin", "/configuracion/avisos").suggestions).not.toContain(why)
+    // Soporte no tiene avisos: tampoco se le pregunta.
+    expect(helpScreenView("support", "/configuracion/avisos").suggestions).not.toContain(why)
     // Y la respuesta le dice a quién pedírselo.
     expect(helpAnswerFor("sales", STORE, "faq:configuracion-sin-permiso")?.restriction).toContain(
       "Dueño y Administrador",
