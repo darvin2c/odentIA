@@ -266,7 +266,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Quién es Sofi y qué hace sola?",
         a: [
           "Sofi es la vendedora de tu tienda. Responde con tu catálogo y tus precios, recomienda, negocia sin bajar del precio mínimo que pusiste y arma el pedido con lo que el cliente ya vio. Le dice cómo pagar y, si paga por link, el pedido queda pagado solo.",
-          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: pasa la conversación a una persona. Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Lo que no está en tu catálogo ni en «Lo que sabe», no lo inventa: pasa la conversación a una persona y la pregunta aparece en «Lo que aprendió». Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente: debajo de cada respuesta, «Por qué» dice qué usó. En una pantalla ancha la prueba está al lado, también mientras cambias algo; en el celular queda abajo, y el botón «Probar a Sofi» de arriba te lleva a ella. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
           "Probarla sirve al ajustarla: por eso la prueba quien cambia la configuración de la tienda.",
         ],
         needs: "configuracion",
@@ -286,8 +286,19 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "sofi-lo-que-sabe",
         q: "¿Cómo le enseño a Sofi lo que debe saber?",
         a: [
-          "En Configuración, en Sofi, «Cómo vende»: cómo se presenta, lo que debe saber (tu horario, los cambios de talla, cómo se cuida el producto) y si está encendida. Ahí también eliges los seguimientos que Argos le encarga, como recordar el pago a quien no pagó.",
-          "Lo cuenta tal cual. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+          "En Configuración, en Sofi, «Lo que sabe»: con «Agregar» escribes una pregunta como la haría una clienta («¿Hacen cambios?») y su respuesta. Sofi la lee cuando le preguntan eso y la cuenta así.",
+          "En «Lo que aprendió» ves lo que clientas preguntaron en tus chats y Sofi no supo: con «Responder» lo guardas en «Lo que sabe». En el celular, si hay preguntas por responder, una línea debajo de las pestañas dice cuántas y te lleva ahí. Nada se agrega solo. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+        ],
+        needs: "configuracion",
+        screen: "sofi",
+      },
+      {
+        id: "sofi-como-habla",
+        q: "¿Cómo elijo cómo habla Sofi y qué puede ofrecer?",
+        a: [
+          "En Configuración, en Sofi, cada parte tiene su «Cambiar». En «Cómo habla» eliges su tono viendo un ejemplo de cada uno (cercana, amable y formal o directa), si trata de tú o de usted, los emojis y cómo se presenta. En «Qué ofrece» marcas lo que puede ofrecer para cerrar: envío gratis, un descuento, un regalo o una rebaja si lleva dos.",
+          "En «Cuándo te pasa el chat» eliges si te lo pasa cuando la clienta está molesta o cuando el pedido pasa de un monto, y el horario de tu equipo: fuera de él, Sofi dice cuándo le responden y tú decides si sigue vendiendo. Con «Pausar» deja de atender y tus chats esperan a una persona; en pausa, ese botón dice «Encender» y la vuelve a poner a atender. Guardar un cambio no la enciende ni la pausa. Si otra persona cambió a Sofi mientras tenías un «Cambiar» abierto, al guardar te lo dice: ciérralo y vuelve a abrirlo para ver lo nuevo.",
+          "Lo que no se elige: ofrece una sola vez, a cambio de pagar en 24 horas, nunca baja del mínimo de cada producto y con pago al recibir no hay oferta.",
         ],
         needs: "configuracion",
         screen: "sofi",
@@ -463,7 +474,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "no-se-entrego",
         q: "¿Qué hago si un pedido volvió sin entregar?",
         a: [
-          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
+          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Arriba te recuerda la regla de la tienda si la clienta no está y si es la primera vez que ese pedido no se entrega. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
           "Hasta que vuelva a salir, aparece primero en Despachos, en «No se entregó», con su motivo y lo que hay que cobrar.",
         ],
         needs: "entregas",
@@ -586,7 +597,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo dejo que Sofi negocie el precio?",
         a: [
           "En el producto, «Precio y negociación»: pon el precio mínimo de venta. Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
-          "Sofi primero cuenta lo bueno del producto y ofrece algo solo cuando ve que puede perder la venta: una sola vez, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
+          "Sofi primero dice el precio completo y lo bueno del producto, y ofrece algo solo si después el cliente duda: dice que está caro, que lo va a pensar, que en otra tienda está más barato o pide rebaja. A quien solo pregunta el precio no le rebaja ni le regala el envío. Ofrece una sola vez, con como mucho la mitad de lo que hay entre tu precio y tu mínimo, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
           "Ahí también van los precios por cantidad y las promociones con sus fechas.",
         ],
         needs: "configuracion",
@@ -663,7 +674,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar otra forma de cobro» y eliges cómo te paga. Yape y Plin piden tu celular, a nombre de quién está y tu QR (lo sueltas o lo pegas con Ctrl+V). Ves cómo le llega el dato a la clienta: tu número, a nombre de quién y el monto. Tu QR queda guardado: Sofi lo enviará cuando el chat por WhatsApp esté conectado. La transferencia pide tu banco de la lista, la cuenta y el CCI, que se revisa con sus dígitos de control.",
+          "Lo que confirma una persona (Yape, Plin, la transferencia) espera a que alguien del equipo revise la captura; lo que se cobra al recibir lo confirma el repartidor. Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -672,8 +684,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
-          "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
+          "En Configuración, en Entregas. Mientras no tienes zonas, eliges desde qué distrito despachas y «Usar la plantilla de Lima» (los 50 distritos de Lima y el Callao en 6 zonas, con precios de partida que cambias) o «Prefiero armarlas yo». Con las zonas ya hechas esos botones no están: los distritos se cambian en el mapa (tocas uno y eliges su zona o «No entrego ahí») o en la lista de cada zona, con «Editar», y una zona nueva (por ejemplo, solo para Lurín) con «Agregar zona». Un distrito está en una sola zona.",
+          "Cada zona, con «Editar»: su precio, cuándo llega (hoy antes de una hora, al día siguiente o en días fijos), sus franjas, si acepta pago al recibir y si tiene envío gratis. En «Reglas», desde qué compra es gratis, quién paga si la clienta no está y dónde se paga al recibir. Sofi cotiza con el distrito de la clienta.",
+          "El recojo y la agencia van en sus tarjetas («Agregar recojo», «Agregar agencia»). A una clienta de provincia, Sofi le nombra tus agencias, le dice lo que cobras por llevarlo y quién paga el flete, y le pide la ciudad, la agencia de destino y el nombre y DNI de quien recoge. Las franjas, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin. Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
         screen: "entregas",
@@ -682,7 +695,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar con Mercado Pago»: entras con la cuenta de la tienda y das permiso, sin copiar ninguna clave. El dinero de cada link llega directo a tu cuenta.",
+          "Empieza en modo prueba: «Probar con S/ 1» crea un link que pagas con la tarjeta de prueba de Mercado Pago, y ves cómo queda pagado solo. En modo prueba ningún pedido se cobra por link. Cuando te guste, «Cobrar de verdad» vuelve a pedir el permiso, esta vez para cobrar.",
+          "Si lo desconectas, los links ya enviados dejan de confirmarse solos: esos pagos los revisas tú.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -691,7 +706,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "avisos-al-celular",
         q: "¿Cómo me entero de un pago o de una entrega aunque gestorIA esté cerrada?",
         a: [
-          "Instala gestorIA en tu celular y activa los avisos: en Pedidos, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
+          "Instala gestorIA en tu celular y activa los avisos: en Inicio, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
           "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre lo que toca resolver, y el siguiente del mismo tipo reemplaza al anterior.",
           "En Avisos al celular eliges qué te llega, y vale en todos tus celulares. «Apagar en este celular» los apaga solo en ese celular; al cerrar sesión también se apagan en él.",
         ],
@@ -702,7 +717,20 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "invitar",
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
-          "En Configuración, en Equipo y repartidores, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
+          "En Configuración, en Equipo y repartidores, «Invitar»: su nombre, su celular, el correo con el que entrará y su rol; cada rol dice lo que puede hacer. «Crear la invitación» y después «Enviar por WhatsApp»: se abre el WhatsApp de tu celular con el mensaje escrito y lo envías tú. En la lista dice quién la envió por WhatsApp: gestorIA no sabe si le llegó.",
+          "Entra solo con la cuenta de ese correo: el link solo no basta. La invitación vence en 7 días; si venció, «Invitar otra vez». Si un dato estaba mal, «Corregir»: se abre con sus datos puestos y, al crear la nueva, la anterior queda anulada. Para que ya no sirva, «Anular» y confírmalo.",
+          "Para cambiar el rol de alguien o quitarlo del equipo, tócalo en la lista: cada rol dice lo que puede hacer. A quien tiene el plan solo lo cambia o lo quita alguien con su mismo rol, y la tienda nunca se queda sin quien tiene el plan.",
+        ],
+        needs: "equipo.gestionar",
+        screen: "equipo",
+      },
+      {
+        id: "repartidores",
+        q: "¿Cómo sumo a un repartidor y anoto lo que le pago?",
+        a: [
+          "En Configuración, en Equipo y repartidores, «Agregar repartidor»: su nombre, su celular, «Le pagas por entrega» y qué pasa «Si la clienta no estaba». Desde ese momento lo eliges al despachar, en Despachos, y le puedes avisar por WhatsApp desde tu celular.",
+          "Lo que le pagas por entrega es para que sepas cuánto le debes: gestorIA no le paga ni lo descuenta de nada. Quien es de tu equipo y ya llevó un pedido también aparece, con su pago si se lo anotas.",
+          "Para que deje de repartir, tócalo en la lista y «Sacar»: lo que tenía asignado y todavía no salió queda sin repartidor en Despachos; lo que llevó y cobró sigue con su nombre.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -741,7 +769,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "plan",
         q: "¿Dónde veo mi plan y lo que se me cobró?",
         a: [
-          "En Configuración, en «Plan y pagos» (también se abre desde el nombre de la tienda, arriba en el menú): tu plan, lo que se te cobró, tus pagos y sus avisos. Ahí también subes el comprobante de un pago.",
+          "En Configuración, en «Plan y pagos» (también se abre desde el nombre de la tienda, arriba en el menú): primero, lo que tienes por pagar y cuándo vence, o «Nada por pagar». Si tienes algo por pagar, ahí mismo está «Subir comprobante»; si no aparece, avísanos que pagaste escribiendo a soporte desde la «Ayuda», arriba. Debajo, tu plan, cuánto usaste de tu saldo y cuánto te queda, tu tope y cuándo cierra tu mes. Más abajo, lo que se te cobró y pagaste antes.",
+          "Para cambiar tu tope, «Pedir otro tope» (o «Pedir un tope», si no tienes): se abre la Ayuda con tu mensaje a soporte de gestorIA ya escrito, lo completas y lo envías. Para preguntar por un cobro, escribe a soporte desde la «Ayuda», arriba en cualquier pantalla. En «Plan y pagos» ves las respuestas de toda la tienda.",
         ],
         needs: "plan",
         screen: "plan",

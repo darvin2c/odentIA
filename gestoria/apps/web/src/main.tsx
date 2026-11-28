@@ -22,6 +22,8 @@ import { DeviceNoticesPage } from "./avisos"
 import { CashPage } from "./caja"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
+import { PaymentMethodsPage } from "./cobros"
+import { DeliveriesPage } from "./config-entregas"
 import { ConfigFrame, ConfigHomePage, StoreDataPage } from "./configuracion"
 import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import { DispatchPage } from "./despachos"
@@ -32,6 +34,7 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
+import { TeamPage } from "./equipo"
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { startInstalledApp } from "./lib/avisos"
@@ -39,13 +42,13 @@ import { customerSearch } from "./lib/clientes"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
 import { FILTERS, type OrderFilter } from "./lib/pedidos"
 import { BrandPage } from "./marca"
-import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
+import { MercadoPagoReturnPage } from "./mercadopago-vuelta"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
 import { ProductPage } from "./producto"
 import { ReportsPage } from "./reportes"
 import { SofiPage } from "./sofi"
-import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
+import { InvitationPage, NewStorePage, StoreLayout, StoresPage } from "./tiendas"
 
 // El tema que eligió la persona en «Apariencia» (el mismo de las clínicas), o el de su equipo.
 // Dentro de la tienda lo lleva el menú de la persona; aquí vale también para la entrada.
@@ -301,6 +304,13 @@ const routeTree = rootRoute.addChildren([
       component: NewStorePage,
     }),
     storeRoute.addChildren(storeChildren),
+    // La vuelta de Mercado Pago al conectar la pasarela (Cobros): su dirección es fija.
+    createRoute({
+      getParentRoute: () => signedIn,
+      path: "/mercadopago/vuelta",
+      validateSearch: search,
+      component: MercadoPagoReturnPage,
+    }),
     createRoute({
       getParentRoute: () => signedIn,
       path: "/invitacion/$id",

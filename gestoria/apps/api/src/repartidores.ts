@@ -5,6 +5,7 @@ import {
   MAX_DELIVERY_SLOTS,
   store,
   storeCourier,
+  storeDeliveryMethod,
   storeEvent,
   storeMember,
 } from "@gestoria/db"
@@ -104,6 +105,24 @@ export async function setDeliverySlots(
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     await tx.update(store).set({ deliverySlots: input.slots }).where(eq(store.id, storeId))
+    // Una franja que se quita sale también de las zonas que la tenían (Entregas).
+    const kept = new Set(input.slots.map(slotKey))
+    const methods = await tx
+      .select({ id: storeDeliveryMethod.id, zones: storeDeliveryMethod.zones })
+      .from(storeDeliveryMethod)
+      .where(eq(storeDeliveryMethod.storeId, storeId))
+    for (const method of methods)
+      if (method.zones.some((zone) => (zone.slots ?? []).some((s) => !kept.has(slotKey(s)))))
+        await tx
+          .update(storeDeliveryMethod)
+          .set({
+            zones: method.zones.map((zone) => ({
+              ...zone,
+              slots: (zone.slots ?? []).filter((s) => kept.has(slotKey(s))),
+            })),
+            updatedAt: new Date(),
+          })
+          .where(eq(storeDeliveryMethod.id, method.id))
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
@@ -151,12 +170,30 @@ export async function courierFor(
 ): Promise<{ id: string; name: string } | null> {
   if (choice === null) return null
   if ("courierId" in choice) {
+    // Se toma su fila: así no se le asigna nada mientras la tienda lo saca (Equipo y repartidores).
     const [row] = await tx
-      .select({ id: storeCourier.id, name: storeCourier.name, account: accountCopy.name })
+      .select({
+        id: storeCourier.id,
+        name: storeCourier.name,
+        account: accountCopy.name,
+        userId: storeCourier.userId,
+        isActive: storeCourier.isActive,
+        member: storeMember.userId,
+      })
       .from(storeCourier)
       .leftJoin(accountCopy, eq(accountCopy.userId, storeCourier.userId))
+      .leftJoin(
+        storeMember,
+        and(
+          eq(storeMember.storeId, storeCourier.storeId),
+          eq(storeMember.userId, storeCourier.userId),
+        ),
+      )
       .where(and(eq(storeCourier.storeId, storeId), eq(storeCourier.id, choice.courierId)))
-    if (!row)
+      .for("share", { of: storeCourier })
+    // Uno de fuera que la tienda sacó, o alguien que dejó el equipo, ya no se elige por su id (otra
+    // pantalla abierta, por ejemplo).
+    if (!row || (row.userId === null ? !row.isActive : row.member === null))
       throw new StoreError(400, "VALIDATION_ERROR", "Ese repartidor ya no está", {
         courier: "Ese repartidor ya no está",
       })

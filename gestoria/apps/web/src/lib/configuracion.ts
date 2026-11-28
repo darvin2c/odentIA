@@ -243,13 +243,19 @@ export interface ConfigOverview {
   catalog: { products: number; withStock: number }
   /** Los medios con que se cobra: un link de pago sin pasarela no viene (no cobra). */
   payments: { name: string; typeCode: PaymentTypeCode; collection: PaymentCollection }[]
-  /** La pasarela del link de pago: solo si está conectada y con qué. */
-  paymentLink: { provider: "mercadopago" } | null
+  /** La pasarela del link de pago: con qué, en qué modo y si sirve (sin cuenta ni llaves). */
+  paymentLink: {
+    provider: "mercadopago"
+    mode: "prueba" | "real"
+    state: "conectada" | "vencida" | "sin_permiso"
+  } | null
   deliveries: {
     name: string
     type: DeliveryType
     cost: DeliveryCost
     zones: number
+    /** Cuántos distritos (UBIGEO) tienen sus zonas. */
+    districts: number
     acceptsPayOnDelivery: boolean
   }[]
   slots: number
@@ -264,7 +270,7 @@ export interface ConfigOverview {
     supportAsks: number
   }
   /** Null para soporte: no mira Sofi. */
-  sofi: { enabled: boolean; tried: boolean } | null
+  sofi: { enabled: boolean; tried: boolean; toAnswer: number } | null
   /** Solo para quien ve el plan; null si todavía no se sabe nada de él. */
   plan: {
     name: string | null
@@ -411,17 +417,24 @@ export function toDoItems(
   const byCapture = overview.payments
     .filter((p) => p.collection === "comprobante")
     .map((p) => p.name)
+  const gateway = overview.paymentLink
+  const charging = gateway?.state === "conectada" && gateway.mode === "real"
+  // No frena la venta: aunque esté a medias (en prueba o sin permiso) va en «Para vender más».
   more.push({
     id: "link",
-    state: overview.paymentLink ? "hecho" : "opcional",
+    state: charging ? "hecho" : "opcional",
     title: "Cobrar por link de pago",
-    detail: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}: el pago se confirma solo.`
-      : byCapture.length > 0
+    detail: !gateway
+      ? byCapture.length > 0
         ? `El pago se confirma solo. Ya cobras con ${listText(byCapture)} por captura.`
-        : "El pago se confirma solo, sin revisar capturas.",
+        : "El pago se confirma solo, sin revisar capturas."
+      : gateway.state !== "conectada"
+        ? `${PROVIDER_NAMES[gateway.provider]} ya no deja cobrar: vuelve a conectarlo.`
+        : gateway.mode === "prueba"
+          ? `${PROVIDER_NAMES[gateway.provider]} en modo prueba: prueba con S/ 1 y pasa a cobrar de verdad.`
+          : `Con ${PROVIDER_NAMES[gateway.provider]}: el pago se confirma solo.`,
     action: {
-      label: overview.paymentLink ? "Ver" : "Conectar pasarela",
+      label: charging ? "Ver" : gateway ? "Terminar" : "Conectar pasarela",
       path: SECTIONS.pagos.path,
     },
   })
@@ -493,12 +506,19 @@ export function configLines(
   if (overview.sofi) {
     const skipped = overview.steps.some((s) => s.step === "sofi" && s.state === "saltado")
     const onOff = overview.sofi.enabled ? "Encendida" : "Apagada"
-    const pending = !overview.sofi.tried && !skipped
+    const untried = !overview.sofi.tried && !skipped
+    const toAnswer = overview.sofi.toAnswer
+    const pending = untried || toAnswer > 0
     lines.sofi = {
       id: "sofi",
-      // Lo pendiente va en el estado, junto a su punto: «Encendida · ● Sin probar».
+      // Lo pendiente va en el estado, junto a su punto: «Encendida · ● Sin probar», o las
+      // preguntas que esperan respuesta en «Lo que aprendió».
       summary: overview.sofi.tried ? "Ya la probaste" : skipped ? "No la usas por ahora" : onOff,
-      status: pending ? "Sin probar" : onOff,
+      status: untried
+        ? "Sin probar"
+        : toAnswer > 0
+          ? `${toAnswer === 1 ? "Una pregunta" : `${toAnswer} preguntas`} por responder`
+          : onOff,
       pending,
     }
   }
@@ -516,13 +536,22 @@ export function configLines(
     status:
       overview.payments.length === 0
         ? "Falta"
-        : overview.paymentLink
-          ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
-          : "Sin pasarela",
-    // Sin pasarela se vende igual (con captura o al recibir): el punto, solo sin forma de cobrar.
-    pending: overview.payments.length === 0,
+        : !overview.paymentLink
+          ? "Sin pasarela"
+          : overview.paymentLink.state !== "conectada"
+            ? `${PROVIDER_NAMES[overview.paymentLink.provider]}: sin permiso`
+            : overview.paymentLink.mode === "prueba"
+              ? `${PROVIDER_NAMES[overview.paymentLink.provider]} en prueba`
+              : `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`,
+    // Sin pasarela se vende igual (con captura o al recibir): el punto, sin forma de cobrar o con
+    // la pasarela a medias (en prueba o sin permiso).
+    pending:
+      overview.payments.length === 0 ||
+      (overview.paymentLink !== null &&
+        (overview.paymentLink.state !== "conectada" || overview.paymentLink.mode !== "real")),
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
+  const districts = overview.deliveries.reduce((sum, d) => sum + (d.districts ?? 0), 0)
   const ownFleet = overview.deliveries.some((d) => d.type === "DeliveryModeOwnFleet")
   lines.entregas = {
     id: "entregas",
@@ -538,11 +567,13 @@ export function configLines(
     status:
       overview.deliveries.length === 0
         ? "Falta"
-        : zones > 0
-          ? plural(zones, "zona", "zonas")
-          : ownFleet
-            ? "Sin zonas"
-            : "Al día",
+        : districts > 0
+          ? `${plural(districts, "distrito", "distritos")} en ${plural(zones, "zona", "zonas")}`
+          : zones > 0
+            ? `${plural(zones, "zona", "zonas")} sin distritos`
+            : ownFleet
+              ? "Sin zonas"
+              : "Al día",
     pending: overview.deliveries.length === 0,
   }
   const { team } = overview
@@ -571,7 +602,7 @@ export function configLines(
       summary: [
         plan.name ? `Plan ${plan.name}` : "Sin plan todavía",
         plan.creditLeftCents !== null && plan.currency
-          ? `te quedan ${money(plan.creditLeftCents, plan.currency)} de crédito`
+          ? `te quedan ${money(plan.creditLeftCents, plan.currency)} de saldo`
           : null,
       ]
         .filter(Boolean)
@@ -627,9 +658,29 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   { text: "Tu link", section: "marca", terms: ["link", "enlace", "url", "dirección", "dominio"] },
   { text: "Encender o apagar a Sofi", section: "sofi", terms: ["sofi", "vendedora", "apagar"] },
   {
-    text: "Lo que Sofi debe saber",
+    text: "Cómo habla Sofi",
     section: "sofi",
-    terms: ["horario", "cambios", "talla", "cuidados", "saber"],
+    terms: ["tono", "trato", "usted", "emojis", "presenta", "habla"],
+  },
+  {
+    text: "Qué ofrece Sofi para cerrar",
+    section: "sofi",
+    terms: ["oferta", "descuento", "rebaja", "envío gratis", "regalo", "negociar"],
+  },
+  {
+    text: "Cuándo te pasa el chat y tu horario",
+    section: "sofi",
+    terms: ["horario", "persona", "pasa", "molesta", "fuera de horario", "domingo"],
+  },
+  {
+    text: "Lo que sabe Sofi",
+    section: "sofi",
+    terms: ["preguntas", "respuestas", "cambios", "talla", "cuidados", "saber"],
+  },
+  {
+    text: "Lo que aprendió Sofi",
+    section: "sofi",
+    terms: ["aprendió", "no supo", "preguntas sin respuesta", "responder"],
   },
   { text: "Probar a Sofi", section: "sofi", terms: ["probar", "prueba", "conversación"] },
   {
@@ -646,6 +697,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     text: "Cobrar por link de pago",
     section: "pagos",
     terms: ["link", "pasarela", "mercado pago", "tarjeta", "yape", "enlace"],
+  },
+  {
+    text: "Probar Mercado Pago con S/ 1",
+    section: "pagos",
+    terms: ["prueba", "probar", "modo prueba", "cobrar de verdad", "comisión"],
   },
   {
     text: "Quién confirma un pago con captura",
@@ -673,6 +729,21 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
       "lima",
     ],
   },
+  {
+    text: "Mapa de distritos de Lima y el Callao",
+    section: "entregas",
+    terms: ["mapa", "distrito", "distritos", "lima", "callao", "ubigeo"],
+  },
+  {
+    text: "Si la clienta no está",
+    section: "entregas",
+    terms: ["no estaba", "viaje fallido", "reprogramar", "no contestó", "volver a llevar"],
+  },
+  {
+    text: "Hora de corte y días de entrega",
+    section: "entregas",
+    terms: ["corte", "hoy", "mañana", "días fijos", "plazo", "cuándo llega"],
+  },
   { text: "Recojo en tienda", section: "entregas", terms: ["recojo", "recoger", "tienda"] },
   {
     text: "Envío por agencia",
@@ -694,7 +765,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     section: "entregas",
     terms: ["franja", "horario", "hora de entrega", "turno"],
   },
-  { text: "Invitar a tu equipo", section: "equipo", terms: ["invitar", "invitación", "correo"] },
+  {
+    text: "Invitar a tu equipo",
+    section: "equipo",
+    terms: ["invitar", "invitación", "correo", "celular"],
+  },
   {
     text: "Roles y permisos",
     section: "equipo",
@@ -703,7 +778,7 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   {
     text: "Repartidores",
     section: "equipo",
-    terms: ["repartidor", "reparte", "motorizado", "delivery"],
+    terms: ["repartidor", "reparte", "motorizado", "delivery", "pago por entrega", "pagarle"],
   },
   {
     text: "Soporte de gestorIA",
@@ -721,7 +796,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     section: "plan",
     terms: ["cobro", "factura", "comprobante", "pagar", "recibo"],
   },
-  { text: "Gasto de este periodo", section: "plan", terms: ["saldo", "tope", "gasto", "crédito"] },
+  {
+    text: "Tu saldo y tu tope del mes",
+    section: "plan",
+    terms: ["saldo", "tope", "gasto", "crédito", "cuánto pago"],
+  },
 ]
 
 /** Los nombres que guardó la tienda, para encontrarlos también (sus medios, su equipo…). */

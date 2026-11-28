@@ -59,7 +59,18 @@ const facts = (r: ChatRequest) => String(r.messages[1]!.content)
 
 /** Estas pruebas no cobran: el link de pago no se usa. */
 const noLink: LinkAdapter = {
-  async verify() {},
+  authorizeURL() {
+    throw new Error("Estas pruebas no conectan la pasarela")
+  },
+  async exchange() {
+    throw new Error("Estas pruebas no conectan la pasarela")
+  },
+  async refresh() {
+    throw new Error("Estas pruebas no conectan la pasarela")
+  },
+  async account() {
+    return "sin_permiso"
+  },
   async create() {
     throw new Error("Estas pruebas no crean links de pago")
   },

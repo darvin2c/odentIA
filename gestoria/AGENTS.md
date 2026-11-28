@@ -38,13 +38,27 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   el rol de Dueño, y una tienda nunca se queda sin Dueño.
 - La tienda de cada pedido sale del equipo de la persona, nunca del navegador (`inStore`).
 - Una invitación se acepta solo entrando con la cuenta del correo invitado; el enlace no basta.
-  No cambia lo que dice: se anula y se hace otra. Cada cambio del equipo queda en `store_event`
+  No cambia lo que dice: se anula y se hace otra («Corregir» lo hace en un paso, con `replaces`;
+  «Anular» se confirma). Cada cambio del equipo queda en `store_event`
   con quién lo hizo.
+- Equipo y repartidores (`apps/web/src/equipo.tsx`; ADR 0235): la invitación lleva nombre y celular
+  (E.164) y sale por el WhatsApp del celular de quien invita. Lo envía la persona: se anota solo que
+  se abrió (`shared_at`) y se dice «enviada por ti», nunca que llegó.
+- El repartidor de fuera lleva su celular y lo que la tienda le paga por entrega
+  (`apps/api/src/equipo-repartidores.ts`, `equipo.gestionar`): es un dato de la tienda, gestorIA no
+  le paga ni lo suma a ninguna cifra, y Ventas y soporte no lo ven. «Sacar» deja «sin repartidor»
+  lo que no salió (`unassignCourierIn`), con su línea en cada pedido. El link de un solo uso y la
+  cuenta del repartidor son de gestorIA Reparto (tablero 23): no se ofrece un link que no lleva a
+  nada.
 
 ## La configuración de la tienda (B3)
 
 - Medios de pago con los tipos de UN/CEFACT 4461 y cómo se confirma el pago, en el orden en que
-  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Formas de entrega con la
+  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Cada forma lleva sus datos
+  (ADR 0232, `apps/api/src/cobros.ts`): Yape y Plin con su celular en E.164, su titular y su QR (en
+  la base, por su contenido); la transferencia con su banco de la lista y su CCI, revisado con sus
+  dígitos de control (`cci.ts`) y del mismo banco. Lo que Sofi envía (`details`) lo arma el
+  servidor con esos datos; nunca se pide un texto libre para lo que tiene campos. Formas de entrega con la
   lista `DeliveryMethod` de Schema.org, su costo y lo que Sofi puede negociar del envío.
 - El catálogo: un producto agrupa hasta tres opciones (Schema.org `ProductGroup`); cada
   combinación es una variante con su código, su stock y, si quiere, su precio y su foto. Sin precio
@@ -103,6 +117,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   SVG (el servidor mira el contenido). La vista previa de la clienta dice que el catálogo con link
   aún no se publica.
 
+## Entregas por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7; ADR 0233)
+
+- Los distritos son códigos UBIGEO del INEI (`apps/api/src/distritos.ts`: los 43 de Lima y los 7
+  del Callao), nunca texto: la pantalla los elige del mapa esquemático o de la lista de cada zona.
+  Un distrito está en una sola zona en toda la tienda (`checkZonesIn`).
+- El precio de un envío sale solo de `deliveryPriceOf` (`apps/api/src/entregas.ts`), con el pago
+  al recibir y el envío gratis por zona (`payOnDeliveryOf`, `freeFromOf`): pedidos, «Cambiar»,
+  cambios y Sofi la usan; nadie más calcula el envío. Cuándo llega se cuenta en la hora de la tienda.
+- Las franjas de una zona son de las de la tienda (`store.delivery_slots`): no hay otra lista.
+- Quién paga el viaje fallido es `store.failed_trip`: se informa (Sofi, «No se entregó»); cobrar
+  otro viaje no está hecho.
+
 ## Inicio y los primeros pasos (entregas 3 y 6 del lienzo «gestorIA como odentIA»; ADR 0227)
 
 - gestorIA abre en Inicio, primero en el menú, para quien atiende (`ventas.atender`); soporte entra
@@ -148,6 +174,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
+- La pasarela se conecta entrando a la cuenta (OAuth con PKCE, `pasarela.ts`; ADR 0232): nunca se
+  pide copiar llaves. El intento vale 10 minutos, una vez y para quien lo empezó; el token se renueva
+  solo antes de vencer. En modo prueba (`store_payment_link.mode`) solo se paga el link de S/ 1 de la
+  tienda: ningún pedido se cobra por link, Sofi no lo ofrece (`chargesOrders`) y un pago de prueba
+  nunca paga un pedido. El aviso `mp-connect` se comprueba con el proveedor antes de creerlo.
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 
@@ -218,8 +249,22 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- A Sofi se la configura eligiendo (ADR 0234): cada opción de `store_agent` (tono, trato, emojis,
+  lo que ofrece, cuándo pasa el chat, el horario) tiene su frase fija en `sofi/opciones.ts`; nada
+  que escriba la tienda va como instrucción. Lo que puede ofrecer lo frenan también cotizar y
+  armar_pedido. «Lo que sabe» llega por `leer_lo_que_sabe` (las preguntas, como JSON en los datos);
+  «Lo que aprendió» lo anota solo Sofi, en chats de verdad, y lo cierra solo una persona: nada se
+  agrega solo. «Por qué» en la prueba sale solo de lo anotado en su respuesta (`whyOf`).
+- Guardar opciones de Sofi manda solo lo que cambió y la versión que se vio (`version`); sobre una
+  versión vieja la API responde 409. Encender o pausar es su propia operación
+  (`PATCH …/sofi/estado`, `setAgentEnabled`), que no cambia esa versión: guardar opciones nunca
+  enciende ni pausa a Sofi.
 - Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
-  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (ADR 0224). Lo frena la herramienta, no solo el prompt (`bargainProblem` de
+  `sofi/herramientas.ts`, en cotizar y armar_pedido): nada se cede antes de que Sofi haya dicho el
+  precio completo de lo que lleva, ni sin una duda de la clienta después de oírlo (`isObjection`;
+  preguntar el precio no es una duda), y la primera oferta cede como mucho la mitad del margen
+  sobre los mínimos. «Por qué» dice la duda que abrió la oferta o por qué no ofreció. Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
@@ -269,6 +314,17 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
   conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.
 - «Plan y pagos» es del Dueño (`plan`). Los textos los escribe gestorIA; la administración manda datos.
+  Arriba, lo que se debe («Por pagar» con la cifra del cobro y su vencimiento); después el plan, el
+  saldo usado y lo que pasó del saldo y el tope, tal como lo manda la administración (`budget`). El
+  precio del plan no es «pagas X al mes»: esa cifra la manda la administración o no se dice.
+  gestorIA no suma, no calcula impuestos ni precios; el total de cada cobro es el suyo. «Subir
+  comprobante» se nombra solo donde está el botón (`receiptHere`). Los movimientos por venta llegan cuando el
+  acuerdo los mande (tablero 18): hasta entonces, un `EmptyState` que dice qué se verá, sin filas
+  inventadas. El 1 % sale del total, con el envío, de cada venta completada (pagada y
+  entregada, o despachada por agencia con su número), venga de donde venga; lo devuelto se
+  descuenta. Ningún texto dice que algo cuenta para el 1 % por su origen: el origen es para medir. Se pregunta desde la Ayuda de la cabecera, escribiendo a soporte, no con un
+  formulario en la página; «Pedir otro tope» abre la Ayuda con ese mensaje ya escrito
+  (`openSupportRequest` de `@odentia/ui-patterns`), que la persona completa y envía.
   El comprobante de un cargo sale en su aviso (`pago.comprobante`), mirado por su contenido.
 - Lo enviado se borra de la bandeja a la semana (`purgeOutbox`), menos el último `cuenta.abierta`.
 - Lo que pide la administración (ADR 0214) llega a `/acuerdo/pedidos` y se aplica en
@@ -324,7 +380,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - No es otra bandeja: avisa lo nuevo de los pedidos (`order_event`, cursor por persona y tienda) y
   de los chats que esperan, y abre la pantalla que lo resuelve. Se anota antes de enviar y nunca
   se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan.
-- La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda.
+- La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda:
+  Inicio (`inicio.tsx`). En Avisos al celular, cada persona elige los suyos; soporte no.
 
 ## La web pública (B8)
 

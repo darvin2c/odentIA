@@ -264,15 +264,71 @@
     {
       "idx": 53,
       "version": "7",
-      "when": 1795845295270,
-      "tag": "0053_los_grupos_de_clientas",
+      "when": 1795845272533,
+      "tag": "0053_los_cobros",
       "breakpoints": true
     },
     {
       "idx": 54,
       "version": "7",
-      "when": 1795845296710,
-      "tag": "0054_reglas_grupos_de_clientas",
+      "when": 1795845285532,
+      "tag": "0054_reglas_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795847291935,
+      "tag": "0055_entregas_por_distrito",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795847298948,
+      "tag": "0056_reglas_entregas",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795848512804,
+      "tag": "0057_lo_que_sabe",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795848520156,
+      "tag": "0058_reglas_lo_que_sabe",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795849083145,
+      "tag": "0059_equipo_y_repartidores",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795849090305,
+      "tag": "0060_reglas_equipo_y_repartidores",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795866471900,
+      "tag": "0061_los_grupos_de_clientas",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795866473167,
+      "tag": "0062_reglas_grupos_de_clientas",
       "breakpoints": true
     }
   ]

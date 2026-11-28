@@ -7,7 +7,7 @@
  * mentira (un `fetch` controlado): prueba nuestro código, no que Mercado Pago responda así.
  */
 import { createHmac, randomBytes, randomUUID } from "node:crypto"
-import { store, storeMember, storePaymentLink } from "@gestoria/db"
+import { store, storeMember, storePaymentLink, storePaymentLinkAttempt } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
@@ -15,16 +15,29 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
 import { dayIn } from "./hora.js"
 import { mercadoPago } from "./link-de-pago.js"
+import { renewPaymentLinks } from "./pasarela.js"
+import type { LinkDeps } from "./pedidos.js"
+import { openSecret, sealSecret } from "./secretos.js"
 
 const ACCOUNT = "https://api.gestoria.test"
 const WEB = "https://app.gestoria.test"
 const SERVER = "https://servidor.gestoria.test"
 const MP_TOKEN = "APP_USR-1234567890-abcdef-tienda-rosa"
+const MP_TEST_TOKEN = "TEST-1234567890-abcdef-tienda-rosa"
+const MP_TOKEN_RENEWED = "APP_USR-1234567890-renovado-tienda-rosa"
+const KEY = randomBytes(32)
+/** La aplicación de gestorIA en el Mercado Pago de mentira. */
+const MP_APP = {
+  clientId: "1234567",
+  clientSecret: "secreto-de-la-app",
+  redirectURL: `${WEB}/mercadopago/vuelta`,
+}
 const MP_SECRET = "clave-secreta-del-webhook"
 
 let db: TestDb
 let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"]
 let app: ReturnType<typeof createApp>
+let linkDeps: LinkDeps
 
 const people = {
   rosa: { id: "u-rosa", email: "rosa@calzados.test", name: "Rosa Quispe" },
@@ -40,18 +53,48 @@ const base = `/api/tiendas/${storeId}`
 const mp = {
   payments: new Map<string, Record<string, unknown>>(),
   preferences: [] as Record<string, unknown>[],
+  /** La tienda desvinculó la aplicación: Mercado Pago ya no reconoce sus tokens. */
+  revoked: false,
 }
 const fakeMercadoPago: typeof fetch = async (input, init) => {
   const url = new URL(String(input))
+  if (url.pathname === "/oauth/token") {
+    const body = JSON.parse(String(init?.body)) as Record<string, string>
+    if (body.client_id !== MP_APP.clientId || body.client_secret !== MP_APP.clientSecret)
+      return Response.json({ message: "invalid_client" }, { status: 401 })
+    if (body.grant_type === "refresh_token")
+      return Response.json({
+        access_token: MP_TOKEN_RENEWED,
+        refresh_token: "TG-renovado",
+        expires_in: 15_552_000,
+        user_id: 77,
+      })
+    if (
+      body.code !== "codigo-bueno" ||
+      body.redirect_uri !== MP_APP.redirectURL ||
+      !body.code_verifier
+    )
+      return Response.json({ message: "invalid_grant" }, { status: 400 })
+    return Response.json({
+      access_token: body.test_token === "true" ? MP_TEST_TOKEN : MP_TOKEN,
+      refresh_token: "TG-primero",
+      expires_in: 15_552_000,
+      user_id: 77,
+    })
+  }
   const auth = new Headers(init?.headers).get("authorization")
-  if (auth !== `Bearer ${MP_TOKEN}`) return Response.json({ message: "invalid" }, { status: 401 })
-  if (url.pathname === "/users/me") return Response.json({ id: 1 })
+  const known = [MP_TOKEN, MP_TEST_TOKEN, MP_TOKEN_RENEWED].map((token) => `Bearer ${token}`)
+  if (mp.revoked || !auth || !known.includes(auth))
+    return Response.json({ message: "invalid" }, { status: 401 })
+  if (url.pathname === "/users/me")
+    return Response.json({ id: 77, email: "rosa.quispe@correo.test" })
   if (url.pathname === "/checkout/preferences") {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>
     mp.preferences.push(body)
     return Response.json({
       id: `pref-${body.external_reference}`,
       init_point: `https://www.mercadopago.test/checkout?pref=${body.external_reference}`,
+      sandbox_init_point: `https://sandbox.mercadopago.test/checkout?pref=${body.external_reference}`,
     })
   }
   const payment = /^\/v1\/payments\/(\d+)$/.exec(url.pathname)
@@ -145,6 +188,12 @@ async function stockOf(variantId: string) {
 
 beforeAll(async () => {
   db = await startTestDb()
+  linkDeps = {
+    adapters: { mercadopago: mercadoPago(fakeMercadoPago) },
+    secretsKey: KEY,
+    apiURL: SERVER,
+    app: MP_APP,
+  }
   const pair = await generateKeyPair("EdDSA", { crv: "Ed25519" })
   privateKey = pair.privateKey
   const jwk: JWK = { ...(await exportJWK(pair.publicKey)), alg: "EdDSA", kid: "k1" }
@@ -153,11 +202,7 @@ beforeAll(async () => {
     ownerDb: db.ownerDb,
     account: { url: ACCOUNT, eventsSecret: "", keys: createLocalJWKSet({ keys: [jwk] }) },
     webURL: WEB,
-    link: {
-      adapters: { mercadopago: mercadoPago(fakeMercadoPago) },
-      secretsKey: randomBytes(32),
-      apiURL: SERVER,
-    },
+    link: linkDeps,
   })
   for (const who of Object.keys(people) as Who[]) await call(who, "GET", "/api/yo")
   await db.ownerDb
@@ -458,41 +503,160 @@ describe("anular, con motivo escrito", () => {
   })
 })
 
-describe("el link de pago (Mercado Pago, con un proveedor controlado)", () => {
+describe("el link de pago (Mercado Pago entrando a la cuenta, con un proveedor controlado)", () => {
   let id = ""
-  it("sin conectar no hay link; solo quien configura lo conecta y el token no vuelve", async () => {
+  /** Conectar de punta a punta: empezar, «dar permiso» en Mercado Pago y volver con el código. */
+  async function connect(mode: "prueba" | "real", who: Who = "rosa", code = "codigo-bueno") {
+    const started = await call(who, "POST", `${base}/link-de-pago/conectar`, { mode })
+    const state = new URL(started.json.url).searchParams.get("state") ?? ""
+    return {
+      started,
+      state,
+      back: await call(who, "POST", "/api/link-de-pago/vuelta", { state, code }),
+    }
+  }
+
+  it("sin conectar no hay link; solo quien configura conecta y va a Mercado Pago con PKCE", async () => {
     id = (await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))).json
       .order.id
     const none = await call("lucia", "POST", `${base}/pedidos/${id}/link`)
     expect(none.status).toBe(409)
     expect(none.json.error.code).toBe("LINK_NOT_CONNECTED")
-    const body = { provider: "mercadopago", accessToken: MP_TOKEN, webhookSecret: MP_SECRET }
-    expect((await call("lucia", "PATCH", `${base}/link-de-pago`, body)).status).toBe(403)
-    const bad = await call("rosa", "PATCH", `${base}/link-de-pago`, {
-      ...body,
-      accessToken: "APP_USR-otro-token-que-no-sirve-0000",
+    expect((await call("lucia", "POST", `${base}/link-de-pago/conectar`, {})).status).toBe(403)
+    const started = await call("rosa", "POST", `${base}/link-de-pago/conectar`, {})
+    const url = new URL(started.json.url)
+    expect(url.origin + url.pathname).toBe("https://auth.mercadopago.com/authorization")
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      client_id: MP_APP.clientId,
+      response_type: "code",
+      platform_id: "mp",
+      redirect_uri: MP_APP.redirectURL,
+      code_challenge_method: "S256",
     })
-    expect(bad.status).toBe(400)
-    expect(bad.json.error.fields).toHaveProperty("accessToken")
-    const ok = await call("rosa", "PATCH", `${base}/link-de-pago`, body)
-    expect(ok.status).toBe(200)
-    expect(JSON.stringify(ok.json)).not.toContain(MP_TOKEN)
-    expect(ok.json.connection).toMatchObject({
-      provider: "mercadopago",
-      hint: "rosa",
-      signed: true,
+    expect(url.searchParams.get("state")).toMatch(new RegExp(`^${storeId}\\.`))
+    // El secreto de la aplicación nunca sale.
+    expect(started.json.url).not.toContain(MP_APP.clientSecret)
+  })
+
+  it("el regreso vale una vez, para quien empezó, y antes de 10 minutos", async () => {
+    const started = await call("rosa", "POST", `${base}/link-de-pago/conectar`, {})
+    const state = new URL(started.json.url).searchParams.get("state") ?? ""
+    // Otra persona del equipo (con permiso) no puede usar el de Rosa; Ventas, ni intentarlo.
+    expect(
+      (await call("lucia", "POST", "/api/link-de-pago/vuelta", { state, code: "codigo-bueno" }))
+        .status,
+    ).toBe(403)
+    expect(
+      (await call("mario", "POST", "/api/link-de-pago/vuelta", { state, code: "codigo-bueno" }))
+        .json.error.code,
+    ).toBe("LINK_STATE")
+    // Vencido: no sirve.
+    await db.ownerDb
+      .update(storePaymentLinkAttempt)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(storePaymentLinkAttempt.storeId, storeId))
+    const late = await call("rosa", "POST", "/api/link-de-pago/vuelta", {
+      state,
+      code: "codigo-bueno",
     })
+    expect(late.json.error.code).toBe("LINK_STATE")
+    // Un código que Mercado Pago no acepta: se dice, y el intento ya no vale.
+    const bad = await connect("prueba", "rosa", "codigo-vencido")
+    expect(bad.back.json.error.code).toBe("LINK_PROVIDER")
+    const again = await call("rosa", "POST", "/api/link-de-pago/vuelta", {
+      state: bad.state,
+      code: "codigo-bueno",
+    })
+    expect(again.json.error.code).toBe("LINK_STATE")
+    expect((await call("rosa", "GET", `${base}/link-de-pago`)).json.connection).toBeNull()
+  })
+
+  it("conectada en modo prueba: el token no vuelve, ningún pedido se cobra por link y el pedido lo dice", async () => {
+    const { back } = await connect("prueba")
+    expect(back.json).toEqual({ storeId, mode: "prueba" })
     const seen = await call("lucia", "GET", `${base}/link-de-pago`)
-    expect(JSON.stringify(seen.json)).not.toContain(MP_TOKEN)
-    // En la base va cifrado.
+    expect(seen.json.connection).toMatchObject({
+      provider: "mercadopago",
+      state: "conectada",
+      mode: "prueba",
+      account: "rosa.quispe@…",
+    })
+    expect(JSON.stringify(seen.json)).not.toContain(MP_TEST_TOKEN)
+    expect(JSON.stringify(seen.json)).not.toContain("TG-")
     const [row] = await db.ownerDb
       .select()
       .from(storePaymentLink)
       .where(eq(storePaymentLink.storeId, storeId))
-    expect(row!.accessTokenEnc).not.toContain(MP_TOKEN)
+    expect(row!.accessTokenEnc).not.toContain(MP_TEST_TOKEN)
+    expect(row!.expiresAt!.getTime()).toBeGreaterThan(Date.now() + 179 * 86_400_000)
+    const blocked = await call("lucia", "POST", `${base}/pedidos/${id}/link`)
+    expect(blocked.json.error.code).toBe("LINK_TEST_MODE")
+    const detail = (await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order
+    expect(detail).toMatchObject({ linkConnected: false, linkTestMode: true })
   })
 
-  it("el link lleva el total y el pedido; pedirlo otra vez da el mismo", async () => {
+  it("el link de prueba de S/ 1 se paga con la tarjeta de prueba y queda pagado solo", async () => {
+    expect((await call("lucia", "POST", `${base}/link-de-pago/prueba`)).status).toBe(403)
+    // Dos toques a la vez: un solo link en Mercado Pago, y los dos reciben el mismo.
+    const before = mp.preferences.length
+    const [made, twice] = await Promise.all([
+      call("rosa", "POST", `${base}/link-de-pago/prueba`),
+      call("rosa", "POST", `${base}/link-de-pago/prueba`),
+    ])
+    expect(made.json.trial.url).toMatch(/^https:\/\/sandbox\.mercadopago\.test\//)
+    expect(twice.json.trial.id).toBe(made.json.trial.id)
+    // Volver a tocar mientras espera el pago: el mismo link, no otro.
+    const again = await call("rosa", "POST", `${base}/link-de-pago/prueba`)
+    expect(again.json.trial.id).toBe(made.json.trial.id)
+    expect(mp.preferences.length).toBe(before + 1)
+    expect(mp.preferences.at(-1)).toMatchObject({
+      external_reference: `prueba:${made.json.trial.id}`,
+      items: [{ unit_price: 1, currency_id: "PEN" }],
+    })
+    // Pagado por otro monto, no; por S/ 1, sí. El pedido de verdad no se toca.
+    mp.payments.set("8001", {
+      id: 8001,
+      status: "approved",
+      external_reference: `prueba:${made.json.trial.id}`,
+      transaction_amount: 2,
+      currency_id: "PEN",
+    })
+    await mpNotice("8001", null)
+    expect((await call("rosa", "GET", `${base}/link-de-pago`)).json.trial.paidAt).toBeNull()
+    mp.payments.set("8002", {
+      id: 8002,
+      status: "approved",
+      external_reference: `prueba:${made.json.trial.id}`,
+      transaction_amount: 1,
+      currency_id: "PEN",
+    })
+    await mpNotice("8002", null)
+    const status = (await call("rosa", "GET", `${base}/link-de-pago`)).json
+    expect(status.trial).toMatchObject({ amountCents: 100, paidCents: 100 })
+    expect(status.trial.paidAt).toBeTruthy()
+    // Ya pagado: otra prueba es otro link.
+    const next = await call("rosa", "POST", `${base}/link-de-pago/prueba`)
+    expect(next.json.trial.id).not.toBe(made.json.trial.id)
+    expect(mp.preferences.length).toBe(before + 2)
+    // Un pago de prueba con la referencia de un pedido nunca lo paga.
+    mp.payments.set("8003", {
+      id: 8003,
+      status: "approved",
+      external_reference: id,
+      transaction_amount: 139,
+      currency_id: "PEN",
+    })
+    await mpNotice("8003", null)
+    expect((await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order.state).toBe("por_pagar")
+  })
+
+  it("«Cobrar de verdad» vuelve a pedir permiso; Sofi tiene su medio y el link lleva el total", async () => {
+    const { back } = await connect("real")
+    expect(back.json.mode).toBe("real")
+    // Cobrando de verdad, el link de prueba ya no se ofrece.
+    expect((await call("rosa", "POST", `${base}/link-de-pago/prueba`)).json.error.code).toBe(
+      "LINK_REAL_MODE",
+    )
     const link = await call("lucia", "POST", `${base}/pedidos/${id}/link`)
     expect(link.json.url).toBe(`https://www.mercadopago.test/checkout?pref=${id}`)
     expect(mp.preferences.at(-1)).toMatchObject({
@@ -500,12 +664,17 @@ describe("el link de pago (Mercado Pago, con un proveedor controlado)", () => {
       notification_url: `${SERVER}/avisos/link-de-pago/${storeId}`,
       items: [{ unit_price: 139, currency_id: "PEN", quantity: 1 }],
     })
+    const count = mp.preferences.length
     const again = await call("lucia", "POST", `${base}/pedidos/${id}/link`)
     expect(again.json.url).toBe(link.json.url)
-    expect(mp.preferences).toHaveLength(1)
+    expect(mp.preferences).toHaveLength(count)
   })
 
-  it("un aviso sin firma o con otra clave no cambia nada", async () => {
+  it("si la cuenta tiene la clave de los avisos (la conectada antes), un aviso sin firma no cambia nada", async () => {
+    await db.ownerDb
+      .update(storePaymentLink)
+      .set({ webhookSecretEnc: sealSecret(KEY, storeId, MP_SECRET) })
+      .where(eq(storePaymentLink.storeId, storeId))
     mp.payments.set("9001", {
       id: 9001,
       status: "approved",
@@ -578,24 +747,69 @@ describe("el link de pago (Mercado Pago, con un proveedor controlado)", () => {
     expect(confirmed?.note).toContain("Pago doble")
   })
 
-  it("al desconectar la cuenta, los links de los pedidos por pagar dejan de valer", async () => {
+  it("el token se renueva antes de vencer, con el refresh_token", async () => {
+    await db.ownerDb
+      .update(storePaymentLink)
+      .set({ expiresAt: new Date(Date.now() + 10 * 86_400_000) })
+      .where(eq(storePaymentLink.storeId, storeId))
+    expect(await renewPaymentLinks(db.ownerDb, linkDeps)).toEqual({ renewed: 1, failed: 0 })
+    const [row] = await db.ownerDb
+      .select()
+      .from(storePaymentLink)
+      .where(eq(storePaymentLink.storeId, storeId))
+    expect(openSecret(KEY, storeId, row!.accessTokenEnc)).toBe(MP_TOKEN_RENEWED)
+    expect(openSecret(KEY, storeId, row!.refreshTokenEnc!)).toBe("TG-renovado")
+    expect(row!.expiresAt!.getTime()).toBeGreaterThan(Date.now() + 179 * 86_400_000)
+    // Con el token renovado se sigue cobrando.
+    const other = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
+    ).json.order.id
+    expect((await call("lucia", "POST", `${base}/pedidos/${other}/link`)).status).toBe(200)
+  })
+
+  it("el aviso mp-connect se comprueba antes de creerlo; desvinculada, no se cobra por link", async () => {
+    const notice = (userId: number | string) =>
+      app.request(`${SERVER}/avisos/mercadopago`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "mp-connect",
+          action: "application.deauthorized",
+          user_id: userId,
+        }),
+      })
+    // Mercado Pago todavía reconoce el token: el aviso no cambia nada.
+    expect((await notice(77)).status).toBe(200)
+    expect((await call("rosa", "GET", `${base}/link-de-pago`)).json.connection.state).toBe(
+      "conectada",
+    )
+    mp.revoked = true
+    expect((await notice(77)).status).toBe(200)
+    const status = (await call("rosa", "GET", `${base}/link-de-pago`)).json
+    expect(status.connection.state).toBe("sin_permiso")
+    const other = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
+    ).json.order.id
+    expect((await call("lucia", "POST", `${base}/pedidos/${other}/link`)).json.error.code).toBe(
+      "LINK_NOT_CONNECTED",
+    )
+    mp.revoked = false
+  })
+
+  it("al desconectar, dice cuántos links enviados dejan de confirmarse solos y los olvida", async () => {
+    await connect("real")
     const id = (
       await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
     ).json.order.id
     await call("lucia", "POST", `${base}/pedidos/${id}/link`)
     expect((await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order.linkUrl).toBeTruthy()
+    expect((await call("rosa", "GET", `${base}/link-de-pago`)).json.openLinks).toBeGreaterThan(0)
     expect((await call("lucia", "DELETE", `${base}/link-de-pago`)).status).toBe(403)
     expect((await call("rosa", "DELETE", `${base}/link-de-pago`)).status).toBe(204)
     const detail = (await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order
-    expect(detail).toMatchObject({ linkUrl: null, linkConnected: false })
+    expect(detail).toMatchObject({ linkUrl: null, linkConnected: false, linkTestMode: false })
     // Un aviso para una tienda sin cuenta conectada responde igual y no hace nada.
     expect((await mpNotice("9001")).json.message).toBe("Recibido")
-    // Se vuelve a conectar sin repetir la clave: se queda la que había, si la hubiera.
-    const again = await call("rosa", "PATCH", `${base}/link-de-pago`, {
-      provider: "mercadopago",
-      accessToken: MP_TOKEN,
-    })
-    expect(again.json.connection).toMatchObject({ signed: false })
   })
 })
 
@@ -1428,5 +1642,170 @@ describe("cambiar o devolver después de entregar (Andrea, tablero 17)", () => {
       deliveryMethodId: ids.reparto,
     })
     expect([403, 404]).toContain(other.status)
+  })
+})
+
+describe("el envío por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7)", () => {
+  it("la plantilla de Lima la usa quien configura; el distrito dice la zona y su precio", async () => {
+    const denied = await call("lucia", "POST", `${base}/entregas/plantilla-lima`, {
+      shipFrom: "150115",
+    })
+    expect(denied.status).toBe(403)
+    const used = await call("rosa", "POST", `${base}/entregas/plantilla-lima`, {
+      shipFrom: "150115",
+    })
+    expect(used.status).toBe(200)
+    expect(used.json.method.id).toBe(ids.reparto)
+    const setup = await call("lucia", "GET", `${base}/entregas`)
+    expect(setup.json.shipFrom).toBe("150115")
+    const zones = setup.json.deliveries.find((d: Json) => d.id === ids.reparto).zones as Json[]
+    expect(zones.map((z) => z.name)).toEqual([
+      "Centro y Lima Moderna",
+      "Lima Este",
+      "Lima Norte",
+      "Lima Sur",
+      "Callao",
+      "Lejanos y playas",
+    ])
+    expect(zones.flatMap((z) => z.districts as string[])).toHaveLength(50)
+
+    // Lince (zona 1) a S/ 10; Lurín (lejanos) a S/ 18.
+    const lince = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150116",
+    })
+    expect(lince.json.quote).toMatchObject({ deliveryListCents: 1000, deliveryCents: 1000 })
+    const lurin = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150119",
+    })
+    expect(lurin.json.quote).toMatchObject({ deliveryListCents: 1800, deliveryCents: 1800 })
+    // En «Lejanos y playas» no se paga al recibir.
+    const door = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150119",
+      paymentMethodId: ids.efectivo,
+    })
+    expect(door.json.quote).toBeNull()
+    expect(door.json.fields.paymentMethodId).toBe("En «Lejanos y playas» no se paga al recibir")
+  })
+
+  it("un distrito está en una sola zona de la tienda", async () => {
+    const other = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Moto express",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      zones: [{ name: "Lince", priceCents: 1500, districts: ["150116"] }],
+    })
+    expect(other.status).toBe(409)
+    expect(JSON.stringify(other.json)).toContain("Lince ya está en «Reparto en Lima»")
+    // Dos zonas de la misma forma tampoco lo comparten.
+    const twice = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Moto express",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      zones: [
+        { name: "A", priceCents: 1500, districts: ["070101"] },
+        { name: "B", priceCents: 1500, districts: ["070101"] },
+      ],
+    })
+    expect(twice.status).toBe(400)
+  })
+
+  it("dos pestañas: guardar una zona toca solo esa, y lo visto viejo no pisa lo nuevo", async () => {
+    const path = `${base}/formas-de-entrega/${ids.reparto}`
+    const read = async () =>
+      (await call("rosa", "GET", `${base}/entregas`)).json.deliveries.find(
+        (d: Json) => d.id === ids.reparto,
+      ) as Json
+    // Las dos pestañas abren lo mismo.
+    const seen = await read()
+    const zoneOf = (method: Json, code: string) =>
+      (method.zones as Json[]).find((z) => (z.districts as string[]).includes(code))?.name ?? null
+    expect(zoneOf(seen, "150140")).toBe("Centro y Lima Moderna")
+    // La B saca Surco.
+    const b = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150140",
+      from: "Centro y Lima Moderna",
+      to: null,
+    })
+    expect(b.status).toBe(200)
+    // La A, sin recargar, saca Cieneguilla: Surco sigue fuera.
+    const a = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150109",
+      from: zoneOf(seen, "150109"),
+      to: null,
+    })
+    expect(a.status).toBe(200)
+    const after = await read()
+    expect(zoneOf(after, "150140")).toBeNull()
+    expect(zoneOf(after, "150109")).toBeNull()
+    // La A vuelve a poner Surco en la zona 1 como si siguiera ahí: se rechaza, no se adivina.
+    const stale = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150140",
+      from: "Centro y Lima Moderna",
+      to: "Lima Sur",
+    })
+    expect(stale.status).toBe(409)
+    expect(stale.json.error.code).toBe("STALE")
+    expect(stale.json.error.message).toContain("Recarga")
+    // Editar una zona con lo visto viejo (la B cambió su precio): 409, y nada cambia.
+    const centro = (seen.zones as Json[])[0]!
+    const priced = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "zona",
+      before: "Lima Este",
+      seen: (after.zones as Json[])[1],
+      zone: { ...(after.zones as Json[])[1], priceCents: 1300 },
+    })
+    expect(priced.status).toBe(200)
+    const old = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "zona",
+      before: "Centro y Lima Moderna",
+      seen: centro,
+      zone: { ...centro, priceCents: 900 },
+    })
+    expect(old.status).toBe(409)
+    // Guardar la forma entera sobre una versión vieja (o sin versión) tampoco pisa.
+    const whole = { ...seen, version: seen.updatedAt }
+    for (const body of [whole, { ...seen }]) {
+      const res = await call("rosa", "PATCH", path, body)
+      expect(res.status).toBe(409)
+    }
+    const now = await read()
+    expect(zoneOf(now, "150140")).toBeNull()
+    expect((now.zones as Json[])[1]!.priceCents).toBe(1300)
+    // Con la versión de ahora, sí; encender o apagar no la pide.
+    expect((await call("rosa", "PATCH", path, { ...now, version: now.updatedAt })).status).toBe(200)
+    expect((await call("rosa", "PATCH", path, { isActive: true })).status).toBe(200)
+    // Ventas no cambia zonas.
+    const denied = await call("lucia", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150140",
+      from: null,
+      to: "Centro y Lima Moderna",
+    })
+    expect(denied.status).toBe(403)
+    // Se deja como estaba.
+    for (const [district, to] of [
+      ["150140", "Centro y Lima Moderna"],
+      ["150109", zoneOf(seen, "150109")],
+    ] as const)
+      expect(
+        (await call("rosa", "PATCH", `${path}/zonas`, { op: "distrito", district, from: null, to }))
+          .status,
+      ).toBe(200)
+  })
+
+  it("quién paga el viaje fallido lo cambia quien configura", async () => {
+    const denied = await call("lucia", "PATCH", `${base}/entregas/reglas`, {
+      failedTrip: "clienta",
+    })
+    expect(denied.status).toBe(403)
+    const done = await call("rosa", "PATCH", `${base}/entregas/reglas`, { failedTrip: "clienta" })
+    expect(done.status).toBe(200)
+    expect((await call("lucia", "GET", `${base}/entregas`)).json.failedTrip).toBe("clienta")
   })
 })

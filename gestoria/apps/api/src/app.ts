@@ -76,18 +76,25 @@ import {
   updateCustomer,
 } from "./clientes.js"
 import {
-  configOverview,
-  createDelivery,
   createPayment,
-  deleteDelivery,
   deletePayment,
-  deliveryInput,
-  deliveryPatch,
   paymentInput,
   paymentPatch,
+  paymentQrContent,
+  putPaymentQr,
+  removePaymentQr,
+  updatePayment,
+} from "./cobros.js"
+import {
+  changeZone,
+  configOverview,
+  createDelivery,
+  deleteDelivery,
+  deliveryInput,
+  deliveryPatch,
   paymentsAndDeliveries,
   updateDelivery,
-  updatePayment,
+  zoneChange,
 } from "./configuracion.js"
 import {
   type AccountConfig,
@@ -99,6 +106,21 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
+import {
+  applyLimaTemplate,
+  deliveryRulesInput,
+  deliverySetup,
+  setDeliveryRules,
+  templateInput,
+} from "./entregas.js"
+import {
+  addCourier,
+  courierAddInput,
+  courierPatchInput,
+  removeCourier,
+  storeCouriers,
+  updateCourier,
+} from "./equipo-repartidores.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
@@ -115,20 +137,27 @@ import {
   storeImageContent,
 } from "./marca.js"
 import {
+  connectInput,
+  createTrialLink,
+  disconnectPaymentLink,
+  finishConnect,
+  finishInput,
+  paymentLinkStatus,
+  receiveConnectNotice,
+  startConnect,
+} from "./pasarela.js"
+import {
   addReceipt,
   assignCourier,
   cancelInput,
   cancelOrder,
   changeInput,
   changeOrder,
-  connectPaymentLink,
   courierInput,
   createOrder,
   createPaymentLink,
   deliverInput,
-  disconnectPaymentLink,
   type LinkDeps,
-  linkConnectionInput,
   listOrders,
   markDelivered,
   markMissed,
@@ -139,7 +168,6 @@ import {
   type OrderFilter,
   orderDetail,
   orderInput,
-  paymentLinkStatus,
   previewChange,
   quoteInput,
   quoteOrder,
@@ -165,15 +193,28 @@ import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
   agentSettingsInput,
+  agentStateInput,
   conversationView,
   customerMessageInput,
   newTestConversation,
   returnToSofi,
   saveAgentSettings,
+  setAgentEnabled,
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
 import { reportPeriod, storeReport } from "./sofi/reportes.js"
+import {
+  addAnswer,
+  answerGap,
+  answerInput,
+  changeAnswer,
+  dismissGap,
+  gapAnswerInput,
+  gapDismissInput,
+  knowledgeView,
+  removeAnswer,
+} from "./sofi/saber.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
@@ -189,6 +230,7 @@ import {
   myStores,
   mySupportState,
   newStoreInput,
+  noteInvitationShared,
   removeMember,
   revokeInvitation,
   roleInput,
@@ -225,6 +267,8 @@ const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
 /** «Guardar» de Tu marca lleva el logo y la portada, cada una con su tope, y unos pocos campos. */
 const BRAND_SAVE = /^\/api\/tiendas\/[^/]+\/marca$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
+/** El QR de Yape o Plin (Cobros): una imagen, con el tope de una foto. */
+const QR_UPLOAD = /^\/api\/tiendas\/[^/]+\/medios-de-pago\/[^/]+\/qr$/
 /** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
 /** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
 const MAX_LINK_NOTICES = 120
@@ -340,6 +384,7 @@ export function createApp(deps: AppDeps) {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && BRAND_SAVE.test(c.req.path)) return brandSave(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
+    if (c.req.method === "POST" && QR_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && RECEIPT_UPLOAD.test(c.req.path)) return receipt(c, next)
     if (c.req.method === "POST" && PLAN_RECEIPT_UPLOAD.test(c.req.path)) return planReceipt(c, next)
     return small(c, next)
@@ -393,6 +438,19 @@ export function createApp(deps: AppDeps) {
       link,
     )
     return c.json({ message: result.message }, result.status)
+  })
+
+  // El aviso de Mercado Pago de que una cuenta desvinculó la aplicación (`mp-connect`): se
+  // comprueba con su API antes de creerlo, y responde siempre lo mismo.
+  let connectNotices = { since: 0, count: 0 }
+  app.post("/avisos/mercadopago", async (c) => {
+    const now = Date.now()
+    if (now - connectNotices.since > LINK_NOTICE_WINDOW_MS)
+      connectNotices = { since: now, count: 0 }
+    if (++connectNotices.count > MAX_LINK_NOTICES)
+      return c.json(errorBody(c, "TOO_MANY", "Demasiados avisos; reintenta en un minuto"), 429)
+    await receiveConnectNotice(deps.ownerDb, await c.req.text(), link)
+    return c.json({ message: "Recibido" })
   })
 
   // Todo lo de /api pide el token de la cuenta y una copia activa.
@@ -517,6 +575,39 @@ export function createApp(deps: AppDeps) {
     return c.body(null, 204)
   })
 
+  // «Enviar por WhatsApp»: se abrió el WhatsApp con la invitación (enviada por quien la invita).
+  app.post("/api/tiendas/:id/invitaciones/:invitationId/enviada", async (c) =>
+    c.json(
+      await noteInvitationShared(
+        deps.appDb,
+        c.get("person"),
+        c.req.param("id"),
+        c.req.param("invitationId"),
+      ),
+    ),
+  )
+
+  // Los repartidores y su pago por entrega (tablero 9): del Dueño y el Administrador.
+  app.get("/api/tiendas/:id/repartidores", async (c) =>
+    c.json(await storeCouriers(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/repartidores", async (c) => {
+    const input = await bodyOf(c, courierAddInput)
+    const courier = await addCourier(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ courier }, 201)
+  })
+  app.patch("/api/tiendas/:id/repartidores/:courierId", async (c) => {
+    const input = await bodyOf(c, courierPatchInput)
+    const { id, courierId } = c.req.param()
+    return c.json({
+      courier: await updateCourier(deps.appDb, c.get("person"), id, courierId, input),
+    })
+  })
+  app.delete("/api/tiendas/:id/repartidores/:courierId", async (c) => {
+    const { id, courierId } = c.req.param()
+    return c.json(await removeCourier(deps.appDb, c.get("person"), id, courierId))
+  })
+
   app.patch("/api/tiendas/:id/equipo/:userId", async (c) => {
     const { role } = await bodyOf(c, roleInput)
     await changeRole(deps.appDb, c.get("person"), c.req.param("id"), c.req.param("userId"), role)
@@ -557,6 +648,28 @@ export function createApp(deps: AppDeps) {
     await deletePayment(deps.appDb, c.get("person"), id, methodId)
     return c.body(null, 204)
   })
+  // El QR de Yape o Plin: su contenido tal cual (se mira qué es por sus primeros bytes).
+  app.post("/api/tiendas/:id/medios-de-pago/:methodId/qr", async (c) => {
+    const { id, methodId } = c.req.param()
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    return c.json(await putPaymentQr(deps.appDb, c.get("person"), id, methodId, bytes))
+  })
+  app.delete("/api/tiendas/:id/medios-de-pago/:methodId/qr", async (c) => {
+    const { id, methodId } = c.req.param()
+    await removePaymentQr(deps.appDb, c.get("person"), id, methodId)
+    return c.body(null, 204)
+  })
+  app.get("/api/tiendas/:id/medios-de-pago/:methodId/qr", async (c) => {
+    const { id, methodId } = c.req.param()
+    const image = await paymentQrContent(deps.appDb, c.get("person"), id, methodId)
+    return c.body(new Uint8Array(image.content), 200, {
+      "content-type": image.contentType,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+      // Cambia con la misma dirección: la pantalla la pide con su versión (`?v=`).
+      "cache-control": "private, max-age=86400",
+    })
+  })
   app.post("/api/tiendas/:id/formas-de-entrega", async (c) => {
     const input = await bodyOf(c, deliveryInput)
     const method = await createDelivery(deps.appDb, c.get("person"), c.req.param("id"), input)
@@ -569,10 +682,32 @@ export function createApp(deps: AppDeps) {
       method: await updateDelivery(deps.appDb, c.get("person"), id, methodId, patch),
     })
   })
+  // Una sola zona del reparto, sobre lo guardado ahora (lienzo de Configuración, tablero 7).
+  app.patch("/api/tiendas/:id/formas-de-entrega/:methodId/zonas", async (c) => {
+    const change = await bodyOf(c, zoneChange)
+    const { id, methodId } = c.req.param()
+    return c.json({
+      method: await changeZone(deps.appDb, c.get("person"), id, methodId, change),
+    })
+  })
   app.delete("/api/tiendas/:id/formas-de-entrega/:methodId", async (c) => {
     const { id, methodId } = c.req.param()
     await deleteDelivery(deps.appDb, c.get("person"), id, methodId)
     return c.body(null, 204)
+  })
+
+  // Entregas por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7).
+  app.get("/api/tiendas/:id/entregas", async (c) =>
+    c.json(await deliverySetup(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/entregas/reglas", async (c) => {
+    const input = await bodyOf(c, deliveryRulesInput)
+    return c.json(await setDeliveryRules(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  app.post("/api/tiendas/:id/entregas/plantilla-lima", async (c) => {
+    const input = await bodyOf(c, templateInput)
+    const method = await applyLimaTemplate(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ method })
   })
 
   // El catálogo (B3): productos, variantes, fotos, stock y la hoja.
@@ -902,16 +1037,22 @@ export function createApp(deps: AppDeps) {
     return c.json(await correctFact(deps.appDb, c.get("person"), id, customerId, input))
   })
 
-  // El link de pago de la tienda (B4): se conecta en Pagos y entregas.
+  // La pasarela de la tienda (Cobros, tablero 6): se conecta entrando a la cuenta de Mercado Pago.
   app.get("/api/tiendas/:id/link-de-pago", async (c) =>
     c.json(await paymentLinkStatus(deps.appDb, c.get("person"), c.req.param("id"), link)),
   )
-  app.patch("/api/tiendas/:id/link-de-pago", async (c) => {
-    const input = await bodyOf(c, linkConnectionInput)
-    return c.json(
-      await connectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"), input, link),
-    )
+  app.post("/api/tiendas/:id/link-de-pago/conectar", async (c) => {
+    const input = await bodyOf(c, connectInput)
+    return c.json(await startConnect(deps.appDb, c.get("person"), c.req.param("id"), input, link))
   })
+  // La vuelta de Mercado Pago, con la persona: el intento dice de qué tienda es.
+  app.post("/api/link-de-pago/vuelta", async (c) => {
+    const input = await bodyOf(c, finishInput)
+    return c.json(await finishConnect(deps.appDb, c.get("person"), input, link))
+  })
+  app.post("/api/tiendas/:id/link-de-pago/prueba", async (c) =>
+    c.json({ trial: await createTrialLink(deps.appDb, c.get("person"), c.req.param("id"), link) }),
+  )
   app.delete("/api/tiendas/:id/link-de-pago", async (c) => {
     await disconnectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"))
     return c.body(null, 204)
@@ -926,9 +1067,39 @@ export function createApp(deps: AppDeps) {
   )
   app.patch("/api/tiendas/:id/sofi", async (c) => {
     const input = await bodyOf(c, agentSettingsInput)
-    return c.json({
-      settings: await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input),
-    })
+    return c.json(await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  // Encender o pausar: aparte de las opciones, para que guardar una opción nunca la cambie.
+  app.patch("/api/tiendas/:id/sofi/estado", async (c) => {
+    const input = await bodyOf(c, agentStateInput)
+    return c.json(await setAgentEnabled(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  // «Lo que sabe» y «Lo que aprendió» (ADR 0234): de quien cambia la configuración.
+  app.get("/api/tiendas/:id/sofi/sabe", async (c) =>
+    c.json(await knowledgeView(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/sofi/sabe", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    return c.json(await addAnswer(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.patch("/api/tiendas/:id/sofi/sabe/:answerId", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    const { id, answerId } = c.req.param()
+    return c.json(await changeAnswer(deps.appDb, c.get("person"), id, answerId, input))
+  })
+  app.delete("/api/tiendas/:id/sofi/sabe/:answerId", async (c) => {
+    const { id, answerId } = c.req.param()
+    await removeAnswer(deps.appDb, c.get("person"), id, answerId)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/sofi/aprendio/responder", async (c) => {
+    const input = await bodyOf(c, gapAnswerInput)
+    return c.json(await answerGap(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.post("/api/tiendas/:id/sofi/aprendio/quitar", async (c) => {
+    const input = await bodyOf(c, gapDismissInput)
+    await dismissGap(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.body(null, 204)
   })
   app.post("/api/tiendas/:id/sofi/pruebas", async (c) =>
     c.json(await newTestConversation(deps.appDb, c.get("person"), c.req.param("id")), 201),

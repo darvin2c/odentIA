@@ -5,6 +5,8 @@ export const API_PORT = 4710
 export const ACCOUNT_PORT = 4711
 export const WEB_PORT = 4712
 export const WEB = `http://127.0.0.1:${WEB_PORT}`
+/** El Mercado Pago de mentira del recorrido de Cobros (`mercadopago-de-prueba.ts`). */
+export const MP_PORT = 4713
 export const ACCOUNT = `http://127.0.0.1:${ACCOUNT_PORT}`
 
 /** La tienda que abre la administración para su clienta. */
