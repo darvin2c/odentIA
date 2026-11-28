@@ -8,7 +8,7 @@ import {
   Textarea,
 } from "@odentia/ui"
 import { Check, MessageCircleQuestion, Pencil, Sparkles, X } from "lucide-react"
-import { type ReactNode, useId, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 
 /*
  * La propuesta de la IA. La IA propone y nunca guarda sola: cada propuesta lleva ✦ y la persona la
@@ -372,17 +372,50 @@ export interface AiSuggestionBarProps {
   /** Default «La IA propone N cambios.». */
   children?: ReactNode
   acceptAllLabel?: string
+  /** Lo que queda en su lugar después de «Aplicar todos». Default «Usaste las N propuestas.». */
+  appliedLabel?: ReactNode
   className?: string
 }
 
-/** Con varias propuestas a la vista, una línea que las cuenta y las usa todas de una vez. */
+/**
+ * Con varias propuestas a la vista, una línea que las cuenta y las usa todas de una vez. Después de
+ * «Aplicar todos» la barra no desaparece de golpe: en su lugar queda una línea que dice lo que pasó y
+ * recibe el foco, para que quien usa el teclado no vuelva al principio de la página.
+ */
 export function AiSuggestionBar({
   count,
   onAcceptAll,
   children,
   acceptAllLabel = "Aplicar todos",
+  appliedLabel,
   className,
 }: AiSuggestionBarProps): React.JSX.Element | null {
+  const [applied, setApplied] = useState<number | null>(null)
+  const appliedRef = useRef<HTMLParagraphElement>(null)
+  const showApplied = count < 1 && applied !== null
+  useEffect(() => {
+    if (showApplied) appliedRef.current?.focus()
+  }, [showApplied])
+  // Si llegan propuestas nuevas, la línea de lo aplicado ya no vale.
+  useEffect(() => {
+    if (count > 0) setApplied(null)
+  }, [count])
+  if (showApplied) {
+    return (
+      <p
+        ref={appliedRef}
+        tabIndex={-1}
+        role="status"
+        className={cn(
+          "flex items-center gap-2 rounded-2xl px-3 py-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          className,
+        )}
+      >
+        <Check className="size-4 shrink-0 text-primary" aria-hidden />
+        {appliedLabel ?? `Usaste ${applied === 1 ? "la propuesta" : `las ${applied} propuestas`}.`}
+      </p>
+    )
+  }
   if (count < 1) return null
   return (
     <div
@@ -395,7 +428,14 @@ export function AiSuggestionBar({
       <span className="min-w-0 flex-1">
         {children ?? `La IA propone ${count} ${count === 1 ? "cambio" : "cambios"}.`}
       </span>
-      <Button type="button" size="sm" onClick={onAcceptAll}>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          setApplied(count)
+          onAcceptAll()
+        }}
+      >
         <Check aria-hidden />
         {acceptAllLabel}
       </Button>
