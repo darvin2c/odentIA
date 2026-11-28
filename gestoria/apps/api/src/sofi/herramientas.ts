@@ -19,7 +19,7 @@ import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
-import { conversationCustomerIn, shownCustomerId } from "../clientes.js"
+import { conversationFichasIn, shownCustomerId } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
 import { momentWords } from "../hora.js"
@@ -35,6 +35,7 @@ import {
   quoteOrderIn,
   variantPrices,
 } from "../pedidos.js"
+import { familyIn, lastConsentIn } from "../perfil.js"
 import { autoUnitCents } from "../precio.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
@@ -864,57 +865,25 @@ async function handOff(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.pasar_
 
 /* ------------------------------------------------ el permiso de promociones (ADR 0240) */
 
-/** La ficha de la clienta de una conversación (la que se ve), con la regla de `clientes.ts`. */
-async function conversationCustomerId(tx: Db, storeId: string, conversationId: string) {
-  return (await conversationCustomerIn(tx, storeId, conversationId))?.id ?? null
-}
-
 export interface ConsentNow {
   state: ConsentState
   at: Date
 }
 
 /**
- * Lo último que dijo la clienta de una conversación sobre las promociones: lo de su ficha (y de
- * las que una persona le unió), por cualquier chat, y lo de esta conversación sin ficha todavía.
- * Null si nunca se le preguntó.
+ * Lo último que dijo la clienta de una conversación sobre las promociones, para que Sofi sepa si
+ * preguntar: lo de esta conversación y lo de la familia de la ficha del chat (la del último
+ * pedido) por cualquier chat (`lastConsentIn`). Null si nunca se le preguntó.
  */
 export async function consentIn(
   tx: Db,
   storeId: string,
   conversationId: string,
 ): Promise<ConsentNow | null> {
-  const head = await conversationCustomerId(tx, storeId, conversationId)
-  const members = head
-    ? (
-        await tx
-          .select({ id: customer.id })
-          .from(customer)
-          .where(
-            and(
-              eq(customer.storeId, storeId),
-              or(eq(customer.id, head), eq(customer.mergedInto, head)),
-            ),
-          )
-      ).map((m) => m.id)
-    : []
-  const [last] = await tx
-    .select({ state: customerConsent.state, at: customerConsent.createdAt })
-    .from(customerConsent)
-    .where(
-      and(
-        eq(customerConsent.storeId, storeId),
-        members.length
-          ? or(
-              eq(customerConsent.conversationId, conversationId),
-              inArray(customerConsent.customerId, members),
-            )
-          : eq(customerConsent.conversationId, conversationId),
-      ),
-    )
-    .orderBy(desc(customerConsent.createdAt))
-    .limit(1)
-  return last ?? null
+  const fichas = await conversationFichasIn(tx, storeId, conversationId)
+  const family = fichas ? await familyIn(tx, storeId, fichas.root) : []
+  const last = await lastConsentIn(tx, storeId, family, { conversationId })
+  return last ? { state: last.state, at: last.at } : null
 }
 
 /** Lo que responde Sofi al anotar la baja: fijo, sin ofrecer nada más. */
@@ -932,11 +901,18 @@ function firstNameOf(...names: (string | null | undefined)[]): string | null {
   return null
 }
 
+/** Lo mínimo de una cita: dos caracteres sin contar espacios («sí» vale; «s» o «.» no). */
+const MIN_QUOTE_CHARS = 2
+
 /**
- * Anota el permiso o la baja. La cita tiene que estar tal cual en un mensaje de ella de esta
- * conversación (el más reciente que la contenga); la base lo vuelve a mirar (`0051`). Si ya está
+ * Anota el permiso o la baja. La cita tiene que estar tal cual en el último mensaje de ella en
+ * esta conversación (lo que acaba de decir: una frase vieja no es su respuesta) y tener al menos
+ * dos caracteres sin espacios; la base vuelve a mirar que esté en el mensaje (`0051`). Si ya está
  * en ese estado, no suma otra fila. Después de una baja, vuelve a aceptar solo con un mensaje suyo
  * posterior a la baja.
+ *
+ * Se anota en la ficha propia del pedido del chat (así «Separar» se lleva lo suyo) y, si el chat
+ * tiene pedidos de fichas de familias distintas, sin ficha: quien escribe puede no ser la clienta.
  */
 async function noteConsent(ctx: SofiToolContext, state: ConsentState, quote: string) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
@@ -945,22 +921,30 @@ async function noteConsent(ctx: SofiToolContext, state: ConsentState, quote: str
       .from(conversation)
       .where(and(eq(conversation.id, ctx.conversationId), eq(conversation.storeId, ctx.storeId)))
     if (!conv) throw new ToolProblem("La conversación no existe", "DATOS")
+    if (quote.replace(/\s/g, "").length < MIN_QUOTE_CHARS)
+      throw new ToolProblem(
+        "Esa cita es muy corta: no se anotó. Copia sus palabras tal cual de lo que acaba de escribir",
+        "SIN_CITA",
+      )
     const [said] = await tx
-      .select({ id: conversationMessage.id, createdAt: conversationMessage.createdAt })
+      .select({
+        id: conversationMessage.id,
+        createdAt: conversationMessage.createdAt,
+        text: conversationMessage.text,
+      })
       .from(conversationMessage)
       .where(
         and(
           eq(conversationMessage.storeId, ctx.storeId),
           eq(conversationMessage.conversationId, ctx.conversationId),
           eq(conversationMessage.author, "cliente"),
-          sql`position(${quote} in ${conversationMessage.text}) > 0`,
         ),
       )
       .orderBy(desc(conversationMessage.seq))
       .limit(1)
-    if (!said)
+    if (!said?.text.includes(quote))
       throw new ToolProblem(
-        "Esas palabras no están en ningún mensaje de ella en esta conversación: no se anotó. Copia sus palabras tal cual; si no lo dijo, no lo anotes",
+        "Esas palabras no están en lo último que ella escribió en esta conversación: no se anotó. Anota solo lo que acaba de decir, con sus palabras tal cual; si no lo dijo, no lo anotes",
         "SIN_CITA",
       )
     const now = await consentIn(tx, ctx.storeId, ctx.conversationId)
@@ -971,7 +955,8 @@ async function noteConsent(ctx: SofiToolContext, state: ConsentState, quote: str
       )
     // «No» después de una baja ya está: tampoco recibe promociones.
     const already = now?.state === state || (state === "no" && now?.state === "baja")
-    const customerId = await conversationCustomerId(tx, ctx.storeId, ctx.conversationId)
+    const fichas = await conversationFichasIn(tx, ctx.storeId, ctx.conversationId)
+    const customerId = fichas && !fichas.mixed ? fichas.own : null
     if (!already)
       await tx.insert(customerConsent).values({
         storeId: ctx.storeId,

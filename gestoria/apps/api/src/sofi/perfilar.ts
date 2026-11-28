@@ -8,8 +8,9 @@ import {
   type Db,
   saleOrder,
 } from "@gestoria/db"
-import { and, desc, eq, gt, isNotNull, sql } from "drizzle-orm"
+import { and, asc, eq, gt, sql } from "drizzle-orm"
 import { ARGOS_ACTOR, withAgent } from "../agente.js"
+import { conversationFichasIn } from "../clientes.js"
 import {
   currentOf,
   type FactRow,
@@ -32,12 +33,18 @@ import { BOUGHT_STATES as BOUGHT } from "./sofi.js"
  *   donde más le escribe a la tienda.
  * - De lo que ella escribió y de la dirección de su última entrega, con el modelo de Sofi: solo
  *   para leer. Lo que dice ella va como mensaje del usuario, nunca en el de sistema. Cada dato trae
- *   su cita y el código comprueba que está tal cual en un mensaje de ella (o en la dirección), que
- *   la medida existe en el catálogo y que el cumpleaños es un día del calendario: lo que no pasa se
- *   descarta. Lee cada mensaje una vez (`argos_reading`), solo conversaciones con una clienta y
- *   nunca a media conversación.
- * - Lo que corrigió la tienda no se vuelve a escribir (la base además lo niega: si choca, sigue con
- *   lo demás). Si el dato ya dice eso, no suma otra fila.
+ *   su cita y el código comprueba que está tal cual en un mensaje de ella (o en la dirección) y que
+ *   el valor sale de la cita: la medida existe en el catálogo y está en ella, el cumpleaños es un
+ *   día del calendario y la cita trae ese día y ese mes, el distrito y el Instagram están en ella y,
+ *   de los gustos, una palabra al menos. Lo que no pasa se descarta. Lee cada mensaje una vez
+ *   (`argos_reading`), desde el más antiguo, solo conversaciones con una clienta y nunca a media
+ *   conversación.
+ * - Anota en la ficha propia del pedido de donde sale (el de la conversación, o el de la dirección),
+ *   no en la que se ve: así «Separar» se lleva lo suyo. Si el chat tiene pedidos de fichas de
+ *   familias distintas, quien escribe puede no ser la clienta: no le anota nada de lo que dice el
+ *   chat a ninguna (lo de sus pedidos, sí).
+ * - Lo que corrigió la tienda en cualquier ficha de la familia no se vuelve a escribir (la base
+ *   además lo niega: si choca, sigue con lo demás). Si el dato ya dice eso, no suma otra fila.
  *
  * Lo que cuesta leer con el modelo queda en la vuelta de Argos (el registro del servidor): no se
  * le cobra a la tienda.
@@ -47,7 +54,7 @@ import { BOUGHT_STATES as BOUGHT } from "./sofi.js"
 export const QUIET_MS = 30 * 60_000
 /** Cuántas conversaciones lee el modelo por tienda en cada vuelta (lo demás, en la siguiente). */
 export const MAX_READS = 20
-/** Cuántos mensajes nuevos de ella lee de una vez, los últimos. */
+/** Cuántos mensajes nuevos de ella lee de una vez, desde el más antiguo sin leer. */
 const MAX_MESSAGES = 40
 /** Hasta cuántas posibilidades guarda un dato que no está claro (la base acepta cuatro). */
 const MAX_ALTERNATIVES = 4
@@ -63,6 +70,51 @@ const fold = (text: string) =>
 function hasWord(text: string, word: string): boolean {
   const escaped = fold(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "u").test(fold(text))
+}
+
+/** Cada mes como puede escribirlo ella: entero o abreviado (en Perú también «setiembre»). */
+const MONTH_WORDS = [
+  ["enero", "ene"],
+  ["febrero", "feb"],
+  ["marzo", "mar"],
+  ["abril", "abr"],
+  ["mayo", "may"],
+  ["junio", "jun"],
+  ["julio", "jul"],
+  ["agosto", "ago"],
+  ["septiembre", "setiembre", "sep", "set"],
+  ["octubre", "oct"],
+  ["noviembre", "nov"],
+  ["diciembre", "dic"],
+]
+
+/**
+ * Si la cita trae el día y el mes de «--MM-DD»: con el nombre del mes («12 de marzo», «el 12 de
+ * mar», «marzo 12») o en números («12/03», «12-3»). Sin eso, el modelo puso la fecha de su cuenta.
+ */
+export function quoteHasBirthday(quote: string, raw: string): boolean {
+  const match = /^--(\d{2})-(\d{2})$/.exec(raw)
+  if (!match) return false
+  const month = Number(match[1])
+  const day = Number(match[2])
+  const words = MONTH_WORDS[month - 1]
+  if (!words) return false
+  const d = `0?${day}`
+  // El mes como palabra suelta: «mar» vale, «martes» no.
+  const name = `(?:${words.join("|")})\\.?(?!\\p{L})`
+  return [
+    `(?<!\\p{N})${d}\\s*(?:del?\\s+)?${name}`,
+    `(?<!\\p{L})${name}\\s*,?\\s*${d}(?!\\p{N})`,
+    `(?<!\\p{N})${d}\\s*[/.-]\\s*0?${month}(?!\\p{N})`,
+  ].some((pattern) => new RegExp(pattern, "u").test(fold(quote)))
+}
+
+/** Si al menos una palabra con contenido (4 letras o más, sin tildes) del valor está en la cita. */
+export function quoteHasWords(quote: string, raw: string): boolean {
+  const said = fold(quote)
+  return fold(raw)
+    .split(/[^\p{L}]+/u)
+    .some((word) => word.length >= 4 && said.includes(word))
 }
 
 export interface ProfileRun {
@@ -92,6 +144,11 @@ const emptyRun = (): ProfileRun => ({
 
 /** Un dato por anotar, con su origen. */
 interface Fact {
+  /**
+   * La ficha donde se anota: la propia del pedido o de la conversación de donde salió, no la que
+   * se ve. Así «Separar» se lleva lo suyo; la ficha lee toda la familia.
+   */
+  customerId: string
   key: CustomerFactKey
   value: string
   source: Exclude<CustomerFactSource, "tienda">
@@ -105,7 +162,8 @@ const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((value, i) => value === b[i])
 
 /**
- * Anota un dato en la ficha que se ve, si hace falta: nunca uno que la tienda corrigió, y no otra
+ * Anota un dato en su ficha (`fact.customerId`), si hace falta: nunca uno que la tienda corrigió
+ * en la familia, y no otra
  * fila igual a la de hoy (ni a la última que salió de esa misma fuente: lo que dijo en el chat no
  * lo tapa otra vez la misma cuenta de sus compras). Cada fila va en su propio punto de guardado:
  * si la base la niega, sigue con lo demás.
@@ -113,7 +171,6 @@ const sameList = (a: string[], b: string[]) =>
 async function noteFact(
   tx: Db,
   storeId: string,
-  rootId: string,
   rows: FactRow[],
   fact: Fact,
   run: ProfileRun,
@@ -137,7 +194,7 @@ async function noteFact(
     await tx.transaction(async (point) => {
       await point.insert(customerFact).values({
         storeId,
-        customerId: rootId,
+        customerId: fact.customerId,
         key: fact.key,
         value: fact.value,
         source: fact.source,
@@ -161,6 +218,8 @@ interface Tally {
   count: number
   lastAt: number
   orderId: string
+  /** La ficha propia del último pedido con ese valor. */
+  customerId?: string
 }
 
 /** El más repetido; si empatan, el más reciente, y los otros del empate «Por confirmar». */
@@ -178,13 +237,14 @@ export function mostUsed(tallies: Map<string, Tally>): { value: string; tie: str
 async function boughtMeasuresIn(tx: Db, storeId: string, catalog: MeasureCatalog) {
   const rows = await tx.execute<{
     root: string
+    customer_id: string
     order_id: string
     created_at: Date | string
     product_id: string
     option_values: string[]
   }>(sql`
-    select coalesce(c.merged_into, c.id) as root, o.id as order_id, o.created_at,
-      v.product_id, v.option_values
+    select coalesce(c.merged_into, c.id) as root, c.id as customer_id, o.id as order_id,
+      o.created_at, v.product_id, v.option_values
     from sale_order o
     join customer c on c.id = o.customer_id
     join sale_order_line l on l.order_id = o.id
@@ -208,6 +268,7 @@ async function boughtMeasuresIn(tx: Db, storeId: string, catalog: MeasureCatalog
     if (at >= tally.lastAt) {
       tally.lastAt = at
       tally.orderId = row.order_id
+      tally.customerId = row.customer_id
     }
     tallies.set(value, tally)
     byRoot.set(row.root, tallies)
@@ -260,9 +321,10 @@ async function countFactsIn(tx: Db, storeId: string, run: ProfileRun) {
       await noteFact(
         tx,
         storeId,
-        root,
         rows,
         {
+          // En la ficha del pedido de donde sale.
+          customerId: size.get(top.value)!.customerId ?? root,
           key: "medida",
           value: top.value,
           source: "pedido",
@@ -277,9 +339,15 @@ async function countFactsIn(tx: Db, storeId: string, run: ProfileRun) {
       await noteFact(
         tx,
         storeId,
-        root,
         rows,
-        { key: "canal", value: best.value, source: "respuesta", alternatives: best.tie },
+        {
+          // Sale de todas sus conversaciones: en la que se ve (cada vuelta lo vuelve a contar).
+          customerId: root,
+          key: "canal",
+          value: best.value,
+          source: "respuesta",
+          alternatives: best.tie,
+        },
         run,
       )
   }
@@ -290,19 +358,30 @@ async function countFactsIn(tx: Db, storeId: string, run: ProfileRun) {
 /** Lo que el modelo lee de una conversación. */
 export interface Reading {
   conversationId: string
+  /** La ficha que se ve de la clienta del chat (la del último pedido): lee lo anotado en su familia. */
   rootId: string
-  /** Sus mensajes nuevos, en orden. */
+  /** La ficha propia de ese pedido: ahí se anota lo que dijo en el chat. */
+  ownId: string
+  /**
+   * Si el chat tiene pedidos de fichas de familias distintas: quien escribe puede no ser la
+   * clienta, y sus mensajes no se leen (`messages` va vacío); la dirección de su pedido, sí.
+   */
+  mixed: boolean
+  /** Sus mensajes nuevos que lee el modelo, en orden, desde el más antiguo. */
   messages: { id: string; seq: number; text: string }[]
-  /** Hasta dónde queda leída. */
+  /** Hasta dónde estaba leída. */
+  cursor: number
+  /** Hasta dónde queda leída: el último mensaje de esta tanda, no el último del chat. */
   lastSeq: number
-  /** La dirección de su última entrega, con su pedido. */
-  address: { orderId: string; text: string } | null
+  /** La dirección de su última entrega, con su pedido y la ficha de ese pedido. */
+  address: { orderId: string; customerId: string; text: string } | null
 }
 
 /**
  * Las conversaciones por leer: de verdad (sin «Probar a Sofi»), con una clienta (la ficha de sus
  * pedidos), con mensajes de ella que Argos no leyó y cuyo último mensaje de ella tiene al menos
- * `QUIET_MS`: no se lee a media conversación.
+ * `QUIET_MS`: no se lee a media conversación. Primero las que lleva más tiempo sin intentar leer
+ * (las nunca leídas antes): una que el modelo no logra leer rota y no tapa a las demás.
  */
 export async function readingsIn(tx: Db, storeId: string, now: Date): Promise<Reading[]> {
   const quietSince = new Date(now.getTime() - QUIET_MS).toISOString()
@@ -314,32 +393,16 @@ export async function readingsIn(tx: Db, storeId: string, now: Date): Promise<Re
     where conv.store_id = ${storeId} and conv.channel <> 'prueba'
       and exists (select 1 from sale_order o where o.conversation_id = conv.id
         and o.customer_id is not null and o.test = false)
-    group by conv.id, r.seq
+    group by conv.id, r.seq, r.read_at
     having max(m.seq) > coalesce(r.seq, 0) and max(m.created_at) <= ${quietSince}
-    order by max(m.created_at)
+    order by r.read_at asc nulls first, max(m.created_at)
     limit ${MAX_READS}`)
   const readings: Reading[] = []
   for (const row of pending) {
-    const [last] = await tx
-      .select({ customerId: saleOrder.customerId })
-      .from(saleOrder)
-      .where(
-        and(
-          eq(saleOrder.storeId, storeId),
-          eq(saleOrder.conversationId, row.id),
-          isNotNull(saleOrder.customerId),
-          eq(saleOrder.test, false),
-        ),
-      )
-      .orderBy(desc(saleOrder.createdAt))
-      .limit(1)
-    if (!last?.customerId) continue
-    const [head] = await tx
-      .select({ id: customer.id, mergedInto: customer.mergedInto })
-      .from(customer)
-      .where(eq(customer.id, last.customerId))
-    if (!head) continue
-    const rootId = head.mergedInto ?? head.id
+    const fichas = await conversationFichasIn(tx, storeId, row.id)
+    if (!fichas) continue
+    const cursor = Number(row.cursor)
+    // Desde el más antiguo sin leer, de a `MAX_MESSAGES`: lo que sigue, en la próxima vuelta.
     const news = await tx
       .select({
         id: conversationMessage.id,
@@ -352,17 +415,16 @@ export async function readingsIn(tx: Db, storeId: string, now: Date): Promise<Re
           eq(conversationMessage.storeId, storeId),
           eq(conversationMessage.conversationId, row.id),
           eq(conversationMessage.author, "cliente"),
-          gt(conversationMessage.seq, Number(row.cursor)),
+          gt(conversationMessage.seq, cursor),
         ),
       )
-      .orderBy(desc(conversationMessage.seq))
+      .orderBy(asc(conversationMessage.seq))
       .limit(MAX_MESSAGES)
     if (news.length === 0) continue
-    const messages = news.reverse()
-    const family = await familyIn(tx, storeId, rootId)
+    const family = await familyIn(tx, storeId, fichas.root)
     // Su última entrega: el último pedido de la familia con dirección (no el de prueba ni anulado).
-    const [delivery] = await tx.execute<{ id: string; address: string }>(sql`
-      select o.id, o.address from sale_order o
+    const [delivery] = await tx.execute<{ id: string; customer_id: string; address: string }>(sql`
+      select o.id, o.customer_id, o.address from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and btrim(o.address) <> ''
         and o.customer_id in (${sql.join(
@@ -372,10 +434,15 @@ export async function readingsIn(tx: Db, storeId: string, now: Date): Promise<Re
       order by o.created_at desc limit 1`)
     readings.push({
       conversationId: row.id,
-      rootId,
-      messages,
-      lastSeq: messages.at(-1)!.seq,
-      address: delivery ? { orderId: delivery.id, text: delivery.address } : null,
+      rootId: fichas.root,
+      ownId: fichas.own,
+      mixed: fichas.mixed,
+      messages: fichas.mixed ? [] : news,
+      cursor,
+      lastSeq: news.at(-1)!.seq,
+      address: delivery
+        ? { orderId: delivery.id, customerId: delivery.customer_id, text: delivery.address }
+        : null,
     })
   }
   return readings
@@ -400,9 +467,16 @@ export function readingMessages(catalog: MeasureCatalog, reading: Reading) {
     "Solo lo que dijo de ella misma: lo que pide para otra persona (un regalo, su hija) no es suyo. Nunca supongas ni completes: si no lo dijo, no va.",
   ].join("\n")
   const user = [
-    "Sus mensajes:",
-    ...reading.messages.map((m) => `- ${m.text}`),
-    ...(reading.address ? ["", "La dirección de su última entrega:", reading.address.text] : []),
+    ...(reading.messages.length
+      ? ["Sus mensajes:", ...reading.messages.map((m) => `- ${m.text}`)]
+      : []),
+    ...(reading.address
+      ? [
+          ...(reading.messages.length ? [""] : []),
+          "La dirección de su última entrega:",
+          reading.address.text,
+        ]
+      : []),
   ].join("\n")
   return [
     { role: "system" as const, content: system },
@@ -475,13 +549,18 @@ export function checkClaims(
     if (key === "medida") {
       const known = catalog.values.get(fold(raw))
       value = known && hasWord(quote, known) ? known : null
-    } else if (key === "cumpleanos") value = isBirthday(raw) ? raw : null
+    } else if (key === "cumpleanos")
+      value = isBirthday(raw) && quoteHasBirthday(quote, raw) ? raw : null
     else if (key === "instagram") {
       const handle = instagramHandle(raw)
       value = handle && fold(quote).includes(handle.slice(1)) ? handle : null
     } else {
+      // Todo valor sale de su cita: el distrito está en ella; de los gustos, una palabra al menos.
       const text = raw.replace(/\s+/g, " ")
-      value = text.length >= 1 && text.length <= 120 ? text : null
+      const fits = text.length >= 1 && text.length <= 120
+      const backed =
+        key === "distrito" ? fold(quote).includes(fold(text)) : quoteHasWords(quote, text)
+      value = fits && backed ? text : null
     }
     if (!value) {
       discarded += 1
@@ -489,8 +568,15 @@ export function checkClaims(
     }
     checked.push({
       fact: said
-        ? { key, value, source: "chat", messageId: said.id, quote }
-        : { key, value, source: "pedido", orderId: reading.address!.orderId, quote },
+        ? { customerId: reading.ownId, key, value, source: "chat", messageId: said.id, quote }
+        : {
+            customerId: reading.address!.customerId,
+            key,
+            value,
+            source: "pedido",
+            orderId: reading.address!.orderId,
+            quote,
+          },
       at: said ? said.seq : -1,
     })
   }
@@ -533,8 +619,13 @@ function boughtSizeOf(rows: FactRow[]): string | null {
 
 /**
  * Perfila a las clientas de una tienda: primero las cuentas fijas y después, con modelo, lo que
- * ellas escribieron. Cada conversación se lee fuera de toda transacción y se anota en la suya: si
- * el modelo falla, su cursor no avanza y se lee en otra vuelta.
+ * ellas escribieron. Cada conversación se lee fuera de toda transacción y se anota en la suya.
+ *
+ * - Si el modelo falla (la red, el tiempo), el cursor no avanza, pero sí la hora del intento
+ *   (`read_at`): se lee en otra vuelta, después de las demás.
+ * - Si responde algo que no es el arreglo pedido, se da por leída (el cursor avanza): no se paga
+ *   dos veces lo mismo. Cuenta como un descarte.
+ * - Si no hay nada que mandarle (un chat de varias familias sin dirección), avanza sin el modelo.
  */
 export async function profileStore(
   appDb: Db,
@@ -554,45 +645,55 @@ export async function profileStore(
   if (!model || !readings) return run
   const { catalog } = readings
   for (const reading of readings.list) {
-    let claims: Claim[] | null = null
-    try {
-      const reply = await model.complete({
-        messages: readingMessages(catalog, reading),
-        temperature: 0,
-        toolChoice: "none",
-      })
-      run.usage = addUsage(run.usage, reply.usage)
-      claims = parseClaims(reply.content)
-    } catch {
-      claims = null
+    let claims: Claim[] = []
+    if (reading.messages.length > 0 || reading.address) {
+      let content: string | null
+      try {
+        const reply = await model.complete({
+          messages: readingMessages(catalog, reading),
+          temperature: 0,
+          toolChoice: "none",
+        })
+        run.usage = addUsage(run.usage, reply.usage)
+        content = reply.content
+      } catch {
+        run.failed += 1
+        await withAgent(appDb, ARGOS_ACTOR, storeId, (tx) =>
+          markReading(tx, storeId, reading.conversationId, reading.cursor),
+        )
+        continue
+      }
+      run.read += 1
+      const parsed = parseClaims(content)
+      if (parsed) claims = parsed
+      else run.discarded += 1
     }
-    if (!claims) {
-      run.failed += 1
-      continue
-    }
-    run.read += 1
     const { checked, discarded } = checkClaims(claims, reading, catalog)
     run.discarded += discarded
     await withAgent(appDb, ARGOS_ACTOR, storeId, async (tx) => {
       const family = await familyIn(tx, storeId, reading.rootId)
       const rows = await factRowsIn(tx, storeId, family)
       for (const fact of pickFacts(checked, boughtSizeOf(rows)))
-        await noteFact(tx, storeId, reading.rootId, rows, fact, run)
-      // Leída hasta aquí: el cursor solo avanza.
-      await tx
-        .insert(argosReading)
-        .values({ storeId, conversationId: reading.conversationId, seq: reading.lastSeq })
-        .onConflictDoUpdate({
-          target: [argosReading.storeId, argosReading.conversationId],
-          set: {
-            seq: sql`greatest(${argosReading.seq}, excluded.seq)`,
-            readAt: sql`now()`,
-          },
-        })
+        await noteFact(tx, storeId, rows, fact, run)
+      await markReading(tx, storeId, reading.conversationId, reading.lastSeq)
     })
   }
   run.costMicros = run.read || run.failed ? costMicros(model.name, run.usage) : null
   return run
+}
+
+/** Leída hasta `seq` (el cursor solo avanza), con la hora del intento. */
+async function markReading(tx: Db, storeId: string, conversationId: string, seq: number) {
+  await tx
+    .insert(argosReading)
+    .values({ storeId, conversationId, seq })
+    .onConflictDoUpdate({
+      target: [argosReading.storeId, argosReading.conversationId],
+      set: {
+        seq: sql`greatest(${argosReading.seq}, excluded.seq)`,
+        readAt: sql`now()`,
+      },
+    })
 }
 
 /** Para las pruebas y la demo: lo que leyó y anotó de una conversación. */

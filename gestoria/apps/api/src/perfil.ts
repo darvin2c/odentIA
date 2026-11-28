@@ -11,7 +11,7 @@ import {
   product,
   saleOrder,
 } from "@gestoria/db"
-import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { agentName } from "./agente.js"
 import type { Person } from "./cuenta.js"
@@ -29,7 +29,10 @@ import { inStore, StoreError } from "./tiendas.js"
  * - Se lee la familia de la ficha (ella y las que una persona le unió, `merged_into`): unir no
  *   mueve datos. Nunca se une ni se busca por el teléfono.
  * - El permiso para escribirle lo anota Sofi con lo que dijo ella (`customer_consent`); aquí solo
- *   se lee el último, de su ficha o de sus conversaciones.
+ *   se lee el último, de su familia o, sin ficha, de sus conversaciones donde solo hay pedidos de
+ *   ella (`lastConsentIn`).
+ * - Argos y Sofi anotan en la ficha propia del pedido de cada conversación, no en la que se ve: así
+ *   «Separar» se lleva lo suyo. «Corregir» anota en la que se ve.
  */
 
 export type FactSource = CustomerFactSource
@@ -280,6 +283,67 @@ export async function familyConversationsIn(tx: Db, storeId: string, family: str
     )
 }
 
+/**
+ * Las conversaciones donde quien escribe es ella: todos sus pedidos con ficha son de la familia.
+ * Si un chat tiene pedidos de otra familia, quien escribe puede ser otra persona (interlocutora ≠
+ * clienta): lo de ese chat sin ficha no se le cuenta a ninguna.
+ */
+export async function ownConversationsIn(
+  tx: Db,
+  storeId: string,
+  family: string[],
+): Promise<string[]> {
+  if (family.length === 0) return []
+  const rows = await tx
+    .select({ id: saleOrder.conversationId })
+    .from(saleOrder)
+    .innerJoin(customer, eq(customer.id, saleOrder.customerId))
+    .where(and(eq(saleOrder.storeId, storeId), isNotNull(saleOrder.conversationId)))
+    .groupBy(saleOrder.conversationId)
+    .having(sql`bool_and(${inArray(customer.id, family)})`)
+  return rows.flatMap((r) => (r.id ? [r.id] : []))
+}
+
+/**
+ * El último permiso o baja de la familia: lo anotado en sus fichas y, sin ficha, lo de sus
+ * conversaciones donde quien escribe es ella (`ownConversationsIn`); más, si se pide, lo de una
+ * conversación (la que atiende Sofi). Sin nada, null: ante la duda, no se le escribe.
+ */
+export async function lastConsentIn(
+  tx: Db,
+  storeId: string,
+  family: string[],
+  options: { conversationId?: string; skipTest?: boolean } = {},
+) {
+  const own = await ownConversationsIn(tx, storeId, family)
+  const reach = [
+    ...(family.length ? [inArray(customerConsent.customerId, family)] : []),
+    ...(own.length
+      ? [and(isNull(customerConsent.customerId), inArray(customerConsent.conversationId, own))]
+      : []),
+    ...(options.conversationId ? [eq(customerConsent.conversationId, options.conversationId)] : []),
+  ]
+  if (reach.length === 0) return null
+  const [last] = await tx
+    .select({
+      state: customerConsent.state,
+      quote: customerConsent.quote,
+      at: customerConsent.createdAt,
+      channel: customerConsent.channel,
+    })
+    .from(customerConsent)
+    .where(
+      and(
+        eq(customerConsent.storeId, storeId),
+        options.skipTest ? ne(customerConsent.channel, "prueba") : undefined,
+        or(...reach),
+      ),
+    )
+    .orderBy(desc(customerConsent.createdAt))
+    .limit(1)
+  return last ?? null
+}
+
 export interface FactRow {
   id: string
   key: CustomerFactKey
@@ -377,29 +441,7 @@ export async function customerProfileIn(
     }
   }
   const conversations = await familyConversationsIn(tx, storeId, family)
-  const conversationIds = conversations.map((c) => c.id)
-  const [consent] = await tx
-    .select({
-      state: customerConsent.state,
-      quote: customerConsent.quote,
-      at: customerConsent.createdAt,
-      channel: customerConsent.channel,
-    })
-    .from(customerConsent)
-    .where(
-      and(
-        eq(customerConsent.storeId, storeId),
-        ne(customerConsent.channel, "prueba"),
-        conversationIds.length
-          ? or(
-              inArray(customerConsent.customerId, family),
-              inArray(customerConsent.conversationId, conversationIds),
-            )
-          : inArray(customerConsent.customerId, family),
-      ),
-    )
-    .orderBy(desc(customerConsent.createdAt))
-    .limit(1)
+  const consent = await lastConsentIn(tx, storeId, family, { skipTest: true })
   const channels = PROFILE_CHANNELS.filter((channel) =>
     conversations.some((c) => c.channel === channel),
   )

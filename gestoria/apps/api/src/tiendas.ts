@@ -44,7 +44,7 @@ import {
 
 export class StoreError extends Error {
   constructor(
-    readonly status: 400 | 403 | 404 | 409 | 429,
+    readonly status: 400 | 403 | 404 | 409 | 429 | 502 | 503,
     readonly code: string,
     message: string,
     readonly fields?: Record<string, string>,

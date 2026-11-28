@@ -1,0 +1,46 @@
+---
+// Clientes (web v5): una ficha por clienta, con las pantallas reales de la tienda de ejemplo. Nunca
+// se unen fichas por el teléfono: gestorIA sugiere y decide una persona.
+import { Image } from "astro:assets"
+import clienta from "../assets/pantallas/clienta.png"
+import clientaCelular from "../assets/pantallas/clienta-celular.png"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+---
+<Base
+  title="Clientes en gestorIA: una ficha por clienta"
+  description="Sus compras, lo que debe y cómo prefiere recibir, escriba por WhatsApp, Instagram o Messenger. Si dos fichas parecen la misma clienta, decides tú."
+>
+  <PaginaHeroe
+    etiqueta="Clientes"
+    titulo="Una ficha por clienta,"
+    acento="escriba por donde escriba"
+    bajada="Sus compras, lo que debe y cómo prefiere recibir, llegue por WhatsApp, Instagram o Messenger."
+    humor="feliz"
+  />
+  <section class="p-bloques" aria-label="La ficha de una clienta">
+    <div class="marco">
+      <figure class="p-ventana" data-aparece>
+        <div class="p-ventana__barra" aria-hidden="true"><i></i><i></i><i></i><span>app.gestoria24.com/clientes</span></div>
+        <Image src={clienta} alt="La ficha de Andrea Castillo: Instagram y WhatsApp, 2 compras, una entregada y otra por pagar, y su dirección de reparto" widths={[720, 1280, 1920]} sizes="(min-width: 1320px) 1240px, calc(100vw - 32px)" />
+      </figure>
+      <ul class="p-bloques__lista">
+        <li class="p-bloque" data-aparece><h3>Lo que sabemos</h3><p>Su talla, cómo prefiere recibir y lo que conviene recordar. Lo escribe el equipo; la clienta no lo ve.</p></li>
+        <li class="p-bloque" data-aparece><h3>Compras y deuda</h3><p>Cada compra con su estado, y lo que falta cobrar.</p></li>
+        <li class="p-bloque" data-aparece><h3>¿Es la misma clienta?</h3><p>Si dos fichas lo parecen, gestorIA te avisa y lo decides tú. Nunca las une por el teléfono.</p></li>
+      </ul>
+    </div>
+  </section>
+  <section class="p-bloques p-bloques--suave" aria-labelledby="cel-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">En el celular</p>
+        <h2 id="cel-h" class="titulo-2">Tu clienta, <span class="cur">en tu bolsillo</span></h2>
+        <p class="bajada">«Escribirle» y «Repetir pedido» a un toque, sin computadora.</p>
+      </div>
+      <div class="p-heroe__visual" data-aparece>
+        <div class="p-cel"><Image src={clientaCelular} alt="La ficha de una clienta en el celular" widths={[300, 600]} sizes="300px" /></div>
+      </div>
+    </div>
+  </section>
+</Base>

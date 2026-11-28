@@ -6,8 +6,8 @@ import { ACCOUNT, STORE_ID, type Who } from "./entorno"
 /**
  * El menú del día y Configuración en un navegador (lienzo «gestorIA como odentIA», tableros 4 y
  * 10; «gestorIA · Configuración, de nuevo», tablero 3), contra su servidor y su base de verdad:
- * - El menú lleva lo diario y, al pie, Configuración y Ayuda. Configuración abre en «Lo que
- *   falta», con sus grupos de tarea y cada parte en una línea.
+ * - El menú lleva lo diario y, al pie, Configuración; la Ayuda está en la cabecera. Configuración
+ *   abre en «Lo que falta», con sus grupos de tarea y cada parte en una línea.
  * - El buscador de Configuración encuentra una parte por lo que hay dentro y la abre con Enter.
  * - En el teléfono, Configuración es un índice: una parte por pantalla, sin «Cambiar sección».
  * - El pedido de soporte sale una vez, en la franja de arriba, y se responde en Equipo.
@@ -73,7 +73,11 @@ test("Configuración abre en «Lo que falta», con sus grupos y cada parte en un
     await expect(sections.getByRole("link", { name, exact: true })).toBeVisible()
   // Lo que falta, con lo guardado: o la lista con su cuenta, o una sola línea con todo listo.
   await expect(
-    page.getByText(/^(Para vender te faltan? \d+ cosas?|Tienes todo para vender)/).first(),
+    page
+      .getByText(
+        /^(Para (que Sofi venda sola|vender) te faltan? \d+ cosas?|Tienes todo para vender)/,
+      )
+      .first(),
   ).toBeVisible()
   const parts = page.getByRole("region", { name: "Cómo está cada parte" })
   await expect(parts.getByRole("link", { name: /^Cobros/ })).toBeVisible()
@@ -110,6 +114,11 @@ test("el buscador de Configuración encuentra lo que hay dentro y lo abre con el
   await search.press("ArrowDown")
   await search.press("Enter")
   await expect(page).toHaveURL(/\/configuracion\/entregas$/)
+  // El foco queda en el título de la parte abierta, no perdido en la página.
+  await expect(page.getByRole("heading", { level: 1, name: "Entregas" })).toBeFocused()
+  // «plantilla» (la de las zonas de Lima) lleva a Entregas.
+  await search.fill("plantilla")
+  await expect(results.getByRole("option").first()).toContainText("Entregas")
   // Con las palabras de quien vende, sin tildes.
   await search.fill("envio gratis")
   await expect(results.getByRole("option").first()).toContainText("Envío gratis")
@@ -223,7 +232,9 @@ test("Ventas, al abrir Configuración, llega a sus avisos al celular", async ({ 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
   await expect(page.getByRole("navigation", { name: "Principal" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Ayuda" })).toBeVisible()
+  // La Ayuda es el botón de la cabecera, no un enlace del menú.
+  await expect(page.getByRole("button", { name: "Ayuda", exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Ayuda" })).toHaveCount(0)
   // Configuración le abre lo único suyo, sin pasar por «Lo que falta».
   await page.getByRole("link", { name: "Configuración" }).click()
   await expect(page).toHaveURL(/\/configuracion\/avisos$/)
@@ -233,7 +244,9 @@ test("Ventas, al abrir Configuración, llega a sus avisos al celular", async ({ 
   await page.goto(`${BASE}/configuracion`)
   await expect(page).toHaveURL(/\/configuracion\/avisos$/)
   await page.goto(`${BASE}/configuracion/sofi`)
-  await expect(page.getByText("Esto lo ajusta quien configura la tienda")).toBeVisible()
+  await expect(page.getByText("Esto lo cambian el Dueño y el Administrador")).toBeVisible()
+  // Una línea le dice por qué solo ve lo suyo, sin una tarjeta vacía.
+  await expect(page.getByText(/^Aquí ves lo que cambias tú\./)).toBeVisible()
   await expect(page.getByRole("button", { name: /Probar|Escribir/ })).toHaveCount(0)
   await page.setViewportSize(PHONE)
   await noSideScroll(page)

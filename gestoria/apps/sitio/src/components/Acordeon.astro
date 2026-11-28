@@ -1,0 +1,19 @@
+---
+// Preguntas y respuestas que se abren de a una (`<details>` con el mismo nombre). La altura se anima
+// con CSS donde el navegador puede; donde no, se abren sin animación.
+import type { Pregunta } from "../lib/contenido"
+
+interface Props {
+  preguntas: readonly Pregunta[]
+  nombre?: string
+}
+const { preguntas, nombre = "preguntas" } = Astro.props
+---
+<div class="acordeon">
+  {preguntas.map(([q, a], i) => (
+    <details class="acordeon__item" name={nombre} open={i === 0}>
+      <summary><h3>{q}</h3><span class="acordeon__mas" aria-hidden="true"></span></summary>
+      <p>{a}</p>
+    </details>
+  ))}
+</div>

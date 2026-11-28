@@ -10,8 +10,10 @@
  */
 import { randomUUID } from "node:crypto"
 import {
+  argosReading,
   conversation,
   conversationMessage,
+  customer,
   customerConsent,
   customerFact,
   type Db,
@@ -27,9 +29,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { ARGOS_ACTOR, SOFI_ACTOR, withAgent } from "./agente.js"
 import { createApp } from "./app.js"
 import { addReceiptIn, createOrderIn, orderInput } from "./pedidos.js"
-import { measureLabelOf } from "./perfil.js"
+import { type MeasureCatalog, measureLabelOf } from "./perfil.js"
 import type { ChatModel, ChatRequest } from "./sofi/modelo.js"
-import { mostUsed, profileStore, readingOf } from "./sofi/perfilar.js"
+import {
+  checkClaims,
+  mostUsed,
+  profileStore,
+  type Reading,
+  readingOf,
+  readingsIn,
+} from "./sofi/perfilar.js"
 
 const ACCOUNT = "https://api.gestoria.test"
 const WEB = "https://app.gestoria.test"
@@ -99,9 +108,10 @@ const ids = { yape: "", reparto: "", t37: "", t38: "", t39: "", botin40: "" }
 
 /**
  * Responde según lo que lee: si el mensaje de ella trae una de las marcas, lo de esa marca; si
- * no, nada. Si la respuesta es un `Error`, falla como un proveedor caído.
+ * no, nada. Si la respuesta es un `Error`, falla como un proveedor caído; si es un texto, lo
+ * devuelve tal cual (lo que no es JSON).
  */
-const answers = new Map<string, unknown[] | Error>()
+const answers = new Map<string, unknown[] | Error | string>()
 const requests: ChatRequest[] = []
 const model: ChatModel = {
   name: "gpt-6-luna",
@@ -112,7 +122,7 @@ const model: ChatModel = {
       if (typeof user === "string" && user.includes(mark)) {
         if (reply instanceof Error) throw reply
         return {
-          content: JSON.stringify(reply),
+          content: typeof reply === "string" ? reply : JSON.stringify(reply),
           toolCalls: [],
           usage: { input: 800, cached: 0, output: 40 },
         }
@@ -552,11 +562,75 @@ describe("Argos perfila", () => {
     answers.set("[caido]", new Error("El proveedor respondió 503"))
     const run = await profileStore(db.appDb, storeId, new Date(), model)
     expect(run.failed).toBe(1)
-    expect(await asArgos((tx) => readingOf(tx, storeId, down))).toBeNull()
+    // El cursor no avanza; la hora del intento, sí.
+    expect(await asArgos((tx) => readingOf(tx, storeId, down))).toBe(0)
     // Vuelve el modelo: la lee en la siguiente vuelta.
     answers.set("[caido]", [])
     await profileStore(db.appDb, storeId, new Date(), model)
-    expect(await asArgos((tx) => readingOf(tx, storeId, down))).not.toBeNull()
+    expect(await asArgos((tx) => readingOf(tx, storeId, down))).toBeGreaterThan(0)
+  })
+
+  it("una que falla rota: la que nunca se intentó leer va antes, aunque sea más nueva", async () => {
+    const stuck = await chat("whatsapp", "Ivón")
+    await says(stuck, "hola [atascada]", 300)
+    await buys(stuck, ids.t38, { customerName: "Ivón Salas" })
+    answers.set("[atascada]", new Error("Se acabó el tiempo"))
+    await profileStore(db.appDb, storeId, new Date(), model)
+    const [tried] = await db.ownerDb
+      .select()
+      .from(argosReading)
+      .where(eq(argosReading.conversationId, stuck))
+    expect(tried).toMatchObject({ seq: 0 })
+    const fresh = await chat("whatsapp", "Olga")
+    await says(fresh, "hola [nueva]", 120)
+    await buys(fresh, ids.t39, { customerName: "Olga Ríos" })
+    const order = ((await asArgos((tx) => readingsIn(tx, storeId, new Date()))) as Reading[]).map(
+      (r) => r.conversationId,
+    )
+    expect(order).toContain(stuck)
+    expect(order.indexOf(fresh)).toBeLessThan(order.indexOf(stuck))
+    answers.delete("[atascada]")
+    await profileStore(db.appDb, storeId, new Date(), model)
+  })
+
+  it("si lo que responde no es JSON, la da por leída: no se paga dos veces", async () => {
+    const odd = await chat("whatsapp", "Flor")
+    const said = await says(odd, "hola [raro]")
+    await buys(odd, ids.t38, { customerName: "Flor Díaz" })
+    answers.set("[raro]", "Claro, aquí tienes lo que encontré: talla 38")
+    const run = await profileStore(db.appDb, storeId, new Date(), model)
+    expect(run.failed).toBe(0)
+    expect(await asArgos((tx) => readingOf(tx, storeId, odd))).toBe(said.seq)
+    requests.length = 0
+    await profileStore(db.appDb, storeId, new Date(), model)
+    expect(requests.some((r) => r.messages.some((m) => String(m.content).includes("[raro]")))).toBe(
+      false,
+    )
+  })
+
+  it("lee los mensajes nuevos desde el más antiguo, de a 40, sin saltarse ninguno", async () => {
+    const long = await chat("whatsapp", "Gina")
+    const sent: { seq: number }[] = []
+    for (let i = 1; i <= 45; i++)
+      sent.push(await says(long, `mensaje [lote-${String(i).padStart(2, "0")}]`, 200 - i))
+    await buys(long, ids.t38, { customerName: "Gina Paredes" })
+    const seen = () =>
+      requests
+        .filter((r) => r.messages.some((m) => String(m.content).includes("[lote-")))
+        .map((r) => String(r.messages.at(-1)?.content))
+        .join("\n")
+    requests.length = 0
+    await profileStore(db.appDb, storeId, new Date(), model)
+    expect(seen()).toContain("[lote-01]")
+    expect(seen()).toContain("[lote-40]")
+    expect(seen()).not.toContain("[lote-41]")
+    expect(await asArgos((tx) => readingOf(tx, storeId, long))).toBe(sent[39]!.seq)
+    requests.length = 0
+    await profileStore(db.appDb, storeId, new Date(), model)
+    expect(seen()).toContain("[lote-41]")
+    expect(seen()).toContain("[lote-45]")
+    expect(seen()).not.toContain("[lote-40]")
+    expect(await asArgos((tx) => readingOf(tx, storeId, long))).toBe(sent[44]!.seq)
   })
 
   it("dos tallas compradas por igual: usa la más reciente y deja la otra por confirmar", async () => {
@@ -696,5 +770,164 @@ describe("la familia unida", () => {
     expect(row?.customerId).toBe(older)
     await profileStore(db.appDb, storeId, new Date(), null)
     expect((await ficha(older)).profile.facts.gustos.value).toBe("Sandalias de colores")
+  })
+})
+
+describe("cada valor sale de su cita", () => {
+  const catalog: MeasureCatalog = {
+    label: "Talla",
+    values: new Map([["38", "38"]]),
+    indexOf: new Map(),
+  }
+  const reading = (text: string): Reading => ({
+    conversationId: "c",
+    rootId: "r",
+    ownId: "o",
+    mixed: false,
+    messages: [{ id: "m", seq: 1, text }],
+    cursor: 0,
+    lastSeq: 1,
+    address: null,
+  })
+  const kept = (text: string, clave: string, valor: string, cita = text) =>
+    checkClaims([{ clave, valor, cita }], reading(text), catalog).checked.map((c) => c.fact.value)
+
+  it("el distrito está en la cita, sin tildes ni mayúsculas", () => {
+    expect(kept("me lo mandas a breña porfa", "distrito", "Breña")).toEqual(["Breña"])
+    expect(kept("me lo mandas a BRENA porfa", "distrito", "Breña")).toEqual(["Breña"])
+    // La cita está en su mensaje, pero el distrito no está en ella.
+    expect(kept("me lo mandas a mi casa porfa", "distrito", "Surco")).toEqual([])
+  })
+
+  it("el cumpleaños: la cita trae el día y el mes", () => {
+    expect(kept("cumplo el 12 de marzo", "cumpleanos", "--03-12")).toEqual(["--03-12"])
+    expect(kept("cumplo el 12/03", "cumpleanos", "--03-12")).toEqual(["--03-12"])
+    expect(kept("cumplo el 12 de mar", "cumpleanos", "--03-12")).toEqual(["--03-12"])
+    expect(kept("cumplo el 5 de setiembre", "cumpleanos", "--09-05")).toEqual(["--09-05"])
+    // Sin fecha en la cita, o con otro día u otro mes, no.
+    expect(kept("es para mi cumple", "cumpleanos", "--03-12")).toEqual([])
+    expect(kept("cumplo el 13 de marzo", "cumpleanos", "--03-12")).toEqual([])
+    expect(kept("cumplo el 12 de abril", "cumpleanos", "--03-12")).toEqual([])
+    expect(kept("nos vemos el 12, martes", "cumpleanos", "--03-12")).toEqual([])
+  })
+
+  it("los gustos: al menos una palabra con contenido del valor está en la cita", () => {
+    expect(kept("me encantan los botines negros", "gustos", "Botines")).toEqual(["Botines"])
+    expect(kept("busco algo cómodo", "gustos", "Zapatillas cómodas")).toEqual([])
+    // Palabras cortas no cuentan.
+    expect(kept("me gusta lo de la tienda", "gustos", "lo de la")).toEqual([])
+  })
+})
+
+describe("cada ficha se lleva lo suyo", () => {
+  it("Argos anota en la ficha propia del pedido del chat: «Separar» se lo lleva", async () => {
+    const one = await chat("whatsapp", "Nora")
+    await says(one, "hola")
+    const older = (await buys(one, ids.t38, { customerName: "Nora Vega" })).customerId!
+    const two = await chat("instagram", "Nora")
+    await says(two, "vivo en Barranco [nora]")
+    const newer = (await buys(two, ids.t38, { customerName: "Nora Vega", channel: "instagram" }))
+      .customerId!
+    expect(
+      (await call("lucia", "POST", `${base}/clientes/unir`, { a: older, b: newer })).status,
+    ).toBe(200)
+    answers.set("[nora]", [{ clave: "distrito", valor: "Barranco", cita: "vivo en Barranco" }])
+    await profileStore(db.appDb, storeId, new Date(), model)
+    expect((await ficha(older)).profile.facts.distrito).toMatchObject({ value: "Barranco" })
+    const [row] = (await factsOf(newer)).filter((f) => f.key === "distrito")
+    expect(row).toMatchObject({ value: "Barranco", source: "chat" })
+    expect((await call("lucia", "POST", `${base}/clientes/${newer}/separar`)).status).toBe(200)
+    expect((await ficha(newer)).profile.facts.distrito).toMatchObject({ value: "Barranco" })
+    expect((await ficha(older)).profile.facts.distrito).toBeUndefined()
+  })
+
+  it("la base le niega a Argos lo que la tienda corrigió en otra ficha de la familia", async () => {
+    const [older] = await db.ownerDb
+      .insert(customer)
+      .values({ storeId, name: "Elsa Rojas", createdBy: "u-lucia" })
+      .returning({ id: customer.id })
+    const [newer] = await db.ownerDb
+      .insert(customer)
+      .values({ storeId, name: "Elsa Rojas", createdBy: "u-lucia", mergedInto: older!.id })
+      .returning({ id: customer.id })
+    await asLucia((tx) =>
+      tx.insert(customerFact).values({
+        storeId,
+        customerId: older!.id,
+        key: "distrito",
+        value: "Lince",
+        source: "tienda",
+        actorUserId: "u-lucia",
+      }),
+    )
+    const byArgos = (customerId: string, key: "distrito" | "gustos") =>
+      asArgos((tx) =>
+        tx.insert(customerFact).values({
+          storeId,
+          customerId,
+          key,
+          value: "Surco",
+          source: "respuesta",
+          actorUserId: ARGOS_ACTOR,
+        }),
+      )
+    await expect(byArgos(newer!.id, "distrito")).rejects.toThrow()
+    // Otra clave de la misma familia, sí.
+    await byArgos(newer!.id, "gustos")
+  })
+})
+
+describe("quien escribe puede no ser la clienta", () => {
+  it("un chat con pedidos de dos familias: Argos no anota lo del chat y el permiso sin ficha no cuenta", async () => {
+    const elsewhere = await chat("whatsapp", "Ruth")
+    await says(elsewhere, "hola")
+    const ruth = (await buys(elsewhere, ids.t38, { customerName: "Ruth Silva" })).customerId!
+    const shared = await chat("whatsapp", "Zoe")
+    const said = await says(shared, "sí avísame, vivo en Breña [mezcla]")
+    const zoe = (await buys(shared, ids.t38, { customerName: "Zoe Lara" })).customerId!
+    await buys(shared, ids.t39, { customerId: ruth, customerName: "Ruth Silva" })
+    answers.set("[mezcla]", [{ clave: "distrito", valor: "Breña", cita: "vivo en Breña" }])
+    requests.length = 0
+    await profileStore(db.appDb, storeId, new Date(), model)
+    const read = requests.map((r) => r.messages.map((m) => String(m.content)).join("\n")).join("\n")
+    expect(read).not.toContain("[mezcla]")
+    for (const id of [zoe, ruth])
+      expect((await factsOf(id)).filter((f) => f.source === "chat")).toEqual([])
+    expect(await asArgos((tx) => readingOf(tx, storeId, shared))).toBe(said.seq)
+
+    // Sofi lo anotó sin ficha: no cuenta para ninguna de las dos.
+    await asSofi((tx) =>
+      tx.insert(customerConsent).values({
+        storeId,
+        customerId: null,
+        conversationId: shared,
+        channel: "whatsapp",
+        state: "si",
+        messageId: said.id,
+        quote: "sí avísame",
+        actorUserId: SOFI_ACTOR,
+      }),
+    )
+    for (const id of [zoe, ruth])
+      expect((await ficha(id)).profile.consent.state).toBe("sin_preguntar")
+
+    // En un chat con solo pedidos de ella, sí cuenta aunque se anotó sin ficha.
+    const own = await chat("whatsapp", "Ruth")
+    const yes = await says(own, "dale, avísame")
+    await buys(own, ids.t38, { customerId: ruth, customerName: "Ruth Silva" })
+    await asSofi((tx) =>
+      tx.insert(customerConsent).values({
+        storeId,
+        customerId: null,
+        conversationId: own,
+        channel: "whatsapp",
+        state: "si",
+        messageId: yes.id,
+        quote: "avísame",
+        actorUserId: SOFI_ACTOR,
+      }),
+    )
+    expect((await ficha(ruth)).profile.consent.state).toBe("si")
+    expect((await ficha(zoe)).profile.consent.state).toBe("sin_preguntar")
   })
 })

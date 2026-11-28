@@ -1097,6 +1097,39 @@ export async function conversationCustomerIn(
   return previous?.customerId ? rootRow(tx, storeId, previous.customerId) : null
 }
 
+export interface ConversationFichas {
+  /** La ficha propia del último pedido con ficha de ese chat (no la que se ve): ahí se anota. */
+  own: string
+  /** La ficha que se ve de esa (`coalesce(merged_into, id)`). */
+  root: string
+  /**
+   * Si los pedidos del chat son de fichas de familias distintas: quien escribe puede no ser la
+   * clienta (interlocutora ≠ clienta), y lo que dice el chat no se le anota a ninguna.
+   */
+  mixed: boolean
+}
+
+/**
+ * Las fichas de los pedidos de una conversación (ADR 0240): la propia del último, su raíz y si hay
+ * pedidos de otra familia. Null si ningún pedido tiene ficha. Nunca por el teléfono ni el nombre.
+ */
+export async function conversationFichasIn(
+  tx: Db,
+  storeId: string,
+  conversationId: string,
+): Promise<ConversationFichas | null> {
+  const rows = await tx
+    .select({ id: customer.id, mergedInto: customer.mergedInto })
+    .from(saleOrder)
+    .innerJoin(customer, eq(customer.id, saleOrder.customerId))
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.conversationId, conversationId)))
+    .orderBy(desc(saleOrder.createdAt))
+  const last = rows[0]
+  if (!last) return null
+  const roots = new Set(rows.map((r) => r.mergedInto ?? r.id))
+  return { own: last.id, root: last.mergedInto ?? last.id, mixed: roots.size > 1 }
+}
+
 /**
  * Lo que compró la clienta de una conversación, para que Sofi elija qué ofrecer (ADR 0224 sobre
  * ADR 0223): los pedidos de su ficha y de las que una persona le unió, por cualquier chat o canal,

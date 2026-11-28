@@ -28,14 +28,20 @@ CREATE POLICY customer_fact_create ON customer_fact FOR INSERT TO gestoria_app
       OR (NOT app_is_agent() AND source = 'tienda')
     )
   );--> statement-breakpoint
--- Lo que corrigió la tienda, Argos no lo vuelve a pisar: aunque el código se equivoque.
+-- Lo que corrigió la tienda, Argos no lo vuelve a pisar: aunque el código se equivoque. Mira la
+-- familia (las fichas con la misma raíz, `coalesce(merged_into, id)`): Argos anota en la ficha
+-- propia de cada pedido y la tienda corrige en la que se ve.
 CREATE POLICY customer_fact_store_wins ON customer_fact AS RESTRICTIVE FOR INSERT TO gestoria_app
   WITH CHECK (
     NOT app_is_agent()
     OR NOT EXISTS (
       SELECT 1 FROM customer_fact f
-      WHERE f.store_id = customer_fact.store_id AND f.customer_id = customer_fact.customer_id
+      JOIN customer mine ON mine.store_id = customer_fact.store_id
+        AND mine.id = customer_fact.customer_id
+      JOIN customer theirs ON theirs.store_id = f.store_id AND theirs.id = f.customer_id
+      WHERE f.store_id = customer_fact.store_id
         AND f.key = customer_fact.key AND f.source = 'tienda'
+        AND coalesce(theirs.merged_into, theirs.id) = coalesce(mine.merged_into, mine.id)
     )
   );--> statement-breakpoint
 

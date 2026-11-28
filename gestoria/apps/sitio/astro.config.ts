@@ -17,6 +17,7 @@ export default defineConfig({
   // /terminos → terminos.html: el Worker de archivos lo sirve en /terminos, sin barra al final.
   build: { format: "file" },
   // El WhatsApp de ventas llega al armado como `VITE_SALES_WHATSAPP`.
-  vite: { envPrefix: ["PUBLIC_", "VITE_"] },
+  // three.js (Sofi) va en su propio archivo, que se carga después de la página: pesa ~540 kB.
+  vite: { envPrefix: ["PUBLIC_", "VITE_"], build: { chunkSizeWarningLimit: 700 } },
   integrations: [sitemap({ filter: (page) => !fueraDelMapa.has(page.replace(/\/$/, "")) })],
 })
