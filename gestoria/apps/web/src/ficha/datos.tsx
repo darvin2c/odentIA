@@ -545,7 +545,8 @@ function Questions() {
     onSuccess: (result, vars) => done(result.product, vars.message),
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
-  const open = sheet.questions.filter((q) => !q.savedAt && !(q.answer && q.saveRequested))
+  // Lo que espera respuesta: lo respondido (también en «Te toca», sin guardar) ya no espera.
+  const open = sheet.questions.filter((q) => !q.savedAt && !q.answer)
   const proposed = sheet.questions.filter((q) => !q.savedAt && q.answer && q.saveRequested)
   const saved = sheet.questions.filter((q) => q.savedAt)
 

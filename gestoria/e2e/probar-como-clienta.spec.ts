@@ -159,14 +159,18 @@ test("probar como clienta: la foto del color, la oferta, el carrito y el pago de
   await page.goto(`${BASE}/catalogo/${product.id}`)
   await expect(page.getByRole("heading", { name: "Zapatilla de lona", level: 1 })).toBeVisible()
   await page.getByRole("button", { name: "Probar como clienta" }).click()
+  // En una ventana ancha va en la columna lateral; si no cabe, en un cajón.
   const panel = page
-    .getByRole("region", { name: "Probar como clienta" })
+    .getByRole("complementary", { name: "Panel lateral" })
     .or(page.getByRole("dialog", { name: "Probar como clienta" }))
-  await expect(panel).toBeVisible()
+  await expect(panel.getByRole("heading", { name: "Probar como clienta" })).toBeVisible()
   const chat = panel.getByRole("log", { name: "El chat de la prueba" })
 
   // Pregunta por la negra: Sofi manda su foto, con el precio y lo que queda de verdad.
-  await panel.getByRole("button", { name: "¿Tienes la negra en 38?" }).click()
+  await panel
+    .getByRole("textbox", { name: "Mensaje de la clienta (prueba)" })
+    .fill("¿Tienes la negra en 38?")
+  await panel.getByRole("button", { name: "Enviar" }).click()
   await expect(chat.getByText(/está a S\/ 119 y me quedan 2/)).toBeVisible({ timeout: 20_000 })
   await expect(chat.getByRole("img", { name: "Zapatilla de lona negra" })).toBeVisible()
   const used = panel.getByRole("list", { name: "Lo que usó Sofi" })
