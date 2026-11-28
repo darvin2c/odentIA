@@ -345,6 +345,47 @@ describe("la cuadrícula de tallas y colores (decisión 6)", () => {
     expect(row.readiness.sellsAlone).toBe(false)
   })
 
+  it("con el stock que vio la pantalla, una venta de mientras tanto no se pisa: se suma lo cambiado", async () => {
+    const own = await newProduct("Zapatilla vendida mientras tanto")
+    await call("rosa", "POST", `${base}/productos/${own}/cuadricula`, grid())
+    const variantOf = async (combo: string) =>
+      (await call("rosa", "GET", `${base}/productos/${own}`)).json.product.variants.find(
+        (v: { optionValues: string[] }) => v.optionValues.join() === combo,
+      )
+    // La pantalla vio la blanca 38 con 3 y la negra 38 con 2. Mientras edita, se vende una de
+    // cada una (aquí, un ajuste del kardex: lo que importa es que el stock bajó por otro lado).
+    for (const combo of ["blanca,38", "negra,38"]) {
+      const v = await variantOf(combo)
+      await call("rosa", "POST", `${base}/variantes/${v.id}/movimientos`, {
+        kind: "ajuste",
+        counted: v.stock - 1,
+        reason: "Vendida en la tienda",
+      })
+    }
+    // Sube la blanca 38 de 3 a 5 y deja la negra 38 como la vio (2): manda lo que vio.
+    const seen = { "blanca,38": 3, "blanca,39": 2, "negra,38": 2, "negra,39": 0 }
+    const saved = await call("rosa", "POST", `${base}/productos/${own}/cuadricula`, {
+      ...grid(),
+      cells: grid().cells.map((c) => {
+        const key = `${c.row},${c.column}` as keyof typeof seen
+        return { ...c, stock: key === "blanca,38" ? 5 : c.stock, seenStock: seen[key] }
+      }),
+    })
+    expect(saved.status).toBe(200)
+    // La blanca 38: lo vendido (3 → 2) más lo que subió la pantalla (+2) = 4, no 5.
+    expect((await variantOf("blanca,38")).stock).toBe(4)
+    // La negra 38 no la tocó: queda con lo vendido (1), no vuelve a 2.
+    expect((await variantOf("negra,38")).stock).toBe(1)
+    // Dice qué se vendió mientras tanto, para avisarlo en la pantalla.
+    expect(saved.json.meanwhile).toEqual(
+      expect.arrayContaining([
+        { variant: "blanca · 38", seen: 3, now: 2 },
+        { variant: "negra · 38", seen: 2, now: 1 },
+      ]),
+    )
+    expect(saved.json).toMatchObject({ entered: 2, lowered: 0 })
+  })
+
   it("bajar el stock pide motivo y queda como ajuste; cambiar un nombre no rehace la variante", async () => {
     const lower = grid({
       cells: grid().cells.map((c) =>

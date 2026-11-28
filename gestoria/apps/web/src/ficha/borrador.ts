@@ -43,10 +43,15 @@ export type SaveStatus =
   /** A medio escribir (las medidas del paquete): se guarda al completarlo. */
   | { kind: "incomplete"; message: string }
 
+/** Lo que responde la cuadrícula: la ficha y lo que se vendió mientras se editaba. */
+export interface GridSaved {
+  product: Sheet
+  meanwhile?: { variant: string; seen: number; now: number }[]
+}
+
 export interface SaveApi {
-  get: () => Promise<Sheet>
   patch: (body: Record<string, unknown>) => Promise<Sheet>
-  grid: (body: ReturnType<typeof gridBody>) => Promise<Sheet>
+  grid: (body: ReturnType<typeof gridBody>) => Promise<GridSaved>
 }
 
 interface State {
@@ -61,6 +66,8 @@ interface State {
   reason: string
   /** Lo último que se deshizo o hizo, para avisarlo. */
   last: { label: string; at: number } | null
+  /** Lo que se vendió mientras se editaba la cuadrícula, para avisarlo. */
+  sold: string | null
 }
 
 const DELAY = 900
@@ -107,6 +114,7 @@ export class FichaStore {
       status: { kind: "saved" },
       reason: "",
       last: null,
+      sold: null,
     }
     if (!readOnly) this.restore()
   }
@@ -324,37 +332,32 @@ export class FichaStore {
   private async saveGrid(reason: string): Promise<"saved" | "waiting" | "rejected" | "offline"> {
     const sent = clone(this.state.draft.grid!)
     const base = this.state.base.grid
-    // Sin motivo y bajando el stock, no se envía: se pide el motivo.
-    if (loweredCells(base, sent) > 0 && reason.trim().length < 3) return "waiting"
-    let fresh: Sheet
+    // Sin motivo y bajando el stock, no se envía: se pide el motivo. Lo que se envía es lo que
+    // cambió frente al stock que se vio (`seenStock`): el servidor lo suma al de ahora.
+    const lowered = loweredCells(base, sent)
+    if (lowered > 0 && reason.trim().length < 3) return "waiting"
     try {
-      fresh = await this.api.get()
-    } catch (error) {
-      if (this.isFinal(error)) return "rejected"
-      this.offline(error)
-      return "offline"
-    }
-    const now = gridOf(fresh, idsOf(base))
-    const target = rebase(base, sent, now)
-    const lowered = loweredCells(now, target)
-    if (lowered > 0 && reason.trim().length < 3) {
-      this.needsReason = JSON.stringify(sent)
-      this.set({ sheet: fresh })
-      return "waiting"
-    }
-    try {
-      const saved = await this.api.grid(
-        gridBody(now, target, lowered > 0 ? { reason: reason.trim() } : {}),
+      const { product: saved, meanwhile = [] } = await this.api.grid(
+        gridBody(base, sent, lowered > 0 ? { reason: reason.trim() } : {}),
       )
       const grid = gridOf(saved, idsOf(sent))
-      const changed = !same(this.state.draft.grid, sent)
+      // Lo que se siguió escribiendo mientras se guardaba va sobre lo guardado de ahora (con lo
+      // que se vendió en ese momento), nunca sobre el stock de antes.
+      const draft = same(this.state.draft.grid, sent)
+        ? { ...this.state.draft, grid }
+        : { ...this.state.draft, grid: onSaved(this.state.draft.grid, sent, grid) }
       const baseDraft = { ...draftOf(saved, grid) }
       this.set({
         sheet: saved,
         base: { ...this.state.base, grid },
-        draft: changed ? this.state.draft : { ...this.state.draft, grid },
+        draft,
         reason: "",
         errors: withoutGridErrors(this.state.errors),
+        sold: meanwhile.length
+          ? `Se vendió mientras editabas: ${meanwhile
+              .map((m) => `${m.variant} (había ${m.seen}, quedaban ${m.now})`)
+              .join(", ")}. Lo que cambiaste se sumó a eso.`
+          : this.state.sold,
       })
       // Lo del producto que cambia con la cuadrícula (las promociones de un color renombrado).
       this.rebaseFields(baseDraft)
@@ -558,22 +561,18 @@ export class FichaStore {
 }
 
 /**
- * Lo que cambió la persona (de `base` a `draft`), sobre lo que hay ahora en el servidor (`now`):
- * una celda que no tocó queda como está; una que tocó suma la diferencia a la de ahora.
+ * Lo que se escribió en la cuadrícula mientras se guardaba (de `sent` a `draft`), sobre lo que
+ * guardó el servidor (`saved`, con lo que se vendió en ese momento): la diferencia de cada celda
+ * se suma a lo guardado; el precio y el código, como se escribieron.
  */
-export function rebase(base: Grid | null, draft: Grid, now: Grid | null): Grid {
-  if (!base || !now) return draft
+export function onSaved(draft: Grid | null, sent: Grid, saved: Grid | null): Grid | null {
+  if (!draft || !saved) return draft
   const cells = { ...draft.cells }
   for (const [key, cell] of Object.entries(draft.cells)) {
-    const before = base.cells[key]
-    const current = now.cells[key]
-    if (!before || !current) continue
-    const delta = cell.stock - before.stock
-    cells[key] = {
-      stock: Math.max(0, current.stock + delta),
-      priceCents: same(cell.priceCents, before.priceCents) ? current.priceCents : cell.priceCents,
-      barcode: same(cell.barcode, before.barcode) ? current.barcode : cell.barcode,
-    }
+    const before = sent.cells[key]
+    const now = saved.cells[key]
+    if (!before || !now) continue
+    cells[key] = { ...cell, stock: Math.max(0, now.stock + cell.stock - before.stock) }
   }
   return { ...draft, cells }
 }

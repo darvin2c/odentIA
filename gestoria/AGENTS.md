@@ -77,9 +77,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   historial (`product_event`), campo por campo, con la forma de `productPatch`.
 - La pantalla de la ficha (`apps/web/src/ficha/`) es una página completa que se guarda sola: un
   borrador (`FichaStore` de `ficha/borrador.ts`) con deshacer y rehacer, que envía solo lo que
-  cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). La
-  cuadrícula se envía sobre el stock de ahora (`rebase`): lo cambiado se suma, nunca pisa una
-  venta; si baja el stock, espera el motivo sin frenar lo demás. El margen se dibuja con el costo
+  cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). Cada
+  celda de la cuadrícula va con el stock que vio la pantalla (`seenStock`): el servidor guarda la
+  diferencia sobre el stock de ahora (`saveGrid`), nunca un total que pise una venta, y dice lo
+  que se vendió mientras tanto (`meanwhile`); si baja el stock, espera el motivo sin frenar lo
+  demás. El margen se dibuja con el costo
   que da el servidor solo con `costos.ver`; lo que cobraría Sofi es siempre `POST /simular`. Las
   propuestas de la IA entran con `AiSuggestion`, nunca dibujadas a mano.
 

@@ -105,6 +105,12 @@ export const gridInput = z
             .int("Escribe un número entero")
             .min(0, "No puede ser menos de 0")
             .max(100_000),
+          /**
+           * El stock que vio la pantalla al cambiarla. Con él, lo que se guarda es la diferencia
+           * (`stock - seenStock`) sobre el stock de ahora: una venta de mientras tanto no se pisa.
+           * Sin él, `stock` es el total (la hoja de antes).
+           */
+          seenStock: z.number().int().min(0).max(100_000).optional(),
           /** Su precio propio; nulo: el del producto. */
           priceCents: money.nullable(),
           barcode: barcodeInput.default(null),
@@ -280,7 +286,21 @@ async function saveGridIn(
   const gone = mapped.filter((m) => m.combo === null).map((m) => m.variant)
 
   const reason = grid.reason?.trim() || null
-  const lowers = kept.some((k) => cellOf.get(comboKey(k.combo))!.stock < k.variant.stock)
+  // Lo que queda de cada variante: con el stock que vio la pantalla, lo de ahora más lo que ella
+  // cambió; si cambió desde entonces (una venta), se dice en `meanwhile`.
+  const meanwhile: { variant: string; seen: number; now: number }[] = []
+  const targetOf = new Map<string, number>()
+  for (const { variant, combo } of kept) {
+    const cell = cellOf.get(comboKey(combo))!
+    if (cell.seenStock === undefined) {
+      targetOf.set(variant.id, cell.stock)
+      continue
+    }
+    if (cell.seenStock !== variant.stock)
+      meanwhile.push({ variant: combo.join(" · "), seen: cell.seenStock, now: variant.stock })
+    targetOf.set(variant.id, Math.max(0, variant.stock + cell.stock - cell.seenStock))
+  }
+  const lowers = kept.some((k) => targetOf.get(k.variant.id)! < k.variant.stock)
   if ((lowers || gone.some((v) => v.stock > 0)) && (!reason || reason.length < 3))
     throw new StoreError(
       400,
@@ -401,7 +421,7 @@ async function saveGridIn(
   const stockMoves = [
     ...kept.map(({ variant, combo }) => ({
       id: variant.id,
-      delta: cellOf.get(comboKey(combo))!.stock - variant.stock,
+      delta: targetOf.get(variant.id)! - variant.stock,
     })),
     ...created.map((row) => ({ id: row.id, delta: cellOf.get(comboKey(row.optionValues))!.stock })),
   ].filter((m) => m.delta !== 0)
@@ -551,7 +571,14 @@ async function saveGridIn(
     lowered ? reason : null,
   )
   const detail = await detailIn(tx, storeId, productId)
-  return { product: detail, entered, lowered, created: created.length, removed: gone.length }
+  return {
+    product: detail,
+    entered,
+    lowered,
+    created: created.length,
+    removed: gone.length,
+    meanwhile,
+  }
 }
 
 /* ------------------------------------------------ «Probar cuánto cobraría Sofi» */
