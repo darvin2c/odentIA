@@ -13,6 +13,7 @@ import { agentStopIn } from "../acuerdo.js"
 import { agentName } from "../agente.js"
 import type { Person } from "../cuenta.js"
 import { pad } from "../pedidos.js"
+import { can, type StoreSeat } from "../permisos.js"
 import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
 import { type AnswerResult, answer, type SofiDeps } from "./sofi.js"
@@ -53,14 +54,18 @@ const DEFAULTS = {
   followReturn: true,
 }
 
-/** Lo que Sofi tiene puesto, y si hay modelo para que responda. */
+/**
+ * Lo que Sofi tiene puesto, si hay modelo para que responda, si la administración la detuvo y
+ * las pruebas. Es la parte «Sofi» de Configuración: la lee quien la cambia (`configuracion`), no
+ * Ventas ni soporte (`gestoria/AGENTS.md`: soporte mira Configuración sin Sofi).
+ */
 export async function agentSettings(
   appDb: Db,
   person: Person,
   storeId: string,
   modelReady: boolean,
 ) {
-  return inStore(appDb, person, storeId, "tienda.ver", async (tx) => {
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const [row] = await tx.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))
     const settings = row
       ? {
@@ -141,8 +146,11 @@ const TOOL_WORDS: Record<string, string> = {
   anotar_baja: "Anotó la baja de promociones",
 }
 
-/** Lo que hizo Sofi para responder, en palabras del equipo (la marca «Agente» del tablero 8). */
-function basisOf(detail: Record<string, unknown>) {
+/**
+ * Lo que hizo Sofi para responder, en palabras del equipo (la marca «Agente» del tablero 8). Lo
+ * que costó el modelo es una cifra de Reportes: va solo a quien los ve (`reportes.ver`).
+ */
+function basisOf(detail: Record<string, unknown>, seesCost: boolean) {
   const tools = Array.isArray(detail.tools)
     ? (detail.tools as { name: string; ok: boolean }[]).map(
         (t) => `${TOOL_WORDS[t.name] ?? t.name}${t.ok ? "" : " (no se pudo)"}`,
@@ -152,11 +160,16 @@ function basisOf(detail: Record<string, unknown>) {
     tools,
     stopped: Array.isArray(detail.frenado) ? (detail.frenado as string[][]).flat() : [],
     handoff: typeof detail.paso === "string" ? detail.paso : null,
-    costMicros: typeof detail.costo === "number" ? detail.costo : null,
+    ...(seesCost ? { costMicros: typeof detail.costo === "number" ? detail.costo : null } : {}),
   }
 }
 
-async function viewIn(tx: Db, storeId: string, conversationId: string) {
+/**
+ * Una conversación como la ve quien tiene `role`. La de «Probar a Sofi» es de Configuración: solo
+ * la abre quien la cambia, aunque atender (`ventas.atender`) abra las de verdad. Lo que costó el
+ * modelo, solo con `reportes.ver`.
+ */
+async function viewIn(tx: Db, storeId: string, conversationId: string, role: StoreSeat) {
   if (!z.uuid().safeParse(conversationId).success)
     throw new StoreError(404, "NOT_FOUND", "Esa conversación ya no está")
   const [conv] = await tx
@@ -164,6 +177,9 @@ async function viewIn(tx: Db, storeId: string, conversationId: string) {
     .from(conversation)
     .where(and(eq(conversation.id, conversationId), eq(conversation.storeId, storeId)))
   if (!conv) throw new StoreError(404, "NOT_FOUND", "Esa conversación ya no está")
+  if (conv.channel === "prueba" && !can(role, "configuracion"))
+    throw new StoreError(403, "FORBIDDEN", "Tu rol en esta tienda no permite hacerlo")
+  const seesCost = can(role, "reportes.ver")
   const messages = await tx
     .select()
     .from(conversationMessage)
@@ -208,7 +224,7 @@ async function viewIn(tx: Db, storeId: string, conversationId: string) {
     customerName: conv.customerName,
     handler: conv.handler,
     waitingReason: conv.waitingReason,
-    costMicros: cost,
+    ...(seesCost ? { costMicros: cost } : {}),
     messages: messages.map((m) => ({
       id: m.id,
       author: m.author,
@@ -218,7 +234,7 @@ async function viewIn(tx: Db, storeId: string, conversationId: string) {
       needsTemplate: m.needsTemplate,
       followUp: m.followUp,
       byArgos: agentName(m.actorUserId) === "Argos",
-      ...(m.author === "sofi" ? { basis: basisOf(m.detail) } : {}),
+      ...(m.author === "sofi" ? { basis: basisOf(m.detail, seesCost) } : {}),
     })),
     orders: orders.map((o) => ({
       ...o,
@@ -240,8 +256,8 @@ export async function conversationView(
   storeId: string,
   conversationId: string,
 ) {
-  return inStore(appDb, person, storeId, "ventas.atender", (tx) =>
-    viewIn(tx, storeId, conversationId),
+  return inStore(appDb, person, storeId, "ventas.atender", (tx, role) =>
+    viewIn(tx, storeId, conversationId, role),
   )
 }
 
@@ -293,8 +309,8 @@ export async function returnToSofi(
   storeId: string,
   conversationId: string,
 ) {
-  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const view = await viewIn(tx, storeId, conversationId)
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx, role) => {
+    const view = await viewIn(tx, storeId, conversationId, role)
     await tx
       .update(conversation)
       .set({ handler: "sofi", waitingReason: null, updatedAt: new Date() })

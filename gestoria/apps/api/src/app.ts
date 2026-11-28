@@ -928,8 +928,8 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/conversaciones/:conversationId/cliente", async (c) => {
     const input = await bodyOf(c, customerMessageInput)
     const { id, conversationId } = c.req.param()
-    // Primero el permiso: quien no es del equipo no gasta el cupo de la tienda.
-    await inStore(deps.appDb, c.get("person"), id, "ventas.atender", async () => {})
+    // Primero el permiso: quien no prueba a Sofi (Configuración) no gasta el cupo de la tienda.
+    await inStore(deps.appDb, c.get("person"), id, "configuracion", async () => {})
     const now = Date.now()
     const seen = testsBy.get(id)
     if (!seen || now - seen.since > TEST_WINDOW_MS) testsBy.set(id, { since: now, count: 1 })
