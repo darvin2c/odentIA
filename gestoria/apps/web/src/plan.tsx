@@ -31,9 +31,11 @@ import {
   NOTICE_LABELS,
   noticeText,
   noticeTone,
+  owedOf,
   PAYMENT_WORDS,
   type PlanView,
   RECEIPT_WORDS,
+  receiptHere,
   STATUS_WORDS,
   SUPPORT_STATUS_WORDS,
 } from "./lib/plan"
@@ -106,7 +108,7 @@ function PlanBody({ view }: { view: PlanView }) {
       {state ? (
         <>
           <ToPay state={state} connected={view.connected} />
-          <Balance state={state} />
+          <Balance state={state} receiptHere={receiptHere(state, view.connected)} />
           <Movements />
           <Charges state={state} />
           <Payments state={state} view={view} />
@@ -130,19 +132,13 @@ function PlanBody({ view }: { view: PlanView }) {
 type Known = NonNullable<PlanView["state"]>
 type Charge = Known["charges"][number]
 
-/** Lo que todavía falta pagar de un cobro. */
-const owedOf = (charge: Charge) =>
-  charge.status === "anulada" || charge.status === "reversada"
-    ? 0
-    : Math.max(0, charge.amountCents - charge.paidCents)
-
 /**
  * El plan y su saldo (tablero 10), después de lo que se debe: el plan y su estado, cuánto del
  * saldo se usó y cuánto queda, y el tope, con lo que manda la administración (`plan` y `budget`
  * del acuerdo). No se dice «pagas X al mes» con el precio del plan: la cifra del mes la dirá la
  * administración cuando la mande; mientras, lo que se paga es lo de «Por pagar», arriba.
  */
-function Balance({ state }: { state: Known }) {
+function Balance({ state, receiptHere }: { state: Known; receiptHere: boolean }) {
   const { store } = useStoreContext()
   // Pedir otro tope es pedírselo a gestorIA: abre la Ayuda con el mensaje a soporte ya escrito,
   // para que la persona lo lea, lo complete y lo envíe ella. Soporte no escribe.
@@ -247,7 +243,11 @@ function Balance({ state }: { state: Known }) {
           <Fact term="Tu mes cierra" value={day(budget.periodEnd)} note="Ese día sale tu cobro." />
         ) : null}
         {methods.length > 0 ? (
-          <Fact term="Pagas con" value={listText(methods)} note="Y subes el comprobante aquí." />
+          <Fact
+            term="Pagas con"
+            value={listText(methods)}
+            note={receiptHere ? "Y subes el comprobante arriba, en «Por pagar»." : undefined}
+          />
         ) : null}
       </dl>
     </section>
@@ -283,8 +283,7 @@ function Fact({
 function ToPay({ state, connected }: { state: Known; connected: boolean }) {
   const [paying, setPaying] = useState<Charge | null>(null)
   const due = state.charges.filter((charge) => owedOf(charge) > 0)
-  // Se sube un comprobante si hay cómo pagar y gestorIA está conectada a la administración.
-  const canSend = connected && state.paymentMethods.length > 0
+  const canSend = receiptHere(state, connected)
   if (due.length === 0)
     return (
       <section
@@ -352,7 +351,11 @@ function ToPay({ state, connected }: { state: Known; connected: boolean }) {
                 Queda «Comprobante enviado» hasta que gestorIA confirma tu pago.
               </span>
             </div>
-          ) : null}
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Cuando pagues, avísanos escribiendo a soporte desde la «Ayuda», arriba.
+            </p>
+          )}
         </article>
       ))}
       {paying ? (

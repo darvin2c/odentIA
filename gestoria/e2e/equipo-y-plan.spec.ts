@@ -132,6 +132,9 @@ test("Plan y pagos: primero lo que se debe, después el saldo y el tope, y qué 
   const [owedBox, balanceBox] = [await owed.boundingBox(), await balance.boundingBox()]
   expect(owedBox && balanceBox && owedBox.y < balanceBox.y, "lo que se debe va primero").toBe(true)
   await expect(page.getByText(/^Usaste .* de tu saldo de /)).toBeVisible()
+  // Con la administración conectada está el botón, y solo entonces la página lo nombra.
+  await expect(page.getByRole("button", { name: "Subir comprobante" })).toBeVisible()
+  await expect(page.getByText("Y subes el comprobante arriba, en «Por pagar».")).toBeVisible()
   await expect(
     page.getByText("Aquí verás cada pedido que cuenta para tu cobro", { exact: true }),
   ).toBeVisible()

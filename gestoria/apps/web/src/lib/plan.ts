@@ -130,3 +130,21 @@ export const SUPPORT_STATUS_WORDS: Record<string, string> = {
   esperando_clinica: "Te respondimos",
   resuelto: "Resuelta",
 }
+
+type Charge = AccountState["charges"][number]
+
+/** Lo que todavía falta pagar de un cobro, con las dos cifras que manda la administración. */
+export const owedOf = (charge: Charge) =>
+  charge.status === "anulada" || charge.status === "reversada"
+    ? 0
+    : Math.max(0, charge.amountCents - charge.paidCents)
+
+/**
+ * Se sube un comprobante si hay algo por pagar, cómo pagarlo y gestorIA está conectada a la
+ * administración: solo entonces está «Subir comprobante», y solo entonces la página lo nombra.
+ */
+export const receiptHere = (
+  state: Pick<AccountState, "charges" | "paymentMethods">,
+  connected: boolean,
+) =>
+  connected && state.paymentMethods.length > 0 && state.charges.some((charge) => owedOf(charge) > 0)
