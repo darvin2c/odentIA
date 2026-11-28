@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react"
  * formulario de la columna, salir por el menú o cerrar la pestaña pregunta lo mismo que × y
  * Escape (`UnsavedDialog`). Es el pegamento de la app con el router; el diálogo es el común.
  */
-export function DraftGuard({ dirty }: { dirty: boolean }) {
+export function DraftGuard({ dirty, lost }: { dirty: boolean; lost?: string | null }) {
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
   const blocker = useDraftBlocker({
@@ -27,6 +27,7 @@ export function DraftGuard({ dirty }: { dirty: boolean }) {
   return (
     <UnsavedDialog
       open={blocked}
+      lost={lost ?? null}
       onStay={() => {
         if (blocked) blocker.reset()
       }}

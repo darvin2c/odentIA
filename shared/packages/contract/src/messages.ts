@@ -84,24 +84,47 @@ export const accountOpenedEvent = z.object({
 })
 
 /**
- * Lo que hizo el agente de la app y se cobra: una conversación atendida, que sube si tomó un
- * pedido. Una por conversación (`conversation`): si primero llega «atendida» y después «pedido»,
- * sube mientras no se haya cobrado; repetida, no se cuenta otra vez.
+ * Lo que hizo un agente o la IA de la app y se cobra del saldo del plan. Dos tipos:
+ *
+ * - `conversacion`: una conversación atendida, que sube si tomó un pedido. Una por conversación
+ *   (`conversation`): si primero llega «atendida» y después «pedido», sube mientras no se haya
+ *   cobrado; repetida, no se cuenta otra vez.
+ * - `ia_fotos`: una vez que la IA de fotos miró (gestorIA, «Agregar desde fotos»), con cuántas
+ *   fotos miró. Una por mirada (`look`); repetida, no se cuenta otra vez. `costMicros` es lo que
+ *   le costó al proveedor de IA (millonésimas de USD, con el precio de lista), para el costo de la
+ *   administración: nunca el precio, que lo pone el plan.
+ *
+ * Una administración que todavía no cobra un tipo lo rechaza sin guardar su clave, y la app lo
+ * vuelve a enviar después: nada se pierde ni se cobra dos veces.
  */
 export const USAGE_OUTCOMES = ["atendida", "pedido"] as const
 export const USAGE_CHANNELS = ["whatsapp", "instagram", "messenger", "webchat"] as const
+export const USAGE_KINDS = ["conversacion", "ia_fotos"] as const
 export const usageEvent = z.object({
   type: z.literal("uso.contado"),
   timestamp: instant,
-  data: z.object({
-    account: accountRef,
-    kind: z.literal("conversacion"),
-    outcome: z.enum(USAGE_OUTCOMES),
-    /** La conversación en la app: la misma clave en sus dos avisos. */
-    conversation: z.string().trim().min(1).max(200),
-    occurredAt: instant,
-    channel: z.enum(USAGE_CHANNELS).nullable().optional(),
-  }),
+  data: z.discriminatedUnion("kind", [
+    z.object({
+      account: accountRef,
+      kind: z.literal("conversacion"),
+      outcome: z.enum(USAGE_OUTCOMES),
+      /** La conversación en la app: la misma clave en sus dos avisos. */
+      conversation: z.string().trim().min(1).max(200),
+      occurredAt: instant,
+      channel: z.enum(USAGE_CHANNELS).nullable().optional(),
+    }),
+    z.object({
+      account: accountRef,
+      kind: z.literal("ia_fotos"),
+      /** La mirada en la app: su clave, que no cambia al reintentar. */
+      look: z.string().trim().min(1).max(200),
+      /** Cuántas fotos miró (un texto que reescribió cuenta como una). */
+      photos: z.number().int().min(1).max(100),
+      /** Lo que le costó al proveedor de IA, en millonésimas de USD; null si no se sabe. */
+      costMicros: z.number().int().min(0).max(100_000_000).nullable(),
+      occurredAt: instant,
+    }),
+  ]),
 })
 
 /**

@@ -9,6 +9,7 @@ import {
   orderPayment,
   product,
   productLink,
+  productQuestion,
   productVariant,
   saleOrder,
   saleOrderLine,
@@ -16,10 +17,11 @@ import {
   storeDeliveryMethod,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
+import type { Storage } from "../archivos.js"
 import { conversationFichasIn, shownCustomerId } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
@@ -34,6 +36,7 @@ import {
   slotWords,
 } from "../entregas.js"
 import { momentWords } from "../hora.js"
+import { sofiMediaIn } from "../medios.js"
 import { chargesOrders, linkStateIn } from "../pasarela.js"
 import {
   addReceiptIn,
@@ -48,10 +51,12 @@ import {
   variantPrices,
 } from "../pedidos.js"
 import { familyIn, lastConsentIn } from "../perfil.js"
-import { autoUnitCents, type Quote } from "../precio.js"
+import { autoUnitCents, floorOf, type Quote } from "../precio.js"
+import { addQuestionIn } from "../preguntas.js"
 import { chargingPaymentsIn } from "../primeros-pasos.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
+import { type SofiProductFacts, sofiFactsIn } from "./ficha.js"
 import type { ToolDef } from "./modelo.js"
 import {
   type AgentChoices,
@@ -109,6 +114,37 @@ export interface TurnTrace {
   withheld: Withheld | null
   /** Pidió la baja de promociones: la respuesta es esta frase fija, y nada más. */
   optOut: string | null
+  /** Las fotos y el video que manda con su respuesta (`mandar_foto`). */
+  media: SentMedia[]
+  /** Los pedidos que anotó en este turno: van como tarjeta con su respuesta. */
+  orders: string[]
+  /** Lo que no supo y dejó a la tienda (`anotar_pregunta`). */
+  questions: { productId: string; product: string; question: string }[]
+  /**
+   * De dónde puede salir lo que dice («Qué usó Sofi» de la prueba): lo que leyó de la ficha, con
+   * las palabras que lo delatan en su respuesta. Lo que de verdad usó se mira al final
+   * (`usedIn`), contra lo que escribió.
+   */
+  facts: UsedFact[]
+}
+
+/** Una foto o un video que Sofi manda en su respuesta: lo que la clienta ve en el chat. */
+export interface SentMedia {
+  kind: "foto" | "video"
+  id: string
+  productId: string
+  product: string
+  /** El color de la foto, como está en la ficha; null si es de todo el producto. */
+  color: string | null
+  label: string | null
+}
+
+/** Un dato de la ficha que Sofi leyó, con dónde se completa (`target`, como en «Qué le falta»). */
+export interface UsedFact {
+  label: string
+  target: string
+  /** Las palabras que tienen que estar en su respuesta para contarlo como usado; vacío: siempre. */
+  words: string[]
 }
 
 export function newTrace(): TurnTrace {
@@ -119,12 +155,42 @@ export function newTrace(): TurnTrace {
     quotes: new Map(),
     handoff: null,
     offers: [],
+    media: [],
+    orders: [],
+    questions: [],
+    facts: [],
     refused: [],
     read: [],
     gap: null,
     withheld: null,
     optOut: null,
   }
+}
+
+/** Un texto en palabras sueltas, sin tildes ni signos, con un espacio a cada lado. */
+const spaced = (text: string) =>
+  ` ${plain(text)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()} `
+
+/**
+ * Lo que usó de la ficha para responder: lo que leyó y está en lo que escribió (palabra por
+ * palabra, sin tildes). No le pregunta al modelo: sale de lo que corrió y de lo que dijo.
+ */
+export function usedIn(
+  trace: Pick<TurnTrace, "facts">,
+  reply: string,
+): { label: string; target: string }[] {
+  const said = spaced(reply)
+  const seen = new Set<string>()
+  const used: { label: string; target: string }[] = []
+  for (const fact of trace.facts) {
+    if (seen.has(fact.label)) continue
+    if (!fact.words.every((word) => said.includes(spaced(word)))) continue
+    seen.add(fact.label)
+    used.push({ label: fact.label, target: fact.target })
+  }
+  return used.slice(0, 10)
 }
 
 /**
@@ -200,6 +266,8 @@ const OBJECTIONS = [
   // «¿me lo bajas?», «bájale»; no «caña baja».
   /\bbaj(as|ar|arme|ame|amelo|amela|ale|arias)\b/,
   /mas barat|mas economic|ultimo precio|precio final|mejor precio|buen precio|cuanto menos/,
+  // «¿Me haces precio?» es pedir rebaja (la sugerencia de «Probar como clienta»), no preguntarlo.
+  /\b(me|nos) (haces|harias|hace|haria) (un )?precio\b|\bhazme (un )?precio\b/,
   /\b(dejas|deja|dejarias|das|darias|pones) (en|a) \d/,
   /\b(un poco|algo|un toque) menos\b/,
   // Pedir el envío gratis, no preguntar si lo es («¿el envío es gratis?»).
@@ -296,6 +364,8 @@ export interface SofiToolContext {
   offer: SofiOffer | null
   /** Hasta cuándo vale lo que ofrezca ahora: el plazo de su oferta, o 24 horas desde ahora. */
   offerDeadline: Date
+  /** Dónde están las fotos y los videos (ADR 0236); sin él, elige la foto y no la firma. */
+  storage?: Storage | null
   /** Lo que la conversación tiene para negociar (`bargainOf`). */
   bargain: Bargain
   /** Lo que eligió la tienda (`opciones.ts`). */
@@ -421,6 +491,27 @@ const SCHEMAS = {
       .max(5)
       .describe("Los números de las preguntas de LO QUE SABE que necesitas, como «p3»"),
   }),
+  mandar_foto: z.object({
+    producto_id: z.string().describe("El producto_id que devolvió buscar_productos"),
+    color: z
+      .string()
+      .max(30)
+      .optional()
+      .describe("El color que pidió la clienta, como sale en colores; sin él, la de portada"),
+    video: z
+      .boolean()
+      .optional()
+      .describe("true si pide verla puesta o en video: manda el video en vez de la foto"),
+  }),
+  anotar_pregunta: z.object({
+    producto_id: z.string().describe("El producto_id del que pregunta"),
+    pregunta: z
+      .string()
+      .trim()
+      .min(3)
+      .max(300)
+      .describe("Lo que preguntó la clienta, corto y claro, como una pregunta"),
+  }),
   anotar_permiso: z.object({
     respuesta: z.enum(["si", "no"]).describe("Lo que contestó: si (quiere que le avises) o no"),
     cita: quoteText,
@@ -447,7 +538,11 @@ const DESCRIPTIONS: Record<SofiToolName, string> = {
   avisar_cuando_vuelva:
     "Anota que el cliente quiere que le avises cuando vuelva una variante agotada.",
   pasar_a_persona:
-    "Pasa la conversación a una persona del equipo: cuando no sabes, hay un reclamo, una devolución o un cambio, el cliente lo pide, o lo que la tienda agregó en CUÁNDO PASAS EL CHAT. Si es porque no sabes, escribe la pregunta: la tienda la verá para responderla una vez.",
+    "Pasa la conversación a una persona del equipo: cuando no sabes algo que no es de un producto, hay un reclamo, una devolución o un cambio, el cliente lo pide, o lo que la tienda agregó en CUÁNDO PASAS EL CHAT. Si es porque no sabes, escribe la pregunta: la tienda la verá para responderla una vez.",
+  mandar_foto:
+    "Manda con tu respuesta la foto del color que pide la clienta (la que eligió la tienda para ese color) o, con video: true, el video del producto cuando pide verla puesta. Úsala cuando hablas de un color o te piden verlo.",
+  anotar_pregunta:
+    "Deja a la tienda una pregunta de un producto que la ficha no responde (ni datos ni preguntas_respondidas). Después dices «No lo tengo confirmado. Le pregunto a la tienda y te escribo» y sigues vendiendo. Nunca inventes la respuesta ni prometas una hora.",
   leer_lo_que_sabe:
     "Lee la respuesta que escribió la tienda a una o más preguntas de LO QUE SABE. Úsala antes de responder algo de la tienda que no sale del catálogo: horario, cambios, cuidados, dónde están.",
   anotar_permiso:
@@ -856,6 +951,61 @@ export function stateWords(
   return words[order.state] ?? order.state
 }
 
+/**
+ * Anota lo que Sofi leyó de una ficha, para decir después de dónde salió su respuesta: cada dato
+ * del rubro, cada pregunta respondida, el estado y el stock de cada variante.
+ */
+function noteFacts(
+  ctx: SofiToolContext,
+  ficha: SofiProductFacts,
+  variants: { variantName: string; stock: number; optionValues: string[] }[],
+) {
+  const words = (text: string) =>
+    plain(text)
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 2 && !STOP.has(w))
+  // Un dato sin palabras propias (solo números o unidades) no se puede reconocer en lo que
+  // escribió: no se dice que lo usó.
+  for (const { dato, valor, clave } of ficha.datos) {
+    const found = words(valor).slice(0, 2)
+    if (found.length)
+      ctx.trace.facts.push({
+        label: `${dato}: ${valor.length > 34 ? `${valor.slice(0, 33)}…` : valor.toLowerCase()}`,
+        // «Completar» lleva a ese dato de la ficha (`#dato-<clave>`, `anchorOf`).
+        target: `dato:${clave}`,
+        words: found,
+      })
+  }
+  for (const { pregunta, respuesta } of ficha.preguntas_respondidas) {
+    const found = words(respuesta).slice(0, 3)
+    if (found.length)
+      ctx.trace.facts.push({
+        label: `Pregunta respondida: ${pregunta}`,
+        target: "preguntas",
+        words: found,
+      })
+  }
+  // El estado se reconoce por lo que dice Sofi en cada uno (las frases de `statusWords`).
+  const said = ficha.estado
+    ? (
+        [
+          ["Por encargo", "Estado: por encargo", "consigo"],
+          ["Con cupo", "Estado: con cupo por día", "por dia"],
+          ["Preventa", "Estado: preventa", "llega"],
+          ["Liquidación", "Estado: liquidación", "liquidacion"],
+        ] as const
+      ).find(([start]) => ficha.estado!.startsWith(start))
+    : undefined
+  if (said) ctx.trace.facts.push({ label: said[1], target: "estado", words: [said[2]] })
+  for (const v of variants)
+    if (v.optionValues.length)
+      ctx.trace.facts.push({
+        label: `Stock ${v.optionValues.join(" ")}: ${v.stock}`,
+        target: "stock",
+        words: [...v.optionValues, String(v.stock)],
+      })
+}
+
 async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_productos>) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const variants = await variantPrices(tx, ctx.storeId, ctx.today)
@@ -904,36 +1054,55 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
         ),
       )
     const nameOf = new Map(products.map((p) => [p.id, p.name]))
+    const facts = await sofiFactsIn(
+      tx,
+      ctx.storeId,
+      chosen.map((p) => p.id),
+    )
     const money = (cents: number) => {
       ctx.trace.amounts.add(cents)
       return formatMoney(cents, ctx.currency)
     }
     const fromPrice = (id: string) => {
       const own = byProduct.get(id) ?? []
-      const inStock = own.filter((v) => v.stock > 0)
+      const inStock = own.filter((v) => v.stock > 0 || v.sellsWithoutStock)
       const prices = (inStock.length ? inStock : own).map((v) => autoUnitCents(v.pricing, 1))
       if (prices.length === 0) return null
       const low = Math.min(...prices)
       return { low, varies: prices.some((p) => p !== low), inStock: inStock.length > 0 }
     }
-    const related = (id: string, kind: "parecido" | "combina") =>
-      links
-        .filter((l) => l.kind === kind && (l.a === id || l.b === id))
-        .map((l) => (l.a === id ? l.b : l.a))
-        .map((other) => ({ other, price: fromPrice(other) }))
-        // Nunca algo sin stock (tablero 8).
-        .filter((r) => r.price?.inStock && nameOf.has(r.other))
-        .map((r) => ({
-          producto_id: r.other,
-          nombre: nameOf.get(r.other)!,
-          precio: `${r.price!.varies ? "desde " : ""}${money(r.price!.low)}`,
-        }))
+    const related = (id: string, kind: "parecido" | "combina") => {
+      const own = fromPrice(id)
+      return (
+        links
+          .filter((l) => l.kind === kind && (l.a === id || l.b === id))
+          .map((l) => (l.a === id ? l.b : l.a))
+          .map((other) => ({ other, price: fromPrice(other) }))
+          // Nunca algo sin stock (tablero 8).
+          .filter((r) => r.price?.inStock && nameOf.has(r.other))
+          // «Algo más barato» lo es de verdad: su precio de venta de hoy (`autoUnitCents`, con
+          // su promoción) es menor. El vínculo vale en los dos sentidos; desde el más barato,
+          // el otro no se ofrece como más barato.
+          .filter((r) => kind !== "parecido" || (own !== null && r.price!.low < own.low))
+          .map((r) => ({
+            producto_id: r.other,
+            nombre: nameOf.get(r.other)!,
+            precio: `${r.price!.varies ? "desde " : ""}${money(r.price!.low)}`,
+          }))
+      )
+    }
     return {
       productos: chosen.map((p) => {
         const own = byProduct.get(p.id) ?? []
         const first = own[0]!
         const price = fromPrice(p.id)!
-        if (first.pricing.percentOff) ctx.trace.percents.add(first.pricing.percentOff)
+        const ficha = facts.get(p.id)
+        if (ficha) noteFacts(ctx, ficha, own)
+        // La promoción puede ser de un color o de una talla: cuenta la de cada variante.
+        for (const v of own) if (v.pricing.percentOff) ctx.trace.percents.add(v.pricing.percentOff)
+        const promoted = own.filter((v) => v.promotion)
+        const wholeProduct =
+          promoted.length === own.length && new Set(promoted.map((v) => v.promotion)).size === 1
         // Lo que dice la descripción («100 % cuero») también se puede repetir.
         for (const percent of percentsIn(p.description)) ctx.trace.percents.add(percent)
         return {
@@ -942,7 +1111,7 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
           categoria: p.category,
           descripcion: p.description.slice(0, 400),
           precio: `${price.varies ? "desde " : ""}${money(price.low)}`,
-          ...(first.promotion
+          ...(wholeProduct
             ? { promocion: `${first.promotion} (${first.pricing.percentOff} % menos, ya incluido)` }
             : {}),
           ...(first.pricing.quantityPrices.length
@@ -953,7 +1122,11 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
                 ),
               }
             : {}),
-          se_negocia: first.pricing.minPriceCents !== null,
+          // En liquidación o sin mínimo no se negocia (la misma regla del precio).
+          se_negocia: own.some((v) => {
+            const auto = autoUnitCents(v.pricing, 1)
+            return floorOf(v.pricing, auto) < auto
+          }),
           variantes: own.map((v) => {
             const unit = autoUnitCents(v.pricing, 1)
             if (v.pricing.listUnitCents !== unit) money(v.pricing.listUnitCents)
@@ -962,11 +1135,29 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
               opciones: v.variantName,
               precio: money(unit),
               stock: v.stock,
-              ...(v.stock === 0 ? { agotada: true } : {}),
+              ...(v.stock === 0 && !v.sellsWithoutStock ? { agotada: true } : {}),
+              ...(v.promotion && !wholeProduct
+                ? { promocion: `${v.promotion} (${v.pricing.percentOff} % menos, ya incluido)` }
+                : {}),
             }
           }),
           parecido: related(p.id, "parecido"),
           combina: related(p.id, "combina"),
+          ...(ficha
+            ? {
+                ...(ficha.estado ? { estado: ficha.estado } : {}),
+                datos: ficha.datos.map(({ dato, valor }) => ({ dato, valor })),
+                ...(ficha.sin_dato.length ? { la_ficha_no_dice: ficha.sin_dato } : {}),
+                ...(ficha.preguntas_respondidas.length
+                  ? { preguntas_respondidas: ficha.preguntas_respondidas }
+                  : {}),
+                ...(ficha.colores.length ? { colores: ficha.colores } : {}),
+                ...(ficha.video ? { video: ficha.video } : {}),
+                puede_ofrecer: ficha.puede_ofrecer.length
+                  ? ficha.puede_ofrecer
+                  : ["nada: este producto va a su precio"],
+              }
+            : {}),
         }
       }),
       ...(matched.length === 0
@@ -979,7 +1170,7 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
 async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
   return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
     const input = await toOrderInput(tx, ctx, args)
-    const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
+    const result = await quoteOrderIn(tx, ctx.storeId, input, ctx.today, { byAgent: true })
     if (!result.quote) return { ok: false, problemas: problemsOf(result.fields, input) }
     const q = result.quote
     const problem = offerProblem(
@@ -1008,6 +1199,33 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
       return formatMoney(cents, ctx.currency)
     }
     ctx.trace.quotes.set(quoteKey(input, q.totalCents), q.totalCents)
+    const named = new Map(
+      (
+        await variantPrices(
+          tx,
+          ctx.storeId,
+          ctx.today,
+          input.lines.map((l) => l.variantId),
+        )
+      ).map((v) => [v.id, v.variantName === "Única" ? v.productName : v.variantName]),
+    )
+    for (const [i, line] of q.lines.entries())
+      if (!line.gift && line.unitCents !== null)
+        ctx.trace.facts.push({
+          label:
+            `Precio ${named.get(input.lines[i]!.variantId) ?? ""}: ${formatMoney(line.unitCents, ctx.currency)}`.replace(
+              /\s+/g,
+              " ",
+            ),
+          target: "precio",
+          words: [],
+        })
+    if (q.negotiated)
+      ctx.trace.facts.push({
+        label: `Cede ${formatMoney(q.marginUsedCents, ctx.currency)} del margen · una sola oferta, con plazo`,
+        target: "ofertas",
+        words: [],
+      })
     const absorbed = q.deliveryFreeByPolicy ? 0 : q.deliveryListCents - q.deliveryCents
     const method = await deliveryRowOf(tx, ctx.storeId, input.deliveryMethodId)
     const parcel = method?.type === "ParcelService" ? parcelFacts(method, money) : null
@@ -1070,7 +1288,7 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
     const customer =
       method?.type === "ParcelService" ? { ...args, direccion: parcelAddress(method, args) } : args
     const input = await toOrderInput(tx, ctx, args, customer)
-    const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today)
+    const priced = await quoteOrderIn(tx, ctx.storeId, input, ctx.today, { byAgent: true })
     if (!priced.quote) return { ok: false, problemas: problemsOf(priced.fields, input) }
     const problem = offerProblem(
       ctx.offer,
@@ -1165,6 +1383,7 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
       .set({ customerName: args.nombre.trim().slice(0, 120), updatedAt: new Date() })
       .where(and(eq(conversation.id, ctx.conversationId), eq(conversation.storeId, ctx.storeId)))
     ctx.trace.amounts.add(created.totalCents)
+    ctx.trace.orders.push(created.id)
     return {
       ok: true,
       pedido: created.number,
@@ -1319,6 +1538,109 @@ async function notifyBack(
   })
 }
 
+/** Un producto de la tienda que se vende, por su id (el que devolvió la búsqueda). */
+async function sellableProduct(tx: Db, ctx: SofiToolContext, productId: string) {
+  if (!z.uuid().safeParse(productId).success)
+    throw new ToolProblem(
+      "Ese producto no está en el catálogo: usa el producto_id de buscar_productos",
+      "DATOS",
+    )
+  const [row] = await tx
+    .select({ id: product.id, name: product.name, status: product.status })
+    .from(product)
+    .where(and(eq(product.id, productId), eq(product.storeId, ctx.storeId)))
+  if (!row || row.status === "no_se_vende")
+    throw new ToolProblem("Ese producto no está en el catálogo", "DATOS")
+  return row
+}
+
+/**
+ * La foto del color que pide la clienta, o el video si pide verla puesta (decisión 9): la elige
+ * `sofiMediaIn`, la misma regla de la vitrina. Sale con su respuesta; la clienta la ve en el chat.
+ */
+async function sendMedia(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.mandar_foto>) {
+  return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
+    const found = await sellableProduct(tx, ctx, args.producto_id)
+    const media = await sofiMediaIn(tx, ctx.storage, ctx.storeId, found.id, args.color ?? null)
+    const chosen = args.video ? media.video : media.photo
+    if (!chosen)
+      return {
+        ok: false,
+        problema: args.video
+          ? "Este producto no tiene video: ofrécele la foto o descríbelo con sus datos"
+          : "Este producto no tiene fotos guardadas: descríbelo con sus datos",
+      }
+    if (ctx.trace.media.length >= 3)
+      return { ok: false, problema: "Ya mandas tres fotos o videos en esta respuesta: no más" }
+    if (!ctx.trace.media.some((m) => m.id === chosen.id))
+      ctx.trace.media.push({
+        kind: chosen.kind,
+        id: chosen.id,
+        productId: found.id,
+        product: found.name,
+        color: chosen.color,
+        label: chosen.label,
+      })
+    const asked = args.color?.trim()
+    const sameColor = !asked || (chosen.color !== null && plain(chosen.color) === plain(asked))
+    ctx.trace.facts.push({
+      label:
+        chosen.kind === "video"
+          ? `Video${chosen.label ? ` «${chosen.label}»` : ""}`
+          : `Foto de «${chosen.color ?? "portada"}»`,
+      target: "fotos",
+      words: [],
+    })
+    return {
+      ok: true,
+      manda: chosen.kind === "video" ? "el video" : "la foto",
+      ...(chosen.color ? { color: chosen.color } : {}),
+      ...(chosen.label ? { muestra: chosen.label } : {}),
+      ...(sameColor
+        ? {}
+        : {
+            ojo: `No hay foto de «${asked}»: va la del producto. No digas que es de ese color.`,
+          }),
+    }
+  })
+}
+
+/**
+ * Lo que Sofi no supo (tablero 12): deja la pregunta en el producto y sigue vendiendo. La tienda la
+ * responde en «Te toca»; la base solo le deja anotarla, sin respuesta (`0035`).
+ */
+async function askStore(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.anotar_pregunta>) {
+  return withAgent(ctx.appDb, SOFI_ACTOR, ctx.storeId, async (tx) => {
+    const found = await sellableProduct(tx, ctx, args.producto_id)
+    const question = args.pregunta.trim()
+    // La misma pregunta, de la misma conversación y sin responder, no se anota dos veces.
+    const waiting = await tx
+      .select({ question: productQuestion.question })
+      .from(productQuestion)
+      .where(
+        and(
+          eq(productQuestion.storeId, ctx.storeId),
+          eq(productQuestion.productId, found.id),
+          eq(productQuestion.conversationId, ctx.conversationId),
+          isNull(productQuestion.answer),
+        ),
+      )
+    const already = waiting.some((q) => plain(q.question) === plain(question))
+    if (!already) {
+      await addQuestionIn(tx, ctx.storeId, SOFI_ACTOR, {
+        productId: found.id,
+        conversationId: ctx.conversationId,
+        question,
+      })
+      ctx.trace.questions.push({ productId: found.id, product: found.name, question })
+    }
+    return {
+      ok: true,
+      nota: "Anotada para la tienda. Dile que no lo tienes confirmado y que le preguntas a la tienda y le escribes; no prometas una hora. Sigue con la venta.",
+    }
+  })
+}
+
 async function handOff(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.pasar_a_persona>) {
   ctx.trace.handoff = args.motivo.trim()
   // Lo que no supo responder va a «Lo que aprendió»: solo lo propone, la tienda decide.
@@ -1368,7 +1690,9 @@ async function cartDelivery(
   } catch {
     return null
   }
-  const priced = await quoteOrderIn(tx, ctx.storeId, { ...input, district }, ctx.today)
+  const priced = await quoteOrderIn(tx, ctx.storeId, { ...input, district }, ctx.today, {
+    byAgent: true,
+  })
   return priced.quote ? { quote: priced.quote, freeFromCents: priced.freeFromCents } : null
 }
 
@@ -1637,6 +1961,8 @@ const RUN: Record<SofiToolName, (ctx: SofiToolContext, args: never) => Promise<u
   ver_pedidos: orders,
   avisar_cuando_vuelva: notifyBack,
   pasar_a_persona: handOff,
+  mandar_foto: sendMedia,
+  anotar_pregunta: askStore,
   leer_lo_que_sabe: readAnswers,
   anotar_permiso: (ctx, args: z.infer<typeof SCHEMAS.anotar_permiso>) =>
     noteConsent(ctx, args.respuesta, args.cita),

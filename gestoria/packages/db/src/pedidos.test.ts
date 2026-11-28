@@ -581,4 +581,64 @@ describe("el dinero devuelto (tablero 17)", () => {
     ).rejects.toThrow()
     expect(await inMario((tx) => tx.select().from(orderRefund))).toEqual([])
   })
+
+  it("un pedido de prueba lleva su numeración, no sale ni se entrega y no se le anota un aviso", async () => {
+    // El número 1 de una venta ya existe: la prueba tiene el suyo, también el 1.
+    const [test] = await inRosa((tx) =>
+      tx
+        .insert(saleOrder)
+        .values({ ...anOrder(calzados, 1, rosa.userId), test: true })
+        .returning({ id: saleOrder.id }),
+    )
+    await expect(
+      inRosa((tx) =>
+        tx.insert(saleOrder).values({ ...anOrder(calzados, 1, rosa.userId), test: true }),
+      ),
+    ).rejects.toThrow()
+    // Se paga de prueba (queda por salir), pero nunca va en camino ni entregado.
+    await inRosa((tx) =>
+      tx.update(saleOrder).set({ state: "por_salir" }).where(eq(saleOrder.id, test!.id)),
+    )
+    for (const state of ["en_camino", "entregado"] as const)
+      await expect(
+        inRosa((tx) => tx.update(saleOrder).set({ state }).where(eq(saleOrder.id, test!.id))),
+      ).rejects.toThrow()
+    await expect(
+      inRosa((tx) =>
+        tx
+          .insert(saleOrder)
+          .values({ ...anOrder(calzados, 2, rosa.userId), test: true, state: "entregado" }),
+      ),
+    ).rejects.toThrow()
+    // Su historia sí se anota, pero no un aviso al cliente.
+    await inRosa((tx) =>
+      tx.insert(orderEvent).values({
+        storeId: calzados,
+        orderId: test!.id,
+        actorUserId: rosa.userId,
+        action: "pago_confirmado",
+      }),
+    )
+    await expect(
+      inRosa((tx) =>
+        tx.insert(orderEvent).values({
+          storeId: calzados,
+          orderId: test!.id,
+          actorUserId: rosa.userId,
+          action: "aviso",
+          detail: { tipo: "pago_confirmado" },
+        }),
+      ),
+    ).rejects.toThrow()
+    // Una venta sí avisa.
+    await inRosa((tx) =>
+      tx.insert(orderEvent).values({
+        storeId: calzados,
+        orderId,
+        actorUserId: rosa.userId,
+        action: "aviso",
+        detail: { tipo: "resumen" },
+      }),
+    )
+  })
 })

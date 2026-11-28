@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto"
 import {
   conversation,
   orderEvent,
+  productQuestion,
   pushChoice,
   pushDevice,
   saleOrder,
@@ -187,6 +188,7 @@ describe("activar un celular y elegir qué llega", () => {
       ["chats", true],
       ["no_entregado", true],
       ["sofi_pedido", false],
+      ["preguntas", true],
     ])
     expect(mine.json.devices).toBe(1)
     expect(
@@ -272,6 +274,39 @@ describe("el envío", () => {
       expect(titlesFor(deliveries, who)).toEqual(["Carla Mendoza pide hablar con una persona"])
     // Lucía los apagó al elegir: lo que elige manda.
     expect(titlesFor(deliveries, "lucia")).toEqual([])
+    expect(await collectPushes(db.ownerDb)).toEqual([])
+  })
+
+  it("lo que Sofi no supo avisa una vez a quien atiende; lo de la prueba no", async () => {
+    const created = await call("rosa", "POST", `${base}/productos`, {
+      name: "Zapatilla de lona",
+      listPriceCents: 11900,
+    })
+    const productId = created.json.product.id as string
+    const chats = await db.ownerDb
+      .insert(conversation)
+      .values([
+        { storeId, channel: "whatsapp", customerName: "Valeria", createdBy: SOFI_ACTOR },
+        { storeId, channel: "prueba", createdBy: people.rosa.id },
+      ])
+      .returning({ id: conversation.id })
+    await db.ownerDb.insert(productQuestion).values(
+      chats.map((chat, i) => ({
+        storeId,
+        productId,
+        conversationId: chat.id,
+        question: i === 0 ? "¿Destiñe al lavarla?" : "¿Es de la prueba?",
+        askedBy: SOFI_ACTOR,
+      })),
+    )
+    const deliveries = await collectPushes(db.ownerDb)
+    for (const who of ["rosa", "kevin"] as const)
+      expect(titlesFor(deliveries, who)).toEqual(["Sofi no supo: «¿Destiñe al lavarla?»"])
+    // Lucía eligió sin este tipo: lo que elige manda.
+    expect(titlesFor(deliveries, "lucia")).toEqual([])
+    expect(deliveries.find((d) => d.message.title.startsWith("Sofi no supo"))?.message.href).toBe(
+      `/tiendas/${storeId}`,
+    )
     expect(await collectPushes(db.ownerDb)).toEqual([])
   })
 

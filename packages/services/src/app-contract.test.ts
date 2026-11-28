@@ -606,6 +606,24 @@ describe("el acuerdo", () => {
     expect(ledger!.n).toBe(0)
   })
 
+  it("lo que miró la IA de fotos todavía no se cobra: se rechaza sin guardar la clave, para reintentarlo", async () => {
+    const photos = event("uso.contado", {
+      account: "calzados-rosa",
+      kind: "ia_fotos",
+      look: "mirada-1",
+      photos: 3,
+      costMicros: 350,
+      occurredAt: NOW.toISOString(),
+    })
+    await expect(receiveAppEvent(ownerDb, GESTORIA, "ia-fotos-1", photos)).rejects.toMatchObject({
+      status: 503,
+    })
+    const [ledger] = (await ownerDb.execute(
+      sql`select count(*)::int as n from admin.app_contract_message where id = 'ia-fotos-1'`,
+    )) as unknown as { n: number }[]
+    expect(ledger!.n).toBe(0)
+  })
+
   it("un aviso de cuenta más viejo que llega tarde no pisa lo último", async () => {
     await receiveAppEvent(
       ownerDb,

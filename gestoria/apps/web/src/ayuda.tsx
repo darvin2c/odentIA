@@ -4,7 +4,7 @@ import { HelpButton } from "@odentia/ui-patterns/help"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CircleHelp } from "lucide-react"
 import { api, type MyStore } from "./lib/api"
-import { HELP_KEY, type HelpQuestion, questionStatus } from "./lib/ayuda"
+import { HELP_KEY, type HelpQuestion, helpRequestWithPanel, questionStatus } from "./lib/ayuda"
 import { when } from "./lib/pedidos"
 
 /**
@@ -35,10 +35,13 @@ export function StoreHelpButton({ store }: { store: MyStore }) {
 
 /** El panel llama con el cuerpo ya en texto; `api` lo quiere como dato y pone la sesión. */
 function helpFetch(path: string, init?: RequestInit): Promise<unknown> {
-  return api<unknown>(path, {
-    method: init?.method,
-    body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-  })
+  // Con un panel abierto que la guía tiene como pantalla («Probar como clienta»), la Ayuda habla
+  // de ese panel.
+  const sent = helpRequestWithPanel(
+    path,
+    typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+  )
+  return api<unknown>(sent.path, { method: init?.method, body: sent.body })
 }
 
 /**

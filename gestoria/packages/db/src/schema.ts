@@ -9,6 +9,7 @@ import {
   index,
   integer,
   jsonb,
+  type PgTableExtraConfigValue,
   pgTable,
   pgView,
   primaryKey,
@@ -289,6 +290,10 @@ export const STORE_EVENT_ACTIONS = [
   "configuracion.tienda",
   // «Tu marca»: el nombre que ve el cliente, el color, el logo, la portada y el nombre del link.
   "configuracion.marca",
+  // La plantilla de un rubro que ajustó la tienda (lienzo «La ficha del producto», decisión 1).
+  "catalogo.plantilla",
+  // «Cargar muchos»: lo que pasó al catálogo con «Crear» (ADR 0236).
+  "catalogo.carga",
   // Los repartidores de la tienda y su pago por entrega (tablero 9).
   "repartidor.agregado",
   "repartidor.cambiado",
@@ -597,6 +602,43 @@ export interface ProductOption {
 export const MAX_PRODUCT_OPTIONS = 3
 
 /**
+ * Los rubros de la ficha del producto (lienzo «La ficha del producto», tablero 10; decisión 1):
+ * cada uno con su plantilla fija en `apps/api/src/rubros.ts`, que cada tienda ajusta en
+ * `store_template_field`.
+ */
+export const PRODUCT_RUBROS = ["calzado", "ropa", "cosmetica", "tecnologia", "hogar"] as const
+export type ProductRubro = (typeof PRODUCT_RUBROS)[number]
+
+/**
+ * Lo que la tienda dice del producto (decisión 8). «Disponible» y «agotado» no se guardan: salen
+ * del stock. Por encargo lleva en cuántos días; con cupo, cuántos por día; preventa, cuándo llega.
+ * En liquidación el mínimo es el precio: no se negocia. «Ya no se vende» no entra a un pedido.
+ */
+export const PRODUCT_STATUSES = [
+  "encargo",
+  "cupo",
+  "preventa",
+  "liquidacion",
+  "no_se_vende",
+] as const
+export type ProductStatus = (typeof PRODUCT_STATUSES)[number]
+
+/**
+ * El valor de un dato del rubro: una opción o un texto (`string`), un número (en la unidad de la
+ * plantilla), uno por cada talla (`{ "38": 24 }`), una tabla por talla (`{ "M": [50, 68] }`, en
+ * el orden de sus columnas), una fecha ISO 8601 (`2028-06` o `2028-06-15`) o «No aplica».
+ */
+export type RubroValue =
+  | string
+  | number
+  | Record<string, number>
+  | Record<string, (number | null)[]>
+  | { noAplica: true }
+
+/** Lo más que una ficha guarda de palabras con que la buscan. */
+export const MAX_PRODUCT_KEYWORDS = 30
+
+/**
  * Un producto: agrupa sus variantes (Schema.org `ProductGroup`). Tiene su precio de lista y,
  * si se negocia, su precio mínimo de venta (tablero 14): sin mínimo, no se negocia.
  */
@@ -607,15 +649,99 @@ export const product = pgTable(
     storeId: uuid("store_id").notNull(),
     name: text("name").notNull(),
     category: text("category"),
-    /** «Lo que Sofi puede contar»: material, horma, cuidados. */
+    /** «Lo que Sofi puede contar»: el texto libre de la ficha (material, horma, cuidados). */
     description: text("description").notNull().default(""),
     listPriceCents: integer("list_price_cents").notNull(),
     minPriceCents: integer("min_price_cents"),
     options: jsonb("options").$type<ProductOption[]>().notNull().default([]),
+    /**
+     * Cuál de sus opciones es el color (o el tono, o el acabado): su índice en `options`. Los
+     * colores existen por los valores de esa opción, en su orden; `product_color` guarda solo
+     * cómo se ven (hex) y su foto. Nulo: el producto no tiene color.
+     */
+    colorOption: smallint("color_option"),
+    /** El rubro de su plantilla; nulo: sin datos del rubro. */
+    rubro: text("rubro").$type<ProductRubro>(),
+    /** Los datos del rubro, por la clave de cada dato de la plantilla (`RubroValue`). */
+    rubroData: jsonb("rubro_data").$type<Record<string, RubroValue>>().notNull().default({}),
+    /** El código del producto («ZAP-LONA»), único en la tienda; cada variante tiene el suyo (SKU). */
+    code: text("code"),
+    status: text("status").$type<ProductStatus>(),
+    /** Por encargo: en cuántos días se consigue. */
+    statusDays: smallint("status_days"),
+    /** Con cupo: cuántos se hacen por día. */
+    statusPerDay: smallint("status_per_day"),
+    /** Preventa: el día que llega. */
+    statusDate: date("status_date"),
+    /**
+     * El paquete para la agencia (decisión 10), opcional: el peso en gramos y las medidas en
+     * milímetros, enteros en unidades del SI (ISO 80000), como los pide GS1 para el envío. La
+     * pantalla los muestra en kg y cm. Las tres medidas van juntas.
+     */
+    packageWeightG: integer("package_weight_g"),
+    packageLengthMm: integer("package_length_mm"),
+    packageWidthMm: integer("package_width_mm"),
+    packageHeightMm: integer("package_height_mm"),
+    /** Las palabras con que lo buscan las clientas («zapa», «tenis»). */
+    keywords: text("keywords").array().notNull().default(sql`'{}'::text[]`),
+    /** Si se muestra en la web de la tienda y su nombre en el link, único en la tienda. */
+    webVisible: boolean("web_visible").notNull().default(true),
+    webSlug: text("web_slug"),
+    /**
+     * El precio para revendedoras («por mayor»): desde tantas unidades del producto, cada una a
+     * tanto. Es un precio por cantidad más, con su nombre: no se suma con otro (va el mejor).
+     */
+    wholesaleMinQuantity: smallint("wholesale_min_quantity"),
+    wholesalePriceCents: integer("wholesale_price_cents"),
+    /** El combo: cuánto menos cuesta lo que combina con este (`product_link` «combina») si va junto. */
+    comboPercentOff: smallint("combo_percent_off"),
+    /**
+     * Lo que Sofi puede ofrecer de este producto (tablero 21 del lienzo «gestorIA como odentIA»),
+     * siempre del mismo margen y una sola vez (ADR 0224): poner el envío, unos soles menos, el
+     * precio de la 2.ª unidad y un regalo (lo que regala, en palabras; nulo: no regala).
+     */
+    offerDelivery: boolean("offer_delivery").notNull().default(true),
+    offerDiscount: boolean("offer_discount").notNull().default(true),
+    offerSecondUnit: boolean("offer_second_unit").notNull().default(false),
+    offerGift: text("offer_gift"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "product_wholesale_check",
+      sql`(${table.wholesaleMinQuantity} is null) = (${table.wholesalePriceCents} is null) and (${table.wholesaleMinQuantity} is null or (${table.wholesaleMinQuantity} between 2 and 10000 and ${table.wholesalePriceCents} > 0 and ${table.wholesalePriceCents} < ${table.listPriceCents}))`,
+    ),
+    check(
+      "product_offers_check",
+      sql`(${table.comboPercentOff} is null or ${table.comboPercentOff} between 1 and 90) and (${table.offerGift} is null or char_length(btrim(${table.offerGift})) between 1 and 80)`,
+    ),
+    check(
+      "product_color_option_check",
+      sql`${table.colorOption} is null or ${table.colorOption} between 0 and 2`,
+    ),
+    check("product_rubro_check", sql`${table.rubro} is null or ${inList("rubro", PRODUCT_RUBROS)}`),
+    check("product_rubro_data_check", sql`jsonb_typeof(${table.rubroData}) = 'object'`),
+    check(
+      "product_code_check",
+      sql`${table.code} is null or ${table.code} ~ '^[A-Za-z0-9._/-]{1,40}$'`,
+    ),
+    check(
+      "product_status_check",
+      sql`(${table.status} is null or ${inList("status", PRODUCT_STATUSES)}) and coalesce(${table.status} = 'encargo', false) = (${table.statusDays} is not null) and coalesce(${table.status} = 'cupo', false) = (${table.statusPerDay} is not null) and coalesce(${table.status} = 'preventa', false) = (${table.statusDate} is not null) and (${table.statusDays} is null or ${table.statusDays} between 1 and 365) and (${table.statusPerDay} is null or ${table.statusPerDay} between 1 and 1000)`,
+    ),
+    check(
+      "product_package_check",
+      sql`(${table.packageWeightG} is null or ${table.packageWeightG} between 1 and 1000000) and ((${table.packageLengthMm} is null and ${table.packageWidthMm} is null and ${table.packageHeightMm} is null) or (${table.packageLengthMm} is not null and ${table.packageWidthMm} is not null and ${table.packageHeightMm} is not null and ${table.packageLengthMm} between 1 and 10000 and ${table.packageWidthMm} between 1 and 10000 and ${table.packageHeightMm} between 1 and 10000))`,
+    ),
+    check(
+      "product_keywords_check",
+      sql`cardinality(${table.keywords}) <= ${sql.raw(String(MAX_PRODUCT_KEYWORDS))}`,
+    ),
+    check(
+      "product_web_slug_check",
+      sql`${table.webSlug} is null or (${table.webSlug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and char_length(${table.webSlug}) <= 80)`,
+    ),
     check("product_name_check", sql`char_length(btrim(${table.name})) between 1 and 120`),
     check(
       "product_category_check",
@@ -638,6 +764,12 @@ export const product = pgTable(
     }).onDelete("cascade"),
     unique("product_store_id_key").on(table.storeId, table.id),
     uniqueIndex("product_store_name_uidx").on(table.storeId, sql`lower(${table.name})`),
+    uniqueIndex("product_store_code_uidx")
+      .on(table.storeId, sql`lower(${table.code})`)
+      .where(sql`code is not null`),
+    uniqueIndex("product_store_web_slug_uidx")
+      .on(table.storeId, table.webSlug)
+      .where(sql`web_slug is not null`),
   ],
 )
 
@@ -649,6 +781,19 @@ export type PhotoType = (typeof PHOTO_TYPES)[number]
 /** Lo más que pesa una foto (la pantalla la achica antes de subirla) y cuántas lleva un producto. */
 export const MAX_PHOTO_BYTES = 1_500_000
 export const MAX_PRODUCT_PHOTOS = 8
+
+/**
+ * Las fotos y los videos del producto van al almacenamiento (ADR 0236), no a la base: la base
+ * guarda dónde están (`object_key`) y lo que se sabe de ellos. Una foto del producto pesa hasta
+ * 8 MB al subirla (la pantalla la achica antes); el video, hasta 16 MB y 30 segundos, lo que
+ * acepta WhatsApp (Cloud API: MP4 con H.264 y AAC, hasta 16 MB).
+ */
+export const MAX_MEDIA_PHOTO_BYTES = 8_000_000
+export const MAX_VIDEO_BYTES = 16_000_000
+export const MAX_VIDEO_MS = 30_000
+/** La propuesta de quitar el fondo: la que se ve (`usada`) o solo propuesta. La original se guarda siempre. */
+export const CUTOUT_STATES = ["propuesta", "usada"] as const
+export type CutoutState = (typeof CUTOUT_STATES)[number]
 
 /** Las imágenes de «Tu marca»: el logo y la foto de portada, una de cada una por tienda. */
 export const STORE_IMAGE_KINDS = ["logo", "portada"] as const
@@ -747,15 +892,41 @@ export const productPhoto = pgTable(
     productId: uuid("product_id").notNull(),
     position: smallint("position").notNull().default(0),
     contentType: text("content_type").$type<PhotoType>().notNull(),
-    content: bytea("content").notNull(),
+    /**
+     * Lo de antes del almacenamiento (ADR 0236): la foto en la base. Las nuevas no lo llevan; las
+     * de antes se mudan solas al arrancar el servidor (`moveStoredPhotos`) y la columna se borra
+     * en otra entrega, cuando ninguna imagen del servidor la lea.
+     */
+    content: bytea("content"),
+    /** Dónde está en el almacenamiento: la carpeta de la foto, con su original y sus copias. */
+    objectKey: text("object_key"),
+    /** La original, como llegó: su peso y su tamaño en píxeles. */
+    sizeBytes: integer("size_bytes"),
+    width: integer("width"),
+    height: integer("height"),
+    /** La propuesta de quitar el fondo (decisión 9): nula si no hay; la original se guarda siempre. */
+    cutout: text("cutout").$type<CutoutState>(),
+    /** La carpeta de esa propuesta (`<object_key>/sin-fondo/<id>`): cada propuesta, la suya. */
+    cutoutId: uuid("cutout_id"),
+    /** El color al que pertenece (decisión 9); nulo: vale para todos. */
+    colorId: uuid("color_id"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [
+  (table): PgTableExtraConfigValue[] => [
     check("product_photo_type_check", inList("content_type", PHOTO_TYPES)),
+    foreignKey({
+      name: "product_photo_color_fkey",
+      columns: [table.storeId, table.colorId],
+      foreignColumns: [productColor.storeId, productColor.id],
+    }),
     check(
       "product_photo_size_check",
-      sql`octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+      sql`${table.content} is null or octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+    ),
+    check(
+      "product_photo_where_check",
+      sql`(${table.content} is not null or ${table.objectKey} is not null) and (${table.objectKey} is null or ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$') and (${table.sizeBytes} is null or ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_MEDIA_PHOTO_BYTES))}) and (${table.cutout} is null or (${table.objectKey} is not null and ${inList("cutout", CUTOUT_STATES)})) and (${table.cutout} is null) = (${table.cutoutId} is null)`,
     ),
     foreignKey({
       name: "product_photo_product_fkey",
@@ -764,6 +935,361 @@ export const productPhoto = pgTable(
     }).onDelete("cascade"),
     unique("product_photo_store_id_key").on(table.storeId, table.id),
     index("product_photo_product_idx").on(table.productId, table.position),
+  ],
+)
+
+/**
+ * Cómo se ve un color de un producto (decisiones 6 y 9): su hex (`#rrggbb`, en minúsculas), el
+ * segundo si es bicolor y la foto que manda Sofi cuando piden ese color. Qué colores hay y en qué
+ * orden no se guarda aquí: son los valores de la opción del color (`product.color_option`), y
+ * `value` es uno de ellos. Un valor sin fila es un color sin hex ni foto todavía.
+ */
+export const productColor = pgTable(
+  "product_color",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    productId: uuid("product_id").notNull(),
+    value: text("value").notNull(),
+    hex: text("hex"),
+    hex2: text("hex2"),
+    photoId: uuid("photo_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    check("product_color_value_check", sql`char_length(btrim(${table.value})) between 1 and 30`),
+    check(
+      "product_color_hex_check",
+      sql`(${table.hex} is null or ${table.hex} ~ '^#[0-9a-f]{6}$') and (${table.hex2} is null or (${table.hex} is not null and ${table.hex2} ~ '^#[0-9a-f]{6}$'))`,
+    ),
+    foreignKey({
+      name: "product_color_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "product_color_photo_fkey",
+      columns: [table.storeId, table.photoId],
+      foreignColumns: [productPhoto.storeId, productPhoto.id],
+    }),
+    unique("product_color_store_id_key").on(table.storeId, table.id),
+    uniqueIndex("product_color_value_uidx").on(table.productId, sql`lower(${table.value})`),
+  ],
+)
+
+/**
+ * El video corto de un producto o de uno de sus colores (decisión 9, «Puesta, caminando · 0:12»):
+ * Sofi lo manda cuando la clienta pide verla puesta. Uno por producto y color (nulo: el del
+ * producto). Está en el almacenamiento (ADR 0236), listo para WhatsApp: MP4 con H.264 sin
+ * cuadros B y AAC, hasta 16 MB y 30 segundos, con su póster (la imagen que se ve antes de darle).
+ */
+export const productVideo = pgTable(
+  "product_video",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    productId: uuid("product_id").notNull(),
+    colorId: uuid("color_id"),
+    /** Lo que muestra, como lo dice la tienda: «Puesta, caminando». */
+    label: text("label").notNull().default(""),
+    objectKey: text("object_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    check(
+      "product_video_check",
+      sql`char_length(${table.label}) <= 60 and ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$' and ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_VIDEO_BYTES))} and ${table.durationMs} between 1 and ${sql.raw(String(MAX_VIDEO_MS))} and ${table.width} between 1 and 4096 and ${table.height} between 1 and 4096`,
+    ),
+    foreignKey({
+      name: "product_video_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "product_video_color_fkey",
+      columns: [table.storeId, table.colorId],
+      foreignColumns: [productColor.storeId, productColor.id],
+    }),
+    // Uno por producto y por color: el del producto lleva el color nulo.
+    uniqueIndex("product_video_color_uidx").on(
+      table.productId,
+      sql`coalesce(${table.colorId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+  ],
+)
+
+/** «Cargar muchos» (decisiones 3 y 4): una carga abierta se revisa; nada pasa al catálogo hasta «Crear». */
+export const BULK_LOAD_STATES = ["abierta", "creada", "descartada"] as const
+export type BulkLoadState = (typeof BULK_LOAD_STATES)[number]
+/** Cada producto de la carga: por revisar, listo o quitado (no se crea). */
+export const BULK_ITEM_STATES = ["revisar", "listo", "quitado"] as const
+export type BulkItemState = (typeof BULK_ITEM_STATES)[number]
+/** Lo más que lleva una carga: fotos y productos. */
+export const MAX_BULK_PHOTOS = 500
+export const MAX_BULK_ITEMS = 300
+
+/** Una variante de un producto de la carga: los valores de sus opciones, su stock y, si quiere, su código, su precio y su costo. */
+export interface BulkVariant {
+  values: string[]
+  stock: number
+  sku?: string | null
+  priceCents?: number | null
+  costCents?: number | null
+}
+
+/**
+ * Una carga de muchos productos: la abre una persona y queda abierta hasta «Crear» o «Descartar».
+ * Sus fotos ya están en el almacenamiento; sus productos, solo aquí.
+ */
+export const bulkLoad = pgTable(
+  "bulk_load",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    state: text("state").$type<BulkLoadState>().notNull().default("abierta"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Quién la creó o la descartó, cuándo y cuántos productos pasaron al catálogo. */
+    finishedBy: text("finished_by"),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdProducts: integer("created_products"),
+  },
+  (table) => [
+    check(
+      "bulk_load_state_check",
+      sql`${inList("state", BULK_LOAD_STATES)} and (${table.state} = 'abierta') = (${table.finishedAt} is null) and (${table.state} = 'creada') = (${table.createdProducts} is not null)`,
+    ),
+    foreignKey({
+      name: "bulk_load_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("bulk_load_store_id_key").on(table.storeId, table.id),
+    index("bulk_load_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/** Un producto de la carga, armado desde sus fotos o desde la hoja: todavía no está en el catálogo. */
+export const bulkLoadItem = pgTable(
+  "bulk_load_item",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    loadId: uuid("load_id").notNull(),
+    position: integer("position").notNull().default(0),
+    state: text("state").$type<BulkItemState>().notNull().default("revisar"),
+    name: text("name").notNull().default(""),
+    category: text("category"),
+    description: text("description").notNull().default(""),
+    listPriceCents: bigint("list_price_cents", { mode: "number" }),
+    options: jsonb("options").$type<ProductOption[]>().notNull().default([]),
+    variants: jsonb("variants").$type<BulkVariant[]>().notNull().default([]),
+    /** La duda que se muestra en amarillo («¿Material? No se ve»); no frena «Crear». */
+    doubt: text("doubt"),
+    /** La fila de la hoja de donde salió (la cabecera es la 1). */
+    sheetRow: integer("sheet_row"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "bulk_load_item_check",
+      sql`${inList("state", BULK_ITEM_STATES)} and char_length(${table.name}) <= 120 and (${table.category} is null or char_length(${table.category}) <= 60) and char_length(${table.description}) <= 2000 and (${table.doubt} is null or char_length(${table.doubt}) <= 200) and (${table.listPriceCents} is null or ${table.listPriceCents} between 1 and 100000000) and jsonb_typeof(${table.options}) = 'array' and jsonb_typeof(${table.variants}) = 'array' and jsonb_array_length(${table.variants}) <= 200`,
+    ),
+    foreignKey({
+      name: "bulk_load_item_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    unique("bulk_load_item_store_id_key").on(table.storeId, table.id),
+    index("bulk_load_item_load_idx").on(table.loadId, table.position),
+  ],
+)
+
+/** Una foto de la carga, ya en el almacenamiento, con el producto de la carga al que va (nulo: suelta). */
+export const bulkLoadPhoto = pgTable(
+  "bulk_load_photo",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    loadId: uuid("load_id").notNull(),
+    itemId: uuid("item_id"),
+    position: integer("position").notNull().default(0),
+    /** El nombre del archivo, para unirla a la fila de la hoja que la nombra. */
+    fileName: text("file_name").notNull().default(""),
+    contentType: text("content_type").$type<PhotoType>().notNull(),
+    objectKey: text("object_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "bulk_load_photo_check",
+      sql`${inList("content_type", PHOTO_TYPES)} and char_length(${table.fileName}) <= 200 and ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$' and ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_MEDIA_PHOTO_BYTES))}`,
+    ),
+    foreignKey({
+      name: "bulk_load_photo_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "bulk_load_photo_item_fkey",
+      columns: [table.storeId, table.itemId],
+      foreignColumns: [bulkLoadItem.storeId, bulkLoadItem.id],
+    }),
+    index("bulk_load_photo_load_idx").on(table.loadId, table.position),
+  ],
+)
+
+/**
+ * Lo que hay que borrar del almacenamiento (ADR 0236): la base anota la carpeta al borrar la fila
+ * que la usaba (también al borrar el producto, la tienda o la carga entera) y el servidor la
+ * borra después, con el dueño de la base. Una carpeta que otra fila sigue usando no se anota.
+ * La aplicación no la lee ni la escribe.
+ */
+export const mediaTrash = pgTable("media_trash", {
+  objectKey: text("object_key").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/*
+ * Lo que propone la IA de fotos (lienzo «La ficha del producto», decisiones 3, 7, 9 y 10): mira
+ * las fotos y propone; nunca guarda sola. Cada vez que mira es un `ai_look` (cuenta para el tope
+ * del día y anota lo que costó) y deja sus propuestas en `ai_proposal`, que una persona usa, cambia
+ * o descarta. Usar una pasa por la operación de siempre de la ficha o de la carga.
+ */
+
+/** Qué miró: las fotos de un producto, las de un producto de una carga, las fotos sueltas de una carga (para juntarlas) o un texto que la persona escribió (solo para reescribirlo). */
+export const AI_LOOK_KINDS = ["producto", "carga_producto", "carga", "texto"] as const
+export type AiLookKind = (typeof AI_LOOK_KINDS)[number]
+/** Mirando (esperando al modelo), lista o falló (con su motivo). */
+export const AI_LOOK_STATES = ["mirando", "lista", "fallo"] as const
+export type AiLookState = (typeof AI_LOOK_STATES)[number]
+
+/** Cada vez que la IA mira: a pedido de quién, cuántas fotos (lo que cuenta para el tope) y lo que costó. */
+export const aiLook = pgTable(
+  "ai_look",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    kind: text("kind").$type<AiLookKind>().notNull(),
+    productId: uuid("product_id"),
+    loadId: uuid("load_id"),
+    /** El producto de la carga que miró (sin llave: la carga puede juntarlo o quitarlo después). */
+    itemId: uuid("item_id"),
+    /** Cuántas fotos miró; un texto cuenta como una. Es lo que suma para el tope del día. */
+    photos: integer("photos").notNull(),
+    state: text("state").$type<AiLookState>().notNull().default("mirando"),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens"),
+    cachedTokens: integer("cached_tokens"),
+    outputTokens: integer("output_tokens"),
+    /** Lo que costó, en millonésimas de USD, con el precio de lista; nulo si no se sabe. */
+    costMicros: integer("cost_micros"),
+    /** Por qué falló, en palabras para la persona. */
+    failure: text("failure"),
+    /** Lo que avisa de las fotos («La foto 3 parece de otro producto»). */
+    notice: text("notice"),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "ai_look_check",
+      sql`${inList("kind", AI_LOOK_KINDS)} and ${inList("state", AI_LOOK_STATES)} and ${table.photos} between 1 and 100 and (${table.state} = 'mirando') = (${table.finishedAt} is null) and (${table.failure} is null or char_length(${table.failure}) <= 300) and (${table.notice} is null or char_length(${table.notice}) <= 300) and (${table.kind} <> 'producto' or ${table.productId} is not null) and (${table.kind} not in ('carga', 'carga_producto') or ${table.loadId} is not null) and (${table.kind} <> 'carga_producto' or ${table.itemId} is not null)`,
+    ),
+    foreignKey({
+      name: "ai_look_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_look_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_look_store_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("ai_look_store_id_key").on(table.storeId, table.id),
+    index("ai_look_store_idx").on(table.storeId, table.requestedAt),
+  ],
+)
+
+/** El estado de una propuesta: propuesta (espera a una persona), usada, cambiada (usada con otro valor) o descartada. */
+export const AI_PROPOSAL_STATES = ["propuesta", "usada", "cambiada", "descartada"] as const
+export type AiProposalState = (typeof AI_PROPOSAL_STATES)[number]
+
+/**
+ * Una propuesta de la IA para un campo: el nombre, la categoría, el rubro, un color con sus fotos,
+ * un dato del rubro que se ve, las palabras de búsqueda, la descripción, la pregunta por lo que no
+ * se ve o juntar fotos sueltas de una carga. Es de un producto, de un producto de una carga o de la
+ * carga; al crear el producto desde la carga, las abiertas pasan al producto. Nunca el precio ni el
+ * paquete (decisión 10).
+ */
+export const aiProposal = pgTable(
+  "ai_proposal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    lookId: uuid("look_id").notNull(),
+    productId: uuid("product_id"),
+    loadId: uuid("load_id"),
+    itemId: uuid("item_id"),
+    /** `nombre`, `categoria`, `rubro`, `descripcion`, `palabras`, `color`, `dato:<clave>`, `pregunta:<clave>` o `juntar`. */
+    field: text("field").notNull(),
+    /** Lo que propone, con la forma de su campo; nulo en una pregunta. */
+    value: jsonb("value").$type<unknown>(),
+    /** Por qué lo propone, en palabras («Se lee en la etiqueta»), o la pregunta. */
+    reason: text("reason").notNull(),
+    state: text("state").$type<AiProposalState>().notNull().default("propuesta"),
+    /** Lo que quedó al cambiarla («Cambiar»). */
+    appliedValue: jsonb("applied_value").$type<unknown>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "ai_proposal_check",
+      sql`${inList("state", AI_PROPOSAL_STATES)} and ${table.field} ~ '^(nombre|categoria|rubro|descripcion|palabras|color|juntar|(dato|pregunta):[a-z][a-z0-9_]{0,39})$' and char_length(${table.reason}) between 1 and 300 and (${table.value} is null or octet_length(${table.value}::text) <= 8000) and (${table.appliedValue} is null or octet_length(${table.appliedValue}::text) <= 8000) and (${table.state} = 'propuesta') = (${table.decidedAt} is null) and (${table.decidedAt} is null) = (${table.decidedBy} is null) and (${table.productId} is not null or ${table.itemId} is not null or ${table.loadId} is not null)`,
+    ),
+    foreignKey({
+      name: "ai_proposal_look_fkey",
+      columns: [table.storeId, table.lookId],
+      foreignColumns: [aiLook.storeId, aiLook.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_proposal_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_proposal_item_fkey",
+      columns: [table.storeId, table.itemId],
+      foreignColumns: [bulkLoadItem.storeId, bulkLoadItem.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_proposal_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    index("ai_proposal_product_idx").on(table.productId, table.createdAt),
+    index("ai_proposal_item_idx").on(table.itemId),
+    index("ai_proposal_load_idx").on(table.loadId),
   ],
 )
 
@@ -786,6 +1312,11 @@ export const productVariant = pgTable(
     priceCents: integer("price_cents"),
     /** Una de las fotos del producto; al borrarla, la variante vuelve a la del producto. */
     photoId: uuid("photo_id"),
+    /**
+     * Su código de barras: un GTIN de GS1 (EAN-13, UPC-A de 12, EAN-8 o GTIN-14), el que usan los
+     * catálogos de Meta y Google (`gtin`). La API comprueba su dígito verificador; aquí, su forma.
+     */
+    barcode: text("barcode"),
     stock: integer("stock").notNull().default(0),
     removedAt: timestamp("removed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -793,6 +1324,13 @@ export const productVariant = pgTable(
   },
   (table) => [
     check("product_variant_sku_check", sql`${table.sku} ~ '^[A-Za-z0-9._/-]{1,40}$'`),
+    check(
+      "product_variant_barcode_check",
+      sql`${table.barcode} is null or ${table.barcode} ~ '^([0-9]{8}|[0-9]{12,14})$'`,
+    ),
+    uniqueIndex("product_variant_barcode_uidx")
+      .on(table.storeId, table.barcode)
+      .where(sql`removed_at is null and barcode is not null`),
     check(
       "product_variant_price_check",
       sql`${table.priceCents} is null or ${table.priceCents} > 0`,
@@ -916,9 +1454,10 @@ export const productQuantityPrice = pgTable(
 )
 
 /**
- * Una promoción con fecha: un porcentaje menos, de un día a otro (inclusive). No se suma con
- * otra ni con el precio por cantidad: va la mejor para el cliente (tablero 14). En un mismo
- * producto no se pisan.
+ * Una promoción con fecha: un porcentaje menos, de un día a otro (inclusive), para todo el
+ * producto o solo para un color o una talla (un valor de una de sus opciones). No se suma con
+ * otra ni con el precio por cantidad: va la mejor para el cliente (tablero 14). Dos del mismo
+ * alcance no se pisan.
  */
 export const productPromotion = pgTable(
   "product_promotion",
@@ -930,12 +1469,19 @@ export const productPromotion = pgTable(
     percentOff: smallint("percent_off").notNull(),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on").notNull(),
+    /** Su alcance: la opción (su índice en `product.options`) y su valor; nulos: todo el producto. */
+    optionIndex: smallint("option_index"),
+    optionValue: text("option_value"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("product_promotion_name_check", sql`char_length(btrim(${table.name})) between 1 and 60`),
     check("product_promotion_percent_check", sql`${table.percentOff} between 1 and 90`),
     check("product_promotion_dates_check", sql`${table.endsOn} >= ${table.startsOn}`),
+    check(
+      "product_promotion_scope_check",
+      sql`(${table.optionIndex} is null) = (${table.optionValue} is null) and (${table.optionIndex} is null or (${table.optionIndex} between 0 and 2 and char_length(btrim(${table.optionValue})) between 1 and 30))`,
+    ),
     foreignKey({
       name: "product_promotion_product_fkey",
       columns: [table.storeId, table.productId],
@@ -976,6 +1522,170 @@ export const productLink = pgTable(
       foreignColumns: [product.storeId, product.id],
     }).onDelete("cascade"),
     index("product_link_b_idx").on(table.productB),
+  ],
+)
+
+/*
+ * La ficha del producto (lienzo «La ficha del producto»): la plantilla de cada rubro que ajusta la
+ * tienda, lo que Sofi no supo y el historial de cada cambio.
+ */
+
+/** Los tipos de un dato del rubro: una opción, un número con su unidad, un texto, uno por talla, una tabla por talla o una fecha. */
+export const TEMPLATE_FIELD_TYPES = [
+  "opcion",
+  "numero",
+  "texto",
+  "por_talla",
+  "tabla",
+  "fecha",
+] as const
+export type TemplateFieldType = (typeof TEMPLATE_FIELD_TYPES)[number]
+
+/**
+ * Lo que la tienda ajustó de la plantilla de un rubro (decisión 1). La plantilla fija vive en el
+ * código (`apps/api/src/rubros.ts`); sin filas, la tienda usa esa. Con filas, la plantilla de la
+ * tienda es esta lista, en su orden: un dato fijo guarda solo si Sofi lo necesita, su lugar y si se
+ * quitó (`hidden`), y su nombre, tipo y valores siguen saliendo del código; uno propio de la tienda
+ * guarda también su nombre, su tipo y sus valores.
+ */
+export const storeTemplateField = pgTable(
+  "store_template_field",
+  {
+    storeId: uuid("store_id").notNull(),
+    rubro: text("rubro").$type<ProductRubro>().notNull(),
+    key: text("key").notNull(),
+    position: smallint("position").notNull(),
+    needed: boolean("needed").notNull(),
+    hidden: boolean("hidden").notNull().default(false),
+    /** Solo en un dato propio de la tienda. */
+    label: text("label"),
+    type: text("type").$type<TemplateFieldType>(),
+    options: text("options").array(),
+    columns: text("columns").array(),
+    unit: text("unit"),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "store_template_field_pkey",
+      columns: [table.storeId, table.rubro, table.key],
+    }),
+    check("store_template_field_rubro_check", inList("rubro", PRODUCT_RUBROS)),
+    check("store_template_field_key_check", sql`${table.key} ~ '^[a-z][a-z0-9_]{0,39}$'`),
+    check(
+      "store_template_field_own_check",
+      sql`(${table.label} is null) = (${table.type} is null) and (${table.type} is null or ${inList("type", TEMPLATE_FIELD_TYPES)}) and (${table.label} is null or char_length(btrim(${table.label})) between 1 and 60) and (${table.label} is not null or (${table.options} is null and ${table.columns} is null and ${table.unit} is null))`,
+    ),
+    check(
+      "store_template_field_values_check",
+      sql`(${table.options} is null or cardinality(${table.options}) between 1 and 20) and (${table.columns} is null or cardinality(${table.columns}) between 1 and 6) and (${table.unit} is null or char_length(btrim(${table.unit})) between 1 and 12)`,
+    ),
+    foreignKey({
+      name: "store_template_field_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * Lo que Sofi no supo de un producto (decisión 11): la pregunta de la clienta y su conversación, y
+ * la respuesta de la tienda. Sofi solo la anota (`0062_reglas_la_ficha_del_producto.sql`). Ventas
+ * responde y puede pedir que se guarde en la ficha (`save_requested`); el Dueño o el Administrador
+ * la guardan (`saved_at`), y desde ahí Sofi la usa. Una persona también anota en la ficha una
+ * pregunta ya respondida, sin conversación.
+ */
+export const productQuestion = pgTable(
+  "product_question",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    productId: uuid("product_id").notNull(),
+    conversationId: uuid("conversation_id"),
+    question: text("question").notNull(),
+    askedBy: text("asked_by").notNull(),
+    askedAt: timestamp("asked_at", { withTimezone: true }).notNull().defaultNow(),
+    answer: text("answer"),
+    answeredBy: text("answered_by"),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    /** Ventas respondió y propone guardarla en la ficha: espera a quien cambia el catálogo. */
+    saveRequested: boolean("save_requested").notNull().default(false),
+    savedBy: text("saved_by"),
+    savedAt: timestamp("saved_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "product_question_texts_check",
+      sql`char_length(btrim(${table.question})) between 3 and 500 and (${table.answer} is null or char_length(btrim(${table.answer})) between 1 and 1000)`,
+    ),
+    check(
+      "product_question_answer_check",
+      sql`(${table.answer} is null) = (${table.answeredBy} is null) and (${table.answer} is null) = (${table.answeredAt} is null) and (${table.savedAt} is null) = (${table.savedBy} is null) and (${table.savedAt} is null or ${table.answer} is not null) and (not ${table.saveRequested} or (${table.answer} is not null and ${table.savedAt} is null))`,
+    ),
+    foreignKey({
+      name: "product_question_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "product_question_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }),
+    index("product_question_product_idx").on(table.productId, table.askedAt),
+    index("product_question_open_idx")
+      .on(table.storeId, table.askedAt)
+      .where(sql`answer is null or save_requested`),
+  ],
+)
+
+/** Lo que se anota de cada cambio de la ficha. */
+export const PRODUCT_EVENT_ACTIONS = [
+  "creado",
+  "cambiado",
+  "cuadricula",
+  "foto",
+  "pregunta",
+] as const
+export type ProductEventAction = (typeof PRODUCT_EVENT_ACTIONS)[number]
+
+/** Un cambio de un campo: cómo estaba y cómo quedó (lo que usa «Deshacer»). */
+export interface ProductChange {
+  field: string
+  from: unknown
+  to: unknown
+}
+
+/**
+ * El historial de la ficha: cada cambio con quién y cuándo, campo por campo, para «Quién cambió
+ * qué» y para deshacer (que es otro cambio, con los valores de antes). Solo se agrega.
+ */
+export const productEvent = pgTable(
+  "product_event",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    productId: uuid("product_id").notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    action: text("action").$type<ProductEventAction>().notNull(),
+    changes: jsonb("changes").$type<ProductChange[]>().notNull().default([]),
+    /** El motivo que escribió, si bajó stock. */
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("product_event_action_check", inList("action", PRODUCT_EVENT_ACTIONS)),
+    check(
+      "product_event_changes_check",
+      sql`jsonb_typeof(${table.changes}) = 'array' and (${table.reason} is null or char_length(${table.reason}) <= 300)`,
+    ),
+    foreignKey({
+      name: "product_event_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    index("product_event_product_idx").on(table.productId, table.createdAt),
   ],
 )
 
@@ -1196,7 +1906,13 @@ export const saleOrder = pgTable(
       foreignColumns: [store.id],
     }).onDelete("cascade"),
     unique("sale_order_store_id_key").on(table.storeId, table.id),
-    unique("sale_order_number_key").on(table.storeId, table.number),
+    // Los pedidos de prueba llevan su propia numeración: una prueba no gasta el número de una venta.
+    uniqueIndex("sale_order_number_key")
+      .on(table.storeId, table.number)
+      .where(sql`not ${table.test}`),
+    uniqueIndex("sale_order_test_number_key")
+      .on(table.storeId, table.number)
+      .where(sql`${table.test}`),
     // La conversación de la que salió, de la misma tienda (B5).
     foreignKey({
       name: "sale_order_conversation_fkey",
@@ -2228,7 +2944,10 @@ export const customerConsent = pgTable(
   (table) => [
     check("customer_consent_state_check", inList("state", CONSENT_STATES)),
     check("customer_consent_channel_check", inList("channel", CONVERSATION_CHANNELS)),
-    check("customer_consent_quote_check", sql`char_length(btrim(${table.quote})) between 1 and 300`),
+    check(
+      "customer_consent_quote_check",
+      sql`char_length(btrim(${table.quote})) between 1 and 300`,
+    ),
     foreignKey({
       name: "customer_consent_customer_fkey",
       columns: [table.storeId, table.customerId],
@@ -2488,8 +3207,16 @@ export const storeSetup = pgTable(
  * - `no_entregado`: una entrega que volvió sin entregarse.
  * - `sofi_pedido`: un pedido que armó Sofi.
  * - `dinero`: lo de dinero de toda la tienda (un pago por link que entró).
+ * - `preguntas`: lo que Sofi no supo de un producto y una clienta espera (va a «Te toca»).
  */
-export const PUSH_KINDS = ["pagos", "chats", "no_entregado", "sofi_pedido", "dinero"] as const
+export const PUSH_KINDS = [
+  "pagos",
+  "chats",
+  "no_entregado",
+  "sofi_pedido",
+  "dinero",
+  "preguntas",
+] as const
 export type PushKind = (typeof PUSH_KINDS)[number]
 
 /**
@@ -2546,6 +3273,8 @@ export const pushChoice = pgTable(
      */
     lastEventSeq: bigint("last_event_seq", { mode: "number" }),
     chatsSeen: uuid("chats_seen").array(),
+    /** Lo que Sofi no supo y ya se avisó (`product_question.id`): lo escribe el sistema. */
+    questionsSeen: uuid("questions_seen").array(),
   },
   (table) => [
     primaryKey({ name: "push_choice_pkey", columns: [table.storeId, table.userId] }),

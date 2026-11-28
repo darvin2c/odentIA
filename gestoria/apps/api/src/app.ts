@@ -1,6 +1,8 @@
 import {
   type Db,
+  MAX_MEDIA_PHOTO_BYTES,
   MAX_PHOTO_BYTES,
+  MAX_VIDEO_BYTES,
   type PhotoType,
   STORE_IMAGE_KINDS,
   type StoreImageKind,
@@ -11,7 +13,7 @@ import { bodyLimit } from "hono/body-limit"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
-import { ZodError, type z } from "zod"
+import { ZodError, type z, z as zod } from "zod"
 import {
   askAriadna,
   askForHelp,
@@ -29,6 +31,7 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
+import type { Storage } from "./archivos.js"
 import {
   choicesInput,
   deviceInput,
@@ -48,17 +51,34 @@ import {
   refundInput,
 } from "./cambios.js"
 import {
-  addPhoto,
+  addLoadPhoto,
+  createFromLoad,
+  discardLoad,
+  joinLoadItems,
+  loadBulkPatch,
+  loadDetail,
+  loadItemPatch,
+  loadPhotoPatch,
+  loadSheet,
+  moveLoadPhoto,
+  openLoad,
+  removeLoadPhoto,
+  storeLoads,
+  updateLoadItem,
+  updateLoadItems,
+} from "./cargas.js"
+import {
   catalog,
   createProduct,
   deleteProduct,
   imageType,
-  photoContent,
+  photoPatch,
   productDetail,
+  productHistory,
   productInput,
   productPatch,
-  removePhoto,
   removeVariant,
+  updatePhoto,
   updateProduct,
   updateVariant,
   variantPatch,
@@ -120,9 +140,11 @@ import {
   storeCouriers,
   updateCourier,
 } from "./equipo-repartidores.js"
+import { gridInput, saveGrid, simulateInput, simulatePrice } from "./ficha.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
+import { clientIp, createRateLimit } from "./limite.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
   brandInput,
@@ -135,6 +157,20 @@ import {
   storeDataInput,
   storeImageContent,
 } from "./marca.js"
+import {
+  addPhoto,
+  addVideo,
+  chooseCutout,
+  photoContent,
+  productMedia,
+  proposeCutout,
+  publicMedia,
+  removePhoto,
+  removeVideo,
+  updateVideo,
+  videoInput,
+  videoPatch,
+} from "./medios.js"
 import {
   connectInput,
   createTrialLink,
@@ -186,8 +222,37 @@ import {
   undoPayment,
 } from "./pedidos.js"
 import { correctFact, factInput } from "./perfil.js"
+import {
+  addSavedQuestion,
+  answerQuestion,
+  answerQuestions,
+  groupAnswerInput,
+  openQuestions,
+  answerInput as questionAnswerInput,
+  savedQuestionInput,
+  saveInput,
+  saveQuestion,
+  unsaveQuestion,
+} from "./preguntas.js"
 import { skipInput, skipStep } from "./primeros-pasos.js"
+import {
+  aiCap,
+  applyAll,
+  DEFAULT_PHOTOS_CAP,
+  discardProposal,
+  improveText,
+  loadProposals,
+  type PhotoAi,
+  productProposals,
+  proposeForLoadItem,
+  proposeForProduct,
+  proposeGroups,
+  rewriteInput,
+  useInput,
+  useProposal,
+} from "./propuestas.js"
 import { setDeliverySlots, slotsInput } from "./repartidores.js"
+import { templateInput as rubroTemplateInput, saveTemplate, storeTemplates } from "./rubros.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
@@ -196,9 +261,16 @@ import {
   conversationView,
   customerMessageInput,
   newTestConversation,
+  payTestOrder,
+  placeTestOrder,
+  quoteTestCart,
   returnToSofi,
   saveAgentSettings,
   setAgentEnabled,
+  tellAnswer,
+  testCart,
+  testOrderInput,
+  testPayInput,
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
@@ -238,6 +310,7 @@ import {
   storeSummary,
   storeTeam,
 } from "./tiendas.js"
+import { previewShowcase, publicShowcase } from "./vitrina.js"
 
 export interface AppDeps {
   /** El rol de la aplicación: todo pedido de una persona, dentro de las reglas de su tienda. */
@@ -255,17 +328,38 @@ export interface AppDeps {
   contract?: ContractConfig
   /** La clave pública VAPID de los avisos al celular (tablero 15); sin ella no se ofrecen. */
   vapidPublicKey?: string
+  /**
+   * Dónde se guardan las fotos y los videos del producto (ADR 0236). Sin él no se suben (503) y
+   * solo se ven las fotos que todavía están en la base.
+   */
+  storage?: Storage | null
+  /**
+   * La IA de fotos (lienzo «La ficha del producto»): el modelo que mira y el tope de fotos por día
+   * y tienda. Sin modelo, la IA no está y se carga a mano.
+   */
+  photosModel?: ChatModel | null
+  photosCapPerDay?: number
+  /** Los topes de la vitrina pública por minuto (por IP y por tienda); las pruebas los bajan. */
+  showcaseLimits?: { perIp: number; perStore: number }
 }
 
 type Env = { Variables: { person: Person } }
 
+/** «Usar esta» o «Dejar la original» de la foto sin fondo; «Juntar» de «Cargar muchos». */
+const cutoutChoice = zod.object({ usar: zod.boolean() })
+const joinInput = zod.object({ from: zod.array(zod.uuid()).min(1).max(300) })
+
 /** Lo más que pesa un aviso de la cuenta o un pedido de la app. */
 const MAX_BODY_BYTES = 64 * 1024
-/** Una foto (ya achicada por la pantalla) y una hoja del catálogo pesan más: su ruta tiene su tope. */
-const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
+// Una foto, un video y una hoja del catálogo pesan más: cada ruta tiene su tope.
+/** Las fotos del producto y de «Cargar muchos» van al almacenamiento (ADR 0236): hasta 8 MB. */
+const MEDIA_PHOTO_UPLOAD =
+  /^\/api\/tiendas\/[^/]+\/(productos\/[^/]+\/fotos|fotos\/[^/]+\/sin-fondo|cargas\/[^/]+\/fotos)$/
+/** El video, con su póster, en un formulario: hasta 16 MB más la imagen. */
+const VIDEO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/videos$/
 /** «Guardar» de Tu marca lleva el logo y la portada, cada una con su tope, y unos pocos campos. */
 const BRAND_SAVE = /^\/api\/tiendas\/[^/]+\/marca$/
-const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
+const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/(catalogo|cargas\/[^/]+)\/hoja$/
 /** El QR de Yape o Plin (Cobros): una imagen, con el tope de una foto. */
 const QR_UPLOAD = /^\/api\/tiendas\/[^/]+\/medios-de-pago\/[^/]+\/qr$/
 /** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
@@ -314,6 +408,33 @@ export function createApp(deps: AppDeps) {
   }
   const app = new Hono<Env>()
   const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
+  // Sofi (B5): la misma tubería para una conversación de verdad, la prueba y sus avisos.
+  const sofi = {
+    appDb: deps.appDb,
+    lockDb: deps.ownerDb,
+    model: deps.model ?? null,
+    link,
+    storage: deps.storage ?? null,
+  }
+  /**
+   * «Que Sofi se lo diga»: Sofi le escribe a cada clienta que preguntó. Corre después de responder
+   * (cada una llama al modelo): si falla, la respuesta ya quedó guardada y se ve en el registro.
+   */
+  const tellLater = (
+    storeId: string,
+    told: { conversationId: string; product: string }[],
+    answer: string,
+  ) => {
+    if (told.length === 0) return
+    void tellAnswer(sofi, storeId, told, answer).catch((error) =>
+      console.error("gestoria-api: Sofi no pudo decir la respuesta", error),
+    )
+  }
+  const ai: PhotoAi = {
+    model: deps.photosModel ?? null,
+    storage: deps.storage,
+    capPerDay: deps.photosCapPerDay ?? DEFAULT_PHOTOS_CAP,
+  }
 
   app.use("*", requestId())
   app.use(
@@ -371,6 +492,14 @@ export function createApp(deps: AppDeps) {
     "El logo o la portada pesan demasiado. Prueba con otra más chica.",
   )
   const sheet = limit(MAX_SHEET_BYTES, "La hoja es muy grande: divídela en partes")
+  const mediaPhoto = limit(
+    MAX_MEDIA_PHOTO_BYTES,
+    "La foto pesa demasiado: hasta 8 MB. Prueba con otra.",
+  )
+  const video = limit(
+    MAX_VIDEO_BYTES + MAX_MEDIA_PHOTO_BYTES + 64 * 1024,
+    "El video pesa demasiado: WhatsApp acepta hasta 16 MB. Prueba con uno más corto.",
+  )
   const receipt = limit(
     MAX_PHOTO_BYTES + 16 * 1024,
     "La captura pesa demasiado. Prueba con otra más chica.",
@@ -380,7 +509,8 @@ export function createApp(deps: AppDeps) {
     "El archivo pesa demasiado: hasta 1,5 MB.",
   )
   app.use("*", (c, next) => {
-    if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
+    if (c.req.method === "POST" && MEDIA_PHOTO_UPLOAD.test(c.req.path)) return mediaPhoto(c, next)
+    if (c.req.method === "POST" && VIDEO_UPLOAD.test(c.req.path)) return video(c, next)
     if (c.req.method === "POST" && BRAND_SAVE.test(c.req.path)) return brandSave(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
     if (c.req.method === "POST" && QR_UPLOAD.test(c.req.path)) return photo(c, next)
@@ -419,16 +549,11 @@ export function createApp(deps: AppDeps) {
   // Los avisos del proveedor del link de pago (B4): de servidor a servidor. El pago se lee del
   // proveedor; el aviso solo dice cuál mirar. Cada aviso consulta al proveedor con la cuenta de
   // la tienda: con un tope por tienda, nadie la gasta mandando avisos inventados.
-  const noticesBy = new Map<string, { since: number; count: number }>()
+  const noticesBy = createRateLimit({ max: MAX_LINK_NOTICES, windowMs: LINK_NOTICE_WINDOW_MS })
   app.post("/avisos/link-de-pago/:storeId", async (c) => {
     const storeId = c.req.param("storeId")
-    const now = Date.now()
-    const seen = noticesBy.get(storeId)
-    if (!seen || now - seen.since > LINK_NOTICE_WINDOW_MS)
-      noticesBy.set(storeId, { since: now, count: 1 })
-    else if (++seen.count > MAX_LINK_NOTICES)
+    if (!noticesBy.hit(storeId))
       return c.json(errorBody(c, "TOO_MANY", "Demasiados avisos; reintenta en un minuto"), 429)
-    if (noticesBy.size > 10_000) noticesBy.clear()
     const body = await c.req.text()
     const result = await receiveLinkNotice(
       deps.ownerDb,
@@ -437,6 +562,67 @@ export function createApp(deps: AppDeps) {
       link,
     )
     return c.json({ message: result.message }, result.status)
+  })
+
+  // La vitrina pública (`<tienda>.gestoria24.com/<producto>`): las fotos y los videos de un producto
+  // que se ve en la web, con enlaces que vencen en una hora. Sin cuenta: es lo público de la tienda.
+  // Cualquiera la llama y cada pedido firma enlaces: un tope por quien pide y otro por tienda,
+  // holgados para una clienta que mira el catálogo.
+  const showcaseByIp = createRateLimit({ max: deps.showcaseLimits?.perIp ?? 60, windowMs: 60_000 })
+  const showcaseByStore = createRateLimit({
+    max: deps.showcaseLimits?.perStore ?? 1_200,
+    windowMs: 60_000,
+  })
+  // El mismo tope para todo lo de la vitrina (la página del producto y sus fotos): una visita
+  // cuenta igual por cualquiera de las dos.
+  const showcaseTooMany = (c: Context) => {
+    if (
+      showcaseByIp.hit(clientIp(c.req.raw.headers)) &&
+      showcaseByStore.hit(c.req.param("link") ?? "")
+    )
+      return null
+    c.header("retry-after", "60")
+    return c.json(
+      errorBody(c, "TOO_MANY", "Demasiadas visitas seguidas. Prueba en un minuto."),
+      429,
+    )
+  }
+  app.get("/vitrina/:link/:producto/medios", async (c) => {
+    c.header("access-control-allow-origin", "*")
+    const limited = showcaseTooMany(c)
+    if (limited) return limited
+    const media = await publicMedia(
+      deps.ownerDb,
+      deps.storage,
+      c.req.param("link"),
+      c.req.param("producto"),
+    )
+    c.header("x-content-type-options", "nosniff")
+    if (!media)
+      return c.json(errorBody(c, "NOT_FOUND", "Ese producto no está en la web de la tienda"), 404)
+    // Menos que lo que valen los enlaces: lo guardado nunca trae uno vencido.
+    c.header("cache-control", "public, max-age=300")
+    return c.json(media)
+  })
+
+  // La página pública de un producto (`<tienda>.gestoria24.com/<producto>`): solo lo vendible de un
+  // producto que se ve en la web. Sin cuenta: es lo público de la tienda.
+  app.get("/vitrina/:link/:producto", async (c) => {
+    c.header("access-control-allow-origin", "*")
+    const limited = showcaseTooMany(c)
+    if (limited) return limited
+    const page = await publicShowcase(
+      deps.ownerDb,
+      deps.storage,
+      c.req.param("link"),
+      c.req.param("producto"),
+    )
+    c.header("access-control-allow-origin", "*")
+    c.header("x-content-type-options", "nosniff")
+    if (!page)
+      return c.json(errorBody(c, "NOT_FOUND", "Ese producto no está en la web de la tienda"), 404)
+    c.header("cache-control", "public, max-age=300")
+    return c.json(page)
   })
 
   // El aviso de Mercado Pago de que una cuenta desvinculó la aplicación (`mp-connect`): se
@@ -725,10 +911,78 @@ export function createApp(deps: AppDeps) {
       "content-disposition": 'attachment; filename="catalogo-ejemplo.csv"',
     })
   })
+  // «Subir una hoja»: CSV o Excel (.xlsx), con las tallas en filas o en columnas.
   app.post("/api/tiendas/:id/catalogo/hoja", async (c) => {
-    const text = await c.req.text()
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
     const confirm = c.req.query("confirmar") === "1"
-    return c.json(await uploadSheet(deps.appDb, c.get("person"), c.req.param("id"), text, confirm))
+    return c.json(await uploadSheet(deps.appDb, c.get("person"), c.req.param("id"), bytes, confirm))
+  })
+
+  // «Cargar muchos» (ADR 0236): una carga con sus fotos, sus productos y su hoja; nada pasa al
+  // catálogo hasta «Crear».
+  app.get("/api/tiendas/:id/cargas", async (c) =>
+    c.json(await storeLoads(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/cargas", async (c) =>
+    c.json({ load: await openLoad(deps.appDb, c.get("person"), c.req.param("id")) }, 201),
+  )
+  app.get("/api/tiendas/:id/cargas/:loadId", async (c) => {
+    const { id, loadId } = c.req.param()
+    return c.json(await loadDetail(deps.appDb, deps.storage, c.get("person"), id, loadId))
+  })
+  // La foto llega tal cual; `?archivo=` su nombre y `?producto=` a cuál va (id, «nuevo» o «suelta»).
+  app.post("/api/tiendas/:id/cargas/:loadId/fotos", async (c) => {
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const { id, loadId } = c.req.param()
+    const photo = await addLoadPhoto(deps.appDb, deps.storage, c.get("person"), id, loadId, bytes, {
+      fileName: c.req.query("archivo") ?? "",
+      item: c.req.query("producto") || null,
+    })
+    return c.json({ photo }, 201)
+  })
+  app.patch("/api/tiendas/:id/cargas/:loadId/fotos/:photoId", async (c) => {
+    const patch = await bodyOf(c, loadPhotoPatch)
+    const { id, loadId, photoId } = c.req.param()
+    const photo = await moveLoadPhoto(deps.appDb, c.get("person"), id, loadId, photoId, patch)
+    return c.json({ photo })
+  })
+  app.delete("/api/tiendas/:id/cargas/:loadId/fotos/:photoId", async (c) => {
+    const { id, loadId, photoId } = c.req.param()
+    await removeLoadPhoto(deps.appDb, c.get("person"), id, loadId, photoId)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/hoja", async (c) => {
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const { id, loadId } = c.req.param()
+    const result = await loadSheet(deps.appDb, c.get("person"), id, loadId, bytes)
+    return c.json(result)
+  })
+  app.patch("/api/tiendas/:id/cargas/:loadId/productos", async (c) => {
+    const input = await bodyOf(c, loadBulkPatch)
+    const { id, loadId } = c.req.param()
+    return c.json(await updateLoadItems(deps.appDb, c.get("person"), id, loadId, input))
+  })
+  app.patch("/api/tiendas/:id/cargas/:loadId/productos/:itemId", async (c) => {
+    const patch = await bodyOf(c, loadItemPatch)
+    const { id, loadId, itemId } = c.req.param()
+    const item = await updateLoadItem(deps.appDb, c.get("person"), id, loadId, itemId, patch)
+    return c.json({ item })
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/productos/:itemId/juntar", async (c) => {
+    const { from } = await bodyOf(c, joinInput)
+    const { id, loadId, itemId } = c.req.param()
+    const item = await joinLoadItems(deps.appDb, c.get("person"), id, loadId, itemId, from)
+    return c.json({ item })
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/crear", async (c) => {
+    const { id, loadId } = c.req.param()
+    const result = await createFromLoad(deps.appDb, c.get("person"), id, loadId)
+    return c.json(result)
+  })
+  app.delete("/api/tiendas/:id/cargas/:loadId", async (c) => {
+    const { id, loadId } = c.req.param()
+    await discardLoad(deps.appDb, c.get("person"), id, loadId)
+    return c.body(null, 204)
   })
   app.post("/api/tiendas/:id/productos", async (c) => {
     const input = await bodyOf(c, productInput)
@@ -751,26 +1005,202 @@ export function createApp(deps: AppDeps) {
     await deleteProduct(deps.appDb, c.get("person"), id, productId)
     return c.body(null, 204)
   })
+  // Las fotos y los videos del producto (ADR 0236): la foto llega tal cual en el cuerpo; con
+  // `?color=<id>` ya es de ese color.
   app.post("/api/tiendas/:id/productos/:productId/fotos", async (c) => {
     const bytes = new Uint8Array(await c.req.arrayBuffer())
     const { id, productId } = c.req.param()
-    return c.json({ photo: await addPhoto(deps.appDb, c.get("person"), id, productId, bytes) }, 201)
+    const photo = await addPhoto(
+      deps.appDb,
+      deps.storage,
+      c.get("person"),
+      id,
+      productId,
+      bytes,
+      c.req.query("color") || null,
+    )
+    return c.json({ photo }, 201)
+  })
+  app.get("/api/tiendas/:id/productos/:productId/medios", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await productMedia(deps.appDb, deps.storage, c.get("person"), id, productId))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/videos", async (c) => {
+    const { id, productId } = c.req.param()
+    let form: FormData
+    try {
+      form = await c.req.formData()
+    } catch {
+      throw new StoreError(400, "VALIDATION_ERROR", "El video no se pudo leer")
+    }
+    const file = form.get("video")
+    const poster = form.get("poster")
+    if (!(file instanceof File) || file.size === 0)
+      throw new StoreError(400, "VALIDATION_ERROR", "Elige el video", { video: "Elige el video" })
+    if (!(poster instanceof File) || poster.size === 0 || poster.size > MAX_MEDIA_PHOTO_BYTES)
+      throw new StoreError(400, "VALIDATION_ERROR", "Falta la imagen del video", {
+        poster: "Falta la imagen del video",
+      })
+    const input = videoInput.parse({
+      colorId: form.get("colorId") ? String(form.get("colorId")) : null,
+      label: String(form.get("label") ?? ""),
+    })
+    const created = await addVideo(deps.appDb, deps.storage, c.get("person"), id, productId, {
+      ...input,
+      video: new Uint8Array(await file.arrayBuffer()),
+      poster: new Uint8Array(await poster.arrayBuffer()),
+    })
+    return c.json({ video: created }, 201)
+  })
+  app.patch("/api/tiendas/:id/videos/:videoId", async (c) => {
+    const patch = await bodyOf(c, videoPatch)
+    const { id, videoId } = c.req.param()
+    return c.json({ video: await updateVideo(deps.appDb, c.get("person"), id, videoId, patch) })
+  })
+  app.delete("/api/tiendas/:id/videos/:videoId", async (c) => {
+    const { id, videoId } = c.req.param()
+    await removeVideo(deps.appDb, c.get("person"), id, videoId)
+    return c.body(null, 204)
+  })
+  // La IA de fotos: mira y propone; usar una propuesta pasa por la operación de siempre.
+  app.get("/api/tiendas/:id/ia", async (c) =>
+    c.json({ cap: await aiCap(deps.appDb, c.get("person"), c.req.param("id"), ai) }),
+  )
+  app.post("/api/tiendas/:id/ia/mejorar-texto", async (c) => {
+    const input = await bodyOf(c, rewriteInput)
+    return c.json(await improveText(deps.appDb, c.get("person"), c.req.param("id"), input, ai))
+  })
+  app.get("/api/tiendas/:id/productos/:productId/ia", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await productProposals(deps.appDb, c.get("person"), id, productId, ai))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/ia", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await proposeForProduct(deps.appDb, c.get("person"), id, productId, ai))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/ia/aplicar-todos", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await applyAll(deps.appDb, c.get("person"), id, { productId }))
+  })
+  app.get("/api/tiendas/:id/cargas/:loadId/ia", async (c) => {
+    const { id, loadId } = c.req.param()
+    return c.json(await loadProposals(deps.appDb, c.get("person"), id, loadId, ai))
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/ia/juntar", async (c) => {
+    const { id, loadId } = c.req.param()
+    return c.json(await proposeGroups(deps.appDb, c.get("person"), id, loadId, ai))
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/productos/:itemId/ia", async (c) => {
+    const { id, loadId, itemId } = c.req.param()
+    return c.json(await proposeForLoadItem(deps.appDb, c.get("person"), id, loadId, itemId, ai))
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/productos/:itemId/ia/aplicar-todos", async (c) => {
+    const { id, loadId, itemId } = c.req.param()
+    return c.json(await applyAll(deps.appDb, c.get("person"), id, { loadId, itemId }))
+  })
+  app.post("/api/tiendas/:id/ia/propuestas/:proposalId/usar", async (c) => {
+    const input = await bodyOf(c, useInput)
+    const { id, proposalId } = c.req.param()
+    return c.json(await useProposal(deps.appDb, c.get("person"), id, proposalId, input))
+  })
+  app.post("/api/tiendas/:id/ia/propuestas/:proposalId/descartar", async (c) => {
+    const { id, proposalId } = c.req.param()
+    return c.json(await discardProposal(deps.appDb, c.get("person"), id, proposalId))
+  })
+  // «La IA propone quitar el fondo»: llega la foto ya sin fondo; la original no se toca.
+  app.post("/api/tiendas/:id/fotos/:photoId/sin-fondo", async (c) => {
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const { id, photoId } = c.req.param()
+    const photo = await proposeCutout(deps.appDb, deps.storage, c.get("person"), id, photoId, bytes)
+    return c.json({ photo }, 201)
+  })
+  // «Usar esta» (`usar: true`) o «Dejar la original» (`usar: false`, borra la propuesta).
+  app.patch("/api/tiendas/:id/fotos/:photoId/sin-fondo", async (c) => {
+    const { usar } = await bodyOf(c, cutoutChoice)
+    const { id, photoId } = c.req.param()
+    return c.json({ photo: await chooseCutout(deps.appDb, c.get("person"), id, photoId, usar) })
   })
   app.get("/api/tiendas/:id/fotos/:photoId", async (c) => {
     const { id, photoId } = c.req.param()
-    const photo = await photoContent(deps.appDb, c.get("person"), id, photoId)
+    const photo = await photoContent(deps.appDb, deps.storage, c.get("person"), id, photoId)
     return c.body(new Uint8Array(photo.content), 200, {
       "content-type": photo.contentType,
       "x-content-type-options": "nosniff",
       "content-security-policy": "default-src 'none'; sandbox",
-      // La foto no cambia (otra foto es otro id); solo quien la pidió la guarda.
-      "cache-control": "private, max-age=86400, immutable",
+      // La que se ve cambia con «Usar esta»: el navegador pregunta cada vez.
+      "cache-control": "private, no-cache",
     })
   })
   app.delete("/api/tiendas/:id/fotos/:photoId", async (c) => {
     const { id, photoId } = c.req.param()
     await removePhoto(deps.appDb, c.get("person"), id, photoId)
     return c.body(null, 204)
+  })
+  app.patch("/api/tiendas/:id/fotos/:photoId", async (c) => {
+    const patch = await bodyOf(c, photoPatch)
+    const { id, photoId } = c.req.param()
+    return c.json({ product: await updatePhoto(deps.appDb, c.get("person"), id, photoId, patch) })
+  })
+
+  // La ficha del producto: la plantilla de cada rubro, la cuadrícula de tallas y colores, el
+  // historial y lo que Sofi no supo (lienzo «La ficha del producto»).
+  app.get("/api/tiendas/:id/plantillas", async (c) =>
+    c.json(await storeTemplates(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/plantillas/:rubro", async (c) => {
+    const input = await bodyOf(c, rubroTemplateInput)
+    const { id, rubro } = c.req.param()
+    return c.json({ template: await saveTemplate(deps.appDb, c.get("person"), id, rubro, input) })
+  })
+  app.get("/api/tiendas/:id/productos/:productId/historial", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await productHistory(deps.appDb, c.get("person"), id, productId))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/cuadricula", async (c) => {
+    const input = await bodyOf(c, gridInput)
+    const { id, productId } = c.req.param()
+    return c.json(await saveGrid(deps.appDb, c.get("person"), id, productId, input))
+  })
+  // «Probar cuánto cobraría Sofi»: la misma regla de precio de los pedidos, sin guardar nada.
+  app.post("/api/tiendas/:id/productos/:productId/simular", async (c) => {
+    const input = await bodyOf(c, simulateInput)
+    const { id, productId } = c.req.param()
+    return c.json(await simulatePrice(deps.appDb, c.get("person"), id, productId, input))
+  })
+  app.get("/api/tiendas/:id/preguntas", async (c) =>
+    c.json(await openQuestions(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/productos/:productId/preguntas", async (c) => {
+    const input = await bodyOf(c, savedQuestionInput)
+    const { id, productId } = c.req.param()
+    const product = await addSavedQuestion(deps.appDb, c.get("person"), id, productId, input)
+    return c.json({ product }, 201)
+  })
+  app.post("/api/tiendas/:id/preguntas/:questionId/respuesta", async (c) => {
+    const input = await bodyOf(c, questionAnswerInput)
+    const { id, questionId } = c.req.param()
+    const done = await answerQuestion(deps.appDb, c.get("person"), id, questionId, input)
+    tellLater(id, done.tell, input.answer)
+    return c.json({ product: done.product, told: done.tell.length })
+  })
+  // La línea de «Te toca»: varias preguntas iguales del mismo producto, de una vez.
+  app.post("/api/tiendas/:id/preguntas/respuesta", async (c) => {
+    const input = await bodyOf(c, groupAnswerInput)
+    const id = c.req.param("id")
+    const done = await answerQuestions(deps.appDb, c.get("person"), id, input)
+    tellLater(id, done.tell, input.answer)
+    return c.json({ product: done.product, told: done.tell.length })
+  })
+  app.post("/api/tiendas/:id/preguntas/:questionId/guardar", async (c) => {
+    const input = await bodyOf(c, saveInput)
+    const { id, questionId } = c.req.param()
+    return c.json({
+      product: await saveQuestion(deps.appDb, c.get("person"), id, questionId, input),
+    })
+  })
+  app.post("/api/tiendas/:id/preguntas/:questionId/quitar", async (c) => {
+    const { id, questionId } = c.req.param()
+    return c.json({ product: await unsaveQuestion(deps.appDb, c.get("person"), id, questionId) })
   })
   app.patch("/api/tiendas/:id/variantes/:variantId", async (c) => {
     const patch = await bodyOf(c, variantPatch)
@@ -1044,7 +1474,6 @@ export function createApp(deps: AppDeps) {
   })
 
   // Sofi (B5): lo que pone el dueño y la conversación de prueba.
-  const sofi = { appDb: deps.appDb, lockDb: deps.ownerDb, model: deps.model ?? null, link }
   app.get("/api/tiendas/:id/sofi", async (c) =>
     c.json(
       await agentSettings(deps.appDb, c.get("person"), c.req.param("id"), Boolean(sofi.model)),
@@ -1092,7 +1521,13 @@ export function createApp(deps: AppDeps) {
   app.get("/api/tiendas/:id/conversaciones/:conversationId", async (c) => {
     const { id, conversationId } = c.req.param()
     return c.json({
-      conversation: await conversationView(deps.appDb, c.get("person"), id, conversationId),
+      conversation: await conversationView(
+        deps.appDb,
+        c.get("person"),
+        id,
+        conversationId,
+        deps.storage,
+      ),
     })
   })
   const testsBy = new Map<string, { since: number; count: number }>()
@@ -1112,6 +1547,41 @@ export function createApp(deps: AppDeps) {
       )
     if (testsBy.size > 10_000) testsBy.clear()
     return c.json(await writeAsCustomer(sofi, c.get("person"), id, conversationId, input))
+  })
+  // «Probar como clienta»: el carrito de la vitrina (el mismo del chat), su pedido y el pago de
+  // prueba (no se cobra). Solo en una conversación de prueba.
+  app.get("/api/tiendas/:id/conversaciones/:conversationId/carrito", async (c) => {
+    const { id, conversationId } = c.req.param()
+    return c.json(await testCart(deps.appDb, c.get("person"), id, conversationId))
+  })
+  app.post("/api/tiendas/:id/conversaciones/:conversationId/carrito", async (c) => {
+    const input = await bodyOf(c, testOrderInput)
+    const { id, conversationId } = c.req.param()
+    return c.json(await placeTestOrder(deps.appDb, c.get("person"), id, conversationId, input), 201)
+  })
+  // Lo que cuesta el carrito de la vitrina antes de pagar (aún sin conversación): la cuenta del
+  // servidor, la misma de «Pagar ahora».
+  app.post("/api/tiendas/:id/vitrina/carrito/calcular", async (c) => {
+    const input = await bodyOf(c, testOrderInput)
+    return c.json(await quoteTestCart(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  app.post("/api/tiendas/:id/conversaciones/:conversationId/pagar", async (c) => {
+    const input = await bodyOf(c, testPayInput)
+    const { id, conversationId } = c.req.param()
+    // Después del pago escribe Sofi (llama al modelo): cuenta en el mismo tope de la prueba.
+    const seen = testsBy.get(id)
+    if (seen && Date.now() - seen.since <= TEST_WINDOW_MS && ++seen.count > MAX_TEST_MESSAGES)
+      throw new StoreError(
+        429,
+        "TOO_MANY",
+        "Muchos mensajes de prueba seguidos. Espera unos minutos y sigue.",
+      )
+    return c.json(await payTestOrder(sofi, c.get("person"), id, conversationId, input))
+  })
+  // La vista previa de la ficha: la página del producto en la vitrina, aunque no se vea en la web.
+  app.get("/api/tiendas/:id/productos/:productId/vitrina", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await previewShowcase(deps.appDb, deps.storage, c.get("person"), id, productId))
   })
   app.post("/api/tiendas/:id/conversaciones/:conversationId/devolver", async (c) => {
     const { id, conversationId } = c.req.param()

@@ -69,7 +69,105 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Ventas ve el catálogo y el stock (`catalogo.ver`), sin cambiarlos (`configuracion`); la API le
   da lo de la tienda que necesita para vender (`tienda.ver`), pero no ve Configuración. Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
   `costos.ver`: la API no se lo devuelve a Ventas.
-- Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
+- La hoja del catálogo llega en CSV o Excel (.xlsx), con las tallas en filas o en columnas
+  (`leer-hoja.ts`); todo pasa por la misma revisión (`planSheet`) y se guarda con `createPlanned`.
+
+## Las fotos y los videos (ADR 0236)
+
+- Van al bucket privado de gestorIA (`archivos.ts`, variables `GESTORIA_S3_*`), nunca a la base ni
+  al de las clínicas: la base guarda su carpeta (`object_key`). Una foto nueva no lleva `content`
+  (regla de la base); las de antes se mudan solas (`moveStoredPhotos`).
+- Subir pasa por el servidor (`medios.ts`): permiso, tipo por sus primeros bytes y tamaño (foto 8
+  MB; video 16 MB y 30 s, listo para WhatsApp según `video.ts`). La original se guarda tal cual;
+  las copias (miniatura, vitrina, WhatsApp) las arma `imagenes.ts`. El video no se rearma.
+- Ver es un enlace firmado que vence: la app (`catalogo.ver`), la vitrina pública
+  (`/vitrina/:link/:producto/medios`, solo lo que se ve en la web, nunca la original) y lo que
+  manda Sofi (`sofiMediaIn`, la copia de WhatsApp de la foto del color pedido o, sin ella, la que
+  es para todos; nunca la de otro color. La elige su herramienta `mandar_foto`, y sin
+  almacenamiento elige igual y no firma).
+- La foto sin fondo es una propuesta (`cutout`), cada una en su carpeta (`cutout_id`); la original
+  no se borra nunca. Nadie borra un
+  archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
+  cascada) y el servidor la borra (`emptyMediaTrash`).
+- La pantalla (`apps/web/src/ficha/fotos.tsx`, `cargar.tsx`, `lib/medios.ts`) achica la foto y
+  prepara el video en el navegador (Mediabunny) antes de subirlo; sin almacenamiento
+  (`MEDIA_OFF`) lo dice con `ErrorState` y deja seguir. Reordenar es arrastrar o «Mover»/Alt y
+  flechas; la ★ de Sofi es la foto del color en la cuadrícula.
+- «Cargar muchos» (`cargas.ts`): una carga abierta con sus productos y sus fotos; nada pasa al
+  catálogo hasta «Crear», que guarda todo o nada y deja las fotos en su misma carpeta. Una carga
+  creada o descartada ya no cambia. El agente no ve las cargas ni toca videos.
+
+## La IA de fotos (lienzo «La ficha del producto», decisiones 3, 7, 9 y 10)
+
+- Mira y propone; nunca guarda sola. Cada vez que mira es un `ai_look` (cuenta para el tope y
+  anota lo que costó) y sus propuestas, `ai_proposal` (campo, valor, por qué, estado propuesta /
+  usada / cambiada / descartada, quién y cuándo). Pedir, usar, cambiar, descartar y «Aplicar
+  todos» es `configuracion`; ver, `catalogo.ver` (las de una carga, `configuracion`). Sofi y
+  Argos no las ven (`0068_reglas_ia_de_fotos.sql`).
+- Usar una propuesta pasa por la operación de siempre (`updateProductIn`, `saveGridIn`,
+  `updatePhotoIn`; en la carga, `applyItem` y `joinPhotosIn`), con «Propuesta de la IA» en el
+  historial. En un producto de una carga solo se usan el nombre, la categoría, la descripción y
+  el color; lo demás pasa a la ficha al «Crear» (`carryProposalsIn`). «Agregar desde fotos» es
+  una carga de un producto.
+- Nunca el precio, el peso ni las medidas, ni un dato que no se ve: la plantilla dice qué puede
+  proponer (`visible` en `rubros.ts`: «foto» o «etiqueta», que solo vale si está escrito en las
+  fotos). Lo demás que la tienda necesita o tiene su pregunta se pregunta, desde la plantilla,
+  nunca desde el modelo. `reviewLook` (`ia-fotos.ts`) descarta cifras que no se leen, precios,
+  cualidades que una foto no muestra y lo que contradice una pregunta. «Mejorar el texto» solo
+  reescribe: si suma un dato, no se propone (`addedFacts`).
+- El modelo es el de Sofi (`gpt-6-luna`, `GESTORIA_FOTOS_MODEL`), con salida estructurada, y se
+  llama fuera de toda transacción. Lo escrito en las fotos es dato, nunca instrucción.
+- El tope son fotos por día y tienda (`GESTORIA_FOTOS_TOPE_DIA`, el día de la tienda); se detiene
+  también si la administración detuvo a Sofi por el saldo o el tope del plan. Al llegar, la
+  persona lo sabe (`capIn`) y sigue a mano: nada más se frena. Lo que costó queda en `ai_look` y
+  sale del saldo del plan con `countPhotoLook` (`uso.contado`, `ia_fotos`): en la transacción que
+  cierra la mirada, una vez, con su id como clave. Lo que no respondió y lo de `fake` no cuentan.
+- Quitar el fondo no lo hace este modelo (solo lee imágenes): el servidor recibe la propuesta ya
+  hecha (`POST fotos/:id/sin-fondo`).
+- En la pantalla, las propuestas usan las piezas comunes (`AiSuggestion`, `AiSuggestionBar`,
+  `AiSuggestionChips`, `AiQuestion` de `@odentia/ui-patterns`): «Agregar desde fotos»
+  (`apps/web/src/agregar.tsx`; en el celular, «Tomar fotos» abre la cámara), los ✦ de la ficha
+  (`ficha/ia.tsx`: «Completar», «Mejorar», «Aplicar todos») y «Juntar con IA» en «Cargar muchos»
+  (`cargar-ia.tsx`). Usar en la ficha guarda antes el borrador. Una pregunta se responde en su
+  campo de siempre. El tope y la IA apagada se dicen y nada se frena.
+- Un cambio en lo que lee o propone se mide con `pnpm --filter @gestoria/api eval:fotos` (banco
+  `apps/api/eval/fotos.json`, con los créditos de cada foto); `--estimar` dice cuánto costará.
+  Las pruebas usan un modelo controlado, nunca la red.
+
+## La ficha del producto (lienzo «La ficha del producto»)
+
+- Las plantillas de los rubros son fijas en `apps/api/src/rubros.ts`; la tienda guarda solo lo que
+  ajusta (`store_template_field`). Los datos del rubro se validan contra esa plantilla, con «No
+  aplica». Lo que falta nunca frena una venta: es el nivel de `readinessOf`, calculado en la API.
+- Qué colores hay y su orden son los valores de la opción del color (`product.color_option`);
+  `product_color` guarda solo su hex y la foto que manda Sofi. No hay dos listas de colores.
+- «Tallas y stock» (`ficha.ts`, `saveGrid`) guarda todo de una vez: cambiar un nombre no rehace
+  la variante y el stock entra al kardex (subir es entrada; bajar o quitar con stock pide motivo).
+- El estado lo pone la tienda (encargo, cupo, preventa, liquidación, ya no se vende); disponible
+  y agotado salen del stock (`saleStateOf`). Por encargo, cupo o preventa se anota sin stock; lo
+  que ya no se vende no entra a un pedido nuevo. El cupo por día todavía no se cuenta.
+- El precio de revendedora, el combo, las promociones de un color o una talla y la liquidación
+  son opciones de `autoUnit`/`floorOf` en `precio.ts`; lo que Sofi puede ofrecer de cada producto
+  solo la frena a ella (`byAgent`). El simulador es `lowestQuote`: nunca otra cuenta.
+- Lo que Sofi no supo (`preguntas.ts`, ADR 0237): Sofi solo anota la pregunta (`anotar_pregunta`);
+  va a «Te toca» (iguales del mismo producto, una línea) y al celular, salvo las de la prueba, que
+  quedan solo en la ficha. Ventas responde (una vez para todas, `answerQuestions`) y propone
+  guardarla; quien tiene `configuracion` la guarda. «Que Sofi se lo diga» le escribe a cada clienta
+  por su tubería (`tellAnswer`), sin prometer una hora. Cada cambio de la ficha va al historial
+  (`product_event`), campo por campo, con la forma de `productPatch`.
+- La página del producto en la vitrina (`vitrina.ts`, `apps/web/src/vitrina/`) es una pieza: la
+  vista previa de la ficha y «Probar como clienta» la usan y la usará el catálogo por link. Da
+  solo lo vendible (ni costo, ni mínimo, ni lo que Sofi puede ofrecer, ni códigos, ni el stock
+  exacto: «quedan pocas» hasta 3); la ruta pública, solo si `web_visible`.
+- La pantalla de la ficha (`apps/web/src/ficha/`) es una página completa que se guarda sola: un
+  borrador (`FichaStore` de `ficha/borrador.ts`) con deshacer y rehacer, que envía solo lo que
+  cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). Cada
+  celda de la cuadrícula va con el stock que vio la pantalla (`seenStock`): el servidor guarda la
+  diferencia sobre el stock de ahora (`saveGrid`), nunca un total que pise una venta, y dice lo
+  que se vendió mientras tanto (`meanwhile`); si baja el stock, espera el motivo sin frenar lo
+  demás. El margen se dibuja con el costo
+  que da el servidor solo con `costos.ver`; lo que cobraría Sofi es siempre `POST /simular`. Las
+  propuestas de la IA entran con `AiSuggestion`, nunca dibujadas a mano.
 
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
@@ -137,7 +235,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   montos del día son de `reportes.ver`; no se crea un permiso para ellos.
 - «Te toca» (`apps/api/src/inicio.ts`) vive solo en Inicio: cada línea, para quien puede
   resolverla, con su único botón y la operación de siempre (el pedido con su captura, «Pasar a…»,
-  «Comparar»). Una línea que depende de una pantalla que no existe va en `waiting` y no se dibuja.
+  «Comparar», «Responder» lo que Sofi no supo). Una línea que depende de una pantalla que no existe va en `waiting` y no se dibuja.
 - Los primeros pasos (`primeros-pasos.ts`) se marcan con lo guardado en cada apartado, nunca a
   mano; `store_setup` guarda solo lo saltado y cuándo quedó lista, y la lista no vuelve. Se saltan
   solo los pasos que no aplican a toda tienda (`SKIPPABLE_STEPS`). Los ve quien tiene
@@ -268,6 +366,15 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
+- «Probar como clienta» (ficha, ADR 0237) es esa misma conversación de prueba, nunca un panel
+  aparte: el chat y la vitrina con el mismo carrito (el pedido de la conversación), la oferta con
+  plazo y «Pagar ahora», que se simula (`payTestOrderIn`) y lo dice. Lo que la tienda le pide decir
+  (que pagó, una respuesta) va como aviso de sistema (`StoreNotice`), nunca como mensaje de la
+  clienta. Lo que llega con el mensaje de la clienta (`detail.desde`, `detail.carrito`) son datos.
+- Sofi lee la ficha (`sofi/ficha.ts`): los datos del rubro, el estado con lo que dice en cada uno,
+  las preguntas guardadas, los colores con su foto, el video y lo que puede ofrecer de ese
+  producto. Lo que la ficha no dice no lo afirma: lo deja a la tienda. «Qué usó Sofi» sale de lo
+  que leyó y está en lo que escribió (`usedIn`), no del modelo.
 - Argos no decide con el modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son
   textos fijos, uno por motivo y pedido. El modelo solo lee lo que dijo la clienta (abajo, «El perfil
   de la clienta»). Solo Dueño y Administrador ven Reportes (`reportes.ver`).
@@ -304,7 +411,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   baja, rol) o del nombre, también a `noteStoreTeam` (ADR 0217): el equipo entero, que la cuenta
   usa para el selector de las clínicas y para no cerrar la cuenta del único Dueño.
 - Lo que usó Sofi se cuenta con `countConversation`: una vez por conversación cada 24 horas, y sube
-  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso (`0009_reglas_acuerdo.sql`).
+  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso de conversaciones
+  (`0009_reglas_acuerdo.sql`); una persona, solo el de una mirada suya de la IA de fotos (`0042`).
 - La app nunca se detiene por la administración: se usa lo último guardado en `contract_state`;
   sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
   conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.
@@ -374,7 +482,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   mirado al enviar. Un tipo nuevo suma su fuente y su permiso ahí, y su respuesta en la Ayuda.
 - No es otra bandeja: avisa lo nuevo de los pedidos (`order_event`, cursor por persona y tienda) y
   de los chats que esperan, y abre la pantalla que lo resuelve. Se anota antes de enviar y nunca
-  se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan.
+  se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan. Lo que Sofi no supo
+  es su tipo (`preguntas`, con `questions_seen` como cursor), para quien atiende.
 - La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda:
   Inicio (`inicio.tsx`). En Avisos al celular, cada persona elige los suyos; soporte no.
 

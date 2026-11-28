@@ -1,12 +1,14 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, STORE_ID, surface, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Sofi en Configuración (tablero 8 de «gestorIA · Configuración, de nuevo»; ADR 0234), contra su
  * servidor y su base de verdad, con el modelo de desarrollo (responde por reglas, sin la red):
  * - Cómo habla se elige con un ejemplo de cada tono, y la prueba dice «Por qué» con lo elegido.
+ *   La prueba es la de la clienta (el chat, la vitrina y el pago de prueba), con un producto que se
+ *   elige: la misma pieza de «Probar como clienta» de la ficha, nunca un chat suelto.
  * - Lo que Sofi no supo en un chat de verdad está en «Lo que aprendió»; respondido, pasa a «Lo
  *   que sabe» y deja de proponerse. En el teléfono, lo pendiente se ve sin deslizar las pestañas.
  * - El horario del equipo se elige con días y horas, y lo dice como lo dirá Sofi.
@@ -35,10 +37,35 @@ async function as(who: Who) {
   expect(response.ok).toBe(true)
 }
 
+/** Lo que pide la prueba de la clienta: un producto que se venda (si la tienda aún no tiene). */
+async function aProduct() {
+  const { token } = (await (await fetch(`${ACCOUNT}/api/auth/token`)).json()) as { token: string }
+  const call = (method: string, path: string, body?: unknown) =>
+    fetch(`http://127.0.0.1:${API_PORT}/api/tiendas/${STORE_ID}${path}`, {
+      method,
+      headers: {
+        origin: WEB,
+        authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+  const { products } = (await (await call("GET", "/catalogo")).json()) as { products: unknown[] }
+  if (products.length > 0) return
+  const created = await call("POST", "/productos", {
+    name: "Zapatilla urbana",
+    category: "Zapatillas",
+    listPriceCents: 12900,
+    options: [{ name: "Talla", values: ["38", "39"] }],
+  })
+  expect(created.ok).toBe(true)
+}
+
 test.describe.configure({ mode: "serial" })
 
 test("Sofi se elige con ejemplos y la prueba dice por qué respondió así", async ({ page }) => {
   await as("rosa")
+  await aProduct()
   // El ancho de la laptop de la tienda: la prueba queda al lado, también con el cajón abierto.
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto(`${BASE}/configuracion/sofi`)
@@ -70,11 +97,18 @@ test("Sofi se elige con ejemplos y la prueba dice por qué respondió así", asy
   await status.getByRole("button", { name: "Pausar" }).click()
   await expect(status.getByText("Apagada")).toBeVisible()
 
+  // Es la prueba de la clienta: se elige el producto y están el chat y la vitrina.
+  await expect(chat.getByRole("combobox")).toBeVisible()
+  await expect(chat.getByRole("log", { name: "El chat de la prueba" })).toBeVisible()
+  await expect(
+    chat.getByRole("radio", { name: "Vitrina" }).or(chat.getByRole("button", { name: "Vitrina" })),
+  ).toHaveCount(1)
   await chat
-    .getByRole("textbox", { name: "Tu mensaje, como cliente" })
+    .getByRole("textbox", { name: "Mensaje de la clienta (prueba)" })
     .fill("hola, ¿tienen zapatillas?")
   await chat.getByRole("button", { name: "Enviar" }).click()
-  await expect(chat.getByText("Por qué:")).toBeVisible()
+  // «Por qué» de su última respuesta, en «Qué usó Sofi».
+  await expect(chat.getByText("Por qué:")).toBeVisible({ timeout: 20_000 })
   await expect(
     chat.getByText("Habló directa, de usted, con pocos emojis, como elegiste."),
   ).toBeVisible()
@@ -152,5 +186,5 @@ test("el horario del equipo se elige con días y horas, y en el teléfono no se 
   await expect(chat).not.toBeInViewport()
   await page.getByRole("button", { name: "Probar a Sofi" }).click()
   await expect(chat).toBeInViewport()
-  await expect(chat.getByRole("textbox", { name: "Tu mensaje, como cliente" })).toBeFocused()
+  await expect(chat.getByRole("textbox", { name: "Mensaje de la clienta (prueba)" })).toBeFocused()
 })

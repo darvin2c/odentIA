@@ -23,6 +23,8 @@ export function Photo({
   // Se pide al acercarse a la vista: un catálogo largo no baja todas sus fotos de una vez.
   const [seen, setSeen] = useState(false)
   const holder = useRef<HTMLSpanElement>(null)
+  // Se vuelve a mirar si la foto llega después (antes no había dónde observar).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: photoId cambia qué se dibuja
   useEffect(() => {
     const node = holder.current
     if (!node || seen) return
@@ -34,7 +36,7 @@ export function Photo({
     )
     watch.observe(node)
     return () => watch.disconnect()
-  }, [seen])
+  }, [seen, photoId])
   const blob = useQuery({
     queryKey: ["foto", storeId, photoId],
     queryFn: () => api<Blob>(`/api/tiendas/${storeId}/fotos/${photoId}`, { as: "blob" }),
@@ -62,6 +64,28 @@ export function Photo({
   ) : (
     <span ref={holder} className={box} />
   )
+}
+
+/**
+ * La dirección de una foto de la tienda para mostrarla o leer sus colores: la misma que pide
+ * `Photo`, una sola vez por foto. Vacía mientras llega.
+ */
+export function usePhotoUrl(storeId: string, photoId: string | null): string | null {
+  const blob = useQuery({
+    queryKey: ["foto", storeId, photoId],
+    queryFn: () => api<Blob>(`/api/tiendas/${storeId}/fotos/${photoId}`, { as: "blob" }),
+    enabled: Boolean(photoId),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 10 * 60_000,
+  })
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!blob.data) return
+    const next = URL.createObjectURL(blob.data)
+    setUrl(next)
+    return () => URL.revokeObjectURL(next)
+  }, [blob.data])
+  return photoId ? url : null
 }
 
 /**

@@ -5,6 +5,10 @@
  * una tienda abierta por la administración, con Lucía en Ventas, un pedido de soporte por aceptar
  * y una conversación que espera a una persona porque Sofi está apagada. Solo pruebas: nunca corre en producción.
  *
+ * Sofi responde con el modelo de desarrollo (`fakeModel`: reglas fijas, sin red), por su misma
+ * tubería. `POST /__clienta` hace escribir a una clienta en un chat de verdad (de WhatsApp) desde
+ * un producto, como llegará por el canal, y Sofi le responde.
+ *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
  * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
  * También lo de Mi perfil que usa el recorrido de la cuenta (ADR 0218): cambiar la contraseña
@@ -13,7 +17,14 @@
  */
 import { createECDH, randomBytes, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
-import { accountCopy, agentGap, conversation, conversationMessage, storeMember } from "@gestoria/db"
+import {
+  accountCopy,
+  agentGap,
+  conversation,
+  conversationMessage,
+  storeMember,
+  storeSupportAccess,
+} from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
 import { serve } from "@hono/node-server"
 import {
@@ -25,8 +36,12 @@ import {
   type HelpAskQuestion,
 } from "@odentia/contract"
 import { signMessage } from "@odentia/contract/signing"
+import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
+import { GenericContainer, Wait } from "testcontainers"
 import { createApp } from "../apps/api/src/app.js"
+import { createS3Storage } from "../apps/api/src/archivos.js"
+import { fakePhotosModel } from "../apps/api/src/ia-fotos.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
 import { fakeModel } from "../apps/api/src/sofi/modelo.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
@@ -48,6 +63,21 @@ const WEB = `http://127.0.0.1:${WEB_PORT}`
 const SECRET = `whsec_${Buffer.alloc(32, 3).toString("base64")}`
 
 const db = await startTestDb()
+// Las fotos y los videos (ADR 0236): un RustFS propio, el mismo S3 de desarrollo, que se borra al
+// terminar. Los enlaces firmados apuntan a su puerto en 127.0.0.1: el navegador los abre.
+const rustfs = await new GenericContainer("docker.io/rustfs/rustfs:1.0.1")
+  .withEnvironment({ RUSTFS_ACCESS_KEY: "gestoria", RUSTFS_SECRET_KEY: "gestoria-e2e" })
+  .withExposedPorts(9000)
+  .withWaitStrategy(Wait.forHttp("/health", 9000).forStatusCode(200))
+  .start()
+const storage = createS3Storage({
+  endpoint: `http://127.0.0.1:${rustfs.getMappedPort(9000)}`,
+  region: "us-east-1",
+  accessKeyId: "gestoria",
+  secretAccessKey: "gestoria-e2e",
+  bucket: "gestoria-medios-e2e",
+})
+await storage.ensureBucket()
 const pair = await generateKeyPair("EdDSA", { crv: "Ed25519" })
 const jwk: JWK = { ...(await exportJWK(pair.publicKey)), alg: "EdDSA", kid: "e2e" }
 
@@ -125,6 +155,7 @@ const adminFetch: typeof fetch = async (input, init) => {
 }
 
 const contract = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
+const model = fakeModel()
 // Cobros: un Mercado Pago de mentira (OAuth, el link y su pago) que avisa a este servidor.
 const mercadoPago = fakeMercadoPago({
   port: MP_PORT,
@@ -153,11 +184,22 @@ const app = createApp({
   contract,
   // «Probar a Sofi» con el modelo de desarrollo: responde por reglas, sin la red (ADR 0234: la
   // prueba muestra «Por qué»). No mide nada de cómo vende.
-  model: fakeModel(),
+  model,
   // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
+  storage,
+  // La IA de fotos, con el modelo de desarrollo: sin red, responde lo grabado para las fotos de la
+  // demo y del banco (`ia-fotos-muestra.ts`). Nunca un proveedor real.
+  photosModel: fakePhotosModel(),
 })
+const sofiDeps = {
+  appDb: db.appDb,
+  lockDb: db.ownerDb,
+  model,
+  link: { adapters: defaultLinkAdapters(), secretsKey: null, apiURL: WEB },
+  storage,
+}
 
 /** Un pedido de la administración, firmado como lo firmaría ella. */
 async function ask(request: AdminRequest) {
@@ -238,6 +280,27 @@ await db.ownerDb.insert(agentGap).values({
   createdBy: "agente:sofi",
 })
 
+// Con `E2E_DEMO=1`, también la demo de Calzados Rosa (sus fotos reales en este RustFS) con Rosa de
+// Dueño: para mirar la pantalla con la demo y sacar capturas. Sin el pedido de soporte de la demo,
+// que dejaría su franja arriba. Los recorridos no la usan.
+if (process.env.E2E_DEMO === "1") {
+  const { DEMO_STORE_ID, seedDemoStore } = await import("../apps/api/src/semilla.js")
+  const { seedDemoMedia } = await import("../apps/api/src/semilla-medios.js")
+  await seedDemoStore(db.ownerDb)
+  await db.ownerDb
+    .insert(storeMember)
+    .values({ storeId: DEMO_STORE_ID, userId: rosa.id, role: "owner", addedBy: "semilla-rosa" })
+  await db.ownerDb.delete(storeSupportAccess).where(eq(storeSupportAccess.storeId, DEMO_STORE_ID))
+  Object.assign(process.env, {
+    GESTORIA_S3_ENDPOINT: `http://127.0.0.1:${rustfs.getMappedPort(9000)}`,
+    GESTORIA_S3_REGION: "us-east-1",
+    GESTORIA_S3_ACCESS_KEY: "gestoria",
+    GESTORIA_S3_SECRET_KEY: "gestoria-e2e",
+    GESTORIA_S3_BUCKET: "gestoria-medios-e2e",
+  })
+  console.log(`e2e: demo, ${await seedDemoMedia(db.ownerDb, DEMO_STORE_ID)}`)
+}
+
 serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 
 // La cuenta de mentira, con las cabeceras que pide la pantalla (credenciales, su origen).
@@ -275,6 +338,30 @@ const account = createServer(async (request, response) => {
     return json(200, { como })
   }
   if (request.method === "GET" && url.pathname === "/__cuenta") return json(200, { asked })
+  // Una clienta escribe en un chat de verdad, desde un producto, y Sofi le responde (si está
+  // encendida): lo que llegará por el canal.
+  if (request.method === "POST" && url.pathname === "/__clienta") {
+    const body = (await readBody(request)) as { text?: string; name?: string; productId?: string }
+    const [chat] = await db.ownerDb
+      .insert(conversation)
+      .values({
+        storeId: STORE_ID,
+        channel: "whatsapp",
+        createdBy: rosa.id,
+        customerName: body.name ?? null,
+      })
+      .returning({ id: conversation.id })
+    await db.ownerDb.insert(conversationMessage).values({
+      storeId: STORE_ID,
+      conversationId: chat!.id,
+      author: "cliente",
+      text: body.text ?? "Hola",
+      actorUserId: rosa.id,
+      detail: body.productId ? { desde: body.productId } : {},
+    })
+    const result = await answer(sofiDeps, STORE_ID, chat!.id)
+    return json(200, { conversationId: chat!.id, status: result.status })
+  }
   const code = /^\/__codigo\/(si|no)$/.exec(url.pathname)?.[1]
   if (request.method === "POST" && code) {
     staffCode = code === "si"
@@ -392,6 +479,7 @@ console.log(`gestoria-e2e: listo (servidor ${API_PORT}, cuenta ${ACCOUNT_PORT})`
 const stop = async () => {
   account.close()
   mercadoPago.server.close()
+  await rustfs.stop().catch(() => undefined)
   await db.stop()
   process.exit(0)
 }

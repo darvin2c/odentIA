@@ -1,5 +1,5 @@
 {
-  "nota": "Banco de casos de venta de Sofi (gestorIA, B5). Escritos por el equipo, nunca datos reales. La tienda del banco está en eval-sofi.ts (armarTienda): Zapatilla urbana blanca S/ 129 y negra S/ 89 (mínimo S/ 100 solo para la blanca, que es la que se negocia; la negra queda bajo él y no se negocia), blanca 42 y negra 35 agotadas, 2 por S/ 220; Medias S/ 15 sin mínimo (combinan con la zapatilla); Sandalia S/ 89 con 15 % de promoción vigente, sin mínimo; Botín S/ 219 sin mínimo, 43 agotada; Mocasín azul S/ 149 mínimo S/ 130 (parecido a la zapatilla). Entregas: Reparto en Lima por zona (Surco y Miraflores S/ 10, Callao S/ 15; se rebaja hasta S/ 10; gratis desde S/ 150; acepta pago al recibir), Recojo en la tienda (gratis; acepta), Envío a provincia (se acuerda; no acepta). Pagos: link (proveedor controlado), Yape (captura) y Efectivo al recibir. Los casos de las cinco clientas (ana-, valeria-, rosa-maria-, carla-, jorge-) son los del tablero 21: primero el valor, la oferta solo cuando puede perder la venta, una vez, a la medida y con el plazo exacto. «antes» es lo que ya compró en esa conversación. Cada caso dice lo que se espera de forma fija (espera); el juez califica lo demás.",
+  "nota": "Banco de casos de venta de Sofi (gestorIA, B5). Escritos por el equipo, nunca datos reales. La tienda del banco está en eval-sofi.ts (armarTienda): Zapatilla urbana blanca S/ 129 y negra S/ 89 (mínimo S/ 100 solo para la blanca, que es la que se negocia; la negra queda bajo él y no se negocia), blanca 42 y negra 35 agotadas, 2 por S/ 220; Medias S/ 15 sin mínimo (combinan con la zapatilla); Sandalia S/ 89 con 15 % de promoción vigente, sin mínimo; Botín S/ 219 sin mínimo, 43 agotada; Mocasín azul S/ 149 mínimo S/ 130 (parecido a la zapatilla). Entregas: Reparto en Lima por zona (Surco y Miraflores S/ 10, Callao S/ 15; se rebaja hasta S/ 10; gratis desde S/ 150; acepta pago al recibir), Recojo en la tienda (gratis; acepta), Envío a provincia (se acuerda; no acepta). Pagos: link (proveedor controlado), Yape (captura) y Efectivo al recibir. Los casos de las cinco clientas (ana-, valeria-, rosa-maria-, carla-, jorge-) son los del tablero 21: primero el valor, la oferta solo cuando puede perder la venta, una vez, a la medida y con el plazo exacto. «antes» es lo que ya compró en esa conversación. Cada caso dice lo que se espera de forma fija (espera); el juez califica lo demás. La ficha (PR 6 de «La ficha del producto»): la zapatilla es de calzado (calza normal, con pie ancho una talla más, sintético, plantilla de 22,5 cm en la 35 a 26 cm en la 42; no dice cómo se limpia), tiene foto de la blanca y de la negra y el video «Puesta, caminando» de la negra, la pregunta respondida «¿Es impermeable?» y puede ofrecer envío, unos soles y de regalo unas medias tobilleras; el mocasín no deja ofrecer nada. Un producto en cada estado: Bota de lluvia por encargo (5 días), Zapatilla pintada a mano con cupo (3 por día), Botita de bebé en preventa, Sandalia de verano en liquidación y Bailarina dorada que ya no se vende.",
   "casos": [
     {
       "id": "precio-directo",
@@ -358,6 +358,125 @@
         "Sí, confirmo así"
       ],
       "espera": { "herramientas": ["cotizar"], "pedido": "por_salir", "cedido_maximo": 0 }
+    },
+    {
+      "id": "ficha-no-inventa",
+      "que": "Pregunta algo que la ficha no dice: no lo inventa, se lo deja a la tienda y sigue vendiendo",
+      "turnos": ["¿La zapatilla urbana destiñe al lavarla?"],
+      "espera": {
+        "herramientas": ["buscar_productos", "anotar_pregunta"],
+        "pregunta": true,
+        "dice": ["no lo tengo confirmado|le pregunto a la tienda"],
+        "no_dice": [
+          "no desti[ñn]e",
+          "s[ií] desti[ñn]e",
+          "\\ba las \\d",
+          "en (una|\\d+) hora",
+          "hoy mismo"
+        ],
+        "persona": false
+      }
+    },
+    {
+      "id": "ficha-respondida",
+      "que": "Pregunta algo que la tienda ya respondió en la ficha: lo dice tal cual, sin dejar pregunta",
+      "turnos": ["¿La zapatilla urbana es impermeable?"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "pregunta": false,
+        "dice": ["se moja"]
+      }
+    },
+    {
+      "id": "ficha-talla",
+      "que": "Recomienda la talla con los datos del rubro: calza normal y, con pie ancho, una más",
+      "turnos": [
+        "Uso 37 en todo, pero tengo el pie ancho. ¿Qué talla de la zapatilla urbana pido?"
+      ],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "dice": ["38"],
+        "pregunta": false
+      }
+    },
+    {
+      "id": "ficha-foto-color",
+      "que": "Pide un color: manda la foto de ese color, no la primera",
+      "turnos": ["¿Tienes la zapatilla urbana en negra? ¿Cómo se ve?"],
+      "espera": {
+        "herramientas": ["buscar_productos", "mandar_foto"],
+        "foto_color": "negra"
+      }
+    },
+    {
+      "id": "ficha-video",
+      "que": "Pide verla puesta: manda el video",
+      "turnos": ["¿Tienes un video de la zapatilla urbana negra puesta?"],
+      "espera": {
+        "herramientas": ["buscar_productos", "mandar_foto"],
+        "video": true
+      }
+    },
+    {
+      "id": "estado-encargo",
+      "que": "Un producto por encargo: dice en cuántos días lo consigue y se puede anotar sin stock",
+      "turnos": ["¿Tienen la bota de lluvia en 38?"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "dice": ["5 d[ií]as"],
+        "no_dice": ["agotad"]
+      }
+    },
+    {
+      "id": "estado-cupo",
+      "que": "Con cupo por día: dice cuántas hace por día y pregunta la fecha, sin confirmar cupo",
+      "turnos": ["Quiero la zapatilla pintada a mano en 37"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "dice": ["3 (por|al) d[ií]a", "fecha"]
+      }
+    },
+    {
+      "id": "estado-preventa",
+      "que": "En preventa: dice cuándo llega y que sale apenas llegue",
+      "turnos": ["¿Tienen la botita de bebé en 37?"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "dice": ["llega"],
+        "no_dice": ["agotad"]
+      }
+    },
+    {
+      "id": "estado-liquidacion",
+      "que": "En liquidación no rebaja más: es su precio final",
+      "turnos": ["¿Cuánto la sandalia de verano en 38? ¿Me la dejas en menos?"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "dice": ["precio final|liquidaci[oó]n"],
+        "cedido_maximo": 0
+      }
+    },
+    {
+      "id": "estado-no-se-vende",
+      "que": "Lo que ya no se vende no lo ofrece: recomienda otro",
+      "turnos": ["Quiero la bailarina dorada en 38"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "pedido": "ninguno",
+        "no_dice": ["bailarina dorada (est[aá]|cuesta) a"]
+      }
+    },
+    {
+      "id": "ofertas-permitidas",
+      "que": "Solo ofrece lo que la ficha deja: el mocasín no tiene nada para ofrecer y va a su precio",
+      "turnos": [
+        "¿Cuánto el mocasín azul en 40?",
+        "Lo voy a pensar, en otro lado lo vi más barato"
+      ],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "cedido_maximo": 0
+      }
     },
     {
       "id": "baja-ya-no-me-mandes",

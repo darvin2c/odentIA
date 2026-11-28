@@ -1,0 +1,362 @@
+{
+  "descripcion": "El banco de la IA de fotos (lienzo «La ficha del producto»): para cada producto, sus fotos, lo que se ve (lo que vale proponer), lo que NO se ve (lo que debe preguntar y nunca afirmar) y lo que nunca puede decir. La meta es cero datos inventados. Las fotos son de Wikimedia Commons (las del prototipo), con sus créditos en «creditos»; el banco lo escribió el equipo mirando cada foto. «puede»: un dato que vale tanto proponer (con ese valor) como preguntar. Lo de «nunca» se busca sin tildes en el nombre, la categoría, la descripción, las palabras y los datos propuestos.",
+  "creditos": {
+    "blanca1": "Superga 2750 Canvas weiß (1) · SPERA.de Designerschuhe, Taschen und Accessoires · CC BY 2.0 (con fondo extendido a cuadrado)",
+    "blanca2": "Superga 2750 Canvas weiß (3) · SPERA.de Designerschuhe, Taschen und Accessoires · CC BY 2.0 (con fondo extendido a cuadrado)",
+    "negra1": "Superga 2750 Microfiber schwarz (1) · SPERA.de Designerschuhe, Taschen und Accessoires · CC BY 2.0 (con fondo extendido a cuadrado)",
+    "negra2": "Oca low · CARIUMA · CC BY-SA 4.0",
+    "negra3": "Oca low · CARIUMA · CC BY-SA 4.0",
+    "botin1": "Ankle boot · Danÿa · CC BY-SA 4.0",
+    "botin2": "Laced ankle boot · Danÿa · CC BY-SA 4.0",
+    "botin2b": "Laced ankle boot · Danÿa · CC BY-SA 4.0",
+    "dorada1": "Sandalias doradas de mujer · Dorieo · CC BY-SA 4.0",
+    "dorada2": "Sandalias doradas de mujer · Dorieo · CC BY-SA 4.0",
+    "plataforma1": "Tacones · Archivaldo · dominio público",
+    "plataforma2": "Tacones · Archivaldo · dominio público",
+    "bailarina1": "Bailarina Bluniq Shoes blanca · Alvaro Blue · CC BY-SA 4.0",
+    "bailarina2": "Ballerinas (Weiss) · Stefan-Xp · CC BY-SA 3.0",
+    "mocasin1": "Coffee loafer shoes · Peachyeung316 · CC BY-SA 4.0",
+    "mocasin2": "Black loafers · Normal Phobic · CC BY-SA 2.5",
+    "lluvia1": "Rain boots on Stairs · Erikamthompson · CC BY-SA 3.0",
+    "polo_negro": "EEPISAT Black Polo Shirt · Mukhayyar · CC0",
+    "polo_coral": "Polo shirt at JCPenney · Ser Amantio di Nicolao · CC BY-SA 4.0",
+    "polo_azul": "WP polo shirt · Wikimedia Foundation · CC0",
+    "vestido1": "Summer dress · USAID Africa Bureau · dominio público",
+    "jean1": "Jeans and brown shirt folded · Ejdowning00 · CC BY-SA 4.0",
+    "jean2": "Tapered jeans · Leo-setä · CC BY 2.0",
+    "labial_rojo": "Lipstick (product) · Maria Morri · CC BY-SA 2.0",
+    "labial_nude": "MAC pink lipstick · Jen · CC BY-SA 3.0",
+    "labial_estuche": "DiorLippenstift · Sjr · dominio público",
+    "audif1": "Headphones · 17mdnasim89 · CC0",
+    "audif2": "Sony S Wireless Headphones · Allan Barger · CC BY-SA 3.0",
+    "audif3": "Sennheiser RS 175 · Richardkiwi · CC BY-SA 4.0",
+    "funda1": "Mobile phone case · Tiia Monto · CC BY-SA 4.0",
+    "cojin1": "Batik Kawung Cushion · Gunarta · CC BY-SA 4.0",
+    "lampara1": "Wooden Antique Table Lamp · Amitbalani · CC0",
+    "taza1": "White Ceramic Mug · Janko Ferlic · CC0",
+    "manta1": "Filet crochet sofa blanket · Durova · CC BY-SA 3.0"
+  },
+  "casos": [
+    {
+      "id": "zapatilla-lona-negra",
+      "fotos": ["negra2", "negra3"],
+      "producto": "Zapatilla de lona negra con planta crema, de frente y desde arriba",
+      "se_ve": { "rubro": "calzado", "nombre": ["zapatilla"], "colores": [["negra", "negro"]], "datos": { "material": ["Lona"] }, "leido": ["cariuma"] },
+      "puede": ["material"],
+      "no_se_ve": ["horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma"],
+      "nunca": ["cuero", "gamuza", "comod", "impermeable", "transpirable", "suave", "resistente", "vegan", "organic"]
+    },
+    {
+      "id": "zapatilla-superga-negra",
+      "fotos": ["negra1"],
+      "producto": "Zapatilla negra de microfibra con aspecto de cuero, planta negra: el material no se distingue",
+      "se_ve": { "rubro": "calzado", "nombre": ["zapatilla"], "colores": [["negra", "negro"]], "datos": {}, "leido": ["superga"] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "lona", "comod", "impermeable", "suave", "resistente", "2750"]
+    },
+    {
+      "id": "zapatilla-superga-blanca",
+      "fotos": ["blanca1", "blanca2"],
+      "producto": "Zapatilla blanca de lona con planta blanca, de lado y de atrás",
+      "se_ve": { "rubro": "calzado", "nombre": ["zapatilla"], "colores": [["blanca", "blanco"]], "datos": { "material": ["Lona"] }, "leido": ["superga"] },
+      "puede": ["material"],
+      "no_se_ve": ["horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma"],
+      "nunca": ["cuero", "comod", "transpirable", "suave", "resistente", "2750", "algodon"]
+    },
+    {
+      "id": "zapatilla-superga-dos-colores",
+      "fotos": ["blanca1", "blanca2", "negra1"],
+      "producto": "El mismo modelo en blanco (lona) y en negro (microfibra lisa): dos colores, el material no es el mismo",
+      "se_ve": { "rubro": "calzado", "nombre": ["zapatilla"], "colores": [["blanca", "blanco"], ["negra", "negro"]], "datos": {}, "leido": ["superga"] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "comod", "suave", "resistente"]
+    },
+    {
+      "id": "botin-lazo",
+      "fotos": ["botin1"],
+      "producto": "Botín negro de taco ancho con lazo y dije dorado, sobre una caja rosada",
+      "se_ve": { "rubro": "calzado", "nombre": ["botin", "bota", "botina"], "colores": [["negro", "negra"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "gamuza", "comod", "suave", "resistente", "caja incluida", "cm"]
+    },
+    {
+      "id": "botin-pasadores",
+      "fotos": ["botin2", "botin2b"],
+      "producto": "Botín negro de taco alto con plataforma y pasadores, de los dos lados",
+      "se_ve": { "rubro": "calzado", "nombre": ["botin", "bota", "botina"], "colores": [["negro", "negra"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "gamuza", "comod", "suave", "resistente", "cm"]
+    },
+    {
+      "id": "sandalia-dorada",
+      "fotos": ["dorada1", "dorada2"],
+      "producto": "Sandalia dorada de taco corrido con tiras cruzadas al tobillo, sobre una alfombra negra",
+      "se_ve": { "rubro": "calzado", "nombre": ["sandalia"], "colores": [["dorada", "dorado", "bronce", "cobre", "oro"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "comod", "suave", "resistente", "cm", "metalico de cuero"]
+    },
+    {
+      "id": "sandalia-blanca-puesta",
+      "fotos": ["plataforma1", "plataforma2"],
+      "producto": "Sandalia blanca de taco corrido con tiras y un nudo, puesta",
+      "se_ve": { "rubro": "calzado", "nombre": ["sandalia"], "colores": [["blanca", "blanco"]], "datos": {}, "leido": [] },
+      "puede": ["material"],
+      "no_se_ve": ["horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma"],
+      "nunca": ["cuero", "comod", "suave", "resistente", "cm", "piso", "pies"]
+    },
+    {
+      "id": "bailarina-punta-negra",
+      "fotos": ["bailarina1"],
+      "producto": "Bailarina blanca con punta negra y detalle rojo, plantilla azul",
+      "se_ve": { "rubro": "calzado", "nombre": ["bailarina", "balerina", "flat", "ballerina"], "colores": [["blanca", "blanco", "crema", "hueso"]], "datos": {}, "leido": ["bluniq", "spain"] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "charol", "serpiente", "piton", "comod", "suave", "acolchad"]
+    },
+    {
+      "id": "bailarina-perforada",
+      "fotos": ["bailarina2"],
+      "producto": "Bailarina blanca con perforaciones en la punta",
+      "se_ve": { "rubro": "calzado", "nombre": ["bailarina", "balerina", "flat", "ballerina", "zapato"], "colores": [["blanca", "blanco", "crema", "hueso"]], "datos": {}, "leido": ["salamander"] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "comod", "suave", "transpirable", "fresc"]
+    },
+    {
+      "id": "mocasin-borlas",
+      "fotos": ["mocasin1"],
+      "producto": "Mocasín marrón oscuro con borlas",
+      "se_ve": { "rubro": "calzado", "nombre": ["mocasin", "zapato", "loafer"], "colores": [["marron", "cafe", "chocolate", "marron oscuro"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "comod", "suave", "artesanal", "hecho a mano"]
+    },
+    {
+      "id": "mocasin-negro",
+      "fotos": ["mocasin2"],
+      "producto": "Mocasín negro sin pasadores, de lado",
+      "se_ve": { "rubro": "calzado", "nombre": ["mocasin", "zapato", "loafer"], "colores": [["negro", "negra"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["material", "horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma", "material"],
+      "nunca": ["cuero", "comod", "suave", "antideslizante"]
+    },
+    {
+      "id": "botas-lluvia",
+      "fotos": ["lluvia1"],
+      "producto": "Botas de lluvia fucsia con lunares blancos; al lado hay otras botas a cuadros que no son el producto",
+      "se_ve": { "rubro": "calzado", "nombre": ["bota"], "colores": [["fucsia", "rosada", "rosa", "fucsia con lunares", "rosada con lunares"]], "datos": {}, "leido": [] },
+      "puede": ["material"],
+      "no_se_ve": ["horma", "ancho", "plantilla", "limpia"],
+      "debe_preguntar": ["horma"],
+      "nunca": ["cuero", "comod", "cuadros", "forro", "antideslizante"]
+    },
+    {
+      "id": "polo-azul-puesto",
+      "fotos": ["polo_azul"],
+      "producto": "Polo con cuello azul con un logo blanco en el pecho, puesto",
+      "se_ve": { "rubro": "ropa", "nombre": ["polo", "camisa", "polera"], "colores": [["azul", "azulino", "azul rey"]], "datos": {}, "leido": ["wiki"] },
+      "puede": ["largo"],
+      "no_se_ve": ["tela", "medidas", "calce", "cuidado"],
+      "debe_preguntar": ["tela"],
+      "nunca": ["algodon", "pique", "poliester", "suave", "fresc", "transpirable", "pantalon"]
+    },
+    {
+      "id": "polo-coral-tienda",
+      "fotos": ["polo_coral"],
+      "producto": "Polos con cuello color coral y naranja, doblados en la repisa de una tienda",
+      "se_ve": { "rubro": "ropa", "nombre": ["polo", "camisa", "polera"], "colores": [["coral", "salmon", "naranja", "durazno", "melon", "anaranjado", "terracota"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["tela", "medidas", "calce", "cuidado", "largo"],
+      "debe_preguntar": ["tela"],
+      "nunca": ["algodon", "pique", "suave", "fresc", "oferta"]
+    },
+    {
+      "id": "polo-negro-modelo",
+      "fotos": ["polo_negro"],
+      "producto": "Polo con cuello gris oscuro, dibujado, con un logo y «Name / Division» en el pecho",
+      "se_ve": { "rubro": "ropa", "nombre": ["polo", "camisa", "polera"], "colores": [["negro", "negra", "gris", "gris oscuro", "plomo", "carbon", "grafito"]], "datos": {}, "leido": ["eepisat"] },
+      "puede": [],
+      "no_se_ve": ["tela", "medidas", "calce", "cuidado"],
+      "debe_preguntar": ["tela"],
+      "nunca": ["algodon", "pique", "suave", "fresc", "personaliz"]
+    },
+    {
+      "id": "vestido-estampado",
+      "fotos": ["vestido1"],
+      "producto": "Vestido corto de tiras con estampado de colores, puesto en una pasarela",
+      "se_ve": { "rubro": "ropa", "nombre": ["vestido"], "colores": [["estampado", "multicolor", "turquesa", "rojo", "rosado", "colores"]], "datos": { "largo": ["Corto"] }, "leido": [] },
+      "puede": ["largo"],
+      "no_se_ve": ["tela", "medidas", "calce", "cuidado"],
+      "debe_preguntar": ["tela"],
+      "nunca": ["algodon", "seda", "lino", "suave", "fresc", "aretes", "pasarela"]
+    },
+    {
+      "id": "jean-puesto",
+      "fotos": ["jean1"],
+      "producto": "Dos personas sentadas con jean celeste y canastas: el producto no está claro",
+      "se_ve": { "rubro": "ropa", "nombre": ["jean", "pantalon", "vaquero"], "colores": [["celeste", "azul", "azul claro", "jean"]], "datos": { "tela": ["Jean"] }, "leido": [] },
+      "puede": ["tela", "largo"],
+      "no_se_ve": ["medidas", "calce", "cuidado"],
+      "debe_preguntar": [],
+      "nunca": ["algodon", "elastic", "stretch", "tiro alto", "suave", "comod"]
+    },
+    {
+      "id": "ropa-varias-prendas",
+      "fotos": ["jean2"],
+      "producto": "Varias prendas sobre una alfombra (dos shorts negros, un polo, un jean celeste): no es un solo producto",
+      "mezcla": true,
+      "se_ve": { "nombre": [], "colores": [], "datos": {}, "leido": [] },
+      "puede": ["tela", "largo"],
+      "no_se_ve": ["medidas", "calce", "cuidado"],
+      "debe_preguntar": [],
+      "nunca": ["algodon", "elastic", "suave", "comod"]
+    },
+    {
+      "id": "labial-rojo",
+      "fotos": ["labial_rojo"],
+      "producto": "Labial rojo en barra, con tubo plateado y negro",
+      "se_ve": { "rubro": "cosmetica", "nombre": ["labial", "lapiz labial", "barra de labios"], "colores": [["rojo", "rojo clasico"]], "datos": {}, "leido": ["mac"] },
+      "puede": [],
+      "no_se_ve": ["contenido", "piel", "ingredientes", "vence", "nso"],
+      "debe_preguntar": ["contenido", "piel", "vence", "nso"],
+      "nunca": ["mate", "hidrat", "larga duracion", "vitamina", "vegano", "cruelty", "3,5", "3.5", "gramos"]
+    },
+    {
+      "id": "labial-nude",
+      "fotos": ["labial_nude"],
+      "producto": "Labial nude en barra, de tubo negro, en una mano",
+      "se_ve": { "rubro": "cosmetica", "nombre": ["labial", "lapiz labial", "barra de labios"], "colores": [["nude", "beige", "rosa palo", "cafe claro", "marron claro", "durazno", "piel", "canela", "nude rosado"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["contenido", "piel", "ingredientes", "vence", "nso"],
+      "debe_preguntar": ["contenido", "piel", "vence", "nso"],
+      "nunca": ["mate", "hidrat", "larga duracion", "vitamina", "vegano", "anillo"]
+    },
+    {
+      "id": "labial-estuche",
+      "fotos": ["labial_estuche"],
+      "producto": "Labial rosa cereza con tubo dorado y tapa azul transparente con la marca",
+      "se_ve": { "rubro": "cosmetica", "nombre": ["labial", "lapiz labial", "barra de labios"], "colores": [["rojo", "rosado", "rosa", "cereza", "fresa", "frambuesa", "coral", "rojo cereza", "rosa intenso"]], "datos": {}, "leido": ["dior"] },
+      "puede": [],
+      "no_se_ve": ["contenido", "piel", "ingredientes", "vence", "nso"],
+      "debe_preguntar": ["contenido", "piel", "vence", "nso"],
+      "nunca": ["mate", "hidrat", "larga duracion", "vitamina", "original", "brillo"]
+    },
+    {
+      "id": "audifonos-fondo-amarillo",
+      "fotos": ["audif1"],
+      "producto": "Audífonos negros de diadema, sobre fondo amarillo; no dice si son inalámbricos",
+      "se_ve": { "rubro": "tecnologia", "nombre": ["audifono", "auricular", "headphone", "audifonos"], "colores": [["negro", "negros"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["compatible", "estado_equipo", "garantia", "incluye", "bateria"],
+      "debe_preguntar": ["compatible", "estado_equipo", "garantia"],
+      "nunca": ["bluetooth", "inalambric", "wireless", "cancelacion", "bateria", "hora", "microfono", "iphone", "android", "nuevo"]
+    },
+    {
+      "id": "audifonos-wireless",
+      "fotos": ["audif2"],
+      "producto": "Audífonos negros de diadema en penumbra, con «WIRELESS STEREO HEADSET» escrito",
+      "se_ve": { "rubro": "tecnologia", "nombre": ["audifono", "auricular", "headphone", "audifonos", "headset", "diadema"], "colores": [["negro", "negros"]], "datos": {}, "leido": ["wireless", "stereo", "headset"] },
+      "puede": [],
+      "no_se_ve": ["compatible", "estado_equipo", "garantia", "incluye", "bateria"],
+      "debe_preguntar": ["compatible", "estado_equipo", "garantia"],
+      "nunca": ["bluetooth", "cancelacion", "bateria", "hora", "microfono", "iphone", "android", "playstation", "sony"]
+    },
+    {
+      "id": "audifonos-base",
+      "fotos": ["audif3"],
+      "producto": "Audífonos negros de diadema sobre su base, con dos botones en la base",
+      "se_ve": { "rubro": "tecnologia", "nombre": ["audifono", "auricular", "headphone", "audifonos"], "colores": [["negro", "negros", "negro y plateado", "negro y gris"]], "datos": { "incluye": ["base"] }, "leido": [] },
+      "puede": ["incluye"],
+      "no_se_ve": ["compatible", "estado_equipo", "garantia", "bateria"],
+      "debe_preguntar": ["compatible", "estado_equipo", "garantia"],
+      "nunca": ["bluetooth", "cancelacion", "hora", "microfono", "iphone", "android", "sennheiser", "tv", "television"]
+    },
+    {
+      "id": "funda-libro",
+      "fotos": ["funda1"],
+      "producto": "Funda tipo libro azul para celular, abierta, con un soporte negro adentro",
+      "se_ve": { "rubro": "tecnologia", "nombre": ["funda", "case", "estuche", "carcasa", "protector"], "colores": [["azul", "azul marino", "azul oscuro", "morado"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["compatible", "estado_equipo", "garantia", "incluye", "bateria"],
+      "debe_preguntar": ["compatible", "estado_equipo", "garantia"],
+      "nunca": ["iphone", "samsung", "galaxy", "xiaomi", "sony", "cuero", "iman", "magnet", "tarjetas", "nuevo"]
+    },
+    {
+      "id": "cojin-estampado",
+      "fotos": ["cojin1"],
+      "producto": "Cojín cuadrado azul con estampado blanco de flores",
+      "se_ve": { "rubro": "hogar", "nombre": ["cojin", "almohadon", "funda"], "colores": [["azul", "azul y blanco", "azulino", "azul rey"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["medidas", "peso", "material", "arma", "limpia", "garantia"],
+      "debe_preguntar": ["medidas", "material"],
+      "nunca": ["algodon", "lino", "batik", "relleno", "cm", "suave", "lavable", "cierre"]
+    },
+    {
+      "id": "lampara-flecos",
+      "fotos": ["lampara1"],
+      "producto": "Pantalla de lámpara guinda plisada con galón y flecos dorados; no se ve la base",
+      "se_ve": { "rubro": "hogar", "nombre": ["lampara", "pantalla"], "colores": [["guinda", "vino", "granate", "burdeos", "bordo", "rojo vino"]], "datos": {}, "leido": [] },
+      "puede": ["material"],
+      "no_se_ve": ["medidas", "peso", "arma", "limpia", "garantia"],
+      "debe_preguntar": ["medidas"],
+      "nunca": ["madera", "led", "bombilla", "foco", "cm", "seda", "terciopelo", "antigua"]
+    },
+    {
+      "id": "taza-cafe",
+      "fotos": ["taza1"],
+      "producto": "Taza blanca con café, junto a granos y una cafetera: el producto es la taza",
+      "se_ve": { "rubro": "hogar", "nombre": ["taza", "pocillo", "tacita"], "colores": [["blanca", "blanco"]], "datos": {}, "leido": [] },
+      "puede": ["material"],
+      "no_se_ve": ["medidas", "peso", "arma", "limpia", "garantia"],
+      "debe_preguntar": ["medidas"],
+      "nunca": ["granos incluidos", "incluye cafe", "cafetera", "moka", "ml", "microondas", "lavavajillas", "porcelana"]
+    },
+    {
+      "id": "manta-crochet",
+      "fotos": ["manta1"],
+      "producto": "Manta tejida a crochet color crema con rombos y borde azul, sobre un sofá",
+      "se_ve": { "rubro": "hogar", "nombre": ["manta", "colcha", "cobija", "frazada", "cubrecama", "tejido"], "colores": [["crema", "blanca", "beige", "marfil", "hueso", "blanco"]], "datos": {}, "leido": [] },
+      "puede": [],
+      "no_se_ve": ["medidas", "peso", "material", "arma", "limpia", "garantia"],
+      "debe_preguntar": ["medidas", "material"],
+      "nunca": ["algodon", "lana", "acrilico", "hecho a mano", "artesanal", "cm", "sofa de cuero", "suave", "abrig"]
+    }
+  ],
+  "juntar": [
+    {
+      "id": "juntar-zapatillas-y-botines",
+      "fotos": ["negra2", "blanca1", "botin2", "negra3", "blanca2", "botin2b"],
+      "grupos": [["negra2", "negra3"], ["blanca1", "blanca2"], ["botin2", "botin2b"]],
+      "puede_juntar": []
+    },
+    {
+      "id": "juntar-ropa-y-labiales",
+      "fotos": ["polo_azul", "labial_rojo", "polo_coral", "labial_nude", "polo_negro"],
+      "grupos": [],
+      "puede_juntar": [["polo_azul", "polo_coral", "polo_negro"], ["labial_rojo", "labial_nude"]]
+    },
+    {
+      "id": "juntar-sandalias-y-mocasines",
+      "fotos": ["dorada1", "mocasin1", "plataforma1", "dorada2", "mocasin2", "plataforma2"],
+      "grupos": [["dorada1", "dorada2"], ["plataforma1", "plataforma2"]],
+      "puede_juntar": []
+    }
+  ]
+}

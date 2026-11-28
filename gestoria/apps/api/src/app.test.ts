@@ -969,7 +969,7 @@ describe("la tienda de ejemplo", () => {
     // El cobro de la semilla espera su pago: el plan lleva su punto.
     expect(overview.plan).toMatchObject({ name: "Tienda", status: "activa", toPay: true })
     // Y tres preguntas que Sofi no supo, por responder en «Lo que aprendió».
-    expect(overview.sofi).toEqual({ enabled: true, tried: false, toAnswer: 3 })
+    expect(overview.sofi).toEqual({ enabled: true, tried: true, toAnswer: 3 })
     expect(overview.team.supportAsks).toBe(1)
     expect(overview.catalog.withStock).toBeGreaterThan(0)
     const help = (await (

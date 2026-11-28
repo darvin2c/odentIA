@@ -4,6 +4,8 @@ import {
   type Db,
   type OrderChannel,
   orderPayment,
+  product,
+  productVariant,
   saleOrder,
   store,
   storeAgent,
@@ -14,6 +16,7 @@ import {
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm"
 import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
+import type { Storage } from "../archivos.js"
 import { conversationCustomerOrdersIn } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { deliveryPriceOf } from "../entregas.js"
@@ -36,6 +39,7 @@ import {
   type SofiOffer,
   type SofiToolContext,
   stateWords,
+  usedIn,
 } from "./herramientas.js"
 import {
   addUsage,
@@ -117,6 +121,13 @@ CÓMO TRABAJAS
 - El precio del envío de su compra es el de cotizar (o el de ver_envio con sus lineas), no el de lista: nunca dices un precio y después «gratis» para el mismo envío. Si te llega para_envio_gratis, díselo una vez, con ese monto.
 - Por agencia: nombras las agencias de la tienda, lo que cuesta llevarlo a la agencia y quién paga el flete, tal como lo dicen tus herramientas. Si el flete se paga al recoger, lo dices claro y no das un monto de flete: no lo sabes.
 
+LA FICHA DE CADA PRODUCTO (buscar_productos te la da: datos, estado, preguntas_respondidas, colores, video y puede_ofrecer)
+- Lo que dices de un producto sale de su ficha. Si la clienta pregunta algo que la ficha no dice (está en la_ficha_no_dice, o no está en datos ni en preguntas_respondidas), no lo afirmas ni lo supones: usa anotar_pregunta y dile «No lo tengo confirmado. Le pregunto a la tienda y te escribo». Sigues vendiendo con lo que sí sabes. Nunca prometes una hora para la respuesta.
+- La talla la recomiendas con los datos de la ficha (cómo calza, si tiene el pie ancho, el largo de la plantilla o las medidas de cada talla). Sin esos datos no adivinas: le preguntas qué talla usa siempre y le dices lo que sí sabes.
+- El estado: si el producto trae estado, haces y dices lo que dice ahí. Por encargo, con cupo o en preventa se anota sin stock y sale cuando llegue; en liquidación no hay rebaja.
+- Cuando hablas de un color, mandas su foto con mandar_foto (el color como sale en colores). Si pide verla puesta o un video, mandas el video (video: true). No repites la foto que ya mandaste en la conversación.
+- Para cerrar, solo ofreces lo que dice puede_ofrecer de ese producto. Si dice «nada», va a su precio.
+
 NEGOCIAR (vender es lo principal, y en una tienda chica la confianza es lo que vende)
 - Solo negocias productos con se_negocia: true. Los demás van a su precio: lo dices con amabilidad.
 - Primero el valor, nunca la rebaja de entrada. Si pide rebaja o duda, primero lo que tiene el producto (su descripción), cuánto queda en su talla (el stock, solo si es poco), lo que dicen quienes ya compraron (solo si está en LO QUE SABE) o algo parecido más barato (parecido, con su precio).
@@ -154,7 +165,9 @@ PROMOCIONES (solo con su permiso)
 - Si lo que dice puede no ser eso («ahora no tengo plata», «es para mi hermana», «para, ya te pago»), no anotas nada y sigues. Si dudas, no la anotes.
 - Las novedades le llegan por este chat, de la tienda: no nombras a nadie más que le vaya a escribir.
 
-PASAR A UNA PERSONA (pasar_a_persona): un reclamo, una devolución, un cambio, si lo pide, si no sabes (con la pregunta) y lo que diga CUÁNDO PASAS EL CHAT (abajo). Al pasarlo no escribes tú: sale un aviso fijo.
+PASAR A UNA PERSONA (pasar_a_persona): un reclamo, una devolución, un cambio, si lo pide, si no sabes algo que no es de un producto (con la pregunta; lo de un producto se lo preguntas a la tienda con anotar_pregunta) y lo que diga CUÁNDO PASAS EL CHAT (abajo). Al pasarlo no escribes tú: sale un aviso fijo.
+
+AVISOS DE LA TIENDA: un mensaje de sistema al final que empieza con «AVISO DE LA TIENDA» lo escribe la tienda, no la clienta (que pagó, o la respuesta a lo que preguntó). Le escribes a la clienta lo que dice el aviso, con tus palabras y sin agregar datos.
 
 CÓMO ESCRIBES: en español, corto (2 a 4 frases), sin listas largas, con los importes tal como vienen de tus herramientas, en el tono, el trato y los emojis de CÓMO HABLAS (abajo). Saludas solo al empezar la conversación, con tu nombre.`
 
@@ -174,6 +187,8 @@ const COLLECTION_WORDS = {
 
 export interface SofiDeps {
   appDb: Db
+  /** Dónde están las fotos y los videos (ADR 0236): las que manda Sofi con su respuesta. */
+  storage?: Storage | null
   /**
    * Donde se toma el candado de cada conversación (el dueño de la base): una conexión apartada
    * mientras responde el modelo no puede salir del grupo de la aplicación, o diez turnos a la vez
@@ -199,6 +214,15 @@ export type AnswerResult =
    * verdad): la conversación espera a una persona, como con Sofi apagada.
    */
   | { status: "detenida"; reason: AgentStop }
+
+/**
+ * Lo que escribe la tienda para que Sofi se lo diga a la clienta, sin que ella haya escrito: que
+ * pagó, o la respuesta a lo que Sofi no supo. Va como mensaje de sistema, nunca como mensaje de la
+ * clienta; los importes que trae se pueden repetir.
+ */
+export interface StoreNotice {
+  text: string
+}
 
 interface Loaded {
   conv: typeof conversation.$inferSelect
@@ -340,6 +364,7 @@ async function load(
             ),
           )
       : []
+    const arrival = await arrivalIn(tx, storeId, history)
     // Lo que compró la clienta: su ficha (ADR 0223) con todos sus chats, no solo este.
     const story = await conversationCustomerOrdersIn(tx, storeId, conversationId)
     const consent = await consentIn(tx, storeId, conversationId)
@@ -467,6 +492,7 @@ async function load(
       "LA CLIENTA (lo que compró en la tienda, por este chat o por otro con su misma ficha):",
       customerStory(story, now, conv.channel === "prueba"),
       consentWords(consent),
+      ...arrival,
     ].join("\n")
     return {
       conv,
@@ -491,6 +517,80 @@ async function load(
   })
 }
 
+/** Lo que una clienta trae puesto en su mensaje: desde qué producto llegó y su carrito de la vitrina. */
+export interface CustomerContext {
+  /** El producto del link por el que llegó (la vitrina o «Probar como clienta» de la ficha). */
+  desde?: string
+  /** Lo que tiene en el carrito de la vitrina, que es el mismo del chat. */
+  carrito?: { variantId: string; quantity: number }[]
+}
+
+/**
+ * Desde qué producto llegó la clienta y qué tiene en el carrito de la vitrina: lo último que trae
+ * su mensaje (`detail.desde`, `detail.carrito`). Son datos, no órdenes: los nombres salen de la
+ * tienda, nunca del mensaje.
+ */
+async function arrivalIn(
+  tx: Db,
+  storeId: string,
+  history: (typeof conversationMessage.$inferSelect)[],
+): Promise<string[]> {
+  const mine = history.filter((m) => m.author === "cliente")
+  const from = mine.findLast((m) => typeof m.detail.desde === "string")?.detail.desde as
+    | string
+    | undefined
+  const cartMessage = mine.at(-1)
+  const cart = Array.isArray(cartMessage?.detail.carrito)
+    ? (cartMessage.detail.carrito as CustomerContext["carrito"])!
+    : []
+  const lines: string[] = []
+  if (from) {
+    const [found] = await tx
+      .select({ id: product.id, name: product.name })
+      .from(product)
+      .where(and(eq(product.id, from), eq(product.storeId, storeId)))
+    if (found)
+      lines.push(
+        "",
+        `LLEGÓ DESDE EL LINK DE: «${found.name}» (producto_id ${found.id}). Es lo que mira: búscalo antes de responder.`,
+      )
+  }
+  if (cart.length) {
+    const rows = await tx
+      .select({
+        id: productVariant.id,
+        values: productVariant.optionValues,
+        name: product.name,
+      })
+      .from(productVariant)
+      .innerJoin(product, eq(product.id, productVariant.productId))
+      .where(
+        and(
+          eq(productVariant.storeId, storeId),
+          inArray(
+            productVariant.id,
+            cart.map((l) => l.variantId),
+          ),
+        ),
+      )
+    const named = cart.flatMap((line) => {
+      const row = rows.find((r) => r.id === line.variantId)
+      return row
+        ? [
+            `- ${line.quantity} × ${row.name}${row.values.length ? ` ${row.values.join(" ")}` : ""} (variante_id ${row.id})`,
+          ]
+        : []
+    })
+    if (named.length)
+      lines.push(
+        "",
+        "SU CARRITO EN LA VITRINA (lo eligió ella; cotízalo si quiere pagarlo):",
+        ...named,
+      )
+  }
+  return lines
+}
+
 /** Cómo va el mensaje de cada autor en lo que lee el modelo. */
 function asChat(message: typeof conversationMessage.$inferSelect): ChatMessage {
   if (message.author === "cliente") return { role: "user", content: message.text }
@@ -510,13 +610,26 @@ export async function answer(
   deps: SofiDeps,
   storeId: string,
   conversationId: string,
+  /** Lo que la tienda le pide decir, sin que la clienta haya escrito (que pagó, una respuesta). */
+  notice?: StoreNotice,
 ): Promise<AnswerResult> {
   const result = await withSessionLock(deps.lockDb, `sofi:${conversationId}`, async () => {
     let last: AnswerResult = { status: "nada" }
     // Lo último del cliente que ya se respondió. Si escribió mientras Sofi respondía, su mensaje
     // quedó antes de esa respuesta: se responde otra vez (como mucho una), con lo nuevo al final.
     let answered = -1
-    for (let round = 0; round < 2; round++) {
+    if (notice) {
+      const loaded = await load(deps.appDb, storeId, conversationId, deps.now?.() ?? new Date())
+      if (!loaded) return { status: "nada" } as const
+      // Lo que la clienta escribió antes del aviso ya lo vio Sofi al responderlo.
+      answered = Math.max(
+        -1,
+        ...loaded.history.filter((m) => m.author === "cliente").map((m) => m.seq),
+      )
+      last = await turn(deps, storeId, loaded, notice)
+      if (last.status !== "respondio" || last.handoff) return last
+    }
+    for (let round = notice ? 1 : 0; round < 2; round++) {
       const loaded = await load(deps.appDb, storeId, conversationId, deps.now?.() ?? new Date())
       if (!loaded) return { status: "nada" } as const
       const fresh = loaded.history.filter((m) => m.author === "cliente" && m.seq > answered)
@@ -577,12 +690,19 @@ async function waitForPerson(
   })
 }
 
-async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<AnswerResult> {
+async function turn(
+  deps: SofiDeps,
+  storeId: string,
+  loaded: Loaded,
+  notice?: StoreNotice,
+): Promise<AnswerResult> {
   const { conv } = loaded
   if (conv.handler === "persona") return { status: "persona" }
   const test = conv.channel === "prueba"
   // Apagada, las conversaciones esperan a una persona; la de prueba sirve para probarla antes.
   if (!test && !loaded.agent?.enabled) {
+    // Un aviso de la tienda con Sofi apagada no le cambia la conversación a nadie: no escribe.
+    if (notice) return { status: "apagada" }
     await waitForPerson(deps, storeId, conv.id, "Sofi está apagada")
     return { status: "apagada" }
   }
@@ -638,6 +758,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       choices: loaded.choices,
       answers: loaded.answers,
       link: deps.link,
+      storage: deps.storage ?? null,
       shownQuotes: new Set(
         loaded.history.flatMap((m) =>
           m.author === "sofi" && Array.isArray(m.detail.quotes)
@@ -653,10 +774,15 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
     const said = loaded.history
       .filter((m) => m.author !== "cliente")
       .flatMap((m) => amountsIn(m.text, loaded.currency))
+    // Lo que escribió la tienda en su aviso (la respuesta a una pregunta) también se puede repetir.
+    if (notice) said.push(...amountsIn(notice.text, loaded.currency))
     const messages: ChatMessage[] = [
       { role: "system", content: SOFI_RULES },
       { role: "system", content: loaded.facts },
       ...loaded.history.map(asChat),
+      ...(notice
+        ? [{ role: "system" as const, content: `AVISO DE LA TIENDA: ${notice.text}` }]
+        : []),
     ]
     const abort = AbortSignal.timeout(deps.timeoutMs ?? SOFI_TIMEOUT_MS)
     try {
@@ -731,8 +857,17 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   const spoken = text ? amountsIn(text, loaded.currency) : []
   const cost = deps.model ? costMicros(deps.model.name, usage) : null
   const offered = text && !trace.handoff ? offeredIn(trace, spoken) : null
+  // Lo que ve la clienta con la respuesta (las fotos, el pedido) y de dónde salió, para la prueba.
+  const shown = text !== null && !trace.handoff ? text : null
   const detail = {
     tools: trace.tools,
+    ...(shown && trace.media.length ? { medios: trace.media } : {}),
+    ...(shown && trace.orders.length ? { pedidos: trace.orders } : {}),
+    ...(shown ? { usados: usedIn(trace, shown) } : {}),
+    ...(trace.questions.length
+      ? { no_supo: trace.questions.map(({ productId, question }) => ({ productId, question })) }
+      : {}),
+    ...(notice ? { aviso: true } : {}),
     // Solo las cotizaciones cuyo total salió en la respuesta: las que el cliente vio.
     quotes:
       text && !trace.handoff

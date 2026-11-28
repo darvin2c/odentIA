@@ -15,6 +15,7 @@ import { dueOn } from "./despachos.js"
 import { startOfDay, storeClockIn } from "./hora.js"
 import { missedSql, pad, paidWithoutStockIn } from "./pedidos.js"
 import { can, type StoreSeat } from "./permisos.js"
+import { type QuestionLine, questionLinesIn } from "./preguntas.js"
 import { setupIn } from "./primeros-pasos.js"
 import { collectedSinceIn, pendingNowIn } from "./sofi/reportes.js"
 import { inStore } from "./tiendas.js"
@@ -85,6 +86,12 @@ export type ToDoItem =
     }
   /** Pagado, pero no alcanza el stock de lo que lleva: «Ver pedido». */
   | { kind: "stock"; when: "hoy"; orderId: string; number: string; customer: string }
+  /**
+   * Lo que Sofi no supo de un producto y una clienta espera (tablero 12): «Responder». Varias
+   * iguales del mismo producto son una línea («3 clientas»). Lo que Ventas propuso guardar, para
+   * quien cambia la ficha: «Revisar y guardar».
+   */
+  | ({ kind: "pregunta"; when: "hoy" } & QuestionLine)
   /** Se acabó y alguien lo pidió: cuando entre, Sofi le avisa sola. «Registrar una entrada». */
   | {
       kind: "reponer"
@@ -241,6 +248,8 @@ export async function toDoIn(tx: Db, storeId: string, seat: StoreSeat): Promise<
       items.push({ kind: "misma", when: "hoy", ...similar.first, more: similar.count - 1 })
     for (const o of await paidWithoutStockIn(tx, storeId))
       items.push({ kind: "stock", when: "hoy", ...o })
+    for (const line of await questionLinesIn(tx, storeId, can(seat, "configuracion")))
+      items.push({ kind: "pregunta", when: "hoy", ...line })
   }
   if (can(seat, "configuracion")) items.push(...(await toRestock(tx, storeId)))
   return items

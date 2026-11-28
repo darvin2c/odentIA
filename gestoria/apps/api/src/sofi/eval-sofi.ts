@@ -41,10 +41,14 @@ import {
   type Db,
   orderPayment,
   product,
+  productColor,
   productLink,
+  productPhoto,
   productPromotion,
   productQuantityPrice,
+  productQuestion,
   productVariant,
+  productVideo,
   saleOrder,
   saleOrderLine,
   stockMovement,
@@ -78,6 +82,12 @@ interface Expect {
   primera_no_dice?: string[]
   /** Lo más que cede un pedido de la conversación, en la unidad menor (0 = nada). */
   cedido_maximo?: number
+  /** Mandó la foto de este color (`mandar_foto`), no la primera del producto. */
+  foto_color?: string
+  /** Mandó el video del producto. */
+  video?: boolean
+  /** Le dejó la pregunta a la tienda (`anotar_pregunta`): no lo sabía y no lo inventó. */
+  pregunta?: boolean
   /** Herramientas que no debían correr (ni bien ni mal): «ahora no tengo plata» no es una baja. */
   no_herramientas?: string[]
   /** Lo que dice en una sola de sus respuestas como mucho (preguntar el permiso, una vez). */
@@ -343,6 +353,114 @@ async function armarTienda(owner: Db, storeId: string, secretsKey: Buffer) {
       pair("Zapatilla urbana", "Medias deportivas", "combina"),
       pair("Botín de cuero marrón", "Mocasín azul", "parecido"),
     ])
+  await fichaDelBanco(owner, storeId, ids, add, sizes)
+}
+
+/**
+ * La ficha del producto del banco (lienzo «La ficha del producto»): los datos de calzado de la
+ * zapatilla (cómo calza, si tienes el pie ancho, el material y el largo de la plantilla; no dice
+ * cómo se limpia), sus colores con una foto de cada uno y el video de la negra, una pregunta ya
+ * respondida, lo que Sofi puede ofrecer y un producto en cada estado que pone la tienda.
+ */
+async function fichaDelBanco(
+  owner: Db,
+  storeId: string,
+  ids: Record<string, string>,
+  add: (
+    name: string,
+    fields: { category: string; description: string; list: number; min?: number },
+    options: { name: string; values: string[] }[],
+    variants: { values: string[]; stock: number; price?: number }[],
+  ) => Promise<void>,
+  sizes: (from: number, to: number) => string[],
+) {
+  const zapatilla = ids["Zapatilla urbana"]!
+  // El mocasín no deja ofrecer nada: va a su precio.
+  await owner
+    .update(product)
+    .set({ offerDelivery: false, offerDiscount: false, offerSecondUnit: false, offerGift: null })
+    .where(eq(product.id, ids["Mocasín azul"]!))
+  await owner
+    .update(product)
+    .set({
+      rubro: "calzado",
+      colorOption: 0,
+      rubroData: {
+        horma: "Normal",
+        ancho: "Una talla más",
+        material: "Sintético",
+        plantilla: Object.fromEntries(sizes(35, 42).map((s, i) => [s, 22.5 + i * 0.5])),
+      },
+      offerDelivery: true,
+      offerDiscount: true,
+      offerGift: "Medias tobilleras",
+    })
+    .where(eq(product.id, zapatilla))
+  const colors = await owner
+    .insert(productColor)
+    .values([
+      { storeId, productId: zapatilla, value: "blanca", hex: "#ffffff" },
+      { storeId, productId: zapatilla, value: "negra", hex: "#1f1f1f" },
+    ])
+    .returning({ id: productColor.id, value: productColor.value })
+  for (const [position, color] of colors.entries())
+    await owner.insert(productPhoto).values({
+      storeId,
+      productId: zapatilla,
+      position,
+      contentType: "image/jpeg",
+      objectKey: `tiendas/${storeId}/productos/${zapatilla}/fotos/banco-${color.value}`,
+      colorId: color.id,
+      createdBy: "banco",
+    })
+  await owner.insert(productVideo).values({
+    storeId,
+    productId: zapatilla,
+    colorId: colors.find((c) => c.value === "negra")!.id,
+    label: "Puesta, caminando",
+    objectKey: `tiendas/${storeId}/productos/${zapatilla}/videos/banco`,
+    sizeBytes: 900_000,
+    durationMs: 6000,
+    width: 720,
+    height: 720,
+    createdBy: "banco",
+  })
+  await owner.insert(productQuestion).values({
+    storeId,
+    productId: zapatilla,
+    question: "¿Es impermeable?",
+    askedBy: "banco",
+    answer: "No. Con lluvia fuerte se moja.",
+    answeredBy: "banco",
+    answeredAt: new Date(),
+    savedBy: "banco",
+    savedAt: new Date(),
+  })
+  // Un producto en cada estado que pone la tienda.
+  const states: [string, Partial<typeof product.$inferInsert>][] = [
+    ["Bota de lluvia", { status: "encargo", statusDays: 5 }],
+    ["Zapatilla pintada a mano", { status: "cupo", statusPerDay: 3 }],
+    ["Botita de bebé", { status: "preventa", statusDate: isoDay(9) }],
+    ["Sandalia de verano", { status: "liquidacion" }],
+    ["Bailarina dorada", { status: "no_se_vende" }],
+  ]
+  for (const [name, status] of states) {
+    await add(
+      name,
+      {
+        category: "Calzado",
+        description: `${name}, de la tienda del banco.`,
+        list: 9900,
+        min: 7900,
+      },
+      [{ name: "Talla", values: ["37", "38"] }],
+      [
+        { values: ["37"], stock: 0 },
+        { values: ["38"], stock: status.status === "liquidacion" ? 2 : 0 },
+      ],
+    )
+    await owner.update(product).set(status).where(eq(product.id, ids[name]!))
+  }
 }
 
 /** El link de pago del banco: un proveedor controlado que devuelve una dirección de prueba. */
@@ -628,6 +746,20 @@ async function runCase(
   if (e.persona !== undefined && (conv?.handler === "persona") !== e.persona)
     graves.push(e.persona ? "No la pasó a una persona" : "La pasó a una persona sin motivo")
   if (e.no_pagado && confirmed.length > 0) graves.push("Quedó un pago confirmado")
+  const sent = sofi.flatMap(
+    (m) => (m.detail as { medios?: { kind: string; color: string | null }[] }).medios ?? [],
+  )
+  if (e.foto_color && !sent.some((m) => m.kind === "foto" && m.color === e.foto_color))
+    graves.push(`No mandó la foto de «${e.foto_color}»`)
+  if (e.video && !sent.some((m) => m.kind === "video")) graves.push("No mandó el video")
+  if (e.pregunta !== undefined) {
+    const asked = await owner
+      .select({ id: productQuestion.id })
+      .from(productQuestion)
+      .where(eq(productQuestion.conversationId, conversationId))
+    if (e.pregunta && asked.length === 0) graves.push("No le dejó la pregunta a la tienda")
+    if (!e.pregunta && asked.length > 0) graves.push("Le dejó a la tienda algo que la ficha dice")
+  }
   if (e.link && !live.some((o) => o.linkUrl)) graves.push("No creó el link de pago")
   if (e.pedido_total_minimo !== undefined)
     for (const o of live)

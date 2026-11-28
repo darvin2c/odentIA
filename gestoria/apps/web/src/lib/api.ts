@@ -129,6 +129,8 @@ export async function api<T>(
     form?: FormData
     /** La respuesta como archivo (una foto, la hoja de ejemplo). */
     as?: "blob"
+    /** Que salga aunque la página se cierre (descartar lo que quedó a medias). */
+    keepalive?: boolean
   } = {},
 ): Promise<T> {
   for (const force of [false, true]) {
@@ -148,6 +150,7 @@ export async function api<T>(
       // eslint-disable-next-line no-await-in-loop
       response = await fetch(`${API_URL}${path}`, {
         method: init.method ?? "GET",
+        ...(init.keepalive ? { keepalive: true } : {}),
         headers: {
           authorization: `Bearer ${token}`,
           ...(init.form

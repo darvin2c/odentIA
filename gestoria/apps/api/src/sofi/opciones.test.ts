@@ -153,6 +153,7 @@ describe("la duda de la clienta, antes de ofrecer (Sofi no regala el precio)", (
       "En otra tienda está más barato",
       "¿me regalas el envío?",
       "¿Y si me bajas 10 soles?",
+      "¿Me haces precio?",
     ])
       expect(isObjection(doubts), doubts).toBe(true)
   })

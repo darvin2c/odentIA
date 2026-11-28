@@ -14,6 +14,7 @@ import {
   type PaymentTypeCode,
   type PhotoType,
   product,
+  productLink,
   productPhoto,
   productPromotion,
   productQuantityPrice,
@@ -29,8 +30,8 @@ import {
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm"
 import { z } from "zod"
-import { agentName, SOFI_ACTOR } from "./agente.js"
-import { imageType } from "./catalogo.js"
+import { agentName, isAgent, SOFI_ACTOR } from "./agente.js"
+import { imageType, sellsWithoutStock, wholesaleOf } from "./catalogo.js"
 import { customerForOrderIn, shownCustomerId } from "./clientes.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
@@ -47,12 +48,13 @@ import {
 import { can } from "./permisos.js"
 import {
   autoUnitCents,
-  floorUnitCents,
+  floorOf,
   negotiatedUntil,
   type PricedVariant,
   type Quote,
   type QuoteLine,
   quote,
+  type SofiOffers,
 } from "./precio.js"
 import {
   checkSlotIn,
@@ -66,6 +68,7 @@ import {
 import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
 import { openSecret } from "./secretos.js"
 import { cancelSale, heldBy, recordReturn, recordSale } from "./stock.js"
+import { sameText } from "./texto.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -91,8 +94,13 @@ import { inStore, StoreError } from "./tiendas.js"
  */
 
 export const pad = (number: number) => String(number).padStart(4, "0")
-/** La referencia del pedido en el kardex: «Pedido 0142» (y cada cambio, «Pedido 0142 · cambio 1»). */
-export const stockReference = (number: number) => `Pedido ${pad(number)}`
+/**
+ * La referencia del pedido en el kardex: «Pedido 0142» (y cada cambio, «Pedido 0142 · cambio 1»).
+ * Un pedido de prueba lleva su propia numeración y su propia referencia, «Prueba 0005»: aunque un
+ * camino olvide que es de prueba, nunca toca lo de la venta con el mismo número.
+ */
+export const stockReference = (order: { number: number; test: boolean }) =>
+  `${order.test ? "Prueba" : "Pedido"} ${pad(order.number)}`
 
 /**
  * Si un pedido (`o`, el alias de `sale_order` en la consulta) no tiene fuera del stock lo que dicen
@@ -108,8 +116,10 @@ export function stockShortSql(o: string) {
       union all
       select m.variant_id, sum(m.quantity)::int from stock_movement m
         where m.store_id = ${a}.store_id and m.kind in ('venta', 'anulacion')
-          and (m.reference = 'Pedido ' || lpad(${a}.number::text, 4, '0')
-            or m.reference like 'Pedido ' || lpad(${a}.number::text, 4, '0') || ' · %')
+          and (m.reference = (case when ${a}.test then 'Prueba ' else 'Pedido ' end)
+              || lpad(${a}.number::text, 4, '0')
+            or m.reference like (case when ${a}.test then 'Prueba ' else 'Pedido ' end)
+              || lpad(${a}.number::text, 4, '0') || ' · %')
         group by m.variant_id
     ) d group by d.variant_id having sum(d.q) <> 0)`
 }
@@ -374,7 +384,14 @@ interface Priced {
  * Con `ids`, solo esas (también las quitadas, para decir que ya no se venden); sin ellos, las que
  * se venden.
  */
-export async function variantPrices(tx: Db, storeId: string, today: string, ids?: string[]) {
+export async function variantPrices(
+  tx: Db,
+  storeId: string,
+  today: string,
+  ids?: string[],
+  /** Solo las de un producto (la ficha): así no se lee toda la tienda. */
+  productId?: string,
+) {
   const rows = await tx
     .select({
       id: productVariant.id,
@@ -387,13 +404,27 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
       productName: product.name,
       listPriceCents: product.listPriceCents,
       minPriceCents: product.minPriceCents,
+      status: product.status,
+      wholesaleMinQuantity: product.wholesaleMinQuantity,
+      wholesalePriceCents: product.wholesalePriceCents,
+      offerDelivery: product.offerDelivery,
+      offerDiscount: product.offerDiscount,
+      offerSecondUnit: product.offerSecondUnit,
+      offerGift: product.offerGift,
     })
     .from(productVariant)
     .innerJoin(product, eq(product.id, productVariant.productId))
     .where(
       and(
         eq(productVariant.storeId, storeId),
-        ids ? inArray(productVariant.id, ids) : isNull(productVariant.removedAt),
+        // Sin `ids`, lo que se vende: ni las variantes quitadas ni lo que «ya no se vende».
+        productId ? eq(productVariant.productId, productId) : undefined,
+        ids
+          ? inArray(productVariant.id, ids)
+          : and(
+              isNull(productVariant.removedAt),
+              sql`${product.status} is distinct from 'no_se_vende'`,
+            ),
       ),
     )
     .orderBy(asc(product.name), asc(productVariant.optionValues))
@@ -404,6 +435,8 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
       productId: productPromotion.productId,
       name: productPromotion.name,
       percentOff: productPromotion.percentOff,
+      optionIndex: productPromotion.optionIndex,
+      optionValue: productPromotion.optionValue,
     })
     .from(productPromotion)
     .where(
@@ -421,19 +454,101 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
     })
     .from(productQuantityPrice)
     .where(inArray(productQuantityPrice.productId, productIds))
-  const promoBy = new Map(promotions.map((p) => [p.productId, p]))
+  const promosBy = Map.groupBy(promotions, (p) => p.productId)
   const tiersBy = Map.groupBy(tiers, (t) => t.productId)
-  return rows.map((row) => ({
-    ...row,
-    variantName: row.optionValues.join(" · ") || "Única",
-    promotion: promoBy.get(row.productId)?.name ?? null,
-    pricing: {
-      listUnitCents: row.priceCents ?? row.listPriceCents,
-      minPriceCents: row.minPriceCents,
-      percentOff: promoBy.get(row.productId)?.percentOff ?? null,
-      quantityPrices: tiersBy.get(row.productId) ?? [],
-    } satisfies PricedVariant,
-  }))
+  return rows.map((row) => {
+    // La mejor promoción de hoy para esta variante: la de todo el producto, la de su color o la de
+    // su talla. Nunca se suman.
+    const promotion =
+      (promosBy.get(row.productId) ?? [])
+        .filter(
+          (p) =>
+            p.optionIndex === null ||
+            sameText(row.optionValues[p.optionIndex] ?? "", p.optionValue ?? ""),
+        )
+        .sort((a, b) => b.percentOff - a.percentOff)[0] ?? null
+    return {
+      ...row,
+      /** Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre. */
+      sellsWithoutStock: sellsWithoutStock(row.status),
+      variantName: row.optionValues.join(" · ") || "Única",
+      promotion: promotion?.name ?? null,
+      pricing: {
+        listUnitCents: row.priceCents ?? row.listPriceCents,
+        minPriceCents: row.minPriceCents,
+        percentOff: promotion?.percentOff ?? null,
+        quantityPrices: tiersBy.get(row.productId) ?? [],
+        wholesale: wholesaleOf(row),
+        clearance: row.status === "liquidacion",
+      } satisfies PricedVariant,
+      offers: {
+        delivery: row.offerDelivery,
+        discount: row.offerDiscount,
+        secondUnit: row.offerSecondUnit,
+        gift: row.offerGift !== null,
+      } satisfies SofiOffers,
+    }
+  })
+}
+
+/**
+ * El combo de un pedido: a lo que combina (`product_link` «combina») con otro producto del mismo
+ * pedido le toca el porcentaje del combo de ese otro, el mayor si hay varios. Va como una opción más
+ * del precio sin negociar: no se suma con la promoción ni con el precio por cantidad.
+ */
+export async function comboPercents(tx: Db, productIds: string[]): Promise<Map<string, number>> {
+  const ids = [...new Set(productIds)]
+  if (ids.length < 2) return new Map()
+  const links = await tx
+    .select({ a: productLink.productA, b: productLink.productB })
+    .from(productLink)
+    .where(
+      and(
+        eq(productLink.kind, "combina"),
+        inArray(productLink.productA, ids),
+        inArray(productLink.productB, ids),
+      ),
+    )
+  if (links.length === 0) return new Map()
+  const percents = await tx
+    .select({ id: product.id, percent: product.comboPercentOff })
+    .from(product)
+    .where(inArray(product.id, ids))
+  const percentOf = new Map(percents.map((p) => [p.id, p.percent]))
+  const out = new Map<string, number>()
+  for (const { a, b } of links)
+    for (const [mine, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const percent = percentOf.get(other)
+      if (percent) out.set(mine, Math.max(out.get(mine) ?? 0, percent))
+    }
+  return out
+}
+
+/**
+ * Lo que cuesta el envío de una forma de entrega, antes de negociarlo, con la misma regla de
+ * «Anotar un pedido» (`deliveryPriceOf`): el fijo, el de la zona o del distrito, o el que se
+ * acordó. Lo que falta para saberlo queda en `fields`.
+ */
+export function deliveryListOf(
+  delivery: typeof storeDeliveryMethod.$inferSelect | undefined,
+  input: { zone: string | null; district?: string | null; deliveryListCents: number | null },
+  fields: Record<string, string>,
+): number {
+  if (!delivery?.isActive) {
+    fields.deliveryMethodId = "Esa forma de entrega ya no está encendida"
+    return 0
+  }
+  const price = deliveryPriceOf(delivery, {
+    zone: input.zone,
+    district: input.district,
+    listCents: input.deliveryListCents,
+  })
+  if (price.ok) return price.listCents
+  fields[price.field] = price.message
+  return 0
 }
 
 /**
@@ -452,6 +567,8 @@ async function priceOrder(
    * stock no frena (lo que el pedido ya tiene fuera cuenta; si falta, queda «falta stock»).
    */
   change: { collection: PaymentCollection } | null = null,
+  /** Lo cotiza Sofi: solo cede lo que cada producto deja ofrecer. */
+  byAgent = false,
 ): Promise<{ ok: true; priced: Priced } | { ok: false; fields: Record<string, string> }> {
   const fields: Record<string, string> = {}
   const ids = input.lines.map((line) => line.variantId)
@@ -468,6 +585,7 @@ async function priceOrder(
     if (row && !line.gift)
       bought.set(row.productId, (bought.get(row.productId) ?? 0) + line.quantity)
   }
+  const combo = await comboPercents(tx, [...bought.keys()])
   const lines: QuoteLine[] = []
   input.lines.forEach((line, i) => {
     const row = byId.get(line.variantId)
@@ -476,17 +594,22 @@ async function priceOrder(
       return
     }
     if (row.removedAt) fields[`lines.${i}.variantId`] = "Esa variante ya no se vende"
-    else if (!change && row.stock < line.quantity)
+    else if (!change && row.status === "no_se_vende")
+      fields[`lines.${i}.variantId`] = "Ese producto ya no se vende"
+    // Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre.
+    else if (!change && row.stock < line.quantity && !row.sellsWithoutStock)
       fields[`lines.${i}.quantity`] =
         row.stock === 0 ? "Está agotado" : `Quedan ${row.stock}: registra una entrada si hay más`
-    const auto = autoUnitCents(row.pricing, bought.get(row.productId) ?? 0)
+    const pricing = { ...row.pricing, comboPercentOff: combo.get(row.productId) ?? null }
+    const auto = autoUnitCents(pricing, bought.get(row.productId) ?? 0)
     lines.push({
       quantity: line.quantity,
       listUnitCents: row.pricing.listUnitCents,
       autoUnitCents: auto,
-      floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
+      floorUnitCents: floorOf(pricing, auto),
       unitCents: line.unitCents,
       gift: line.gift,
+      offers: row.offers,
     })
   })
 
@@ -548,6 +671,7 @@ async function priceOrder(
       chargedCents: input.deliveryCents,
     },
     currency,
+    { byAgent },
   )
   if (!result.ok) return result
   return {
@@ -576,9 +700,15 @@ async function priceOrder(
  * El precio de un pedido sin guardarlo, dentro de la transacción de la tienda: el resumen de
  * «Anotar un pedido» y lo que cotiza Sofi (la misma regla).
  */
-export async function quoteOrderIn(tx: Db, storeId: string, input: OrderInput, today: string) {
+export async function quoteOrderIn(
+  tx: Db,
+  storeId: string,
+  input: OrderInput,
+  today: string,
+  options: { byAgent?: boolean } = {},
+) {
   const { currency } = await storeRow(tx, storeId)
-  const result = await priceOrder(tx, storeId, currency, input, today)
+  const result = await priceOrder(tx, storeId, currency, input, today, null, options.byAgent)
   // La zona del envío y desde qué compra es gratis ahí: Sofi lo dice sin calcularlo.
   return result.ok
     ? {
@@ -638,7 +768,14 @@ type Notice =
  */
 export async function notifyCustomer(
   tx: Db,
-  order: { id: string; storeId: string; number: number; totalCents: number; state?: OrderState },
+  order: {
+    id: string
+    storeId: string
+    number: number
+    totalCents: number
+    state?: OrderState
+    test: boolean
+  },
   actorUserId: string | null,
   currency: string,
   kind: Notice,
@@ -675,6 +812,8 @@ export async function notifyCustomer(
       : `Cambiamos tu pedido ${n}. Nuevo total: ${total}.`,
     cambio: extra.text ?? `Tu cambio quedó anotado en el pedido ${n}.`,
   }
+  // A la clienta de una prueba no se le avisa nada: no existe (la base también lo frena).
+  if (order.test) return text[kind]
   await logEvent(tx, order.storeId, order.id, actorUserId, "aviso", {
     tipo: kind,
     texto: text[kind],
@@ -687,13 +826,18 @@ export async function notifyCustomer(
 
 /* ---------------------------------------------------------------------- armar un pedido */
 
-/** El número del pedido nuevo: sigue al último de la tienda; dos pedidos a la vez esperan su turno. */
-export async function nextNumber(tx: Db, storeId: string): Promise<number> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}`}))`)
+/**
+ * El número del pedido nuevo: sigue al último de la tienda; dos pedidos a la vez esperan su turno.
+ * Los de prueba llevan su propia numeración: una prueba no gasta el número de una venta.
+ */
+export async function nextNumber(tx: Db, storeId: string, test = false): Promise<number> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}${test ? ":prueba" : ""}`}))`,
+  )
   const [last] = await tx
     .select({ number: sql<number>`coalesce(max(${saleOrder.number}), 0)` })
     .from(saleOrder)
-    .where(eq(saleOrder.storeId, storeId))
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.test, test)))
   return Number(last?.number ?? 0) + 1
 }
 
@@ -722,7 +866,9 @@ export async function createOrderIn(
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
   const today = options.today ?? (await todayIn(tx, storeId, now))
-  const result = await priceOrder(tx, storeId, currency, input, today)
+  // Lo que anota Sofi solo cede lo que cada producto deja ofrecer, como al cotizarlo.
+  const byAgent = isAgent(actorUserId)
+  const result = await priceOrder(tx, storeId, currency, input, today, null, byAgent)
   if (!result.ok)
     throw new StoreError(
       400,
@@ -745,7 +891,7 @@ export async function createOrderIn(
     throw new StoreError(400, "VALIDATION_ERROR", "Escribe el nombre de la clienta", {
       customerName: "Escribe el nombre de la clienta",
     })
-  const number = await nextNumber(tx, storeId)
+  const number = await nextNumber(tx, storeId, options.test ?? false)
   const [order] = await tx
     .insert(saleOrder)
     .values({
@@ -856,8 +1002,10 @@ export async function listOrders(
     const dueToday = and(inArray(saleOrder.state, TO_DELIVER), lte(saleOrder.deliverOn, today))
     // Un pago que espera a una persona, en cualquier estado del pedido.
     const toConfirm = sql`exists (select 1 from ${orderPayment} where ${orderPayment.orderId} = ${saleOrder.id} and ${orderPayment.status} = 'por_confirmar')`
+    // Los pedidos de prueba no son ventas: no entran a la lista ni a sus conteos.
+    const real = and(eq(saleOrder.storeId, storeId), eq(saleOrder.test, false))
     const where = and(
-      eq(saleOrder.storeId, storeId),
+      real,
       inArray(saleOrder.state, ORDER_FILTERS[filter]),
       filter === "hoy" ? dueToday : undefined,
       filter === "por_confirmar" ? toConfirm : undefined,
@@ -923,16 +1071,10 @@ export async function listOrders(
     const counts = await tx
       .select({ state: saleOrder.state, n: count() })
       .from(saleOrder)
-      .where(eq(saleOrder.storeId, storeId))
+      .where(real)
       .groupBy(saleOrder.state)
-    const [today_] = await tx
-      .select({ n: count() })
-      .from(saleOrder)
-      .where(and(eq(saleOrder.storeId, storeId), dueToday))
-    const [toConfirm_] = await tx
-      .select({ n: count() })
-      .from(saleOrder)
-      .where(and(eq(saleOrder.storeId, storeId), toConfirm))
+    const [today_] = await tx.select({ n: count() }).from(saleOrder).where(and(real, dueToday))
+    const [toConfirm_] = await tx.select({ n: count() }).from(saleOrder).where(and(real, toConfirm))
     const byState = Object.fromEntries(counts.map((c) => [c.state, c.n])) as Partial<
       Record<OrderState, number>
     >
@@ -1240,8 +1382,11 @@ export async function sellable(appDb: Db, person: Person, storeId: string, now =
           stock: row.stock,
           listUnitCents: row.pricing.listUnitCents,
           autoUnitCents: auto,
-          floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
+          floorUnitCents: floorOf(row.pricing, auto),
           promotion: row.promotion,
+          /** Por encargo, con cupo o en preventa: se vende sin stock (el pedido espera). */
+          sellsWithoutStock: row.sellsWithoutStock,
+          status: row.status,
         }
       }),
     }
@@ -1286,6 +1431,20 @@ export function stateError(order: OrderRow): StoreError {
   )
 }
 
+/**
+ * Un pedido de prueba («Probar a Sofi», «Probar como clienta») no es una venta: se paga de prueba,
+ * pero no sale, no se entrega, no se reparte y no avisa a nadie. La base también lo frena
+ * (`0073_reglas_pedido_de_prueba.sql`).
+ */
+export function notForTest(order: Pick<OrderRow, "test">) {
+  if (order.test)
+    throw new StoreError(
+      409,
+      "TEST_ORDER",
+      "Es un pedido de prueba: no se entrega ni se avisa. No es una venta.",
+    )
+}
+
 async function setState(tx: Db, order: OrderRow, state: OrderState, extra: Partial<OrderRow> = {}) {
   await tx
     .update(saleOrder)
@@ -1310,7 +1469,7 @@ export async function trySale(tx: Db, order: OrderRow, actor: string): Promise<b
   const lines = await saleLines(tx, order.id)
   try {
     await tx.transaction((sp) =>
-      recordSale(sp as unknown as Db, order.storeId, actor, stockReference(order.number), lines),
+      recordSale(sp as unknown as Db, order.storeId, actor, stockReference(order), lines),
     )
     return true
   } catch (error) {
@@ -1328,7 +1487,7 @@ async function mustSale(tx: Db, order: OrderRow, actor: string) {
   if (order.test) return
   const lines = await saleLines(tx, order.id)
   try {
-    await recordSale(tx, order.storeId, actor, stockReference(order.number), lines)
+    await recordSale(tx, order.storeId, actor, stockReference(order), lines)
   } catch (error) {
     if (error instanceof StoreError && error.code === "NOT_ENOUGH_STOCK")
       throw new StoreError(
@@ -1638,8 +1797,7 @@ export async function undoPayment(
       order.paymentCollection !== "al_recibir" &&
       (await balanceIn(tx, order)).confirmedCents === 0
     ) {
-      if (!order.test)
-        back = await cancelSale(tx, storeId, person.userId, stockReference(order.number))
+      if (!order.test) back = await cancelSale(tx, storeId, person.userId, stockReference(order))
       state = "por_confirmar"
       await setState(tx, order, state)
     }
@@ -1676,6 +1834,7 @@ export async function markShipped(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "por_salir") throw stateError(order)
     const shipping = shippingOf(order, input)
     await mustSale(tx, order, person.userId)
@@ -1719,7 +1878,7 @@ async function takeBack(tx: Db, order: OrderRow, actor: string): Promise<string[
       tx,
       order.storeId,
       actor,
-      stockReference(order.number),
+      stockReference(order),
       back.map((r) => ({ variantId: r.variantId, quantity: r.quantity, reason: r.reason })),
     )
   await tx
@@ -1750,6 +1909,7 @@ export async function markDelivered(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
     const { dueCents, pendingCents } = await balanceIn(tx, order)
     const { currency } = await storeRow(tx, storeId)
@@ -2080,7 +2240,7 @@ export async function changeOrderIn(
 
   // El stock: solo si el pedido ya lo tenía fuera (se pagó); si no, baja al pagar o al salir.
   let stockPending = false
-  const reference = stockReference(order.number)
+  const reference = stockReference(order)
   if (!order.test && (await heldBy(tx, storeId, reference)).size > 0) {
     const wanted = input.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity }))
     try {
@@ -2236,6 +2396,7 @@ export async function markMissed(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "en_camino" && order.state !== "por_salir") throw stateError(order)
     await dayFromToday(tx, storeId, input.deliverOn)
     const move = await movedTo(tx, order, person.userId, input)
@@ -2259,6 +2420,7 @@ export async function reschedule(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
     const move = await movedTo(tx, order, person.userId, input)
     if (order.deliverOn === input.deliverOn && Object.keys(move.detail).length === 0)
@@ -2293,6 +2455,7 @@ export async function assignCourier(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (!OPEN.includes(order.state)) throw stateError(order)
     const move = await movedTo(tx, order, person.userId, { courier: input.courier })
     if (!move.detail.repartidor)
@@ -2357,6 +2520,7 @@ export async function setShipping(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
     const shipping = shippingOf(order, input)
     if (shipping.agency === order.agency && shipping.tracking === order.tracking)
@@ -2387,6 +2551,7 @@ export async function noteSentByYou(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state === "anulado") throw stateError(order)
     await logEvent(tx, storeId, orderId, person.userId, "aviso", {
       tipo: "despacho",
@@ -2452,7 +2617,11 @@ export async function cancelOrderIn(
       "FORBIDDEN",
       "Un pedido que ya tiene un pago lo anula quien confirma pagos",
     )
-  const returned = await cancelSale(tx, storeId, actorUserId, stockReference(order.number))
+  // Una prueba nunca movió stock, y su número es de la numeración de prueba: «Pedido 0005» en el
+  // kardex es el de una venta, que no se toca.
+  const returned = order.test
+    ? 0
+    : await cancelSale(tx, storeId, actorUserId, stockReference(order))
   await setState(tx, order, "anulado", { cancelReason: reason })
   const { currency } = await storeRow(tx, storeId)
   await logEvent(tx, storeId, orderId, actorUserId, "anulado", {
@@ -2752,4 +2921,53 @@ export async function receiveLinkNotice(
     })
     return done
   })
+}
+
+/**
+ * «Pagar ahora» en «Probar como clienta» (la vitrina de la prueba): el pago de un pedido de prueba,
+ * como si el link de pago lo hubiera aprobado. No se cobra nada ni se mueve el stock (`trySale` no
+ * toca un pedido de prueba), y no avisa ni cuenta en Reportes, Argos ni el uso: el pedido es `test`.
+ * El cobro de verdad por la vitrina llega con su propia entrega.
+ */
+export async function payTestOrderIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  orderId: string,
+  /** El medio de la tienda con que paga en la prueba: su nombre y su tipo. */
+  method: { name: string; typeCode: PaymentTypeCode },
+) {
+  uuidOr404(orderId)
+  const order = await lockOrder(tx, storeId, orderId)
+  if (!order.test) throw new StoreError(409, "NOT_A_TEST", "Así solo se paga un pedido de prueba")
+  if (order.state !== "por_pagar") throw stateError(order)
+  if (order.priceExpiresAt && order.priceExpiresAt.getTime() <= Date.now())
+    throw new StoreError(
+      409,
+      "PRICE_EXPIRED",
+      "Lo acordado venció: el pedido vuelve a su precio. Pídele a Sofi que lo cotice de nuevo.",
+    )
+  // Un pago por el link solo lo anota el aviso del proveedor (0005): el de prueba lo anota quien
+  // prueba, ya revisado por ella, con el nombre y el tipo del medio que eligió.
+  await tx.insert(orderPayment).values({
+    storeId,
+    orderId,
+    kind: "comprobante",
+    status: "confirmado",
+    // Lo que falta: si pagó una parte antes, solo el resto.
+    amountCents: (await balanceIn(tx, order)).dueCents,
+    methodName: `${method.name} (prueba)`.slice(0, 80),
+    methodType: method.typeCode,
+    note: "Pago de prueba: no se cobró",
+    createdBy: actorUserId,
+    reviewedBy: actorUserId,
+    reviewedAt: new Date(),
+  })
+  await trySale(tx, order, actorUserId)
+  await setState(tx, order, "por_salir")
+  await logEvent(tx, storeId, orderId, actorUserId, "pago_confirmado", {
+    monto: order.totalCents,
+    prueba: true,
+  })
+  return { number: pad(order.number), totalCents: order.totalCents }
 }

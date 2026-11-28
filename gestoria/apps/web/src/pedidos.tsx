@@ -20,6 +20,7 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
+  PageNotice,
   PersonAvatar,
   RadioChips,
   SubmitButton,
@@ -60,6 +61,7 @@ import { HOME_KEY } from "./lib/inicio"
 import {
   CHANNELS,
   type ChangePreview,
+  canPick,
   dayName,
   FILTERS,
   missedReason,
@@ -73,6 +75,7 @@ import {
   type Quote,
   type SellableVariant,
   STATE_TONE,
+  sellableLabel,
   stateName,
   storeToday,
   when,
@@ -301,7 +304,12 @@ export function OrderSheet({ orderId, onClose }: { orderId: string; onClose: () 
     <DetailDrawer
       open
       size="xl"
-      title={order ? `Pedido ${order.number} · ${order.customerName}` : "Pedido"}
+      // Un pedido de prueba lleva su numeración: se dice «Prueba», nunca como una venta.
+      title={
+        order
+          ? `${order.test ? "Prueba" : "Pedido"} ${order.number} · ${order.customerName}`
+          : "Pedido"
+      }
       headerContent={
         order ? (
           <span className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -354,6 +362,35 @@ export function Row({
   )
 }
 
+/** Un pedido de prueba, abierto por un enlace: lo que lleva, sin pasos de cobro ni de entrega. */
+function TestOrderBody({ order }: { order: OrderDetail }) {
+  const cur = useStoreContext().store.currency
+  return (
+    <div className="flex flex-col gap-4">
+      <PageNotice tone="aviso" label="Es una prueba">
+        Es de «Probar como clienta»: no es una venta. No se cobró, no movió el stock, no se entrega
+        ni se le avisa a nadie, y no entra a Pedidos.
+      </PageNotice>
+      <ul className="flex flex-col gap-2 text-sm">
+        {order.lines.map((line) => (
+          <li key={line.id} className="flex justify-between gap-4">
+            <span>
+              {line.quantity} × {line.productName}
+              {line.variantName === "Única" ? "" : ` · ${line.variantName}`}
+            </span>
+            <span className="tabular-nums">
+              {line.gift ? "regalo" : money(line.unitCents * line.quantity, cur)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Row label="Total" strong>
+        {money(order.totalCents, cur)}
+      </Row>
+    </div>
+  )
+}
+
 function OrderBody({ order }: { order: OrderDetail }) {
   const { store } = useStoreContext()
   const can = (p: string) => store.permissions.includes(p)
@@ -368,6 +405,10 @@ function OrderBody({ order }: { order: OrderDetail }) {
   const { balance } = order
   // Un cambio (tablero 17): lo que vuelve se descuenta; un total bajo cero es lo que se devuelve.
   const exchange = order.exchangeOf !== null
+
+  // Un pedido de prueba no es una venta: no entra a Pedidos, no sale ni se entrega (el servidor
+  // también lo frena). Si se abre por un enlace, se ve sin sus pasos.
+  if (order.test) return <TestOrderBody order={order} />
 
   return (
     <div className="flex flex-col">
@@ -1597,7 +1638,7 @@ export function NewOrderSheet({
   const repeating = Boolean(draft?.number)
   useEffect(() => {
     if (!repeating || !sellable.data) return
-    const ids = new Set(sellable.data.variants.filter((v) => v.stock > 0).map((v) => v.id))
+    const ids = new Set(sellable.data.variants.filter(canPick).map((v) => v.id))
     form.setFieldValue(
       "lines",
       form
@@ -1851,9 +1892,10 @@ export function NewOrderSheet({
                                 }
                                 options={variants.map((x) => ({
                                   value: x.id,
-                                  label: `${x.productName}${x.variantName === "Única" ? "" : ` · ${x.variantName}`} — ${money(x.autoUnitCents, cur)}${x.stock === 0 ? " · agotado" : ` · quedan ${x.stock}`}`,
+                                  label: sellableLabel(x, money(x.autoUnitCents, cur)),
                                   // Al cambiar se puede: se guarda y no sale hasta que entre.
-                                  disabled: x.stock === 0 && !editing,
+                                  // Por encargo, con cupo o en preventa se vende sin stock.
+                                  disabled: !canPick(x) && !editing,
                                 }))}
                               />
                             )}

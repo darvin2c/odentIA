@@ -1,11 +1,21 @@
-import { Badge, Button, cn, toast } from "@odentia/ui"
-import { ErrorState, KpiCard, LoadingState, submitErrorMessage } from "@odentia/ui-patterns"
+import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
+import {
+  ErrorState,
+  FormDrawer,
+  KpiCard,
+  LoadingState,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, Circle, Clock3, MinusCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
+import { z } from "zod"
 import { InstallCard } from "./avisos"
 import { SimilarQueue } from "./clientes"
+import { PRODUCT_KEY } from "./ficha/datos"
 import { api } from "./lib/api"
 import { fromWhom } from "./lib/caja"
 import { setupProgress } from "./lib/configuracion"
@@ -151,6 +161,7 @@ const TAGS: Record<ToDoItem["kind"], string> = {
   efectivo: "Efectivo",
   misma: "Clienta",
   stock: "Stock",
+  pregunta: "Sofi no supo",
   reponer: "Reponer",
 }
 
@@ -159,6 +170,7 @@ function ToDo({ items, today }: { items: ToDoItem[]; today: string }) {
   const groups = byWhen(items)
   const [order, setOrder] = useState<string | null>(null)
   const [comparing, setComparing] = useState<string | null>(null)
+  const [answering, setAnswering] = useState<Extract<ToDoItem, { kind: "pregunta" }> | null>(null)
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
       <h2 id={id} className="text-lg font-bold">
@@ -182,6 +194,7 @@ function ToDo({ items, today }: { items: ToDoItem[]; today: string }) {
                   today={today}
                   onOpenOrder={setOrder}
                   onCompare={setComparing}
+                  onAnswer={setAnswering}
                 />
               ))}
             </ul>
@@ -190,6 +203,13 @@ function ToDo({ items, today }: { items: ToDoItem[]; today: string }) {
       )}
       {order ? <OrderSheet orderId={order} onClose={() => setOrder(null)} /> : null}
       {comparing ? <SimilarQueue first={comparing} onClose={() => setComparing(null)} /> : null}
+      {answering ? (
+        <AnswerQuestion
+          key={answering.ids.join()}
+          item={answering}
+          onClose={() => setAnswering(null)}
+        />
+      ) : null}
     </section>
   )
 }
@@ -207,6 +227,8 @@ function lineKey(item: ToDoItem): string {
       return `misma-${item.a.id}-${item.b.id}`
     case "reponer":
       return `reponer-${item.productId}-${item.variant}`
+    case "pregunta":
+      return `pregunta-${item.ids[0]}`
   }
 }
 
@@ -215,11 +237,13 @@ function ToDoLine({
   today,
   onOpenOrder,
   onCompare,
+  onAnswer,
 }: {
   item: ToDoItem
   today: string
   onOpenOrder: (orderId: string) => void
   onCompare: (customerId: string) => void
+  onAnswer: (item: Extract<ToDoItem, { kind: "pregunta" }>) => void
 }) {
   const { store } = useStoreContext()
   const m = (cents: number) => money(cents, store.currency)
@@ -301,6 +325,27 @@ function ToDoLine({
         </Button>
       )
       break
+    case "pregunta":
+      text = item.proposed ? (
+        <>
+          <strong className="font-semibold">«{item.question}»</strong> · {item.product}. Ventas
+          propuso: «{item.proposed.answer}»
+        </>
+      ) : (
+        <>
+          <strong className="font-semibold">«{item.question}»</strong> · {item.product}.{" "}
+          {item.people > 1
+            ? `${item.people} clientas esperan`
+            : `${item.customer ?? "Una clienta"} te espera`}{" "}
+          · {sinceText(item.askedAt)}
+        </>
+      )
+      action = (
+        <Button size="sm" variant="outline" onClick={() => onAnswer(item)}>
+          {item.proposed ? "Revisar y guardar" : "Responder"}
+        </Button>
+      )
+      break
     case "reponer":
       text = (
         <>
@@ -337,6 +382,122 @@ function ToDoLine({
       </div>
       <div className="shrink-0 self-start sm:self-center">{action}</div>
     </li>
+  )
+}
+
+/** Hace cuánto preguntó: «hace 5 min», «hace 2 h», «ayer». */
+function sinceText(iso: string): string {
+  const minutes = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
+  if (minutes < 60) return `hace ${minutes} min`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `hace ${hours} h`
+  return hours < 48 ? "ayer" : `hace ${Math.round(hours / 24)} días`
+}
+
+/**
+ * Responder lo que Sofi no supo, una vez (lienzo «La ficha del producto», tablero 12): «Que Sofi
+ * se lo diga» le escribe a cada clienta que preguntó; «Guardarlo en la ficha» lo deja en el
+ * producto para la próxima. Ventas lo propone y lo guarda quien cambia la ficha.
+ */
+function AnswerQuestion({
+  item,
+  onClose,
+}: {
+  item: Extract<ToDoItem, { kind: "pregunta" }>
+  onClose: () => void
+}) {
+  const { store } = useStoreContext()
+  const queryClient = useQueryClient()
+  const editor = store.permissions.includes("configuracion")
+  const proposal = item.proposed
+  const answer = useMutation({
+    mutationFn: (body: { answer: string; save: boolean; tell: boolean }) =>
+      proposal
+        ? api(`/api/tiendas/${store.id}/preguntas/${proposal.id}/guardar`, {
+            method: "POST",
+            body: { answer: body.answer },
+          })
+        : api<{ told: number }>(`/api/tiendas/${store.id}/preguntas/respuesta`, {
+            method: "POST",
+            body: { ...body, ids: item.ids },
+          }),
+  })
+  const who = item.people > 1 ? `las ${item.people} clientas` : (item.customer ?? "la clienta")
+  const form = useAppForm({
+    defaultValues: { answer: proposal?.answer ?? "", tell: true, save: true },
+    validators: {
+      onSubmit: z.object({
+        answer: z
+          .string()
+          .trim()
+          .min(1, "Escribe la respuesta")
+          .max(1000, "Máximo 1000 caracteres"),
+        tell: z.boolean(),
+        save: z.boolean(),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await answer.mutateAsync({ answer: value.answer.trim(), save: value.save, tell: value.tell })
+      await queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) })
+      void queryClient.invalidateQueries({ queryKey: PRODUCT_KEY(store.id, item.productId) })
+      toast.success(
+        proposal
+          ? "Guardado en la ficha: Sofi ya lo sabe"
+          : value.tell
+            ? `Respondido. Sofi se lo escribe a ${who}, si atiende su chat.`
+            : "Respondido",
+      )
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormDrawer
+      {...surface}
+      open
+      title={proposal ? "Guardar en la ficha" : "Responder lo que Sofi no supo"}
+      description={`«${item.question}» · ${item.product}`}
+      onClose={onClose}
+      submitLabel={proposal ? "Guardar en la ficha" : "Responder"}
+    >
+      <FieldGroup className="gap-5">
+        <form.AppField name="answer">
+          {(field) => (
+            <field.TextareaField
+              label="Tu respuesta"
+              rows={3}
+              maxLength={1000}
+              autoFocus
+              description="Escríbela una vez. Sofi se lo dice con sus palabras, sin agregar datos."
+            />
+          )}
+        </form.AppField>
+        {proposal ? null : (
+          <>
+            <form.AppField name="tell">
+              {(field) => (
+                <field.CheckboxField
+                  label="Que Sofi se lo diga"
+                  description={`Sofi le escribe la respuesta a ${who} por el mismo chat, si ella lo atiende. Si lo atiende una persona, díselo tú.`}
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="save">
+              {(field) => (
+                <field.CheckboxField
+                  label="Guardarlo en la ficha"
+                  description={
+                    editor
+                      ? `Queda en ${item.product} y en su página de la vitrina, en «Lo que más preguntan»: la próxima vez Sofi responde sin esperar.`
+                      : "Lo propones: lo guarda el Dueño o un Administrador."
+                  }
+                />
+              )}
+            </form.AppField>
+          </>
+        )}
+      </FieldGroup>
+    </FormDrawer>
   )
 }
 
