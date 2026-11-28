@@ -689,7 +689,7 @@ export function ClientTestPiece({
     onGo,
     extraQuick,
     phoneClassName:
-      "h-[calc(100dvh-14rem)] min-h-[30rem] max-h-[46rem] @3xl:h-[min(720px,calc(100dvh-16rem))] @3xl:min-h-[28rem]",
+      "h-[calc(100dvh-14rem)] min-h-[30rem] max-h-[46rem] @3xl:h-[min(640px,calc(100dvh-26rem))] @3xl:min-h-[24rem]",
   })
   return (
     <div className="flex flex-col gap-3" data-draft-ignore>

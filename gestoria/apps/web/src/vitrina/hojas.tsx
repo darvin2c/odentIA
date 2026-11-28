@@ -453,7 +453,8 @@ export function Sheets(props: SheetsProps) {
           </p>
         ) : null}
         <p className="proto">
-          Pago de prueba: no se cobra. No es una venta: no mueve el stock ni cuenta en Reportes.
+          Pago de prueba: no se cobra. No es una venta: no mueve el stock ni entra a Pedidos ni a
+          Reportes.
         </p>
       </Sheet>
     )
