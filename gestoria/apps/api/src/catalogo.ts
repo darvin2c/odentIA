@@ -32,7 +32,6 @@ import { z } from "zod"
 import { isAgent } from "./agente.js"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
-import { todayIn, variantPrices } from "./pedidos.js"
 import { can, type StoreSeat } from "./permisos.js"
 import { autoUnitCents } from "./precio.js"
 import { applyRubroData, mergeTemplate, RUBROS, readinessOf, templateIn } from "./rubros.js"
@@ -455,6 +454,8 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
       .where(eq(storeTemplateField.storeId, storeId))
     // El precio de venta de hoy de cada producto (con su promoción, `precio.ts`), el mismo que da
     // Sofi: con él se compara «algo más barato». De lo que hay (o se vende sin stock), si no, de todo.
+    // `pedidos.ts` importa este archivo: se trae al usarlo, para no armar un ciclo al cargar.
+    const { todayIn, variantPrices } = await import("./pedidos.js")
     const priced = Map.groupBy(
       await variantPrices(tx, storeId, await todayIn(tx, storeId)),
       (v) => v.productId,

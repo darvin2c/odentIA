@@ -559,10 +559,10 @@ describe("la Ayuda: la misma Ariadna, y cada uno ve solo sus casos (ADR 0221 y 0
     expect(asked.json.data).toMatchObject({
       askId: ASK,
       kind: "guia",
-      basedOn: "La guía de gestorIA: Catálogo.",
+      basedOn: "La guía de gestorIA: Ficha del producto.",
       answers: [
         {
-          where: "Catálogo",
+          where: "Ficha del producto",
           path: `/tiendas/${storeId}/catalogo`,
           restriction:
             "Con tu rol (Ventas) no se puede: pídeselo a quien sí puede. Lo pueden hacer: Dueño y Administrador.",

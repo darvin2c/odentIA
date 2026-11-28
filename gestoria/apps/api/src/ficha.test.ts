@@ -256,7 +256,7 @@ describe("los datos del rubro y qué tan lista está para Sofi (decisión 2)", (
 
   it("un producto nuevo nace con su nombre en el link, sin chocar con otro", async () => {
     const first = await newProduct("Mocasín Ñandú")
-    const second = await newProduct("Mocasín ñandú")
+    const second = await newProduct("Mocasín - Ñandú")
     const slugOf = async (product: string) =>
       (await call("lucia", "GET", `${base}/productos/${product}`)).json.product.web.slug
     expect(await slugOf(first)).toBe("mocasin-nandu")
