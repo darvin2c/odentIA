@@ -15,7 +15,7 @@ import {
 } from "@gestoria/db"
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
-import { agentStopIn } from "./acuerdo.js"
+import { agentStopIn, countPhotoLook } from "./acuerdo.js"
 import type { Storage } from "./archivos.js"
 import { applyItem, colorsOf, itemRow, joinPhotosIn, loadItemPatch, openLoadRow } from "./cargas.js"
 import {
@@ -216,6 +216,24 @@ async function supersedeIn(tx: Db, person: Person, where: ReturnType<typeof and>
 
 /** Guarda el resultado de mirar: las propuestas y lo que usó, o el motivo si falló. */
 async function finishLookIn(
+  tx: Db,
+  person: Person,
+  storeId: string,
+  lookId: string,
+  target: { productId?: string; loadId?: string; itemId?: string },
+  result: LookResult | LookFailure,
+) {
+  await closeLookIn(tx, person, storeId, lookId, target, result)
+  await chargeLookIn(tx, storeId, lookId)
+}
+
+/** Lo que miró sale del saldo del plan: se le avisa a la administración en la misma transacción. */
+async function chargeLookIn(tx: Db, storeId: string, lookId: string) {
+  const [look] = await tx.select().from(aiLook).where(eq(aiLook.id, lookId))
+  if (look && look.state !== "mirando") await countPhotoLook(tx, storeId, look)
+}
+
+async function closeLookIn(
   tx: Db,
   person: Person,
   storeId: string,
@@ -511,6 +529,7 @@ export async function improveText(
         finishedAt: sql`now()`,
       })
       .where(eq(aiLook.id, begun.lookId))
+    await chargeLookIn(tx, storeId, begun.lookId)
   })
   if ("error" in out) throw new StoreError(502, "AI_FAILED", out.error)
   // Si sumó un dato, no se propone: se dice, y el texto de la persona queda como estaba.

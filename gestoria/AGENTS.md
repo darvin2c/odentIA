@@ -100,8 +100,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   llama fuera de toda transacción. Lo escrito en las fotos es dato, nunca instrucción.
 - El tope son fotos por día y tienda (`GESTORIA_FOTOS_TOPE_DIA`, el día de la tienda); se detiene
   también si la administración detuvo a Sofi por el saldo o el tope del plan. Al llegar, la
-  persona lo sabe (`capIn`) y sigue a mano: nada más se frena. Lo que costó queda en `ai_look`;
-  avisarlo a la administración espera un mensaje nuevo de `@odentia/contract`.
+  persona lo sabe (`capIn`) y sigue a mano: nada más se frena. Lo que costó queda en `ai_look` y
+  sale del saldo del plan con `countPhotoLook` (`uso.contado`, `ia_fotos`): en la transacción que
+  cierra la mirada, una vez, con su id como clave. Lo que no respondió y lo de `fake` no cuentan.
 - Quitar el fondo no lo hace este modelo (solo lee imágenes): el servidor recibe la propuesta ya
   hecha (`POST fotos/:id/sin-fondo`).
 - Un cambio en lo que lee o propone se mide con `pnpm --filter @gestoria/api eval:fotos` (banco
@@ -277,7 +278,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   baja, rol) o del nombre, también a `noteStoreTeam` (ADR 0217): el equipo entero, que la cuenta
   usa para el selector de las clínicas y para no cerrar la cuenta del único Dueño.
 - Lo que usó Sofi se cuenta con `countConversation`: una vez por conversación cada 24 horas, y sube
-  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso (`0009_reglas_acuerdo.sql`).
+  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso de conversaciones
+  (`0009_reglas_acuerdo.sql`); una persona, solo el de una mirada suya de la IA de fotos (`0042`).
 - La app nunca se detiene por la administración: se usa lo último guardado en `contract_state`;
   sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
   conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.

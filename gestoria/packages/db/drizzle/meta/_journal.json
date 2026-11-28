@@ -295,6 +295,13 @@
       "when": 1795820318006,
       "tag": "0041_reglas_ia_de_fotos",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795825138546,
+      "tag": "0042_reglas_uso_ia_de_fotos",
+      "breakpoints": true
     }
   ]
 }

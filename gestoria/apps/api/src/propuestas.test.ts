@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto"
 import {
   aiLook,
   aiProposal,
+  contractOutbox,
   productColor,
   productEvent,
   productPhoto,
@@ -17,7 +18,7 @@ import {
   storeMember,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, isNull, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import sharp from "sharp"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -218,6 +219,20 @@ describe("la IA mira las fotos de un producto y propone", () => {
       costMicros: 350,
       requestedBy: "u-rosa",
     })
+    // Sale del saldo del plan: un aviso a la administración, con la mirada como clave.
+    const [usage] = await db.ownerDb
+      .select()
+      .from(contractOutbox)
+      .where(eq(contractOutbox.id, look!.id))
+    expect(usage).toMatchObject({
+      storeId,
+      type: "uso.contado",
+      dedupe: `ia_fotos:${look!.id}`,
+      payload: {
+        type: "uso.contado",
+        data: { account: storeId, kind: "ia_fotos", look: look!.id, photos: 2, costMicros: 350 },
+      },
+    })
     // Nada cambió en la ficha.
     const detail = (await call("rosa", "GET", `${base}/productos/${zapatilla}`)).json.product
     expect(detail).toMatchObject({ name: "Zapatilla", rubroData: {}, keywords: [] })
@@ -368,6 +383,13 @@ describe("la IA mira las fotos de un producto y propone", () => {
       .where(and(eq(aiLook.productId, zapatilla), eq(aiLook.state, "fallo")))
     expect(looks.some((l) => l.outputTokens === 20 && l.costMicros === 160)).toBe(true)
     expect(looks.every((l) => l.finishedAt)).toBe(true)
+    // Lo que se pagó se avisa; lo que no respondió, no.
+    const charged = await db.ownerDb
+      .select({ id: contractOutbox.id })
+      .from(contractOutbox)
+      .where(eq(contractOutbox.type, "uso.contado"))
+    const ids = new Set(charged.map((c) => c.id))
+    expect(looks.filter((l) => ids.has(l.id)).map((l) => l.outputTokens)).toEqual([20])
     expect((await call("rosa", "GET", `${base}/ia`)).json.cap.used).toBe(before + 2)
   })
 
@@ -546,6 +568,39 @@ describe("las reglas de la base", () => {
         }),
       ),
     ).rejects.toThrow()
+  })
+
+  it("una persona anota el uso solo de su mirada, con sus fotos; nunca el de una conversación", async () => {
+    const { withPerson } = await import("@gestoria/db")
+    // Una mirada que falló sin respuesta: no se avisó, así su clave está libre.
+    const [look] = await db.ownerDb
+      .select()
+      .from(aiLook)
+      .where(
+        and(
+          eq(aiLook.productId, zapatilla),
+          eq(aiLook.state, "fallo"),
+          isNull(aiLook.outputTokens),
+        ),
+      )
+      .limit(1)
+    const usage = (who: "u-rosa" | "u-lucia", data: Record<string, unknown>) =>
+      withPerson(db.appDb, { userId: who, email: "", storeId }, (tx) =>
+        tx.insert(contractOutbox).values({
+          id: look!.id,
+          storeId,
+          type: "uso.contado",
+          payload: { type: "uso.contado", data: { account: storeId, ...data } },
+        }),
+      )
+    const photos = { kind: "ia_fotos", look: look!.id, photos: look!.photos }
+    await expect(usage("u-lucia", photos)).rejects.toThrow()
+    await expect(usage("u-rosa", { ...photos, photos: 99 })).rejects.toThrow()
+    await expect(
+      usage("u-rosa", { kind: "conversacion", conversation: "x", outcome: "pedido" }),
+    ).rejects.toThrow()
+    // Con lo suyo, sí: la regla es esa y no otra.
+    await expect(usage("u-rosa", photos)).resolves.toBeDefined()
   })
 
   it("una propuesta decidida no cambia más, ni se decide a nombre de otro", async () => {
