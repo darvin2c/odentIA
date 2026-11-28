@@ -7,6 +7,7 @@
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 import { CHAT_VIVO } from "../lib/venta"
+import { boleta } from "./arm"
 import { desde, reduceMovimiento, scrollSuave } from "./sitio"
 import type { Humor, Sofi } from "./sofi"
 
@@ -324,7 +325,7 @@ export function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   ScrollTrigger.create({
     trigger: mapaEl,
     start: desde("top 70%"),
-    end: "bottom 45%",
+    end: matchMedia("(max-width: 860px)").matches ? "bottom 85%" : "bottom 45%",
     onUpdate: (st) => encender(Math.min(total, Math.floor(st.progress * (total + 0.999)))),
     onLeave: () => sofi?.mirar(null),
     onLeaveBack: () => {
@@ -525,7 +526,12 @@ function cobro(sofi: Sofi | null) {
   const tl = gsap.timeline({
     scrollTrigger: { trigger: escena, start: desde("top 68%", "top 80%") },
   })
-  tl.from(a, { x: -60, rotateY: 14, opacity: 0, duration: 1.2, ease: "expo.out" })
+  // En el celular entran desde abajo: desde el costado sobresalían del borde mientras se movían.
+  const entra = (lado: number) =>
+    apilado
+      ? { y: 50, opacity: 0, duration: 1.1, ease: "expo.out" }
+      : { x: 60 * lado, rotateY: -14 * lado, opacity: 0, duration: 1.2, ease: "expo.out" }
+  tl.from(a, entra(-1))
     .from(
       linea,
       { [apilado ? "scaleY" : "scaleX"]: 0, duration: 0.9, ease: "power2.inOut" },
@@ -533,7 +539,7 @@ function cobro(sofi: Sofi | null) {
     )
     .from(toque, { scale: 0.6, opacity: 0, duration: 0.6, ease: "back.out(2.5)" }, "-=0.3")
     .to(toque, { scale: 0.92, duration: 0.12, yoyo: true, repeat: 1 }, "+=0.3")
-    .from(b, { x: 60, rotateY: -14, opacity: 0, duration: 1.2, ease: "expo.out" }, "-=0.1")
+    .from(b, entra(1), "-=0.1")
     .to(onda, { x: "120%", duration: 1.4, ease: "power2.inOut" }, "-=0.6")
     .call(
       () => {
@@ -690,6 +696,7 @@ export function iniciarInicio() {
   prepararScroll()
 
   heroe()
+  boleta()
   trabajo(sofi)
   mapa(sofi, lineas)
   venta(sofi)

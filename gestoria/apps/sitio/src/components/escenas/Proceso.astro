@@ -1,0 +1,117 @@
+---
+// Quién hace qué (web v5): el pedido pasa por sus estados, de la primera pregunta a entregado, en
+// tres carriles. Sofi hace casi todo, va de estado en estado y confirma y le avisa a la clienta en
+// cada uno; tu equipo hace tres cosas chiquitas
+// en el centro (confirmar una captura, empacar y entregar); Argos te dice lo que te toca. En
+// computadora la escena se fija y el pedido avanza con el scroll (`proceso()` de scripts/agentes.ts);
+// sin movimiento o en el celular, se lee entera.
+import { Image } from "astro:assets"
+import sofiAtenta from "../../assets/sofi-atenta.png"
+import sofiDecidida from "../../assets/sofi-decidida.png"
+import sofiFeliz from "../../assets/sofi-feliz.png"
+
+type Estado = {
+  estado: string
+  sofi?: string
+  tu?: string
+  argos?: string
+  cara?: "atenta" | "decidida" | "feliz"
+  /** Lo que dice Sofi en su globito al llegar a este estado. */
+  dice: string
+}
+const estados: Estado[] = [
+  { estado: "Escribe la clienta", sofi: "Atiende al instante", cara: "atenta", dice: "¡Hola, Andrea!" },
+  { estado: "Cotizado", sofi: "Muestra el valor y ofrece una vez", cara: "decidida", dice: "S/ 120 y te regalo el envío" },
+  { estado: "Pedido anotado", sofi: "Anota el pedido y pide el pago", cara: "atenta", dice: "Te paso el link" },
+  {
+    estado: "Pago por confirmar",
+    sofi: "Le avisa a Andrea que su pago se está revisando",
+    tu: "Confirmas la captura (el link se confirma solo)",
+    argos: "Te toca: 1 pago por confirmar",
+    cara: "atenta",
+    dice: "¡Te toca confirmar!",
+  },
+  {
+    estado: "Pagado",
+    sofi: "Le confirma el pago a Andrea; el stock baja solo",
+    cara: "feliz",
+    dice: "¡Pagado!",
+  },
+  {
+    estado: "Sale hoy",
+    sofi: "Le avisa a Andrea que su pedido sale hoy",
+    tu: "Empacas",
+    argos: "Sale hoy, en Despachos",
+    cara: "atenta",
+    dice: "¡A empacar!",
+  },
+  {
+    estado: "Entregado",
+    sofi: "Le confirma la entrega a Andrea",
+    tu: "Entregas",
+    argos: "Queda en la ficha de la clienta",
+    cara: "feliz",
+    dice: "¡Una venta más!",
+  },
+]
+const caras = { atenta: sofiAtenta, decidida: sofiDecidida, feliz: sofiFeliz }
+---
+<section class="proceso" aria-labelledby="proceso-h" data-proceso>
+  <div class="proceso__pin" data-proceso-pin>
+    <div class="marco">
+      <div class="cabeza">
+        <p class="etiqueta">Quién hace qué</p>
+        <h2 id="proceso-h" class="titulo-2">Sofi lleva el pedido y avisa en cada estado. <span class="cur">Tú solo haces tres cositas.</span></h2>
+      </div>
+      <p class="proceso__pedido" aria-hidden="true">
+        <span>Pedido 1042</span><b data-proceso-estado>{estados[0]?.estado}</b>
+      </p>
+      <div class="proceso__tabla" role="table" aria-label="Los estados del pedido y quién hace cada paso">
+        <div class="proceso__fila proceso__fila--estados" role="row">
+          <span class="proceso__carril" role="columnheader">Estado</span>
+          {estados.map((e, i) => (
+            <span class="proceso__estado" role="columnheader" data-col={i} data-cara={e.cara ?? ""} data-nombre={e.estado} data-dice={e.dice} data-tuyo={e.tu ? "" : undefined}>
+              <i aria-hidden="true">{i + 1}</i>{e.estado}
+            </span>
+          ))}
+        </div>
+        <div class="proceso__fila proceso__fila--sofi" role="row">
+          <span class="proceso__carril" role="rowheader">Sofi</span>
+          {estados.map((e, i) => (
+            <span class="proceso__celda" role="cell" data-col={i}>
+              {e.sofi && <span class="tarea tarea--sofi">{e.sofi}</span>}
+            </span>
+          ))}
+          <span class="proceso__sofi" data-proceso-sofi aria-hidden="true">
+            <span class="proceso__dice" data-proceso-dice></span>
+            <span class="proceso__salto" data-proceso-salto>
+              <span class="proceso__flota" data-proceso-flota>
+                {Object.entries(caras).map(([k, img]) => (
+                  <Image src={img} alt="" widths={[96, 192]} sizes="96px" data-cara={k} />
+                ))}
+              </span>
+            </span>
+          </span>
+        </div>
+        <div class="proceso__fila proceso__fila--tu" role="row">
+          <span class="proceso__carril" role="rowheader">Tu equipo</span>
+          {estados.map((e, i) => (
+            <span class="proceso__celda" role="cell" data-col={i}>
+              {e.tu && <span class="tarea tarea--tu">{e.tu}</span>}
+            </span>
+          ))}
+        </div>
+        <div class="proceso__fila proceso__fila--argos" role="row">
+          <span class="proceso__carril" role="rowheader">Argos</span>
+          {estados.map((e, i) => (
+            <span class="proceso__celda" role="cell" data-col={i}>
+              {e.argos && <span class="tarea tarea--argos">{e.argos}</span>}
+            </span>
+          ))}
+        </div>
+        <div class="proceso__avance" aria-hidden="true"><span data-proceso-avance></span></div>
+      </div>
+      <p class="proceso__cuenta">De 7 estados, a tu equipo le tocan <b>3 cositas</b>. Sofi confirma y le avisa a la clienta en cada uno, y Argos te dice lo que te toca.</p>
+    </div>
+  </div>
+</section>

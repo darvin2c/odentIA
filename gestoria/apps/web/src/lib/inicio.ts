@@ -84,7 +84,7 @@ export interface StoreHome {
   waiting: { chats: unknown[] }
   /** Null: ya quedó lista, o quien lo ve no configura la tienda. */
   setup: {
-    steps: { step: SetupStep; state: SetupStepState; skippable: boolean }[]
+    steps: { step: SetupStep; state: SetupStepState; skippable: boolean; sells: boolean }[]
     facts: SetupFacts
   } | null
 }
@@ -227,15 +227,6 @@ export function stepView(
               : "Quien atiende contigo, con su rol. Si trabajas sola, sáltalo.",
         action: go("Invitar", `${CONFIG_PATH}/equipo`),
       }
-  }
-}
-
-/** «4 de 6»: cuántos pasos hechos o saltados, de los que cuentan (lo de «Muy pronto», no). */
-export function setupProgress(steps: { state: SetupStepState }[]): { done: number; total: number } {
-  const counted = steps.filter((s) => s.state !== "pronto")
-  return {
-    done: counted.filter((s) => s.state === "hecho" || s.state === "saltado").length,
-    total: counted.length,
   }
 }
 

@@ -167,7 +167,7 @@ export async function storeReport(
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_by = ${SOFI_ACTOR} and o.created_at >= ${since}`)
-    // Lo que volvió de lo que vendió Sofi: el cobro del 1 % lo descuenta (tablero 18).
+    // Lo que volvió de lo que vendió Sofi, para medirla (el cobro del 1 % es sobre toda venta completada).
     const agentReturned = await agentReturnsIn(tx, storeId, since)
     const soldOrders = sold.orders
     const soldCents = sold.cents - n(refunded?.cents)

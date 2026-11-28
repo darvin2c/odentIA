@@ -75,6 +75,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   datos de los primeros pasos (`setupFactsIn`), nunca marcas a mano. Lo que todavía no existe no
   viene ni se dibuja. Soporte lo mira sin Sofi ni el plan; a nadie le llegan llaves, costos ni
   datos de cobro. Una parte nueva suma su línea ahí y en `configLines`.
+- Inicio y «Lo que falta» cuentan con la misma función (`setupProgress` de
+  `apps/web/src/lib/configuracion.ts`), sobre los pasos del servidor y su `sells`: lo que no frena
+  la venta (invitar al equipo, Tu marca, el link de pago) se muestra, pero nunca se cuenta como
+  falta ni deja abierta la lista. Un link de pago sin pasarela no es una forma de cobrar
+  (`chargingPaymentsIn`).
 - El buscador de Configuración no es el de Ctrl+K: es el `Combobox` común sobre `SEARCH_INDEX`
   (lo que hay dentro de cada parte, con las palabras de quien vende) y los nombres que guardó la
   tienda (`namesIndex`). Una pantalla que suma algo que se busca suma su entrada, solo de lo que
@@ -90,7 +95,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
   los bloquea `linkNameProblem`. Si está libre se dice al escribirlo (`checkLinkName`); de otra
-  tienda solo se sabe si tiene el nombre (`store_link_taken`, `0034`), nunca cuál.
+  tienda solo se sabe si tiene el nombre (`store_link_taken`, `0052`), nunca cuál.
 - Tu marca se guarda una sola vez (`saveStoreBrand`): el nombre, el color, el link, el logo y la
   portada en una transacción; si algo no se puede, no queda nada a medias. El logo se suelta, se
   elige o se pega (arrastrar nunca es la única forma), se recorta con `ImageAdjust` y sube como
@@ -179,8 +184,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   marcar «Entregado» el cambio (`recordReturn` de `stock.ts`); nunca antes. No vuelve dos veces lo
   mismo, salvo que el cambio se anule. Un cambio no se «Cambia».
 - El dinero devuelto se anota en `order_refund` (medio y quién, `pagos.confirmar`) y el saldo único
-  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto; lo que
-  vuelve de un pedido de Sofi queda para el cobro del 1 % (`agentReturnsIn`).
+  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto, y el cobro
+  del 1 % también lo descuenta. `agentReturnsIn` solo mide lo que volvió de lo que vendió Sofi.
 
 ## Las clientas (entrega 4)
 
@@ -218,11 +223,31 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
-- Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
-  fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
+- Argos no decide con el modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son
+  textos fijos, uno por motivo y pedido. El modelo solo lee lo que dijo la clienta (abajo, «El perfil
+  de la clienta»). Solo Dueño y Administrador ven Reportes (`reportes.ver`).
 - Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
   `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
   las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
+
+## El perfil de la clienta (ADR 0240)
+
+- Argos perfila solo (`apps/api/src/sofi/perfilar.ts`, en su vuelta) y la ficha lo muestra
+  (`customerProfileIn` de `apps/api/src/perfil.ts`, sobre la familia de fichas unidas). Cada dato es
+  una fila de `customer_fact` con su fuente, su cita y su hora: nada se edita. El de hoy es el último
+  de la tienda o, si no hay, el último. Lo que corrige una persona («Corregir», `ventas.atender`)
+  queda «Lo puso la tienda» y Argos no lo vuelve a escribir; la base también se lo niega (`0051`).
+- Argos usa el modelo (el de Sofi) SOLO para leer lo que ella escribió y la dirección de su última
+  entrega: lo de ella va como mensaje del usuario y cada dato trae su cita, que el código comprueba
+  tal cual en el mensaje o la dirección, con la medida del catálogo y una fecha que existe; lo demás
+  se descarta. Lee cada mensaje una vez (`argos_reading`), nunca a media conversación ni «Probar a
+  Sofi». Las cifras (la medida de sus compras, su canal) y toda decisión siguen siendo cuentas fijas.
+  Lo que cuesta leer queda en el registro de la vuelta: no se cobra.
+- El permiso para escribirle (`customer_consent`) lo anota solo Sofi, del último mensaje de ella y con
+  sus palabras. Nadie del equipo dice por ella que sí.
+- Argos y Sofi anotan en la ficha propia del pedido del chat (`conversationFichasIn`), no en la que se
+  ve: «Separar» se lleva lo suyo. Un chat con pedidos de familias distintas puede no ser de ella: no
+  se le anota nada de lo que dice y su permiso queda sin ficha, que no cuenta para nadie.
 
 ## El acuerdo con la administración (B7)
 
@@ -305,7 +330,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
 - Solo dice lo que gestorIA hace; lo que todavía no existe va como «pronto» y nunca se muestra como
   pantalla. El precio es el que definió el usuario: USD 19 al mes, que vuelven como saldo, más el
-  1 % de cada pedido que gestorIA genera sola. Términos y
+  1 % del total (con el envío) de cada venta completada: pagada y entregada, o despachada por
+  agencia, venga de donde venga; lo devuelto se descuenta. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
