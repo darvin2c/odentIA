@@ -8,7 +8,7 @@ import { ACCOUNT, STORE_ID, surface, type Who } from "./entorno"
  * Configuración, de nuevo», tableros 9, 10 y 11), contra su servidor y su base de verdad:
  * - Invitar al equipo con nombre, celular, correo y rol; «Enviar por WhatsApp» abre el WhatsApp con
  *   el mensaje y la lista dice «Enviada por ti por WhatsApp», nunca que llegó.
- * - Invitar a un repartidor con lo que se le paga por entrega; cambiar su pago y sacarlo.
+ * - Agregar a un repartidor con lo que se le paga por entrega; cambiar su pago y sacarlo.
  * - Plan y pagos dice primero lo que se debe y cuándo vence; después el saldo y el tope y, sin
  *   movimientos en el acuerdo, qué se verá; sin formulario de ayuda en la página.
  * - La tarjeta para instalar la app va en Inicio, no en Pedidos.
@@ -80,13 +80,53 @@ test("Rosa invita a Carla por WhatsApp y queda «enviada por ti»", async ({ pag
   await noSideScroll(page)
 })
 
+test("Rosa corrige el correo de una invitación sin escribir todo de nuevo, y anular pide confirmar", async ({
+  page,
+}) => {
+  await as("rosa")
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/configuracion/equipo`)
+  await page.getByRole("button", { name: "Invitar", exact: true }).click()
+  const form = surface(page, "Invitar al equipo")
+  await form.getByLabel("Nombre").fill("Ana Torres")
+  await form.getByLabel("Celular").fill("912000111")
+  await form.getByLabel("Correo con el que entrará").fill("ana.tores@gmail.test")
+  await form.getByRole("button", { name: "Crear la invitación" }).click()
+  await surface(page, "Envía la invitación a Ana").getByRole("button", { name: "Listo" }).click()
+
+  // «Corregir» abre el cajón con lo que ya tenía: solo se cambia el correo.
+  await page.getByRole("button", { name: "Corregir la invitación de Ana Torres" }).click()
+  const fix = surface(page, "Corregir la invitación")
+  await expect(fix.getByLabel("Nombre")).toHaveValue("Ana Torres")
+  await expect(fix.getByLabel("Correo con el que entrará")).toHaveValue("ana.tores@gmail.test")
+  await shot(page, "equipo-corregir-escritorio")
+  await fix.getByLabel("Correo con el que entrará").fill("ana.torres@gmail.test")
+  await fix.getByRole("button", { name: "Crear la invitación" }).click()
+  const share = surface(page, "Envía la invitación a Ana")
+  await expect(share.getByText(/ana\.torres@gmail\.test/).first()).toBeVisible()
+  await share.getByRole("button", { name: "Listo" }).click()
+  // Queda una sola, la nueva.
+  await expect(page.getByRole("listitem").filter({ hasText: "Ana Torres" })).toHaveCount(1)
+
+  // «Anular» pregunta antes; «Cancelar» la deja como estaba.
+  await page.getByRole("button", { name: "Anular la invitación de Ana Torres" }).click()
+  const confirm = page.getByRole("alertdialog")
+  await expect(confirm).toContainText("¿Anular la invitación de Ana Torres?")
+  await shot(page, "equipo-anular-escritorio")
+  await confirm.getByRole("button", { name: "Cancelar" }).click()
+  await expect(page.getByRole("listitem").filter({ hasText: "Ana Torres" })).toHaveCount(1)
+  await page.getByRole("button", { name: "Anular la invitación de Ana Torres" }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Anular la invitación" }).click()
+  await expect(page.getByRole("listitem").filter({ hasText: "Ana Torres" })).toHaveCount(0)
+})
+
 test("Rosa suma a Kevin con su pago por entrega, lo cambia y lo saca", async ({ page }) => {
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/configuracion/equipo`)
   const couriers = page.getByRole("region", { name: "Repartidores" })
-  await couriers.getByRole("button", { name: "Invitar repartidor" }).click()
-  const form = surface(page, "Invitar repartidor")
+  await couriers.getByRole("button", { name: "Agregar repartidor" }).click()
+  const form = surface(page, "Agregar repartidor")
   await form.getByLabel("Nombre").fill("Kevin Ramos")
   await form.getByLabel("Celular").fill("955101202")
   await form.getByLabel("Le pagas por entrega").fill("8")

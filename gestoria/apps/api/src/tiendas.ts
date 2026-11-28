@@ -131,6 +131,11 @@ export const invitationInput = z.object({
   name: personName.nullish(),
   /** Su celular en E.164, para enviarle la invitación por WhatsApp. */
   phone: e164.nullish(),
+  /**
+   * «Corregir»: la invitación pendiente que esta reemplaza. Se anula en el mismo paso, así un
+   * correo mal escrito se corrige sin dejar dos vivas y sin perder la de antes si no se guarda.
+   */
+  replaces: z.uuid().nullish(),
 })
 
 export const roleInput = z.object({ role: z.enum(STORE_ROLES) })
@@ -488,6 +493,37 @@ export async function inviteToStore(
         email: "Esa persona ya es parte del equipo",
       })
     const expiresAt = new Date(now.getTime() + INVITATION_DAYS * 86_400_000)
+    if (input.replaces) {
+      const [replaced] = await tx
+        .select({ email: storeInvitation.email, role: storeInvitation.role })
+        .from(storeInvitation)
+        .where(
+          and(
+            eq(storeInvitation.id, input.replaces),
+            eq(storeInvitation.storeId, storeId),
+            isNull(storeInvitation.acceptedAt),
+            isNull(storeInvitation.revokedAt),
+          ),
+        )
+      if (!replaced) throw new StoreError(404, "NOT_FOUND", "La invitación que corriges ya no está")
+      if (!canAssign(role, replaced.role))
+        throw new StoreError(
+          403,
+          "FORBIDDEN",
+          "Solo el dueño puede corregir la invitación de un dueño",
+        )
+      await tx
+        .update(storeInvitation)
+        .set({ revokedAt: now, revokedBy: person.userId })
+        .where(eq(storeInvitation.id, input.replaces))
+      await tx.insert(storeEvent).values({
+        storeId,
+        actorUserId: person.userId,
+        action: "invitacion.anulada",
+        subject: replaced.email,
+        detail: { por: "corregir" },
+      })
+    }
     const [pending] = await tx
       .select({ id: storeInvitation.id })
       .from(storeInvitation)

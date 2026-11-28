@@ -150,7 +150,7 @@ async function outsiderNamed(tx: Db, storeId: string, name: string) {
 }
 
 /**
- * «Invitar repartidor»: suma a alguien de fuera con su celular y su pago. Si la tienda ya lo tuvo
+ * «Agregar repartidor»: suma a alguien de fuera con su celular y su pago. Si la tienda ya lo tuvo
  * (el mismo nombre, sin mayúsculas ni espacios de más) y lo había sacado, vuelve el mismo, con lo
  * que llevó y cobró; si ya está, se dice.
  */
@@ -238,7 +238,7 @@ export async function updateCourier(
       (await outsiderNamed(tx, storeId, input.name))
     )
       throw nameTaken(
-        "Ese nombre ya es de otro repartidor, de ahora o de antes. Usa otro, o suma al de antes con «Invitar repartidor».",
+        "Ese nombre ya es de otro repartidor, de ahora o de antes. Usa otro, o suma al de antes con «Agregar repartidor».",
       )
     const next = {
       name: input.name ?? row.name,

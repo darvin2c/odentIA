@@ -169,6 +169,46 @@ describe("la invitación por WhatsApp", () => {
     })
     const id = made.json.invitation.id
     expect((await call("mario", "POST", `${base}/invitaciones/${id}/enviada`)).status).toBe(403)
+    // Tampoco la corrige: corregir es anularla.
+    const fixed = await call("mario", "POST", `${base}/invitaciones`, {
+      email: "socia2@gmail.test",
+      role: "admin",
+      replaces: id,
+    })
+    expect(fixed.status).toBe(403)
+    const team = (await call("rosa", "GET", `${base}/equipo`)).json
+    expect(team.invitations.map((one: Json) => one.email)).toContain("socia@gmail.test")
+    expect(team.invitations.map((one: Json) => one.email)).not.toContain("socia2@gmail.test")
+  })
+
+  it("«Corregir» crea la nueva y anula la anterior en el mismo paso, aunque cambie el correo", async () => {
+    const wrong = await call("rosa", "POST", `${base}/invitaciones`, {
+      email: "ana.tores@gmail.test",
+      role: "sales",
+      name: "Ana Torres",
+      phone: "+51912000111",
+    })
+    const old = wrong.json.invitation.id
+    const fixed = await call("rosa", "POST", `${base}/invitaciones`, {
+      email: "ana.torres@gmail.test",
+      role: "sales",
+      name: "Ana Torres",
+      phone: "+51912000111",
+      replaces: old,
+    })
+    expect(fixed.status).toBe(201)
+    const team = (await call("rosa", "GET", `${base}/equipo`)).json
+    const emails = team.invitations.map((one: Json) => one.email)
+    expect(emails).toContain("ana.torres@gmail.test")
+    expect(emails).not.toContain("ana.tores@gmail.test")
+    // La de antes ya no sirve, y no se corrige dos veces.
+    expect((await call("rosa", "POST", `${base}/invitaciones/${old}/enviada`)).status).toBe(404)
+    const again = await call("rosa", "POST", `${base}/invitaciones`, {
+      email: "ana.t@gmail.test",
+      role: "sales",
+      replaces: old,
+    })
+    expect(again.status).toBe(404)
   })
 })
 

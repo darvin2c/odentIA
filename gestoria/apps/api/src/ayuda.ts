@@ -608,7 +608,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
           "En Configuración, en Equipo y repartidores, «Invitar»: su nombre, su celular, el correo con el que entrará y su rol; cada rol dice lo que puede hacer. «Crear la invitación» y después «Enviar por WhatsApp»: se abre el WhatsApp de tu celular con el mensaje escrito y lo envías tú. En la lista dice quién la envió por WhatsApp: gestorIA no sabe si le llegó.",
-          "Entra solo con la cuenta de ese correo: el link solo no basta. La invitación vence en 7 días; si venció, «Invitar otra vez». Una invitación no se cambia: si el correo estaba mal, «Anular» y haz otra.",
+          "Entra solo con la cuenta de ese correo: el link solo no basta. La invitación vence en 7 días; si venció, «Invitar otra vez». Si un dato estaba mal, «Corregir»: se abre con sus datos puestos y, al crear la nueva, la anterior queda anulada. Para que ya no sirva, «Anular» y confírmalo.",
           "Para cambiar el rol de alguien o quitarlo del equipo, tócalo en la lista: cada rol dice lo que puede hacer. A quien tiene el plan solo lo cambia o lo quita alguien con su mismo rol, y la tienda nunca se queda sin quien tiene el plan.",
         ],
         needs: "equipo.gestionar",
@@ -618,7 +618,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "repartidores",
         q: "¿Cómo sumo a un repartidor y anoto lo que le pago?",
         a: [
-          "En Configuración, en Equipo y repartidores, «Invitar repartidor»: su nombre, su celular, «Le pagas por entrega» y qué pasa «Si la clienta no estaba». Desde ese momento lo eliges al despachar, en Despachos, y le puedes avisar por WhatsApp desde tu celular.",
+          "En Configuración, en Equipo y repartidores, «Agregar repartidor»: su nombre, su celular, «Le pagas por entrega» y qué pasa «Si la clienta no estaba». Desde ese momento lo eliges al despachar, en Despachos, y le puedes avisar por WhatsApp desde tu celular.",
           "Lo que le pagas por entrega es para que sepas cuánto le debes: gestorIA no le paga ni lo descuenta de nada. Quien es de tu equipo y ya llevó un pedido también aparece, con su pago si se lo anotas.",
           "Para que deje de repartir, tócalo en la lista y «Sacar»: lo que tenía asignado y todavía no salió queda sin repartidor en Despachos; lo que llevó y cobró sigue con su nombre.",
         ],

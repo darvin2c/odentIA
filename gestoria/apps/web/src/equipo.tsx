@@ -105,7 +105,9 @@ export function TeamPage() {
     queryFn: () => api<{ couriers: Courier[] }>(`/api/tiendas/${store.id}/repartidores`),
     enabled: canManage,
   })
-  const [inviting, setInviting] = useState(false)
+  // Invitar, o «Corregir» una invitación (con sus datos puestos). Vive aquí y no en su fila: al
+  // crear la nueva, la fila de la anterior se va y el cajón tiene que seguir para enviarla.
+  const [inviting, setInviting] = useState<"nueva" | PendingInvitation | null>(null)
   // Lo de soporte que hay que responder o que está abierto va primero: ahí lleva la franja.
   const supportNow = (team.data?.support ?? []).some(
     (row) => row.status === "por_aceptar" || row.status === "vigente",
@@ -121,7 +123,11 @@ export function TeamPage() {
         subtitle="Quién atiende tu tienda, qué puede hacer y quién reparte."
         primary={
           canManage
-            ? { label: "Invitar", icon: <UserPlus aria-hidden />, onClick: () => setInviting(true) }
+            ? {
+                label: "Invitar",
+                icon: <UserPlus aria-hidden />,
+                onClick: () => setInviting("nueva"),
+              }
             : undefined
         }
       />
@@ -153,6 +159,7 @@ export function TeamPage() {
                 store={store}
                 invitation={invitation}
                 canManage={canManage}
+                onFix={() => setInviting(invitation)}
                 sentBy={
                   invitation.sharedBy === meId
                     ? "ti"
@@ -169,7 +176,15 @@ export function TeamPage() {
       {team.data && !supportNow && team.data.support.length > 0 ? (
         <SupportAccessPanel store={store} team={team.data} />
       ) : null}
-      {inviting ? <InviteForm store={store} onClose={() => setInviting(false)} /> : null}
+      {inviting ? (
+        <InviteForm
+          // Otro cajón para cada invitación que se corrige: arranca con sus datos.
+          key={inviting === "nueva" ? "nueva" : inviting.id}
+          store={store}
+          replaces={inviting === "nueva" ? undefined : inviting}
+          onClose={() => setInviting(null)}
+        />
+      ) : null}
     </>
   )
 }
@@ -266,11 +281,11 @@ function Row({
           <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground sm:hidden" />
         </button>
       ) : (
-        <div className="flex min-h-16 min-w-0 flex-1 basis-72 items-center gap-3 px-2 py-2.5">{body}</div>
+        <div className="flex min-h-16 min-w-0 flex-1 basis-72 items-center gap-3 px-2 py-2.5">
+          {body}
+        </div>
       )}
-      {actions ? (
-        <div className="flex flex-wrap gap-2 px-2 pb-3">{actions}</div>
-      ) : null}
+      {actions ? <div className="flex flex-wrap gap-2 px-2 pb-3">{actions}</div> : null}
     </li>
   )
 }
@@ -436,24 +451,29 @@ function PendingRow({
   store,
   invitation,
   canManage,
+  onFix,
   sentBy,
 }: {
   store: MyStore
   invitation: PendingInvitation
   canManage: boolean
+  /** «Corregir»: abre el cajón de invitar con sus datos puestos. */
+  onFix: () => void
   /** Quién abrió el WhatsApp con ella: «ti» o su nombre. */
   sentBy: string
 }) {
   const queryClient = useQueryClient()
   const [sharing, setSharing] = useState<PendingInvitation | null>(null)
+  const [revoking, setRevoking] = useState(false)
+  // Anular no se deshace: el link deja de servir. Por eso se confirma.
   const revoke = useMutation({
     mutationFn: () =>
       api(`/api/tiendas/${store.id}/invitaciones/${invitation.id}`, { method: "DELETE" }),
     onSuccess: async () => {
+      setRevoking(false)
       await refreshTeam(queryClient, store.id)
       toast.success("Invitación anulada")
     },
-    onError: (error) => toast.error(error.message),
   })
   // Una vencida se hace otra, con lo mismo: la de antes queda anulada.
   const renew = useMutation({
@@ -511,15 +531,24 @@ function PendingRow({
                   {invitation.sharedAt ? "Reenviar" : "Enviar"}
                 </Button>
               )}
-              <SubmitButton
+              <Button
                 size="sm"
                 variant="ghost"
                 className="max-sm:min-h-11"
-                pending={revoke.isPending}
-                onClick={() => revoke.mutate()}
+                aria-label={`Corregir la invitación de ${shown}`}
+                onClick={onFix}
+              >
+                Corregir
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="max-sm:min-h-11"
+                aria-label={`Anular la invitación de ${shown}`}
+                onClick={() => setRevoking(true)}
               >
                 Anular
-              </SubmitButton>
+              </Button>
             </>
           ) : undefined
         }
@@ -527,6 +556,20 @@ function PendingRow({
       {sharing ? (
         <ShareInvitation store={store} invitation={sharing} onClose={() => setSharing(null)} />
       ) : null}
+      <ConfirmDialog
+        open={revoking}
+        title={`¿Anular la invitación de ${shown}?`}
+        description={`El link ${invitation.sharedAt ? "que le enviaste " : ""}deja de servir y ya no podrá entrar con él a ${store.name}. Si solo había un dato mal, usa «Corregir».`}
+        confirmLabel="Anular la invitación"
+        variant="destructive"
+        pending={revoke.isPending}
+        error={revoke.isError ? revoke.error.message : null}
+        onConfirm={() => revoke.mutate()}
+        onClose={() => {
+          setRevoking(false)
+          revoke.reset()
+        }}
+      />
     </>
   )
 }
@@ -645,18 +688,28 @@ const inviteSchema = z.object({
 
 /**
  * Invitar al equipo (tablero 9): nombre, celular, el correo con el que entrará y el rol. Al
- * crearla, el mensaje para enviarlo por WhatsApp.
+ * crearla, el mensaje para enviarlo por WhatsApp. «Corregir» abre lo mismo con los datos de la
+ * invitación ya puestos (`replaces`): una invitación no cambia lo que dice, así que al crear la
+ * nueva la anterior queda anulada en el mismo paso; si se cierra sin crearla, sigue como estaba.
  */
-function InviteForm({ store, onClose }: { store: MyStore; onClose: () => void }) {
+function InviteForm({
+  store,
+  replaces,
+  onClose,
+}: {
+  store: MyStore
+  replaces?: PendingInvitation
+  onClose: () => void
+}) {
   const queryClient = useQueryClient()
   const [done, setDone] = useState<PendingInvitation | null>(null)
   const roles = assignable(store)
   const form = useAppForm({
     defaultValues: {
-      name: "",
-      phone: null as string | null,
-      email: "",
-      role: "sales" as StoreRole,
+      name: replaces?.name ?? "",
+      phone: replaces?.phone ?? (null as string | null),
+      email: replaces?.email ?? "",
+      role: replaces?.role ?? ("sales" as StoreRole),
     },
     validators: { onSubmit: inviteSchema },
     onSubmit: async ({ value }) => {
@@ -669,6 +722,7 @@ function InviteForm({ store, onClose }: { store: MyStore; onClose: () => void })
             phone: value.phone,
             email: value.email.trim(),
             role: value.role,
+            ...(replaces ? { replaces: replaces.id } : {}),
           },
         },
       )
@@ -682,13 +736,19 @@ function InviteForm({ store, onClose }: { store: MyStore; onClose: () => void })
     <FormDrawer
       {...surface}
       open
-      title="Invitar al equipo"
-      description={`Le llega por WhatsApp y entra a ${store.name} con su cuenta.`}
+      title={replaces ? "Corregir la invitación" : "Invitar al equipo"}
+      description={
+        replaces
+          ? "Cambia lo que estaba mal. Al crearla, la anterior queda anulada y su link deja de servir: envía la nueva."
+          : `Le llega por WhatsApp y entra a ${store.name} con su cuenta.`
+      }
       onClose={onClose}
       submitLabel="Crear la invitación"
     >
       <form.AppField name="name">
-        {(field) => <field.TextField label="Nombre" autoComplete="off" maxLength={80} autoFocus />}
+        {(field) => (
+          <field.TextField label="Nombre" autoComplete="off" maxLength={80} autoFocus={!replaces} />
+        )}
       </form.AppField>
       <form.AppField name="phone">
         {(field) => (
@@ -763,7 +823,7 @@ function Couriers({
       onClick={() => setEditing("nuevo")}
     >
       <Truck aria-hidden />
-      Invitar repartidor
+      Agregar repartidor
     </Button>
   )
   const list = query.data?.couriers ?? []
@@ -812,7 +872,7 @@ function Couriers({
             icon={Truck}
             title="Todavía no tienes repartidores"
             description="Suma a quien lleva tus pedidos, con su celular y lo que le pagas por entrega. Luego lo eliges al despachar, en Despachos."
-            actionLabel="Invitar repartidor"
+            actionLabel="Agregar repartidor"
             onAction={() => setEditing("nuevo")}
           />
         )
@@ -927,7 +987,7 @@ function CourierForm({
       <FormDrawer
         {...surface}
         open
-        title={courier ? courier.name : "Invitar repartidor"}
+        title={courier ? courier.name : "Agregar repartidor"}
         description={
           team
             ? "Es de tu equipo: aquí anotas lo que le pagas por entrega."
