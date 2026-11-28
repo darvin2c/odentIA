@@ -239,8 +239,22 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- A Sofi se la configura eligiendo (ADR 0234): cada opción de `store_agent` (tono, trato, emojis,
+  lo que ofrece, cuándo pasa el chat, el horario) tiene su frase fija en `sofi/opciones.ts`; nada
+  que escriba la tienda va como instrucción. Lo que puede ofrecer lo frenan también cotizar y
+  armar_pedido. «Lo que sabe» llega por `leer_lo_que_sabe` (las preguntas, como JSON en los datos);
+  «Lo que aprendió» lo anota solo Sofi, en chats de verdad, y lo cierra solo una persona: nada se
+  agrega solo. «Por qué» en la prueba sale solo de lo anotado en su respuesta (`whyOf`).
+- Guardar opciones de Sofi manda solo lo que cambió y la versión que se vio (`version`); sobre una
+  versión vieja la API responde 409. Encender o pausar es su propia operación
+  (`PATCH …/sofi/estado`, `setAgentEnabled`), que no cambia esa versión: guardar opciones nunca
+  enciende ni pausa a Sofi.
 - Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
-  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (ADR 0224). Lo frena la herramienta, no solo el prompt (`bargainProblem` de
+  `sofi/herramientas.ts`, en cotizar y armar_pedido): nada se cede antes de que Sofi haya dicho el
+  precio completo de lo que lleva, ni sin una duda de la clienta después de oírlo (`isObjection`;
+  preguntar el precio no es una duda), y la primera oferta cede como mucho la mitad del margen
+  sobre los mínimos. «Por qué» dice la duda que abrió la oferta o por qué no ofreció. Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).

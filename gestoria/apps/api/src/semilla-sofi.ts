@@ -1,4 +1,5 @@
 import {
+  agentGap,
   conversation,
   conversationMessage,
   type Db,
@@ -9,16 +10,18 @@ import {
   saleOrder,
   stockRequest,
   storeAgent,
+  storeAgentAnswer,
   storeDeliveryMethod,
   storePaymentMethod,
 } from "@gestoria/db"
 import { and, eq } from "drizzle-orm"
 import { ARGOS_ACTOR, SOFI_ACTOR } from "./agente.js"
 import { addReceiptIn, createOrderIn, orderInput } from "./pedidos.js"
+import { questionKey } from "./sofi/saber.js"
 
 /**
- * Sofi y Argos en Calzados Rosa (paso B5, tableros 2, 8 y 13): Sofi encendida, con lo que debe
- * saber; conversaciones de WhatsApp e Instagram como las traerá B2 (una venta negociada con la
+ * Sofi y Argos en Calzados Rosa (paso B5, tableros 2, 8 y 13): Sofi encendida (lo que sabe va en
+ * `seedDemoSofiKnows`); conversaciones de WhatsApp e Instagram como las traerá B2 (una venta negociada con la
  * captura por confirmar, un pedido por pagar, una talla agotada que pidieron y un reclamo que
  * espera a una persona) y lo que Argos le encargó a Sofi. Solo para desarrollo y demostraciones,
  * como el resto de `semilla.ts`. Se agrega una vez: si la tienda ya tiene conversaciones, no
@@ -36,13 +39,7 @@ export async function seedDemoSofi(tx: Db, storeId: string): Promise<void> {
   if (any) return
   await tx
     .insert(storeAgent)
-    .values({
-      storeId,
-      enabled: true,
-      knowledge:
-        "Atendemos de lunes a sábado, de 9 a. m. a 7 p. m. Cambios de talla dentro de 7 días, con la caja y sin usar. Las zapatillas blancas se limpian con un paño húmedo.",
-      updatedBy: "semilla-rosa",
-    })
+    .values({ storeId, enabled: true, updatedBy: "semilla-rosa" })
     .onConflictDoNothing()
 
   const variant = async (name: string, values: string[]) => {
@@ -253,4 +250,106 @@ export async function seedDemoSofi(tx: Db, storeId: string): Promise<void> {
     ],
     { handler: "persona", waitingReason: "Un reclamo: el botín llegó con la suela despegada" },
   )
+}
+
+/**
+ * Lo que eligió Calzados Rosa para Sofi, «Lo que sabe» y «Lo que aprendió» (tablero 8 de
+ * «gestorIA · Configuración, de nuevo»; ADR 0234): el horario de su equipo, tres respuestas y lo
+ * que clientas de verdad preguntaron sin respuesta (cada una en su conversación, con Sofi pasando
+ * el chat). Se agrega una vez: si la tienda ya tiene «Lo que sabe», no lo toca.
+ */
+export async function seedDemoSofiKnows(tx: Db, storeId: string): Promise<void> {
+  const [any] = await tx
+    .select({ id: storeAgentAnswer.id })
+    .from(storeAgentAnswer)
+    .where(eq(storeAgentAnswer.storeId, storeId))
+    .limit(1)
+  if (any) return
+  await tx
+    .update(storeAgent)
+    .set({
+      tone: "cercana",
+      address: "tu",
+      emojis: "pocos",
+      teamHours: { days: [1, 2, 3, 4, 5, 6], from: "09:00", to: "19:00" },
+    })
+    .where(eq(storeAgent.storeId, storeId))
+  const who = "semilla-rosa"
+  await tx.insert(storeAgentAnswer).values(
+    [
+      ["¿Hacen cambios?", "Sí, de talla dentro de 7 días, con la caja y sin usar."],
+      [
+        "¿Dónde están?",
+        "En Jr. Gamarra 650, La Victoria, stand 214. Puedes recoger de lunes a sábado.",
+      ],
+      ["¿Cómo se limpian las zapatillas blancas?", "Con un paño húmedo, sin lavadora."],
+    ].map(([question, answer]) => ({
+      storeId,
+      question: question!,
+      answer: answer!,
+      createdBy: who,
+      updatedBy: who,
+    })),
+  )
+  const asked: [string, string, string][] = [
+    [
+      "Camila Torres",
+      "Hola, ¿la zapatilla blanca es de cuero?",
+      "¿La zapatilla blanca es de cuero?",
+    ],
+    ["Daniela Ruiz", "¿Es de cuero la blanca o sintética?", "¿La zapatilla blanca es de cuero?"],
+    ["Paola Vega", "la blanca es cuero?", "¿La zapatilla blanca es de cuero?"],
+    [
+      "Sofía Lara",
+      "¿El botín marrón viene en horma chica?",
+      "¿La horma del botín marrón es chica?",
+    ],
+    ["Mónica Díaz", "¿La horma del botín es chica?", "¿La horma del botín marrón es chica?"],
+    ["Rocío Salas", "¿Dan boleta o factura?", "¿Dan boleta o factura?"],
+  ]
+  for (const [i, [name, text, question]] of asked.entries()) {
+    const at = Date.now() - (i + 2) * 20 * HOUR
+    const [row] = await tx
+      .insert(conversation)
+      .values({
+        storeId,
+        channel: i % 2 ? "instagram" : "whatsapp",
+        customerName: name,
+        createdBy: "canal",
+        createdAt: new Date(at),
+        updatedAt: new Date(at + 60_000),
+        lastCustomerAt: new Date(at),
+        handler: "persona",
+        waitingReason: "No sabe la respuesta",
+      })
+      .returning({ id: conversation.id })
+    await tx.insert(conversationMessage).values([
+      {
+        storeId,
+        conversationId: row!.id,
+        author: "cliente",
+        text,
+        actorUserId: "canal",
+        createdAt: new Date(at),
+      },
+      {
+        storeId,
+        conversationId: row!.id,
+        author: "sofi",
+        text: "Déjame consultarlo con el equipo. Te paso con una persona del equipo, que te escribe por aquí en un momento.",
+        delivery: "sin_enviar",
+        actorUserId: SOFI_ACTOR,
+        detail: { paso: "No sabe la respuesta", pregunta: question },
+        createdAt: new Date(at + 60_000),
+      },
+    ])
+    await tx.insert(agentGap).values({
+      storeId,
+      conversationId: row!.id,
+      question,
+      questionKey: questionKey(question),
+      createdBy: SOFI_ACTOR,
+      createdAt: new Date(at + 60_000),
+    })
+  }
 }

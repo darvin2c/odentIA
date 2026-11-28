@@ -288,6 +288,20 @@
       "when": 1795847298948,
       "tag": "0056_reglas_entregas",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795848512804,
+      "tag": "0057_lo_que_sabe",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795848520156,
+      "tag": "0058_reglas_lo_que_sabe",
+      "breakpoints": true
     }
   ]
 }

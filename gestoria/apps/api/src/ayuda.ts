@@ -266,7 +266,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Quién es Sofi y qué hace sola?",
         a: [
           "Sofi es la vendedora de tu tienda. Responde con tu catálogo y tus precios, recomienda, negocia sin bajar del precio mínimo que pusiste y arma el pedido con lo que el cliente ya vio. Le dice cómo pagar y, si paga por link, el pedido queda pagado solo.",
-          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: pasa la conversación a una persona. Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Lo que no está en tu catálogo ni en «Lo que sabe», no lo inventa: pasa la conversación a una persona y la pregunta aparece en «Lo que aprendió». Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente: debajo de cada respuesta, «Por qué» dice qué usó. En una pantalla ancha la prueba está al lado, también mientras cambias algo; en el celular queda abajo, y el botón «Probar a Sofi» de arriba te lleva a ella. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
           "Probarla sirve al ajustarla: por eso la prueba quien cambia la configuración de la tienda.",
         ],
         needs: "configuracion",
@@ -286,8 +286,19 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "sofi-lo-que-sabe",
         q: "¿Cómo le enseño a Sofi lo que debe saber?",
         a: [
-          "En Configuración, en Sofi, «Cómo vende»: cómo se presenta, lo que debe saber (tu horario, los cambios de talla, cómo se cuida el producto) y si está encendida. Ahí también eliges los seguimientos que Argos le encarga, como recordar el pago a quien no pagó.",
-          "Lo cuenta tal cual. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+          "En Configuración, en Sofi, «Lo que sabe»: con «Agregar» escribes una pregunta como la haría una clienta («¿Hacen cambios?») y su respuesta. Sofi la lee cuando le preguntan eso y la cuenta así.",
+          "En «Lo que aprendió» ves lo que clientas preguntaron en tus chats y Sofi no supo: con «Responder» lo guardas en «Lo que sabe». En el celular, si hay preguntas por responder, una línea debajo de las pestañas dice cuántas y te lleva ahí. Nada se agrega solo. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+        ],
+        needs: "configuracion",
+        screen: "sofi",
+      },
+      {
+        id: "sofi-como-habla",
+        q: "¿Cómo elijo cómo habla Sofi y qué puede ofrecer?",
+        a: [
+          "En Configuración, en Sofi, cada parte tiene su «Cambiar». En «Cómo habla» eliges su tono viendo un ejemplo de cada uno (cercana, amable y formal o directa), si trata de tú o de usted, los emojis y cómo se presenta. En «Qué ofrece» marcas lo que puede ofrecer para cerrar: envío gratis, un descuento, un regalo o una rebaja si lleva dos.",
+          "En «Cuándo te pasa el chat» eliges si te lo pasa cuando la clienta está molesta o cuando el pedido pasa de un monto, y el horario de tu equipo: fuera de él, Sofi dice cuándo le responden y tú decides si sigue vendiendo. Con «Pausar» deja de atender y tus chats esperan a una persona; en pausa, ese botón dice «Encender» y la vuelve a poner a atender. Guardar un cambio no la enciende ni la pausa. Si otra persona cambió a Sofi mientras tenías un «Cambiar» abierto, al guardar te lo dice: ciérralo y vuelve a abrirlo para ver lo nuevo.",
+          "Lo que no se elige: ofrece una sola vez, a cambio de pagar en 24 horas, nunca baja del mínimo de cada producto y con pago al recibir no hay oferta.",
         ],
         needs: "configuracion",
         screen: "sofi",
@@ -565,7 +576,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo dejo que Sofi negocie el precio?",
         a: [
           "En el producto, «Precio y negociación»: pon el precio mínimo de venta. Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
-          "Sofi primero cuenta lo bueno del producto y ofrece algo solo cuando ve que puede perder la venta: una sola vez, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
+          "Sofi primero dice el precio completo y lo bueno del producto, y ofrece algo solo si después el cliente duda: dice que está caro, que lo va a pensar, que en otra tienda está más barato o pide rebaja. A quien solo pregunta el precio no le rebaja ni le regala el envío. Ofrece una sola vez, con como mucho la mitad de lo que hay entre tu precio y tu mínimo, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
           "Ahí también van los precios por cantidad y las promociones con sus fechas.",
         ],
         needs: "configuracion",

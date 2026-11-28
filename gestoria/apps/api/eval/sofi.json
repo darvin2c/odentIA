@@ -198,9 +198,9 @@
     },
     {
       "id": "lo-que-debe-saber",
-      "que": "Pregunta algo que está en «Lo que debe saber»",
+      "que": "Pregunta algo que está en «Lo que sabe»",
       "turnos": ["¿Hasta qué hora atienden el sábado? ¿Puedo cambiar la talla si no me queda?"],
-      "espera": { "dice": ["7", "7 d[ií]as"] }
+      "espera": { "herramientas": ["leer_lo_que_sabe"], "dice": ["7", "7 d[ií]as"] }
     },
     {
       "id": "sumar-al-despacho",

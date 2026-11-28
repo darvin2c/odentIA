@@ -150,7 +150,7 @@ const ROSA: ConfigOverview = {
     names: ["Lucía Torres", "Mario Huamán", "Rosa Quispe"],
     supportAsks: 1,
   },
-  sofi: { enabled: true, tried: false },
+  sofi: { enabled: true, tried: false, toAnswer: 0 },
   plan: {
     name: "Emprende",
     status: "activa",
@@ -176,7 +176,7 @@ const CARMEN: ConfigOverview = {
   deliveries: [],
   slots: 0,
   team: { members: 1, invitations: 0, couriers: [], names: ["Carmen Huanca"], supportAsks: 0 },
-  sofi: { enabled: false, tried: false },
+  sofi: { enabled: false, tried: false, toAnswer: 0 },
   plan: null,
 }
 
