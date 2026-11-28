@@ -60,7 +60,8 @@ export function SearchInput({
         className,
       )}
     >
-      <InputGroup className="h-9">
+      {/* 36 px con el mouse; 44 con el dedo (`touch:`). */}
+      <InputGroup className="h-9 touch:h-11">
         <InputGroupAddon align="inline-start">
           {isFetching ? <Spinner className="size-5" aria-label={common.states.loading} /> : <Search aria-hidden />}
         </InputGroupAddon>

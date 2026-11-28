@@ -20,6 +20,7 @@ import { normalizeSearchText } from "../text.js"
 import { Calendar } from "./calendar.js"
 import type { FilterDef, FilterOption } from "./filter-def.js"
 import { paramKeys } from "./filter-def.js"
+import { FilterStrip } from "./filter-strip.js"
 import { useListSearch } from "./list-search.js"
 
 export interface FilterControlProps {
@@ -96,6 +97,9 @@ function moneyDigits(filter: Extract<FilterDef, { type: "number-range" }>): numb
   return digits !== undefined && Number.isInteger(digits) && digits >= 0 ? digits : null
 }
 
+/** Una opción de la lista: 36 px con el mouse, 44 con el dedo (`touch:`). */
+const TOUCH_OPTION = "touch:min-h-11"
+
 export function hasFilterValue(
   filter: FilterDef,
   get: (key: string) => string | undefined,
@@ -111,7 +115,7 @@ export function filterSummary(
     if (!get(filter.key)) return "Todos"
     if (get(filter.key) === "none") return "Ninguno"
   }
-  if (filter.type === "select" || filter.type === "multi") {
+  if (filter.type === "select" || filter.type === "multi" || filter.type === "strip") {
     const labels = optionLabels(filter.options, selectedValues(get(filter.key)))
     if (labels.length === 0) return undefined
     return labels.length > 2 ? String(labels.length) : labels.join(", ")
@@ -274,6 +278,7 @@ function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }
                   tabIndex={focusIndex === index ? 0 : -1}
                   className={cn(
                     "flex min-h-9 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground outline-none transition-colors hover:bg-surface-muted focus-visible:bg-surface-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50",
+                    TOUCH_OPTION,
                     isSelected && "font-medium",
                   )}
                   onFocus={() => setFocusIndex(index)}
@@ -337,7 +342,10 @@ function SelectOptions({
                 type="button"
                 role="option"
                 aria-selected={selected === option.value}
-                className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-surface-muted"
+                className={cn(
+                  "flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-surface-muted",
+                  TOUCH_OPTION,
+                )}
                 onClick={() => {
                   setParam(filter.key, option.value)
                   close?.()
@@ -492,6 +500,8 @@ function ControlBody({ filter, layout, close }: FilterControlProps & { close?: (
     case "date":
     case "date-range":
       return <DateControl filter={filter} compact={layout === "inline" || isMobile} />
+    case "strip":
+      return <FilterStrip filter={filter} />
   }
 }
 
@@ -518,15 +528,15 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
     <Popover open={open} onOpenChange={setOpen}>
       <div
         className={cn(
-          // En el teléfono el filtro va en la fila de la barra: 44 px para tocarlo con el dedo.
-          "inline-flex h-11 max-w-64 shrink-0 items-center rounded-full border bg-surface text-foreground transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50 md:h-9",
+          // 36 px con el mouse. Con el dedo (`touch:`), 46: adentro caben el filtro y su «×» de 44.
+          "inline-flex h-9 max-w-64 shrink-0 items-center rounded-full border bg-surface text-foreground transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50 touch:h-[46px]",
           hasFilterValue(filter, get) ? "border-accent" : "border-border hover:bg-surface-muted",
         )}
       >
         {hasFilterValue(filter, get) ? (
           <button
             type="button"
-            className="ml-1 flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="ml-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 touch:ml-0 touch:size-11"
             aria-label={`${common.filters.clear}: ${filter.label}`}
             onClick={() => {
               setOpen(false)
@@ -540,7 +550,11 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
           render={
             <button
               type="button"
-              className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium outline-none"
+              className={cn(
+                "inline-flex h-full min-w-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium outline-none",
+                // Junto a la «×» de 44 px del dedo, sin otro hueco entre las dos.
+                hasFilterValue(filter, get) && "touch:pl-0.5",
+              )}
               aria-label={summary ? `${filter.label}: ${summary}` : filter.label}
               title={summary ? `${filter.label}: ${summary}` : filter.label}
             >

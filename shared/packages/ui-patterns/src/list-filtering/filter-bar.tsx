@@ -6,6 +6,7 @@ import { FilterControl, hasFilterValue } from "./filter-control.js"
 import type { FilterDef, SortOption } from "./filter-def.js"
 import { paramKeys } from "./filter-def.js"
 import { FilterDrawer } from "./filter-drawer.js"
+import { FilterStrip } from "./filter-strip.js"
 import { useListSearch } from "./list-search.js"
 import { SearchInput } from "./search-input.js"
 import { SortMenu } from "./sort-menu.js"
@@ -102,23 +103,29 @@ export function FilterBar({
       : resetFilters()
   // Pool ordenado por prioridad inline: primarias primero y las de
   // `placement: "overflow"` al final (entran a inline solo si sobra sitio).
-  const orderedFilters = React.useMemo(
-    () => [
-      ...filters.filter((filter) => filter.placement !== "overflow"),
-      ...filters.filter((filter) => filter.placement === "overflow"),
-    ],
-    [filters],
+  // La tira no va en la fila: se pinta en la suya (o donde la pone la página).
+  const orderedFilters = React.useMemo(() => {
+    const row = filters.filter((filter) => filter.type !== "strip")
+    return [
+      ...row.filter((filter) => filter.placement !== "overflow"),
+      ...row.filter((filter) => filter.placement === "overflow"),
+    ]
+  }, [filters])
+  const stripsBelow = filters.filter(
+    (filter): filter is Extract<FilterDef, { type: "strip" }> =>
+      filter.type === "strip" && filter.placement !== "apart",
   )
   // Todo lo que cambia el ancho del row: valores de filtros, `q` y `sort`
   // (botones Limpiar/orden). Ante cualquier cambio se reintenta con todo.
   const contentKey = React.useMemo(
     () =>
       JSON.stringify([
-        ...orderedFilters.flatMap((filter) => paramKeys(filter).map((key) => get(key) ?? "")),
+        // También la tira: su valor pone o quita «Limpiar», que cambia el ancho de la fila.
+        ...filters.flatMap((filter) => paramKeys(filter).map((key) => get(key) ?? "")),
         get("q") ?? "",
         get("sort") ?? "",
       ]),
-    [orderedFilters, get],
+    [filters, get],
   )
   const { containerRef, visibleCount } = useFittedInlineCount(orderedFilters.length, contentKey)
   const primaryFilters = orderedFilters.slice(0, visibleCount)
@@ -126,9 +133,11 @@ export function FilterBar({
   const activeFilterCount = filters.filter((filter) => hasFilterValue(filter, get)).length
   const activeOverflowCount = overflowFilters.filter((filter) => hasFilterValue(filter, get)).length
   const hasActiveCriteria = activeFilterCount > 0 || Boolean(get("q"))
+  // Con el dedo (`touch:`), 44 px; con el mouse, como siempre.
+  const touch = "touch:h-11"
 
-  return (
-    <div className={cn("flex", className)}>
+  const bar = (
+    <div className={cn("flex", stripsBelow.length === 0 && className)}>
       {/* scroll-nativo: `useFittedInlineCount` mide este desborde para pasar a «Más filtros» lo que no cabe; casi nunca llega a desplazarse.
           Sin barra visible: el desborde de 1 o 2 px que deja el anillo de foco no debe dibujar una barra bajo los filtros. */}
       <div
@@ -147,7 +156,7 @@ export function FilterBar({
           <Button
             type="button"
             variant="outline"
-            className={cn("shrink-0", activeOverflowCount > 0 && "border-accent")}
+            className={cn("shrink-0", touch, activeOverflowCount > 0 && "border-accent")}
             onClick={() => setDrawerOpen(true)}
             aria-label={
               activeOverflowCount > 0
@@ -165,7 +174,7 @@ export function FilterBar({
           </Button>
         ) : null}
         {hasActiveCriteria ? (
-          <Button type="button" variant="ghost" className="shrink-0" onClick={clear}>
+          <Button type="button" variant="ghost" className={cn("shrink-0", touch)} onClick={clear}>
             <X />
             {common.filters.clear}
           </Button>
@@ -188,7 +197,7 @@ export function FilterBar({
         {showSearch && (
           <SearchInput placeholder={searchPlaceholder} label={searchLabel} className="w-full min-w-0" isFetching={searchPending} />
         )}
-        {filters.length > 0 || sortOptions.length > 0 || hasActiveCriteria ? (
+        {orderedFilters.length > 0 || sortOptions.length > 0 || hasActiveCriteria ? (
           <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {orderedFilters.map((filter) => (
               <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="popover" />
@@ -199,7 +208,7 @@ export function FilterBar({
               </div>
             )}
             {hasActiveCriteria ? (
-              <Button type="button" variant="ghost" className="shrink-0" onClick={clear}>
+              <Button type="button" variant="ghost" className={cn("shrink-0", touch)} onClick={clear}>
                 <X />
                 {common.filters.clear}
               </Button>
@@ -213,6 +222,16 @@ export function FilterBar({
         onOpenChange={setDrawerOpen}
         title={common.filters.moreFilters}
       />
+    </div>
+  )
+  if (stripsBelow.length === 0) return bar
+  // La tira, en su propia fila bajo la barra: en el escritorio y en el teléfono.
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-3", className)}>
+      {bar}
+      {stripsBelow.map((filter) => (
+        <FilterStrip key={filter.key} filter={filter} />
+      ))}
     </div>
   )
 }

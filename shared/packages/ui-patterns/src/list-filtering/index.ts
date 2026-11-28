@@ -5,9 +5,11 @@ export {
   type FilterDef,
   type FilterOption,
   type FilterPlacement,
+  type FilterTone,
   paramKeys,
   type SortOption,
 } from "./filter-def.js"
+export { FilterStrip, type FilterStripProps } from "./filter-strip.js"
 export { FilterDrawer, type FilterDrawerProps } from "./filter-drawer.js"
 export { type ListSearchController, ListSearchScope, useListSearch, useScopedListSearch } from "./list-search.js"
 export { SearchInput, type SearchInputProps } from "./search-input.js"
