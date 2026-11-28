@@ -190,7 +190,7 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
   // La cabecera también tiene su casilla: tres productos y la cabecera.
   await expect(rows).toHaveCount(4)
   // Dice de quién es la carga abierta y desde cuándo.
-  await expect(page.getByText(/^Abriste esta carga el /)).toBeVisible()
+  await expect(page.getByText(/^Carga abierta por ti · /)).toBeVisible()
   // Nada pasó al catálogo todavía.
   const before = (await json("GET", `${STORE}/catalogo`)).products.length
 
