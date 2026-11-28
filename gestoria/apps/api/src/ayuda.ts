@@ -98,21 +98,22 @@ export const HELP_SCREENS = {
       "Lo vendido y cobrado, lo que falta cobrar, lo más vendido, lo que se acaba y lo que hicieron Sofi y Argos.",
     terms: ["reportes", "cuánto vendí", "ventas del mes", "cifras", "estadísticas", "Argos"],
   },
-  // Configuración, al pie del menú: cada apartado lo abre quien puede cambiarlo.
-  datos: {
-    label: "Datos de la tienda",
+  // Configuración, al pie del menú: abre en «Lo que falta» y cada apartado lo abre quien puede
+  // cambiarlo.
+  configuracion: {
+    label: "Lo que falta",
     path: "/configuracion",
     opens: "configuracion",
-    purpose: "El nombre de la tienda, su país y su hora: la entrada de Configuración.",
-    terms: [
-      "configuración",
-      "datos de la tienda",
-      "nombre",
-      "hora",
-      "zona horaria",
-      "país",
-      "moneda",
-    ],
+    purpose:
+      "La entrada de Configuración: lo que falta para vender, cada cosa con su botón, cómo está cada parte y el buscador de Configuración.",
+    terms: ["configuración", "lo que falta", "qué me falta", "ajustes", "buscar en configuración"],
+  },
+  datos: {
+    label: "Datos de la tienda",
+    path: "/configuracion/datos",
+    opens: "configuracion",
+    purpose: "El nombre de la tienda, su país y su hora.",
+    terms: ["datos de la tienda", "nombre", "hora", "zona horaria", "país", "moneda"],
   },
   marca: {
     label: "Tu marca",
@@ -122,12 +123,12 @@ export const HELP_SCREENS = {
     terms: ["marca", "logo", "color", "portada", "link de la tienda"],
   },
   equipo: {
-    label: "Equipo",
+    label: "Equipo y repartidores",
     path: "/configuracion/equipo",
     opens: "equipo.gestionar",
     purpose:
-      "Quiénes trabajan en la tienda y con qué rol, sus invitaciones y quién de soporte miró la tienda.",
-    terms: ["equipo", "invitar", "roles", "usuarios", "permisos", "soporte"],
+      "Quiénes trabajan en la tienda y con qué rol, sus invitaciones, los repartidores, y si soporte pide mirar la tienda o quién la miró.",
+    terms: ["equipo", "invitar", "roles", "usuarios", "permisos", "soporte", "repartidores"],
   },
   sofi: {
     label: "Sofi",
@@ -138,15 +139,23 @@ export const HELP_SCREENS = {
     terms: ["Sofi", "vendedora", "asistente", "bot", "probar", "seguimientos", "horario"],
   },
   pagos: {
-    label: "Medios de pago",
+    label: "Cobros",
     path: "/configuracion/medios-de-pago",
     opens: "configuracion",
     purpose:
       "Los medios de pago que ofrece Sofi (Yape, Plin, transferencias) y la conexión con Mercado Pago para los links de pago.",
-    terms: ["medios de pago", "Yape", "Plin", "transferencia", "cuenta bancaria", "Mercado Pago"],
+    terms: [
+      "cobros",
+      "medios de pago",
+      "Yape",
+      "Plin",
+      "transferencia",
+      "cuenta bancaria",
+      "Mercado Pago",
+    ],
   },
   entregas: {
-    label: "Formas de entrega y zonas",
+    label: "Entregas",
     path: "/configuracion/entregas",
     opens: "configuracion",
     purpose:
@@ -189,6 +198,11 @@ export interface HelpFaq {
   /** El permiso para hacer lo que explica: de ahí sale quién puede. */
   needs: StorePermission
   screen: HelpScreen
+  /**
+   * Se sugiere solo a quien NO tiene `needs`: la pregunta es por qué no puede (como Ventas en
+   * Configuración). Su respuesta lleva a quién pedírselo (`restrictionFor`).
+   */
+  forWhoCannot?: true
 }
 
 export interface HelpGroup {
@@ -298,7 +312,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo le mando un link de pago?",
         a: [
           "En el pedido por pagar, «Crear link de pago» y después «Copiar el link», para pegarlo en la conversación. Cuando paga, el pedido pasa a pagado solo.",
-          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Medios de pago, o venció el precio acordado.",
+          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Cobros, o venció el precio acordado.",
         ],
         needs: "ventas.atender",
         screen: "pedidos",
@@ -510,11 +524,43 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "configuracion",
         q: "¿Dónde se ajusta la tienda y por qué hay quien no ve Configuración?",
         a: [
-          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega, tus avisos al celular y el plan. Se ajusta una vez y lo usan las demás pantallas.",
-          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración ve ahí solo sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En Configuración, al pie del menú, por tareas: «Tu tienda» (los datos de la tienda y Tu marca), «Vender» (Sofi, Cobros y Entregas), «Tu equipo» (Equipo y repartidores), «Para ti» (tus avisos al celular) y «Tu cuenta gestorIA» (el plan). Se ajusta una vez y lo usan las demás pantallas.",
+          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración, al abrir Configuración llega directo a sus avisos al celular: no ve el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+          "En el celular, Configuración es una lista: cada parte se abre en su pantalla y «Configuración», arriba, vuelve a la lista.",
         ],
         needs: "configuracion",
-        screen: "datos",
+        screen: "configuracion",
+      },
+      {
+        id: "lo-que-falta",
+        q: "¿Qué me falta para vender y cómo está cada parte?",
+        a: [
+          "Configuración abre en «Lo que falta»: arriba, lo que falta para vender, cada cosa con su botón para hacerla (como «Probar a Sofi»); lo que ya está lleva su ✓. Es la misma cuenta que «Tu tienda está casi lista» de Inicio. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano.",
+          "Debajo, en «Para vender más», lo que ayuda pero no frena la venta, como tu logo o «Conectar pasarela» para cobrar por link: no se cuenta como falta. Cuando no falta nada, lo dice en una línea.",
+          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin probar» o «Por pagar». Toca la línea para abrirla.",
+        ],
+        needs: "configuracion",
+        screen: "configuracion",
+      },
+      {
+        id: "configuracion-sin-permiso",
+        q: "¿Por qué en Configuración solo veo mis avisos?",
+        a: [
+          "En Configuración cada quien ve lo que puede cambiar. Tus avisos al celular son tuyos: eliges tú qué te llega.",
+          "Los datos de la tienda, Tu marca, Sofi, Cobros, Entregas y el equipo los cambia quien configura la tienda. Tú sigues atendiendo y vendiendo con lo que ahí se puso; si algo hay que cambiar, pídeselo.",
+        ],
+        needs: "configuracion",
+        screen: "avisos",
+        forWhoCannot: true,
+      },
+      {
+        id: "buscar-en-configuracion",
+        q: "No encuentro dónde se cambia algo, ¿cómo lo busco?",
+        a: [
+          "Arriba de la lista de Configuración, en «Buscar en Configuración», escribe con tus palabras: «yape», «shalom», «envío gratis», «horario» o el nombre de alguien de tu equipo. Cada resultado dice en qué parte está; con las flechas eliges y con Enter lo abres.",
+        ],
+        needs: "configuracion",
+        screen: "configuracion",
       },
       {
         id: "hora-de-la-tienda",
@@ -539,7 +585,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Medios de pago, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -548,7 +594,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Formas de entrega y zonas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
+          "En Configuración, en Entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
           "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
@@ -558,7 +604,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Medios de pago, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -578,7 +624,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "invitar",
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
-          "En Configuración, en Equipo, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
+          "En Configuración, en Equipo y repartidores, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -588,7 +634,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Qué ve soporte cuando lo dejo entrar y cómo sé si entró?",
         a: [
           "Soporte de gestorIA entra solo si lo dejan entrar, y por los minutos que pidió, que empiezan cuando lo dejan entrar. Ve tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Solo el equipo de gestorIA puede pedirlo.",
-          "En Configuración, en Equipo, ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
+          "Cuando soporte pide mirar tu tienda, lo ves una sola vez en la franja de arriba, en cualquier pantalla: «Revisar» te lleva a Configuración, en Equipo y repartidores, donde respondes «Dejar entrar» o «No». Mientras mira, la franja lo dice hasta que termina.",
+          "En Equipo y repartidores ves también quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -701,7 +748,13 @@ export function helpScreenView(
   if (!screen) return { title: null, suggestions: [] }
   return {
     title: HELP_SCREENS[screen].label,
-    suggestions: FAQS.filter((faq) => faq.screen === screen && can(seat, faq.needs))
+    suggestions: FAQS.filter(
+      (faq) =>
+        faq.screen === screen &&
+        (faq.forWhoCannot
+          ? !can(seat, faq.needs) && can(seat, HELP_SCREENS[screen].opens)
+          : can(seat, faq.needs)),
+    )
       .slice(0, 3)
       .map((faq) => faq.q),
   }

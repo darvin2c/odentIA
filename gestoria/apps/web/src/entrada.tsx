@@ -1,9 +1,20 @@
-import { Button, Checkbox, Field, FieldError, FieldGroup, FieldLabel, Input } from "@odentia/ui"
-import { AuthSplit, PasswordInput, PersonAvatar, SubmitButton } from "@odentia/ui-patterns"
+import { Button, Field, FieldError, FieldGroup, FieldLabel } from "@odentia/ui"
+import {
+  AuthSplit,
+  clearSubmitErrors,
+  PasswordInput,
+  PersonAvatar,
+  SubmitButton,
+  useAppForm,
+  useFieldContext,
+  useFieldControl,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { MailCheck } from "lucide-react"
-import { type FormEvent, type ReactNode, useState } from "react"
+import { type ReactNode, useState } from "react"
 import { z } from "zod"
+import { ApiError } from "./lib/api"
 import {
   accountErrorText,
   authClient,
@@ -23,7 +34,8 @@ import {
  * registra aquí y no ve otra marca. Las direcciones (`/login`, `/forgot-password`,
  * `/two-factor`) son las que usa la cuenta al volver de un enlace. La pantalla es la misma de
  * las clínicas (`AuthSplit`), con la marca de gestorIA (lienzo «Una cuenta, todas las apps»,
- * tablero 5).
+ * tablero 5). Los formularios son los comunes (`useAppForm`): cada error en su campo y lo que no
+ * es de ninguno, junto al botón.
  */
 
 /** Un aviso dentro de un formulario de la entrada: junto al botón, no en uno que se va. */
@@ -48,50 +60,105 @@ function SameAccount() {
   )
 }
 
-const emailSchema = z.string().trim().email("Escribe un correo válido, como nombre@tienda.com")
+const EMAIL_PROBLEM = "Escribe un correo válido, como nombre@tienda.com"
+const NO_CONNECTION = "No hay conexión con tu cuenta. Revisa tu internet e inténtalo de nuevo."
+const email = z.string().trim().email(EMAIL_PROBLEM)
 
-type Fields = Record<string, string>
-
-function useFormState() {
-  const [errors, setErrors] = useState<Fields>({})
-  const [problem, setProblem] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
-  return { errors, setErrors, problem, setProblem, pending, setPending }
+/** Lo que la cuenta respondió, para decirlo junto al botón (o en su campo, con `field`). */
+function accountProblem(
+  error: { code?: string; message?: string; status?: number } | null | undefined,
+  field?: string,
+): Error {
+  const text = accountErrorText(error)
+  return field ? new ApiError(400, error?.code ?? "", text, { [field]: text }) : new Error(text)
 }
+
+/** Llama a la cuenta; sin red, lo dice con sus palabras (no como un envío sin confirmar). */
+async function reachAccount<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch {
+    throw new Error(NO_CONNECTION)
+  }
+}
+
+/**
+ * La contraseña con «¿Olvidaste tu contraseña?» junto a la etiqueta (en el teclado va después del
+ * campo): pinta su propio `Field` con el estado de `form.AppField`, como la entrada de las clínicas.
+ */
+function LoginPassword({ autoFocus, forgotEmail }: { autoFocus: boolean; forgotEmail: string }) {
+  const field = useFieldContext<string>()
+  const { control, errors, errorId } = useFieldControl({ id: "password", hasDescription: false })
+  return (
+    <Field data-invalid={control.invalid || undefined}>
+      <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-2">
+        <FieldLabel htmlFor={control.id} className="col-start-1 row-start-1">
+          Contraseña
+        </FieldLabel>
+        <div className="col-span-2 row-start-2">
+          <PasswordInput
+            id={control.id}
+            value={field.state.value}
+            onChange={(next) => field.handleChange(next)}
+            onBlur={control.onBlur}
+            autoComplete="current-password"
+            autoFocus={autoFocus}
+            invalid={control.invalid}
+            describedBy={control.describedBy}
+          />
+        </div>
+        {control.invalid ? (
+          <FieldError
+            id={errorId}
+            className="col-span-2 row-start-3"
+            errors={errors.map((message) => ({ message }))}
+          />
+        ) : null}
+        <Link
+          to="/forgot-password"
+          search={forgotEmail ? { email: forgotEmail } : {}}
+          className="col-start-2 row-start-1 text-sm font-medium text-primary underline"
+        >
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </div>
+    </Field>
+  )
+}
+
+const loginSchema = z.object({ email, password: z.string().min(1, "Escribe tu contraseña") })
+// Con la persona recordada el correo no se muestra: no se valida lo que no se puede corregir.
+const knownLoginSchema = z.object({
+  email: z.string(),
+  password: z.string().min(1, "Escribe tu contraseña"),
+})
 
 export function LoginPage() {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { next?: string; bloqueada?: string }
   // Quien entró la última vez desde este navegador: su correo entero y solo la contraseña.
   const [known, setKnown] = useState(readRememberedUser)
-  const [email, setEmail] = useState(known?.email ?? "")
-  const [password, setPassword] = useState("")
   const [unverified, setUnverified] = useState(false)
   const [resent, setResent] = useState(false)
-  const form = useFormState()
+  const [resendProblem, setResendProblem] = useState<string | null>(null)
   const next = safeNext(search.next)
 
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    const errors: Fields = {}
-    if (!emailSchema.safeParse(email).success)
-      errors.email = "Escribe un correo válido, como nombre@tienda.com"
-    if (!password) errors.password = "Escribe tu contraseña"
-    form.setErrors(errors)
-    form.setProblem(null)
-    setUnverified(false)
-    if (Object.keys(errors).length > 0) return
-    form.setPending(true)
-    try {
-      const result = await authClient.signIn.email({ email: email.trim(), password })
+  const form = useAppForm({
+    defaultValues: { email: known?.email ?? "", password: "" },
+    validators: { onSubmit: known ? knownLoginSchema : loginSchema },
+    onSubmit: async ({ value }) => {
+      setUnverified(false)
+      setResendProblem(null)
+      const result = await reachAccount(() =>
+        authClient.signIn.email({ email: value.email.trim(), password: value.password }),
+      )
       if (result.error) {
         const code = (result.error as { code?: string }).code
-        if (code === "EMAIL_NOT_VERIFIED") setUnverified(true)
-        else
-          form.setProblem(
-            accountErrorText({ code, message: result.error.message, status: result.error.status }),
-          )
-        return
+        if (code === "EMAIL_NOT_VERIFIED") {
+          setUnverified(true)
+          return
+        }
+        throw accountProblem({ code, message: result.error.message, status: result.error.status })
       }
       const signed = result.data as {
         twoFactorRedirect?: boolean
@@ -105,22 +172,18 @@ export function LoginPage() {
       forgetToken()
       if (next) window.location.assign(next)
       else await navigate({ to: "/" })
-    } catch {
-      form.setProblem("No hay conexión con tu cuenta. Revisa tu internet e inténtalo de nuevo.")
-    } finally {
-      form.setPending(false)
-    }
-  }
+    },
+  })
+  const { onSubmit, isSubmitting, error } = useFormSurface(form)
 
   /** Otra persona en este navegador: deja de recordar a la anterior y pide el correo. */
   function otherAccount() {
     forgetUser()
     setKnown(null)
-    setEmail("")
-    setPassword("")
-    form.setErrors({})
-    form.setProblem(null)
+    form.reset({ email: "", password: "" })
+    clearSubmitErrors(form)
     setUnverified(false)
+    setResendProblem(null)
     // El botón desaparece: el foco pasa al correo, que es lo que sigue (WCAG 2.4.3).
     window.requestAnimationFrame(() => document.getElementById("email")?.focus())
   }
@@ -169,47 +232,25 @@ export function LoginPage() {
               />
             </div>
           ) : (
-            <Field data-invalid={form.errors.email ? true : undefined}>
-              <FieldLabel htmlFor="email">Correo</FieldLabel>
-              <Input
-                id="email"
-                type="email"
-                inputMode="email"
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                aria-invalid={form.errors.email ? true : undefined}
-                aria-describedby={form.errors.email ? "email-error" : undefined}
-              />
-              {form.errors.email ? (
-                <FieldError id="email-error">{form.errors.email}</FieldError>
-              ) : null}
-            </Field>
+            <form.AppField name="email">
+              {(field) => (
+                <field.TextField
+                  label="Correo"
+                  id="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="username"
+                />
+              )}
+            </form.AppField>
           )}
-          <Field data-invalid={form.errors.password ? true : undefined}>
-            <div className="flex items-baseline justify-between gap-3">
-              <FieldLabel htmlFor="password">Contraseña</FieldLabel>
-              <Link
-                to="/forgot-password"
-                search={email ? { email } : {}}
-                className="text-sm font-medium text-primary underline"
-              >
-                ¿Olvidaste tu contraseña?
-              </Link>
-            </div>
-            <PasswordInput
-              id="password"
-              value={password}
-              onChange={setPassword}
-              autoComplete="current-password"
-              autoFocus={Boolean(known)}
-              invalid={Boolean(form.errors.password)}
-              describedBy={form.errors.password ? "password-error" : undefined}
-            />
-            {form.errors.password ? (
-              <FieldError id="password-error">{form.errors.password}</FieldError>
-            ) : null}
-          </Field>
+          <form.Subscribe selector={(state) => state.values.email}>
+            {(typed) => (
+              <form.AppField name="password">
+                {() => <LoginPassword autoFocus={Boolean(known)} forgotEmail={typed} />}
+              </form.AppField>
+            )}
+          </form.Subscribe>
           {unverified ? (
             <AuthAlert>
               <span className="flex flex-col gap-2">
@@ -221,11 +262,11 @@ export function LoginPage() {
                   type="button"
                   className="self-start font-semibold underline"
                   onClick={async () => {
-                    const { error } = await authClient.sendVerificationEmail({
-                      email: email.trim(),
+                    const { error: sendError } = await authClient.sendVerificationEmail({
+                      email: form.state.values.email.trim(),
                       callbackURL: `${window.location.origin}/`,
                     })
-                    if (error) form.setProblem(accountErrorText(error))
+                    if (sendError) setResendProblem(accountErrorText(sendError))
                     else setResent(true)
                   }}
                 >
@@ -234,8 +275,8 @@ export function LoginPage() {
               </span>
             </AuthAlert>
           ) : null}
-          {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="w-full">
+          {(error ?? resendProblem) ? <AuthAlert>{error ?? resendProblem}</AuthAlert> : null}
+          <SubmitButton type="submit" pending={isSubmitting} className="w-full">
             Entrar
           </SubmitButton>
           {known ? (
@@ -250,56 +291,43 @@ export function LoginPage() {
   )
 }
 
+const registerSchema = z.object({
+  name: z.string().trim().min(1, "Escribe tu nombre"),
+  email,
+  password: z.string().min(8, "Usa al menos 8 caracteres"),
+  accepted: z.boolean().refine((value) => value, "Acepta los términos para crear tu cuenta"),
+})
+
 export function RegisterPage() {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { next?: string }
-  const [name, setName] = useState("")
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [accepted, setAccepted] = useState(false)
-  const form = useFormState()
   const next = safeNext(search.next)
-
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    const errors: Fields = {}
-    if (!name.trim()) errors.name = "Escribe tu nombre"
-    if (!emailSchema.safeParse(email).success)
-      errors.email = "Escribe un correo válido, como nombre@tienda.com"
-    if (password.length < 8) errors.password = "Usa al menos 8 caracteres"
-    if (!accepted) errors.terms = "Acepta los términos para crear tu cuenta"
-    form.setErrors(errors)
-    form.setProblem(null)
-    if (Object.keys(errors).length > 0) return
-    form.setPending(true)
-    const [firstName = "", ...rest] = name.trim().split(/\s+/)
-    try {
-      const result = await authClient.signUp.email({
-        name: name.trim(),
-        email: email.trim(),
-        password,
-        firstName,
-        lastName: rest.join(" "),
-        termsVersion: TERMS_VERSION,
-        callbackURL: `${window.location.origin}${next ?? "/"}`,
-      })
+  const form = useAppForm({
+    defaultValues: { name: "", email: "", password: "", accepted: false },
+    validators: { onSubmit: registerSchema },
+    onSubmit: async ({ value }) => {
+      const [firstName = "", ...rest] = value.name.trim().split(/\s+/)
+      const result = await reachAccount(() =>
+        authClient.signUp.email({
+          name: value.name.trim(),
+          email: value.email.trim(),
+          password: value.password,
+          firstName,
+          lastName: rest.join(" "),
+          termsVersion: TERMS_VERSION,
+          callbackURL: `${window.location.origin}${next ?? "/"}`,
+        }),
+      )
       if (result.error) {
         const code = (result.error as { code?: string }).code
         if (code === "PASSWORD_TOO_SHORT" || code === "PASSWORD_COMPROMISED")
-          form.setErrors({ password: accountErrorText({ code }) })
-        else
-          form.setProblem(
-            accountErrorText({ code, message: result.error.message, status: result.error.status }),
-          )
-        return
+          throw accountProblem({ code }, "password")
+        throw accountProblem({ code, message: result.error.message, status: result.error.status })
       }
-      await navigate({ to: "/verify-email-sent", search: { email: email.trim() } })
-    } catch {
-      form.setProblem("No hay conexión con tu cuenta. Revisa tu internet e inténtalo de nuevo.")
-    } finally {
-      form.setPending(false)
-    }
-  }
+      await navigate({ to: "/verify-email-sent", search: { email: value.email.trim() } })
+    },
+  })
+  const { onSubmit, isSubmitting, error } = useFormSurface(form)
 
   return (
     <AuthSplit
@@ -320,89 +348,67 @@ export function RegisterPage() {
     >
       <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
-          <Field data-invalid={form.errors.name ? true : undefined}>
-            <FieldLabel htmlFor="name">Tu nombre</FieldLabel>
-            <Input
-              id="name"
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-invalid={form.errors.name ? true : undefined}
-              aria-describedby={form.errors.name ? "name-error" : undefined}
-            />
-            {form.errors.name ? <FieldError id="name-error">{form.errors.name}</FieldError> : null}
-          </Field>
-          <Field data-invalid={form.errors.email ? true : undefined}>
-            <FieldLabel htmlFor="email">Correo</FieldLabel>
-            <Input
-              id="email"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={form.errors.email ? true : undefined}
-              aria-describedby={form.errors.email ? "email-error" : undefined}
-            />
-            {form.errors.email ? (
-              <FieldError id="email-error">{form.errors.email}</FieldError>
-            ) : null}
-          </Field>
-          <Field data-invalid={form.errors.password ? true : undefined}>
-            <FieldLabel htmlFor="password">Contraseña</FieldLabel>
-            <PasswordInput
-              id="password"
-              value={password}
-              onChange={setPassword}
-              autoComplete="new-password"
-              invalid={Boolean(form.errors.password)}
-              describedBy={form.errors.password ? "password-error" : undefined}
-              requirements={[
-                { label: "Al menos 8 caracteres", met: password ? password.length >= 8 : null },
-              ]}
-            />
-            {form.errors.password ? (
-              <FieldError id="password-error">{form.errors.password}</FieldError>
-            ) : null}
-          </Field>
-          <Field orientation="horizontal" data-invalid={form.errors.terms ? true : undefined}>
-            <Checkbox
-              id="terms"
-              checked={accepted}
-              onCheckedChange={(value) => {
-                setAccepted(value === true)
-                if (value === true) form.setErrors(({ terms: _, ...rest }) => rest)
-              }}
-              aria-invalid={form.errors.terms ? true : undefined}
-              aria-describedby={form.errors.terms ? "terms-error" : undefined}
-            />
-            <FieldLabel htmlFor="terms" className="font-normal">
-              <span>
-                Acepto los{" "}
-                <a
-                  className="text-primary underline"
-                  href="https://gestoria24.com/terminos"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Términos
-                </a>{" "}
-                y el{" "}
-                <a
-                  className="text-primary underline"
-                  href="https://gestoria24.com/privacidad"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Aviso de privacidad
-                </a>{" "}
-                del Grupo Sallca.
-              </span>
-            </FieldLabel>
-          </Field>
-          {form.errors.terms ? <FieldError id="terms-error">{form.errors.terms}</FieldError> : null}
-          {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="w-full">
+          <form.AppField name="name">
+            {(field) => <field.TextField label="Tu nombre" id="name" autoComplete="name" />}
+          </form.AppField>
+          <form.AppField name="email">
+            {(field) => (
+              <field.TextField
+                label="Correo"
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="password">
+            {(field) => (
+              <field.PasswordField
+                label="Contraseña"
+                id="password"
+                autoComplete="new-password"
+                requirements={[
+                  {
+                    label: "Al menos 8 caracteres",
+                    met: field.state.value ? field.state.value.length >= 8 : null,
+                  },
+                ]}
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="accepted">
+            {(field) => (
+              <field.CheckboxField
+                id="terms"
+                label={
+                  <span className="font-normal">
+                    Acepto los{" "}
+                    <a
+                      className="text-primary underline"
+                      href="https://gestoria24.com/terminos"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Términos
+                    </a>{" "}
+                    y el{" "}
+                    <a
+                      className="text-primary underline"
+                      href="https://gestoria24.com/privacidad"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Aviso de privacidad
+                    </a>{" "}
+                    del Grupo Sallca.
+                  </span>
+                }
+              />
+            )}
+          </form.AppField>
+          {error ? <AuthAlert>{error}</AuthAlert> : null}
+          <SubmitButton type="submit" pending={isSubmitting} className="w-full">
             Crear mi cuenta
           </SubmitButton>
         </FieldGroup>
@@ -464,30 +470,23 @@ export function VerifyEmailSentPage() {
 
 export function ForgotPasswordPage() {
   const search = useSearch({ strict: false }) as { email?: string; vencido?: string }
-  const [email, setEmail] = useState(search.email ?? "")
   const [sentTo, setSentTo] = useState<string | null>(null)
-  const form = useFormState()
-
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    form.setProblem(null)
-    if (!emailSchema.safeParse(email).success) {
-      form.setErrors({ email: "Escribe un correo válido, como nombre@tienda.com" })
-      return
-    }
-    form.setErrors({})
-    form.setPending(true)
-    try {
+  const form = useAppForm({
+    defaultValues: { email: search.email ?? "" },
+    validators: { onSubmit: z.object({ email }) },
+    onSubmit: async ({ value }) => {
       const { error } = await authFetch("/access-link/request", {
         method: "POST",
-        body: { email: email.trim(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+        body: {
+          email: value.email.trim(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
       })
-      if (error) form.setProblem(accountErrorText(error))
-      else setSentTo(email.trim())
-    } finally {
-      form.setPending(false)
-    }
-  }
+      if (error) throw accountProblem(error)
+      setSentTo(value.email.trim())
+    },
+  })
+  const { onSubmit, isSubmitting, error } = useFormSurface(form)
 
   if (sentTo)
     return (
@@ -530,24 +529,19 @@ export function ForgotPasswordPage() {
       {search.vencido === "1" ? <AuthAlert>El enlace ya venció. Pide uno nuevo.</AuthAlert> : null}
       <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
-          <Field data-invalid={form.errors.email ? true : undefined}>
-            <FieldLabel htmlFor="email">Correo</FieldLabel>
-            <Input
-              id="email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={form.errors.email ? true : undefined}
-              aria-describedby={form.errors.email ? "email-error" : undefined}
-            />
-            {form.errors.email ? (
-              <FieldError id="email-error">{form.errors.email}</FieldError>
-            ) : null}
-          </Field>
-          {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="w-full">
+          <form.AppField name="email">
+            {(field) => (
+              <field.TextField
+                label="Correo"
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+              />
+            )}
+          </form.AppField>
+          {error ? <AuthAlert>{error}</AuthAlert> : null}
+          <SubmitButton type="submit" pending={isSubmitting} className="w-full">
             Enviarme el enlace
           </SubmitButton>
         </FieldGroup>
@@ -558,41 +552,38 @@ export function ForgotPasswordPage() {
 
 export function TwoFactorPage() {
   const search = useSearch({ strict: false }) as { next?: string }
-  const [code, setCode] = useState("")
   const [backup, setBackup] = useState(false)
-  const form = useFormState()
   const next = safeNext(search.next)
-
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    const clean = code.replace(/\s/g, "")
-    if (!clean) {
-      form.setErrors({
-        code: backup ? "Escribe uno de tus códigos de respaldo" : "Escribe el código de 6 dígitos",
-      })
-      return
-    }
-    form.setErrors({})
-    form.setPending(true)
-    try {
+  const form = useAppForm({
+    defaultValues: { code: "" },
+    validators: {
+      onSubmit: z.object({
+        code: z
+          .string()
+          .refine(
+            (value) => value.replace(/\s/g, "") !== "",
+            backup ? "Escribe uno de tus códigos de respaldo" : "Escribe el código de 6 dígitos",
+          ),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const clean = value.code.replace(/\s/g, "")
       const result = backup
         ? await authClient.twoFactor.verifyBackupCode({ code: clean })
         : await authClient.twoFactor.verifyTotp({ code: clean })
-      if (result.error) {
-        form.setProblem(
-          accountErrorText({ ...result.error, code: (result.error as { code?: string }).code }),
-        )
-        return
-      }
+      if (result.error)
+        throw accountProblem({
+          ...result.error,
+          code: (result.error as { code?: string }).code,
+        })
       // Con el segundo paso, la cuenta dice quién es recién aquí: la entrada la recuerda igual.
       const user = (result.data as { user?: { name: string; email: string } } | null)?.user
       if (user) rememberUser({ name: user.name, email: user.email })
       forgetToken()
       window.location.assign(next ?? "/")
-    } finally {
-      form.setPending(false)
-    }
-  }
+    },
+  })
+  const { onSubmit, isSubmitting, error } = useFormSurface(form)
 
   return (
     <AuthSplit
@@ -608,9 +599,8 @@ export function TwoFactorPage() {
           className="font-medium text-primary underline"
           onClick={() => {
             setBackup((v) => !v)
-            setCode("")
-            form.setProblem(null)
-            form.setErrors({})
+            form.reset()
+            clearSubmitErrors(form)
           }}
         >
           {backup ? "Usar el código de mi app" : "Usar un código de respaldo"}
@@ -619,22 +609,19 @@ export function TwoFactorPage() {
     >
       <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
-          <Field data-invalid={form.errors.code ? true : undefined}>
-            <FieldLabel htmlFor="code">{backup ? "Código de respaldo" : "Código"}</FieldLabel>
-            <Input
-              id="code"
-              autoComplete="one-time-code"
-              inputMode={backup ? "text" : "numeric"}
-              autoFocus
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              aria-invalid={form.errors.code ? true : undefined}
-              aria-describedby={form.errors.code ? "code-error" : undefined}
-            />
-            {form.errors.code ? <FieldError id="code-error">{form.errors.code}</FieldError> : null}
-          </Field>
-          {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="w-full">
+          <form.AppField name="code">
+            {(field) => (
+              <field.TextField
+                label={backup ? "Código de respaldo" : "Código"}
+                id="code"
+                autoComplete="one-time-code"
+                inputMode={backup ? "text" : "numeric"}
+                autoFocus
+              />
+            )}
+          </form.AppField>
+          {error ? <AuthAlert>{error}</AuthAlert> : null}
+          <SubmitButton type="submit" pending={isSubmitting} className="w-full">
             Entrar
           </SubmitButton>
         </FieldGroup>
