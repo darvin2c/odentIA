@@ -425,7 +425,8 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
 
 /**
  * La línea del plan con lo último que dijo la administración (`contract_state`), sin preguntarle:
- * su nombre, cómo está la cuenta y lo que queda del crédito del tramo. Sin nada guardado, null.
+ * su nombre, cómo está la cuenta, lo que queda del crédito del tramo y si hay un cobro por pagar
+ * (su estado, tal como lo dice la administración: aquí no se suma nada). Sin nada guardado, null.
  */
 async function planLineIn(tx: Db, storeId: string) {
   const [row] = await tx
@@ -434,7 +435,7 @@ async function planLineIn(tx: Db, storeId: string) {
     .where(eq(contractState.storeId, storeId))
   const parsed = accountState.safeParse(row?.state)
   if (!parsed.success || !parsed.data.found) return null
-  const { plan, access, budget } = parsed.data
+  const { plan, access, budget, charges } = parsed.data
   return {
     name: plan?.name ?? null,
     status: access?.status ?? null,
@@ -443,5 +444,6 @@ async function planLineIn(tx: Db, storeId: string) {
         ? Math.max(0, budget.creditCents - budget.creditUsedCents)
         : null,
     currency: budget?.currency ?? null,
+    toPay: charges.some((charge) => charge.status === "pendiente" || charge.status === "parcial"),
   }
 }

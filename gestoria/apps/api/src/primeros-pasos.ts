@@ -9,10 +9,11 @@ import {
   storeDeliveryMethod,
   storeInvitation,
   storeMember,
+  storePaymentLink,
   storePaymentMethod,
   storeSetup,
 } from "@gestoria/db"
-import { and, asc, count, countDistinct, eq, gt, isNull, sql } from "drizzle-orm"
+import { and, asc, count, countDistinct, eq, gt, isNull, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -46,7 +47,10 @@ export interface SetupFacts {
   country: string | null
   /** Los productos con alguna variante con stock. */
   productsWithStock: number
-  /** Los medios de pago encendidos, por su nombre. */
+  /**
+   * Los medios de pago encendidos con los que se cobra, por su nombre. El link de pago sin pasarela
+   * conectada no cobra: no cuenta.
+   */
   payments: string[]
   /** Las formas de entrega encendidas, por su nombre. */
   deliveries: string[]
@@ -128,10 +132,20 @@ export async function setupFactsIn(tx: Db, storeId: string, now: Date): Promise<
         gt(productVariant.stock, 0),
       ),
     )
+  const [gateway] = await tx
+    .select({ provider: storePaymentLink.provider })
+    .from(storePaymentLink)
+    .where(eq(storePaymentLink.storeId, storeId))
   const payments = await tx
     .select({ name: storePaymentMethod.name })
     .from(storePaymentMethod)
-    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
+    .where(
+      and(
+        eq(storePaymentMethod.storeId, storeId),
+        eq(storePaymentMethod.isActive, true),
+        gateway ? undefined : ne(storePaymentMethod.collection, "link"),
+      ),
+    )
     .orderBy(asc(storePaymentMethod.createdAt))
   const deliveries = await tx
     .select({ name: storeDeliveryMethod.name })
