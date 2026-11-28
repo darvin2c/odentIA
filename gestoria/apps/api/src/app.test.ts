@@ -431,6 +431,37 @@ describe("Inicio y los primeros pasos (tableros 5 y 16)", () => {
   })
 })
 
+describe("Configuración: lo que falta para vender", () => {
+  it("quien configura ve cómo está cada parte con lo guardado; Ventas no, y nunca las llaves", async () => {
+    const rosa = await call("rosa", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)
+    expect(rosa.status).toBe(200)
+    // Lo mismo que los primeros pasos de Inicio, con «No lo necesito» aplicado.
+    const steps = Object.fromEntries(
+      (rosa.json.steps as { step: string; state: string }[]).map((s) => [s.step, s.state]),
+    )
+    expect(steps).toMatchObject({ catalogo: "falta", sofi: "saltado", chats: "pronto" })
+    expect(rosa.json).toMatchObject({
+      paymentLink: null,
+      payments: [],
+      deliveries: [],
+      catalog: { withStock: 0 },
+      team: { members: 3, supportAsks: 0 },
+      sofi: { enabled: false, tried: false },
+    })
+    // El plan es del Dueño: al Administrador no le llega.
+    const mario = await call("mario", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)
+    expect(mario.status).toBe(200)
+    expect(mario.json.plan).toBeNull()
+    expect(
+      (await call("lucia", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)).status,
+    ).toBe(403)
+    expect(
+      (await call("ajena", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)).status,
+    ).toBe(404)
+    expect(JSON.stringify(rosa.json)).not.toMatch(/token|secret|Enc"/i)
+  })
+})
+
 describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
   /** Un PNG de 1 × 1 rosado: lo que se mira es su contenido, no su nombre. */
   const PNG = Buffer.from(
@@ -857,6 +888,20 @@ describe("la tienda de ejemplo", () => {
       ]),
     )
     expect(home.setup).toBeNull()
+    // «Lo que falta» (Configuración): Calzados Rosa vende, pero le falta la pasarela y probar a
+    // Sofi, y soporte pide mirar la tienda (se responde en Equipo y repartidores).
+    const overview = (await (
+      await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/configuracion/resumen`)
+    ).json()) as {
+      paymentLink: unknown
+      sofi: { enabled: boolean; tried: boolean }
+      team: { supportAsks: number }
+      catalog: { withStock: number }
+    }
+    expect(overview.paymentLink).toBeNull()
+    expect(overview.sofi).toEqual({ enabled: true, tried: false })
+    expect(overview.team.supportAsks).toBe(1)
+    expect(overview.catalog.withStock).toBeGreaterThan(0)
     const help = (await (
       await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/ayuda/casos`)
     ).json()) as {

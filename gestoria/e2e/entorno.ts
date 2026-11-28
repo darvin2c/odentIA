@@ -1,4 +1,6 @@
 /** Lo que comparten el entorno (`servidor.ts`), la configuración y los recorridos de gestorIA. */
+import type { Locator, Page } from "@playwright/test"
+
 export const API_PORT = 4710
 export const ACCOUNT_PORT = 4711
 export const WEB_PORT = 4712
@@ -23,3 +25,25 @@ export const CLAVE = "clave-de-prueba"
 
 /** El código de la app de autenticación que acepta la cuenta de mentira al activar los dos pasos. */
 export const CODIGO_TOTP = "246810"
+
+/**
+ * Un formulario o un detalle lateral por su título, como en los recorridos de las clínicas
+ * (`e2e/admin.ts`): abierto desde una página, en ventana ancha va en la columna lateral (una
+ * región); abierto desde lo que ya está en la columna, o en el teléfono, en cajón (un diálogo).
+ */
+export function surface(page: Page, name: string | RegExp): Locator {
+  const exact = typeof name === "string"
+  return page.getByRole("dialog", { name, exact }).or(page.getByRole("region", { name, exact }))
+}
+
+/**
+ * Elige en el `Select` común (`field.SelectField`, `Select` de `@odentia/ui`) por el texto de la
+ * opción, como `chooseOption` de los recorridos de las clínicas (`e2e/fixtures.ts`).
+ */
+export async function choose(trigger: Locator, option: string | RegExp) {
+  await trigger.click()
+  await trigger
+    .page()
+    .getByRole("option", { name: option, exact: typeof option === "string" })
+    .click()
+}

@@ -119,7 +119,8 @@ describe("la pantalla donde está", () => {
     expect(storePath(`/tiendas/${STORE}`, STORE)).toBe("/")
     expect(helpScreenOf("/")).toBe("inicio")
     expect(helpScreenOf("/catalogo/prod-1")).toBe("catalogo")
-    expect(helpScreenOf("/configuracion")).toBe("datos")
+    expect(helpScreenOf("/configuracion")).toBe("configuracion")
+    expect(helpScreenOf("/configuracion/datos")).toBe("datos")
     expect(helpScreenOf("/configuracion/marca")).toBe("marca")
     expect(helpScreenOf("/clientes")).toBeNull()
   })
@@ -243,7 +244,7 @@ describe("lo que respondió Ariadna, hecho texto", () => {
     expect(reply).toMatchObject({ kind: "duda", say: HELP_WORDS.doubt })
     expect(reply.choices).toEqual([
       { question: "¿Cómo le mando un link de pago?", where: "Pedidos" },
-      { question: "¿Para qué sirve Medios de pago?", where: "Medios de pago" },
+      { question: "¿Para qué sirve Cobros?", where: "Cobros" },
     ])
   })
 

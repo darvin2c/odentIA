@@ -1,5 +1,5 @@
 import { Badge, Button, cn, toast } from "@odentia/ui"
-import { KpiCard } from "@odentia/ui-patterns"
+import { ErrorState, KpiCard, LoadingState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, Circle, Clock3, MinusCircle } from "lucide-react"
@@ -25,7 +25,7 @@ import {
 import { dayName, storeToday } from "./lib/pedidos"
 import { money } from "./lib/tienda"
 import { MoveToDay, OrderSheet } from "./pedidos"
-import { ErrorBlock, StoreHeader, useMe, useStoreContext } from "./tiendas"
+import { StoreHeader, useMe, useStoreContext } from "./tiendas"
 
 /**
  * Inicio (lienzo «gestorIA como odentIA», tableros 5 y 16): abro y sé qué me toca. Lo ve todo el
@@ -67,8 +67,8 @@ export function HomePage() {
         title={`${greeting(store.timeZone)}${name ? `, ${name}` : ""}`}
         subtitle={longDay(today)}
       />
-      {home.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-      {home.isError ? <ErrorBlock error={home.error} onRetry={() => void home.refetch()} /> : null}
+      {home.isPending ? <LoadingState message="Cargando lo de hoy…" /> : null}
+      {home.isError ? <ErrorState error={home.error} onRetry={() => void home.refetch()} /> : null}
       {data?.setup ? <FirstSteps setup={data.setup} /> : null}
       {/* Una tienda que recién empieza, sin nada todavía, no ve cifras en cero. */}
       {data && !quiet ? <Figures figures={data.figures} /> : null}
@@ -368,7 +368,7 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
       await queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) })
       toast.success("Listo: ese paso ya no falta")
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   return (
     <section

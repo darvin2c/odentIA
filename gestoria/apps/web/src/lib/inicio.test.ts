@@ -44,7 +44,7 @@ describe("los primeros pasos", () => {
     expect(stepView("datos", "hecho", FACTS, STORE)).toEqual({
       title: "Datos de la tienda",
       detail: "Calzados Rosa · Perú · hora de Lima",
-      action: { label: "Revisar", path: "/configuracion" },
+      action: { label: "Revisar", path: "/configuracion/datos" },
     })
     expect(stepView("catalogo", "hecho", FACTS, STORE).detail).toBe("18 productos con su stock.")
     expect(stepView("pagos", "hecho", FACTS, STORE).detail).toBe("Yape, Plin y Efectivo al recibir")

@@ -93,6 +93,7 @@ import {
   updateCustomer,
 } from "./clientes.js"
 import {
+  configOverview,
   createDelivery,
   createPayment,
   deleteDelivery,
@@ -610,6 +611,12 @@ export function createApp(deps: AppDeps) {
 
   app.post("/api/invitaciones/:id/aceptar", async (c) =>
     c.json(await acceptInvitation(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+
+  // Configuración abre con «Lo que falta para vender» (lienzo «gestorIA · Configuración, de
+  // nuevo», tablero 3): cómo está cada parte, con lo guardado en cada una.
+  app.get("/api/tiendas/:id/configuracion/resumen", async (c) =>
+    c.json(await configOverview(deps.appDb, c.get("person"), c.req.param("id"))),
   )
 
   // La configuración (B3): medios de pago y formas de entrega.

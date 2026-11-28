@@ -109,7 +109,11 @@ export function setupFinished(steps: readonly SetupStepView[]): boolean {
   return steps.every((s) => s.state !== "falta")
 }
 
-async function factsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> {
+/**
+ * Lo guardado en cada apartado que marca los pasos. También lo lee «Lo que falta» de
+ * Configuración (`configuracion.ts`): las dos listas miran lo mismo y no lo vuelven a contar.
+ */
+export async function setupFactsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> {
   const [shop] = await tx
     .select({ country: store.country })
     .from(store)
@@ -179,7 +183,7 @@ async function factsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> 
 export async function setupIn(tx: Db, storeId: string, now = new Date()) {
   const [saved] = await tx.select().from(storeSetup).where(eq(storeSetup.storeId, storeId))
   if (saved?.finishedAt) return null
-  const facts = await factsIn(tx, storeId, now)
+  const facts = await setupFactsIn(tx, storeId, now)
   const steps = setupSteps(facts, saved?.skipped ?? [])
   if (setupFinished(steps)) {
     await tx
@@ -192,6 +196,15 @@ export async function setupIn(tx: Db, storeId: string, now = new Date()) {
     return null
   }
   return { steps, facts }
+}
+
+/** Los pasos que la tienda dijo que no necesita («No lo necesito»). */
+export async function skippedStepsIn(tx: Db, storeId: string): Promise<SetupStep[]> {
+  const [saved] = await tx
+    .select({ skipped: storeSetup.skipped })
+    .from(storeSetup)
+    .where(eq(storeSetup.storeId, storeId))
+  return saved?.skipped ?? []
 }
 
 export const skipInput = z.object({
