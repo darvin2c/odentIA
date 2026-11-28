@@ -24,7 +24,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, useLocation, useNavigate } from "@tanstack/react-router"
-import { Check, ChevronLeft, ChevronRight, Minus, Search, Settings } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Info, Minus, Search, Settings } from "lucide-react"
 import { type ReactNode, useId, useMemo, useState } from "react"
 import { z } from "zod"
 import { useZones, zoneLabel } from "./hora"
@@ -40,10 +40,12 @@ import {
   configLines,
   configSectionOf,
   namesIndex,
+  notYoursText,
   SEARCH_INDEX,
   type SearchResult,
   searchConfig,
   seesSection,
+  setupProgress,
   type ToDoItem,
   toDoItems,
   toDoTitle,
@@ -86,9 +88,8 @@ export function ConfigFrame({ children }: { children: ReactNode }) {
   const base = `/tiendas/${store.id}`
   const visible = configGroupsFor(store)
   const overview = useConfigOverview(store)
-  const left = overview.data
-    ? toDoItems(overview.data, store).filter((item) => item.state === "falta").length
-    : 0
+  // La misma cuenta que «Lo que falta» y que Inicio.
+  const left = overview.data ? setupProgress(overview.data.steps).left : 0
   const groups: SectionNavGroup[] = visible.map((group) => ({
     label: group.label,
     items: group.items.map((item) => ({
@@ -108,20 +109,34 @@ export function ConfigFrame({ children }: { children: ReactNode }) {
   const home = configSectionOf(CONFIG_HOME_PATH)
   const hasHome = home !== null && seesSection(store, home)
   const single = visible.flatMap((group) => group.items).length === 1
+  const notYours = notYoursText(store, section)
   const content =
     section && seesSection(store, section) ? (
       children
     ) : (
       <>
         <StoreHeader title="Configuración" />
-        <EmptyState
-          icon={Settings}
-          title="Esto lo ajusta quien configura la tienda"
-          description="Tu rol atiende y vende con lo que ya está configurado. Si algo hay que cambiar, pídeselo a quien administra la tienda."
-        />
+        <EmptyState icon={Settings} title={notYours.title} description={notYours.description} />
       </>
     )
-  if (visible.length === 0) return <div className="flex flex-col gap-6">{content}</div>
+  // Quien no configura la tienda (Ventas) ve solo lo suyo: una línea le dice por qué.
+  const onlyYours =
+    !hasHome && store.role !== "support" ? (
+      <p className="flex items-start gap-2 text-sm text-muted-foreground">
+        <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+        <span>
+          Aquí ves lo que cambias tú. Los datos de la tienda, Sofi, los cobros, las entregas y el
+          equipo los cambian el Dueño y el Administrador.
+        </span>
+      </p>
+    ) : null
+  if (visible.length === 0)
+    return (
+      <div className="flex flex-col gap-6">
+        {content}
+        {onlyYours}
+      </div>
+    )
   return (
     <div className="relative">
       {hasHome ? (
@@ -155,6 +170,7 @@ export function ConfigFrame({ children }: { children: ReactNode }) {
             </Link>
           ) : null}
           {content}
+          {onlyYours}
         </div>
       </SectionNav>
     </div>
@@ -205,7 +221,16 @@ export function ConfigSearch({
           if (!result) return
           setQuery("")
           setOpen(false)
-          void navigate({ to: `/tiendas/${store.id}${result.section.path}` })
+          // El foco va al título de la parte abierta: el buscador puede desaparecer (en el
+          // teléfono vive en la portada) y el foco no se queda perdido en la página.
+          void navigate({ to: `/tiendas/${store.id}${result.section.path}` }).then(() =>
+            requestAnimationFrame(() => {
+              const title = document.querySelector<HTMLElement>("main h1")
+              if (!title) return
+              title.tabIndex = -1
+              title.focus()
+            }),
+          )
         }}
       >
         <div className="relative">
@@ -277,7 +302,7 @@ export function ConfigHomePage() {
         <ErrorState error={overview.error} onRetry={() => void overview.refetch()} />
       ) : (
         <>
-          <ToDoCard store={store} items={toDoItems(overview.data, store)} />
+          <ToDoCard store={store} overview={overview.data} />
           <PartsIndex store={store} lines={configLines(overview.data, store)} />
         </>
       )}
@@ -285,11 +310,16 @@ export function ConfigHomePage() {
   )
 }
 
-function ToDoCard({ store, items }: { store: MyStore; items: ToDoItem[] }) {
+function ToDoCard({ store, overview }: { store: MyStore; overview: ConfigOverview }) {
   const canChange = store.permissions.includes("configuracion")
-  const left = items.filter((item) => item.state === "falta")
-  const ready = items.length - left.length
-  if (left.length === 0)
+  const { selling, more } = toDoItems(overview, store)
+  const progress = setupProgress(overview.steps)
+  const withSofi = selling.find((item) => item.id === "sofi")?.state !== "saltado"
+  const title = toDoTitle(progress.left, withSofi)
+  const moreLeft = more.filter((item) => item.state === "opcional")
+  // Solo lo primero que falta lleva el botón principal; lo demás, el secundario.
+  const first = selling.find((item) => item.state === "falta")?.id
+  if (progress.left === 0 && moreLeft.length === 0)
     return (
       <section
         aria-label="Lo que falta para vender"
@@ -298,10 +328,70 @@ function ToDoCard({ store, items }: { store: MyStore; items: ToDoItem[] }) {
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
           <Check aria-hidden className="size-4" />
         </span>
-        <p className="font-semibold">{toDoTitle(items)}: cada parte está lista.</p>
+        <p className="font-semibold">{title}: cada parte está lista.</p>
       </section>
     )
   let number = 0
+  const row = (item: ToDoItem) => {
+    const pending = item.state === "falta" || item.state === "opcional"
+    if (item.state === "falta") number += 1
+    return (
+      <li key={item.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+        <span
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+            item.state === "hecho" && "bg-success-soft text-success",
+            (item.state === "saltado" || item.state === "opcional") &&
+              "bg-muted text-muted-foreground",
+            item.state === "falta" && "bg-warning-soft text-warning",
+          )}
+        >
+          {item.state === "hecho" ? (
+            <Check aria-hidden className="size-4" />
+          ) : item.state === "falta" ? (
+            <span aria-hidden>{number}</span>
+          ) : (
+            <Minus aria-hidden className="size-4" />
+          )}
+          <span className="sr-only">
+            {item.state === "hecho"
+              ? "Listo:"
+              : item.state === "saltado"
+                ? "Saltado:"
+                : item.state === "opcional"
+                  ? "Cuando quieras:"
+                  : "Falta:"}
+          </span>
+        </span>
+        <div className="flex min-w-0 flex-1 basis-56 flex-col">
+          <span className={cn("font-medium", !pending && "text-muted-foreground")}>
+            {item.title}
+          </span>
+          <span className="text-sm text-muted-foreground">{item.detail}</span>
+        </div>
+        {pending && canChange ? (
+          <Button
+            size="sm"
+            variant={item.id === first ? "default" : "outline"}
+            className="max-sm:ml-11"
+            render={<Link to={`/tiendas/${store.id}${item.action.path}`} />}
+          >
+            {item.action.label}
+          </Button>
+        ) : (
+          <span className="text-sm text-muted-foreground max-sm:ml-11">
+            {item.state === "hecho"
+              ? "Listo"
+              : item.state === "saltado"
+                ? "No lo necesitas"
+                : item.state === "opcional"
+                  ? "Cuando quieras"
+                  : "Falta"}
+          </span>
+        )}
+      </li>
+    )
+  }
   return (
     <section
       aria-labelledby="lo-que-falta"
@@ -309,68 +399,16 @@ function ToDoCard({ store, items }: { store: MyStore; items: ToDoItem[] }) {
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-2">
         <h2 id="lo-que-falta" className="text-lg font-bold">
-          {toDoTitle(items)}
+          {title}
         </h2>
         <span className="text-sm text-muted-foreground">
-          {ready} de {items.length} listas
+          {progress.done} de {progress.total} listas
         </span>
       </div>
-      <ol className="flex flex-col divide-y">
-        {items.map((item) => {
-          const pending = item.state === "falta"
-          if (pending) number += 1
-          return (
-            <li key={item.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-              <span
-                className={cn(
-                  "flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-                  item.state === "hecho" && "bg-success-soft text-success",
-                  item.state === "saltado" && "bg-muted text-muted-foreground",
-                  pending && "bg-warning-soft text-warning",
-                )}
-              >
-                {item.state === "hecho" ? (
-                  <Check aria-hidden className="size-4" />
-                ) : item.state === "saltado" ? (
-                  <Minus aria-hidden className="size-4" />
-                ) : (
-                  <span aria-hidden>{number}</span>
-                )}
-                <span className="sr-only">
-                  {item.state === "hecho"
-                    ? "Listo:"
-                    : item.state === "saltado"
-                      ? "Saltado:"
-                      : "Falta:"}
-                </span>
-              </span>
-              <div className="flex min-w-0 flex-1 basis-56 flex-col">
-                <span className={cn("font-medium", !pending && "text-muted-foreground")}>
-                  {item.title}
-                </span>
-                <span className="text-sm text-muted-foreground">{item.detail}</span>
-              </div>
-              {pending && canChange ? (
-                <Button
-                  size="sm"
-                  className="max-sm:ml-11"
-                  render={<Link to={`/tiendas/${store.id}${item.action.path}`} />}
-                >
-                  {item.action.label}
-                </Button>
-              ) : (
-                <span className="text-sm text-muted-foreground max-sm:ml-11">
-                  {item.state === "hecho"
-                    ? "Listo"
-                    : item.state === "saltado"
-                      ? "No lo necesitas"
-                      : "Falta"}
-                </span>
-              )}
-            </li>
-          )
-        })}
-      </ol>
+      <ol className="flex flex-col divide-y">{selling.map(row)}</ol>
+      {/* Lo que no frena la venta: ayuda a vender más, y no se cuenta como falta. */}
+      <h3 className="pt-4 text-sm font-semibold text-muted-foreground">Para vender más</h3>
+      <ul className="flex flex-col divide-y">{more.map(row)}</ul>
     </section>
   )
 }
@@ -413,12 +451,13 @@ function PartsIndex({
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
                       <span className="shrink-0 font-medium sm:w-48">{item.label}</span>
+                      {/* En el teléfono la línea se parte en dos y no se corta a la mitad. */}
                       {line ? (
-                        <span className="min-w-0 truncate text-sm text-muted-foreground">
+                        <span className="min-w-0 text-sm break-words text-muted-foreground max-sm:line-clamp-2 sm:truncate">
                           {line.summary}
                         </span>
                       ) : PLAIN_SUMMARY[item.id] ? (
-                        <span className="min-w-0 truncate text-sm text-muted-foreground">
+                        <span className="min-w-0 text-sm break-words text-muted-foreground max-sm:line-clamp-2 sm:truncate">
                           {PLAIN_SUMMARY[item.id]}
                         </span>
                       ) : null}

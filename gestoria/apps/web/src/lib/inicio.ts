@@ -230,15 +230,6 @@ export function stepView(
   }
 }
 
-/** «4 de 6»: cuántos pasos hechos o saltados, de los que cuentan (lo de «Muy pronto», no). */
-export function setupProgress(steps: { state: SetupStepState }[]): { done: number; total: number } {
-  const counted = steps.filter((s) => s.state !== "pronto")
-  return {
-    done: counted.filter((s) => s.state === "hecho" || s.state === "saltado").length,
-    total: counted.length,
-  }
-}
-
 export const WHEN_TITLES = { ahora: "Ahora", hoy: "Hoy", sin_apuro: "Sin apuro" } as const
 
 /** «Te toca» en sus tres tiempos, en orden, sin los que quedan vacíos. */

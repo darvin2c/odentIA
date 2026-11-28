@@ -164,6 +164,38 @@ export function configEntryFor(store: Seat): ConfigSection | null {
   return configGroupsFor(store)[0]?.items[0] ?? null
 }
 
+/**
+ * Lo que se le dice a quien abre por su dirección una parte que no ve, según quién es y qué pide
+ * la parte. Repite quién cambia cada cosa de `permisos.ts` (la pantalla solo recibe los permisos
+ * propios): si cambia la matriz, cambia aquí.
+ */
+export function notYoursText(
+  store: Seat,
+  section: ConfigSection | null,
+): { title: string; description: string } {
+  if (!section)
+    return {
+      title: "Esta parte no está en Configuración",
+      description: "Puede que la dirección esté mal escrita. Elige lo que buscas en Configuración.",
+    }
+  if (store.role === "support")
+    return {
+      title: "Soporte de gestorIA no mira esta parte",
+      description:
+        "Mientras la tienda te deja entrar, miras lo que está en Configuración, sin cambiar nada.",
+    }
+  if (section.needs === "plan")
+    return {
+      title: "El plan y los pagos los ve el Dueño",
+      description: "Si algo del plan hay que pagar o cambiar, pídeselo al Dueño de la tienda.",
+    }
+  return {
+    title: "Esto lo cambian el Dueño y el Administrador",
+    description:
+      "Tu rol atiende y vende con lo que ya está configurado. Si algo hay que cambiar, pídeselo a ellos.",
+  }
+}
+
 /** El apartado de una ruta de la tienda (`/configuracion/marca`), o null si no es uno. */
 export function configSectionOf(path: string): ConfigSection | null {
   return CONFIG_GROUPS.flatMap((group) => group.items).find((item) => item.path === path) ?? null
@@ -179,10 +211,45 @@ export function sectionById(id: ConfigSectionId): ConfigSection {
  * palabras de la pantalla. Nada se marca a mano.
  */
 
-type SetupStep = "datos" | "catalogo" | "pagos" | "entregas" | "chats" | "sofi" | "equipo"
+export type SetupStep = "datos" | "catalogo" | "pagos" | "entregas" | "chats" | "sofi" | "equipo"
+type SetupState = "hecho" | "falta" | "saltado" | "pronto"
+
+/**
+ * Los pasos que hacen falta para que Sofi venda sola. Invitar al equipo no frena la venta (con o
+ * sin equipo se vende): Inicio lo muestra, pero no se cuenta como falta.
+ */
+const SELLING_STEPS: readonly SetupStep[] = [
+  "datos",
+  "catalogo",
+  "pagos",
+  "entregas",
+  "chats",
+  "sofi",
+]
+
+/** Si el paso frena la venta mientras falta (y se cuenta en «3 de 5»). */
+export function sellingStep(step: SetupStep): boolean {
+  return SELLING_STEPS.includes(step)
+}
+
+/**
+ * La única cuenta de lo que falta para vender: la de Inicio («Tu tienda está casi lista · 3 de
+ * 5») y la de Configuración («Para que Sofi venda sola te faltan 2 cosas · 3 de 5 listas»). Sale
+ * de los pasos del servidor (`setupSteps`): hecho o saltado está listo; lo de «Muy pronto» y lo que
+ * no frena la venta no cuentan.
+ */
+export function setupProgress(steps: readonly { step: SetupStep; state: SetupState }[]): {
+  done: number
+  total: number
+  left: number
+} {
+  const counted = steps.filter((s) => s.state !== "pronto" && sellingStep(s.step))
+  const done = counted.filter((s) => s.state === "hecho" || s.state === "saltado").length
+  return { done, total: counted.length, left: counted.length - done }
+}
 
 export interface ConfigOverview {
-  steps: { step: SetupStep; state: "hecho" | "falta" | "saltado" | "pronto"; skippable: boolean }[]
+  steps: { step: SetupStep; state: SetupState; skippable: boolean }[]
   brand: {
     publicName: string | null
     brandColor: string | null
@@ -219,6 +286,8 @@ export interface ConfigOverview {
     status: keyof typeof STATUS_WORDS | null
     creditLeftCents: number | null
     currency: string | null
+    /** Hay un cobro del plan por pagar (pendiente o pagado en parte). */
+    toPay: boolean
   } | null
 }
 
@@ -247,10 +316,15 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
-/** Una cosa por hacer (o ya hecha) para vender, con su botón. */
+/**
+ * Una cosa por hacer (o ya hecha), con su botón. Las que frenan la venta son los pasos del servidor
+ * y se cuentan; las que no la frenan (Tu marca, el link de pago) van aparte, en «Para vender más»,
+ * y nunca se cuentan como falta.
+ */
 export interface ToDoItem {
   id: "datos" | "catalogo" | "marca" | "pagos" | "link" | "entregas" | "sofi"
-  state: "hecho" | "falta" | "saltado"
+  /** «opcional»: todavía no está, pero no frena la venta. */
+  state: "hecho" | "falta" | "saltado" | "opcional"
   title: string
   /** Cómo está, en una línea. */
   detail: string
@@ -258,14 +332,37 @@ export interface ToDoItem {
   action: { label: string; path: string }
 }
 
-/** Lo que falta para vender, en su orden: lo hecho queda con su ✓ y lo pendiente, con su botón. */
-export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">): ToDoItem[] {
-  const stepOf = (step: SetupStep) => overview.steps.find((s) => s.step === step)?.state
-  const items: ToDoItem[] = []
-  const country = stepOf("datos") === "hecho"
-  items.push({
+type ToDoSource = Pick<
+  ConfigOverview,
+  "steps" | "brand" | "catalog" | "payments" | "paymentLink" | "deliveries"
+>
+
+/**
+ * Los medios con que se cobra de verdad: un link de pago sin pasarela conectada no cobra, así que
+ * no cuenta (igual que en los primeros pasos del servidor, `setupFactsIn`).
+ */
+export function workingPayments(overview: Pick<ToDoSource, "payments" | "paymentLink">) {
+  return overview.payments.filter((p) => p.collection !== "link" || overview.paymentLink !== null)
+}
+
+/**
+ * Lo que falta para vender, en su orden (`selling`), y lo que ayuda a vender más (`more`): lo hecho
+ * queda con su ✓ y lo pendiente, con su botón. El estado de lo que frena la venta es el del paso
+ * del servidor: el mismo que ve Inicio.
+ */
+export function toDoItems(
+  overview: ToDoSource,
+  store: Pick<MyStore, "name">,
+): { selling: ToDoItem[]; more: ToDoItem[] } {
+  const stateOf = (step: SetupStep): ToDoItem["state"] => {
+    const state = overview.steps.find((s) => s.step === step)?.state
+    return state === "hecho" ? "hecho" : state === "saltado" ? "saltado" : "falta"
+  }
+  const selling: ToDoItem[] = []
+  const country = stateOf("datos") === "hecho"
+  selling.push({
     id: "datos",
-    state: country ? "hecho" : "falta",
+    state: stateOf("datos"),
     title: "El país y la hora de tu tienda",
     detail: country
       ? "Con su hora se cuentan «hoy», los reportes y las promociones."
@@ -273,22 +370,59 @@ export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">
     action: { label: country ? "Ver" : "Completar", path: SECTIONS.datos.path },
   })
   const { products, withStock } = overview.catalog
-  items.push({
+  const stocked = stateOf("catalogo") === "hecho"
+  selling.push({
     id: "catalogo",
-    state: withStock > 0 ? "hecho" : "falta",
+    state: stateOf("catalogo"),
     title: "Tu catálogo con precios y stock",
-    detail:
-      withStock > 0
-        ? plural(withStock, "producto con stock", "productos con stock")
-        : products > 0
-          ? `${plural(products, "producto", "productos")}, todavía sin stock.`
-          : "Sube tus productos con sus tallas, precios y stock.",
-    action: { label: withStock > 0 ? "Ver" : "Ir al catálogo", path: "/catalogo" },
+    detail: stocked
+      ? plural(withStock, "producto con stock", "productos con stock")
+      : products > 0
+        ? `${plural(products, "producto", "productos")}, todavía sin stock.`
+        : "Sube tus productos con sus tallas, precios y stock.",
+    action: { label: stocked ? "Ver" : "Ir al catálogo", path: "/catalogo" },
   })
+  const names = workingPayments(overview).map((p) => p.name)
+  const paid = stateOf("pagos") === "hecho"
+  selling.push({
+    id: "pagos",
+    state: stateOf("pagos"),
+    title: "Cómo te pagan",
+    detail: paid && names.length > 0 ? listText(names) : "Yape, Plin, transferencia o al recibir.",
+    action: { label: paid ? "Ver" : "Agregar un medio", path: SECTIONS.pagos.path },
+  })
+  const deliveries = overview.deliveries.map((d) => d.name)
+  const delivers = stateOf("entregas") === "hecho"
+  selling.push({
+    id: "entregas",
+    state: stateOf("entregas"),
+    title: "Cómo entregas",
+    detail:
+      delivers && deliveries.length > 0
+        ? listText(deliveries)
+        : "Tu reparto, el recojo en la tienda o la agencia, con su precio.",
+    action: { label: delivers ? "Ver" : "Agregar una forma", path: SECTIONS.entregas.path },
+  })
+  // Soporte no abre Sofi, pero su paso cuenta igual: lo ve sin botón, como todo lo demás.
+  const sofi = stateOf("sofi")
+  selling.push({
+    id: "sofi",
+    state: sofi,
+    title: "Probar a Sofi",
+    detail:
+      sofi === "hecho"
+        ? "Ya le escribiste como una clienta."
+        : sofi === "saltado"
+          ? "Dijiste que no la usas por ahora."
+          : "Escríbele como una clienta y mira cómo vende con tus precios.",
+    action: { label: sofi === "hecho" ? "Ver" : "Probar a Sofi", path: SECTIONS.sofi.path },
+  })
+
+  const more: ToDoItem[] = []
   const { logo, brandColor } = overview.brand
-  items.push({
+  more.push({
     id: "marca",
-    state: logo && brandColor ? "hecho" : "falta",
+    state: logo && brandColor ? "hecho" : "opcional",
     title: "Tu marca: logo y color",
     detail:
       logo && brandColor
@@ -300,20 +434,12 @@ export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">
             : "Falta el color de tu marca.",
     action: { label: logo && brandColor ? "Ver" : "Completar", path: SECTIONS.marca.path },
   })
-  const names = overview.payments.map((p) => p.name)
-  items.push({
-    id: "pagos",
-    state: names.length > 0 ? "hecho" : "falta",
-    title: "Cómo te pagan",
-    detail: names.length > 0 ? listText(names) : "Yape, Plin, transferencia o al recibir.",
-    action: { label: names.length > 0 ? "Ver" : "Agregar un medio", path: SECTIONS.pagos.path },
-  })
   const byCapture = overview.payments
     .filter((p) => p.collection === "comprobante")
     .map((p) => p.name)
-  items.push({
+  more.push({
     id: "link",
-    state: overview.paymentLink ? "hecho" : "falta",
+    state: overview.paymentLink ? "hecho" : "opcional",
     title: "Cobrar por link de pago",
     detail: overview.paymentLink
       ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}: el pago se confirma solo.`
@@ -325,44 +451,18 @@ export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">
       path: SECTIONS.pagos.path,
     },
   })
-  const deliveries = overview.deliveries.map((d) => d.name)
-  items.push({
-    id: "entregas",
-    state: deliveries.length > 0 ? "hecho" : "falta",
-    title: "Cómo entregas",
-    detail:
-      deliveries.length > 0
-        ? listText(deliveries)
-        : "Tu reparto, el recojo en la tienda o la agencia, con su precio.",
-    action: {
-      label: deliveries.length > 0 ? "Ver" : "Agregar una forma",
-      path: SECTIONS.entregas.path,
-    },
-  })
-  // Soporte no mira Sofi: su paso no se le muestra.
-  if (overview.sofi) {
-    const sofi = stepOf("sofi")
-    items.push({
-      id: "sofi",
-      state: sofi === "hecho" ? "hecho" : sofi === "saltado" ? "saltado" : "falta",
-      title: "Probar a Sofi",
-      detail:
-        sofi === "hecho"
-          ? "Ya le escribiste como una clienta."
-          : sofi === "saltado"
-            ? "Dijiste que no la usas por ahora."
-            : "Escríbele como una clienta y mira cómo vende con tus precios.",
-      action: { label: sofi === "hecho" ? "Ver" : "Probar a Sofi", path: SECTIONS.sofi.path },
-    })
-  }
-  return items
+  return { selling, more }
 }
 
-/** «Para vender te faltan 2 cosas» o, con todo listo, que ya está. */
-export function toDoTitle(items: readonly ToDoItem[]): string {
-  const left = items.filter((item) => item.state === "falta").length
+/**
+ * «Para que Sofi venda sola te faltan 2 cosas» o, sin nada por hacer, que ya puede vender. Quien
+ * dijo que no usa a Sofi por ahora lee «Para vender…». Con todo listo no promete que Sofi venda
+ * sola: los chats todavía no se conectan.
+ */
+export function toDoTitle(left: number, withSofi: boolean): string {
   if (left === 0) return "Tienes todo para vender"
-  return left === 1 ? "Para vender te falta 1 cosa" : `Para vender te faltan ${left} cosas`
+  const lead = withSofi ? "Para que Sofi venda sola" : "Para vender"
+  return left === 1 ? `${lead} te falta 1 cosa` : `${lead} te faltan ${left} cosas`
 }
 
 /** Cómo está una parte, en una línea, y si tiene algo pendiente (su punto naranja). */
@@ -416,12 +516,20 @@ export function configLines(
     const skipped = overview.steps.some((s) => s.step === "sofi" && s.state === "saltado")
     lines.sofi = {
       id: "sofi",
+      // Lo pendiente va en el estado, junto a su punto: «Encendida · ● Sin probar».
       summary: overview.sofi.tried
         ? "Ya la probaste"
         : skipped
           ? "No la usas por ahora"
+          : overview.sofi.enabled
+            ? "Encendida"
+            : "Apagada",
+      status:
+        overview.sofi.tried || skipped
+          ? overview.sofi.enabled
+            ? "Encendida"
+            : "Apagada"
           : "Sin probar",
-      status: overview.sofi.enabled ? "Encendida" : "Apagada",
       pending: !overview.sofi.tried && !skipped,
     }
   }
@@ -436,10 +544,13 @@ export function configLines(
   lines.pagos = {
     id: "pagos",
     summary: paymentParts.length > 0 ? paymentParts.join(" · ") : "Sin medios de pago",
-    status: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
-      : "Sin pasarela",
-    pending: overview.payments.length === 0 || !overview.paymentLink,
+    status:
+      workingPayments(overview).length === 0
+        ? "Falta"
+        : overview.paymentLink
+          ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
+          : "Sin pasarela",
+    pending: workingPayments(overview).length === 0 || !overview.paymentLink,
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
   const ownFleet = overview.deliveries.some((d) => d.type === "DeliveryModeOwnFleet")
@@ -495,8 +606,9 @@ export function configLines(
       ]
         .filter(Boolean)
         .join(" · "),
-      status: plan.status ? STATUS_WORDS[plan.status] : "—",
-      pending: late,
+      // Un cobro por pagar lleva su punto aunque la cuenta siga activa.
+      status: plan.toPay && !late ? "Por pagar" : plan.status ? STATUS_WORDS[plan.status] : "—",
+      pending: late || plan.toPay,
     }
   }
   return lines
@@ -574,7 +686,18 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   {
     text: "Reparto propio y zonas",
     section: "entregas",
-    terms: ["reparto", "delivery", "zona", "zonas", "distrito", "motorizado", "envío", "envio"],
+    terms: [
+      "reparto",
+      "delivery",
+      "zona",
+      "zonas",
+      "distrito",
+      "motorizado",
+      "envío",
+      "envio",
+      "plantilla",
+      "lima",
+    ],
   },
   { text: "Recojo en tienda", section: "entregas", terms: ["recojo", "recoger", "tienda"] },
   {

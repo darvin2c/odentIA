@@ -7,6 +7,7 @@ import { type ReactNode, useId, useState } from "react"
 import { SimilarQueue } from "./clientes"
 import { api } from "./lib/api"
 import { fromWhom } from "./lib/caja"
+import { sellingStep, setupProgress } from "./lib/configuracion"
 import {
   byWhen,
   FROM_HOME,
@@ -17,7 +18,6 @@ import {
   type SetupStepState,
   type StoreHome,
   sameText,
-  setupProgress,
   stepView,
   type ToDoItem,
   WHEN_TITLES,
@@ -359,7 +359,8 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
   const queryClient = useQueryClient()
   const id = useId()
   const progress = setupProgress(setup.steps)
-  const next = setup.steps.find((s) => s.state === "falta")?.step
+  // La misma cuenta que «Lo que falta» de Configuración: lo que no frena la venta no se cuenta.
+  const next = setup.steps.find((s) => s.state === "falta" && sellingStep(s.step))?.step
   const done = setup.steps.filter((s) => s.state === "hecho")
   const skip = useMutation({
     mutationFn: (step: string) =>
@@ -415,9 +416,13 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="flex flex-wrap items-center gap-2 font-semibold">
                     {view.title}
-                    <Badge variant={STATE_BADGES[s.state].variant}>
-                      {STATE_BADGES[s.state].label}
-                    </Badge>
+                    {s.state === "falta" && !sellingStep(s.step) ? (
+                      <Badge variant="secondary">Opcional</Badge>
+                    ) : (
+                      <Badge variant={STATE_BADGES[s.state].variant}>
+                        {STATE_BADGES[s.state].label}
+                      </Badge>
+                    )}
                   </span>
                   <span className={cn("text-sm text-muted-foreground", !isNext && "max-sm:hidden")}>
                     {view.detail}
