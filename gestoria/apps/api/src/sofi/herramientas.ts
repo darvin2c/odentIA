@@ -5,13 +5,14 @@ import {
   orderPayment,
   product,
   productLink,
+  productQuestion,
   productVariant,
   saleOrder,
   stockRequest,
   storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, asc, eq, inArray, or } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm"
 import { z } from "zod"
 import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
@@ -545,20 +546,38 @@ function noteFacts(
     plain(text)
       .split(/[^a-z0-9]+/)
       .filter((w) => w.length > 2 && !STOP.has(w))
-  for (const { dato, valor } of ficha.datos)
-    ctx.trace.facts.push({
-      label: `${dato}: ${valor.length > 34 ? `${valor.slice(0, 33)}…` : valor.toLowerCase()}`,
-      target: "datos",
-      words: words(valor).slice(0, 2),
-    })
-  for (const { pregunta, respuesta } of ficha.preguntas_respondidas)
-    ctx.trace.facts.push({
-      label: `Pregunta respondida: ${pregunta}`,
-      target: "preguntas",
-      words: words(respuesta).slice(0, 3),
-    })
-  if (ficha.estado)
-    ctx.trace.facts.push({ label: "Estado del producto", target: "estado", words: [] })
+  // Un dato sin palabras propias (solo números o unidades) no se puede reconocer en lo que
+  // escribió: no se dice que lo usó.
+  for (const { dato, valor } of ficha.datos) {
+    const found = words(valor).slice(0, 2)
+    if (found.length)
+      ctx.trace.facts.push({
+        label: `${dato}: ${valor.length > 34 ? `${valor.slice(0, 33)}…` : valor.toLowerCase()}`,
+        target: "datos",
+        words: found,
+      })
+  }
+  for (const { pregunta, respuesta } of ficha.preguntas_respondidas) {
+    const found = words(respuesta).slice(0, 3)
+    if (found.length)
+      ctx.trace.facts.push({
+        label: `Pregunta respondida: ${pregunta}`,
+        target: "preguntas",
+        words: found,
+      })
+  }
+  // El estado se reconoce por lo que dice Sofi en cada uno (las frases de `statusWords`).
+  const said = ficha.estado
+    ? (
+        [
+          ["Por encargo", "Estado: por encargo", "consigo"],
+          ["Con cupo", "Estado: con cupo por día", "por dia"],
+          ["Preventa", "Estado: preventa", "llega"],
+          ["Liquidación", "Estado: liquidación", "liquidacion"],
+        ] as const
+      ).find(([start]) => ficha.estado!.startsWith(start))
+    : undefined
+  if (said) ctx.trace.facts.push({ label: said[1], target: "estado", words: [said[2]] })
   for (const v of variants)
     if (v.optionValues.length)
       ctx.trace.facts.push({
@@ -1097,9 +1116,18 @@ async function askStore(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.anota
     const found = await sellableProduct(tx, ctx, args.producto_id)
     const question = args.pregunta.trim()
     // La misma pregunta, de la misma conversación y sin responder, no se anota dos veces.
-    const already = ctx.trace.questions.some(
-      (q) => q.productId === found.id && plain(q.question) === plain(question),
-    )
+    const waiting = await tx
+      .select({ question: productQuestion.question })
+      .from(productQuestion)
+      .where(
+        and(
+          eq(productQuestion.storeId, ctx.storeId),
+          eq(productQuestion.productId, found.id),
+          eq(productQuestion.conversationId, ctx.conversationId),
+          isNull(productQuestion.answer),
+        ),
+      )
+    const already = waiting.some((q) => plain(q.question) === plain(question))
     if (!already) {
       await addQuestionIn(tx, ctx.storeId, SOFI_ACTOR, {
         productId: found.id,

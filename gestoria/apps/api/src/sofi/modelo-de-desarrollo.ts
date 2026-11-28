@@ -149,7 +149,7 @@ function dev(messages: ChatMessage[]): Partial<ModelReply> {
   )
   const variant = fits.find((v) => !v.agotada) ?? fits[0]
   const left = (v: Found["variantes"][number]) =>
-    v.stock > 0 && v.stock <= 5 ? ` y me quedan ${v.stock}` : ""
+    v.stock === 1 ? " y me queda 1" : v.stock > 0 && v.stock <= 5 ? ` y me quedan ${v.stock}` : ""
 
   // Pide verla puesta: el video.
   if (/video|puesta|puesto|como se ve/.test(t)) {

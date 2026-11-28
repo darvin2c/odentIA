@@ -348,7 +348,7 @@ export function createApp(deps: AppDeps) {
    */
   const tellLater = (
     storeId: string,
-    told: { conversationId: string; question: string }[],
+    told: { conversationId: string; product: string }[],
     answer: string,
   ) => {
     if (told.length === 0) return

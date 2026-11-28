@@ -257,13 +257,19 @@ export function deliveryFrom(d: ShowcaseDelivery): number | null {
 }
 
 /** Las cuentas del carrito de la vitrina, antes de que haya pedido (el servidor cobra lo suyo). */
-export function localTotals(page: Showcase, lines: CartLine[], delivery: ShowcaseDelivery | null) {
+export function localTotals(
+  page: Showcase,
+  lines: CartLine[],
+  delivery: ShowcaseDelivery | null,
+  zone: string | null = null,
+) {
   const priced = lines.flatMap((line) => {
     const variant = page.product.variants.find((v) => v.id === line.variantId)
     return variant ? [{ line, variant, cents: variant.priceCents * line.quantity }] : []
   })
   const subtotal = priced.reduce((n, p) => n + p.cents, 0)
-  const base = delivery ? deliveryFrom(delivery) : null
+  const zoned = delivery?.zones.find((z) => z.name === zone)
+  const base = zoned ? zoned.priceCents : delivery ? deliveryFrom(delivery) : null
   const free = delivery?.freeFromCents != null && subtotal >= delivery.freeFromCents
   const shipping = free ? 0 : (base ?? 0)
   return {

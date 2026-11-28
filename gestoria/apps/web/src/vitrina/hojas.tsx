@@ -10,7 +10,7 @@ import {
   Smartphone,
   X,
 } from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { money } from "../lib/tienda"
 import {
   type CartLine,
@@ -42,19 +42,30 @@ function Sheet({
   onClose: () => void
   children: ReactNode
 }) {
+  // El foco entra a la hoja al abrirla y vuelve a lo que la abrió al cerrarla. Escape cierra solo
+  // la hoja, no el panel de afuera.
+  const closer = useRef<HTMLButtonElement>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [onClose])
+    const before = document.activeElement as HTMLElement | null
+    closer.current?.focus()
+    return () => before?.focus?.()
+  }, [])
   return (
     <>
       <div className="scrim" onClick={onClose} aria-hidden />
-      <div className="sheet" role="dialog" aria-label={title}>
+      <div
+        className="sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") return
+          e.stopPropagation()
+          onClose()
+        }}
+      >
         <span className="grab" aria-hidden />
-        <button type="button" className="x" aria-label="Cerrar" onClick={onClose}>
+        <button ref={closer} type="button" className="x" aria-label="Cerrar" onClick={onClose}>
           <X className="size-5" aria-hidden />
         </button>
         <div className="sheet-in">{children}</div>
@@ -84,6 +95,9 @@ export interface SheetsProps {
   onLines: (lines: CartLine[]) => void
   deliveryId: string | null
   onDelivery: (id: string) => void
+  /** La zona, si la entrega es por zona. */
+  zone: string | null
+  onZone: (zone: string) => void
   /** «Pagar ahora» del carrito: anota el pedido si todavía no hay y pasa a pagar. */
   onCheckout: () => void
   onPay: (method: "Yape" | "Tarjeta") => void
@@ -100,9 +114,11 @@ export function Sheets(props: SheetsProps) {
   const { currency } = page.store
   const m = (cents: number) => money(cents, currency)
   const link = page.store.link ? `${page.store.link}.gestoria24.com` : null
-  const delivery =
-    page.store.deliveries.find((d) => d.id === props.deliveryId) ?? page.store.deliveries[0] ?? null
-  const local = localTotals(page, props.lines, delivery)
+  // En la vitrina se elige lo que tiene precio: lo que «se acuerda» se ve con Sofi en el chat.
+  const options = page.store.deliveries.filter((d) => d.cost !== "se_acuerda")
+  const delivery = options.find((d) => d.id === props.deliveryId) ?? options[0] ?? null
+  const local = localTotals(page, props.lines, delivery, props.zone)
+  const needsZone = delivery?.cost === "por_zona" && !props.zone
   const open = order && order.state === "por_pagar" ? order : null
   const dealLive = open?.deal && new Date(open.deal.expiresAt).getTime() > now ? open.deal : null
 
@@ -249,7 +265,7 @@ export function Sheets(props: SheetsProps) {
             <b>{open.deliveryCents ? m(open.deliveryCents) : "Gratis"}</b>
           </div>
         ) : (
-          page.store.deliveries.slice(0, 3).map((d) => {
+          options.slice(0, 3).map((d) => {
             const on = d.id === delivery?.id
             const from = deliveryFrom(d)
             return (
@@ -276,6 +292,21 @@ export function Sheets(props: SheetsProps) {
             )
           })
         )}
+        {!open && delivery?.cost === "por_zona" ? (
+          <div className="pay" role="group" aria-label="Tu zona">
+            {delivery.zones.map((z) => (
+              <button
+                key={z.name}
+                type="button"
+                className={cn("zone", props.zone === z.name && "on")}
+                aria-pressed={props.zone === z.name}
+                onClick={() => props.onZone(z.name)}
+              >
+                {z.name} · {m(z.priceCents)}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="sum">
           <div>
             <span>Productos</span>
@@ -306,6 +337,7 @@ export function Sheets(props: SheetsProps) {
             <b>{m(open ? open.totalCents : local.total)}</b>
           </div>
         </div>
+        {!open && needsZone ? <p className="hint">Elige tu zona</p> : null}
         {props.error ? (
           <p className="hint" role="alert">
             {props.error}
@@ -314,7 +346,7 @@ export function Sheets(props: SheetsProps) {
         <button
           type="button"
           className="btn"
-          disabled={(!open && local.priced.length === 0) || props.busy}
+          disabled={(!open && (local.priced.length === 0 || needsZone)) || props.busy}
           onClick={props.onCheckout}
         >
           Pagar ahora · {m(open ? open.totalCents : local.total)}
@@ -376,14 +408,14 @@ export function Sheets(props: SheetsProps) {
         <ol className="steps">
           {(
             [
-              ["Confirmado", "Hoy", "done"],
+              ["Confirmado", "", "done"],
               [
                 "Pagado",
-                order.paid ? "Pago de prueba · hoy" : "Falta pagar",
+                order.paid ? "Pago de prueba" : "Falta pagar",
                 order.paid ? "done" : "now",
               ],
               ["Preparando", "La tienda lo alista y lo empaca", order.paid ? "now" : ""],
-              ["Salió", "Te avisan por WhatsApp", ""],
+              ["Salió", "La tienda te avisa", ""],
               ["Entregado", "", ""],
             ] as const
           ).map(([title, detail, step]) => (

@@ -61,6 +61,10 @@ const fmtTime = (ms: number) => {
 }
 
 /** La galería que se pasa con el dedo: al cambiar de color, entra la foto de ese color. */
+/** Con «reducir movimiento», el video no arranca solo: se da play. */
+const still =
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
 function Gallery({ page, choice }: { page: Showcase; choice: Choice }) {
   const { photos, videos } = mediaFor(page, choice.color)
   const color = page.product.colors.find((c) => c.value === choice.color)
@@ -108,7 +112,8 @@ function Gallery({ page, choice }: { page: Showcase; choice: Choice }) {
                 muted
                 loop
                 playsInline
-                autoPlay
+                autoPlay={!still}
+                controls={still}
                 aria-label="Video del producto"
               />
             ) : (
@@ -553,7 +558,7 @@ export function ProductWeb({ page, choice, onChoose, onWant, cart }: ProductPage
           style={{ color: "var(--vv-ink-2)", fontWeight: 600 }}
         >
           <SofiMini size={22} />
-          Sofi responde a toda hora
+          Sofi responde por chat
         </span>
         <span className="icon-btn" role="img" aria-label={`Tu carrito, ${count}`}>
           <ShoppingBag className="size-5" aria-hidden />
@@ -597,7 +602,15 @@ export function ProductWeb({ page, choice, onChoose, onWant, cart }: ProductPage
             style={{ width: "100%" }}
           >
             {current?.video ? (
-              <video src={current.big} poster={current.thumb} muted loop playsInline autoPlay />
+              <video
+                src={current.big}
+                poster={current.thumb}
+                muted
+                loop
+                playsInline
+                autoPlay={!still}
+                controls
+              />
             ) : current ? (
               <img src={current.big} alt={product.name} />
             ) : (

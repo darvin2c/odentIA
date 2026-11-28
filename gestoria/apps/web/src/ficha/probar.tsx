@@ -106,6 +106,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
   const [sheet, setSheet] = useState<SheetKind | null>(null)
   const [lines, setLines] = useState<CartLine[]>([])
   const [deliveryId, setDeliveryId] = useState<string | null>(null)
+  const [zone, setZone] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const showcase = useShowcase(store.id, product.id)
   const page = showcase.data ?? null
@@ -179,7 +180,9 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
           method: "POST",
           body: {
             lines,
-            deliveryMethodId: deliveryId ?? page?.store.deliveries[0]?.id,
+            deliveryMethodId:
+              deliveryId ?? page?.store.deliveries.find((d) => d.cost !== "se_acuerda")?.id,
+            zone,
           },
         },
       )
@@ -288,7 +291,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
   )
 
   const footer = (
-    <Collapsible defaultOpen className="-mx-1">
+    <Collapsible defaultOpen={!isMobile} className="-mx-1">
       <CollapsibleTrigger className="group flex w-full items-center gap-2.5 rounded-lg px-1 py-1.5 text-left outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/40">
         <SofiDot
           done={readiness.done}
@@ -362,7 +365,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
       headerContent={header}
       footer={footer}
     >
-      <div className="flex h-[min(760px,calc(100dvh-16rem))] min-h-[30rem] bg-muted/40 p-1">
+      <div className="flex h-[min(760px,calc(100dvh-27rem))] min-h-[24rem] sm:h-[min(760px,calc(100dvh-24rem))] sm:min-h-[26rem] bg-muted/40 p-1">
         {showcase.isError ? (
           <ErrorState error={showcase.error} onRetry={() => void showcase.refetch()} />
         ) : !page || !choice ? (
@@ -434,7 +437,12 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
                     lines={lines}
                     onLines={setLines}
                     deliveryId={deliveryId}
-                    onDelivery={setDeliveryId}
+                    onDelivery={(id) => {
+                      setDeliveryId(id)
+                      setZone(null)
+                    }}
+                    zone={zone}
+                    onZone={setZone}
                     onCheckout={() => checkout.mutate()}
                     onPay={(method) => pay.mutate(method)}
                     busy={checkout.isPending || pay.isPending}

@@ -502,16 +502,22 @@ export async function answer(
   notice?: StoreNotice,
 ): Promise<AnswerResult> {
   const result = await withSessionLock(deps.lockDb, `sofi:${conversationId}`, async () => {
-    if (notice) {
-      const loaded = await load(deps.appDb, storeId, conversationId, deps.now?.() ?? new Date())
-      if (!loaded) return { status: "nada" } as const
-      return turn(deps, storeId, loaded, notice)
-    }
     let last: AnswerResult = { status: "nada" }
     // Lo último del cliente que ya se respondió. Si escribió mientras Sofi respondía, su mensaje
     // quedó antes de esa respuesta: se responde otra vez (como mucho una), con lo nuevo al final.
     let answered = -1
-    for (let round = 0; round < 2; round++) {
+    if (notice) {
+      const loaded = await load(deps.appDb, storeId, conversationId, deps.now?.() ?? new Date())
+      if (!loaded) return { status: "nada" } as const
+      // Lo que la clienta escribió antes del aviso ya lo vio Sofi al responderlo.
+      answered = Math.max(
+        -1,
+        ...loaded.history.filter((m) => m.author === "cliente").map((m) => m.seq),
+      )
+      last = await turn(deps, storeId, loaded, notice)
+      if (last.status !== "respondio" || last.handoff) return last
+    }
+    for (let round = notice ? 1 : 0; round < 2; round++) {
       const loaded = await load(deps.appDb, storeId, conversationId, deps.now?.() ?? new Date())
       if (!loaded) return { status: "nada" } as const
       const fresh = loaded.history.filter((m) => m.author === "cliente" && m.seq > answered)
@@ -569,6 +575,8 @@ async function turn(
   const test = conv.channel === "prueba"
   // Apagada, las conversaciones esperan a una persona; la de prueba sirve para probarla antes.
   if (!test && !loaded.agent?.enabled) {
+    // Un aviso de la tienda con Sofi apagada no le cambia la conversación a nadie: no escribe.
+    if (notice) return { status: "apagada" }
     await waitForPerson(deps, storeId, conv.id, "Sofi está apagada")
     return { status: "apagada" }
   }

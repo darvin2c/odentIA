@@ -143,6 +143,9 @@ export async function answerQuestions(
     if (rows.some((row) => row.productId !== productId))
       throw new StoreError(400, "VALIDATION_ERROR", "Son preguntas de productos distintos")
     const editor = can(role, "configuracion")
+    // La línea de «Te toca» responde lo que espera: si otra persona ya la respondió, no se pisa.
+    if (input.ids.length > 1 && rows.some((row) => row.answer !== null))
+      throw new StoreError(409, "ALREADY_ANSWERED", "Esa pregunta ya la respondieron")
     if (rows.some((row) => row.savedAt) && !editor)
       throw new StoreError(
         403,
@@ -173,14 +176,18 @@ export async function answerQuestions(
           { field: "questionId", from: row.id, to: row.id },
         ])
     }
-    const told = new Map<string, string>()
+    // Se le dice solo a quien esperaba: lo ya respondido no se vuelve a escribir.
+    const told = new Set<string>()
     for (const row of rows)
-      if (row.conversationId && !told.has(row.conversationId))
-        told.set(row.conversationId, row.question)
+      if (row.conversationId && row.answer === null) told.add(row.conversationId)
+    const [named] = await tx
+      .select({ name: product.name })
+      .from(product)
+      .where(eq(product.id, productId))
     return {
       product: forRole(await detailIn(tx, storeId, productId), role),
       tell: input.tell
-        ? [...told].map(([conversationId, question]) => ({ conversationId, question }))
+        ? [...told].map((conversationId) => ({ conversationId, product: named?.name ?? "" }))
         : [],
     }
   })

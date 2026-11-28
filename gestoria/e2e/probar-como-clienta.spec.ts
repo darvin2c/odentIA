@@ -78,9 +78,9 @@ async function prepare() {
     maxDiscountCents: 1000,
   })
   const created = await json("POST", `${STORE}/productos`, {
-    name: "Zapatilla de lona",
+    name: "Zapatilla de tela",
     category: "Zapatillas",
-    description: "Zapatilla de lona para el día a día. Suela gruesa.",
+    description: "Zapatilla de tela para el día a día. Suela gruesa.",
     listPriceCents: 11900,
     minPriceCents: 9900,
     options: [
@@ -121,7 +121,7 @@ async function prepare() {
     rubro: "calzado",
     rubroData: { horma: "Normal", material: "Lona" },
     offers: { delivery: true, discount: false, secondUnit: false, gift: null },
-    web: { visible: true, slug: "zapatilla-de-lona" },
+    web: { visible: true, slug: "zapatilla-de-tela" },
   })
   // Sofi cotiza con la primera entrega encendida: las de otros recorridos se apagan.
   const shown = await json("GET", `${STORE}/productos/${id}/vitrina`)
@@ -157,7 +157,7 @@ test("probar como clienta: la foto del color, la oferta, el carrito y el pago de
   const before = await stock()
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/catalogo/${product.id}`)
-  await expect(page.getByRole("heading", { name: "Zapatilla de lona", level: 1 })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Zapatilla de tela", level: 1 })).toBeVisible()
   await page.getByRole("button", { name: "Probar como clienta" }).click()
   // En una ventana ancha va en la columna lateral; si no cabe, en un cajón.
   const panel = page
@@ -172,7 +172,7 @@ test("probar como clienta: la foto del color, la oferta, el carrito y el pago de
     .fill("¿Tienes la negra en 38?")
   await panel.getByRole("button", { name: "Enviar" }).click()
   await expect(chat.getByText(/está a S\/ 119 y me quedan 2/)).toBeVisible({ timeout: 20_000 })
-  await expect(chat.getByRole("img", { name: "Zapatilla de lona negra" })).toBeVisible()
+  await expect(chat.getByRole("img", { name: "Zapatilla de tela negra" })).toBeVisible()
   const used = panel.getByRole("list", { name: "Lo que usó Sofi" })
   await expect(used.getByText("Foto de «negra»")).toBeVisible()
   await expect(used.getByText("Stock negra 38: 2")).toBeVisible()
@@ -248,6 +248,6 @@ test("en el teléfono la prueba es un cajón, y la vista previa muestra celular 
     .or(preview.getByRole("button", { name: "Web" }))
     .first()
     .click()
-  await expect(preview.getByRole("heading", { name: "Zapatilla de lona", level: 1 })).toBeVisible()
+  await expect(preview.getByRole("heading", { name: "Zapatilla de tela", level: 1 })).toBeVisible()
   await shot(page, "vista-previa-web-1440")
 })

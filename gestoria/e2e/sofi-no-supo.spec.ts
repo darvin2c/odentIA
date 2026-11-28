@@ -112,7 +112,9 @@ test("Sofi no supo: «Te toca» en una línea, se responde una vez y queda en la
     await expect(form.getByRole("checkbox", { name: "Guardarlo en la ficha" })).toBeChecked()
     await shot(page, "sofi-no-supo-responder-1440")
     await form.getByRole("button", { name: "Responder" }).click()
-    await expect(page.getByText("Respondido: Sofi se lo dice a las 2 clientas")).toBeVisible()
+    await expect(
+      page.getByText("Respondido. Sofi se lo escribe a las 2 clientas, si atiende su chat."),
+    ).toBeVisible()
     await expect(line).toHaveCount(0)
 
     // Sofi se lo dice a cada una, por la misma tubería.

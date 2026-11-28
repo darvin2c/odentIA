@@ -516,9 +516,16 @@ export async function placeTestOrder(
         .select()
         .from(storePaymentMethod)
         .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-    ).sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
+    )
+      // «Pagar ahora» es pagar ya: no el pago al recibir.
+      .filter((m) => m.collection !== "al_recibir")
+      .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
     if (!methods[0])
-      throw new StoreError(409, "NO_PAYMENT", "La tienda no tiene medios de pago encendidos")
+      throw new StoreError(
+        409,
+        "NO_PAYMENT",
+        "La tienda no tiene un medio para pagar ya (link o captura): solo se paga al recibir",
+      )
     const parsed = orderInput.safeParse({
       customerName: "Clienta de prueba",
       customerPhone: "",
@@ -615,13 +622,15 @@ export async function payTestOrder(
 export async function tellAnswer(
   sofi: SofiDeps,
   storeId: string,
-  told: { conversationId: string; question: string }[],
+  told: { conversationId: string; product: string }[],
   answerText: string,
 ): Promise<{ told: number }> {
   let count = 0
-  for (const { conversationId, question } of told) {
+  // La pregunta la escribió la clienta: no va en el aviso (es de sistema). Va el producto, que es
+  // de la tienda, y la respuesta, que es lo único cuyos importes se pueden repetir.
+  for (const { conversationId, product: name } of told) {
     const result = await answer(sofi, storeId, conversationId, {
-      text: `La tienda respondió lo que preguntó la clienta («${question}»): «${answerText}». Díselo con tus palabras, sin agregar nada que no diga la respuesta, y sigue con la venta.`,
+      text: `La tienda respondió lo que preguntó la clienta de «${name}»: «${answerText}». Díselo con tus palabras, sin agregar nada que no diga la respuesta, y sigue con la venta.`,
     })
     if (result.status === "respondio") count += 1
   }

@@ -997,6 +997,14 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
       tell: false,
     })
     expect(answered.status).toBe(200)
+    // Otra persona con la misma línea abierta no la pisa ni le vuelve a escribir a nadie.
+    const again = await call("rosa", "POST", `${base}/preguntas/respuesta`, {
+      ids: lines[0].ids,
+      answer: "Otra respuesta",
+      save: false,
+      tell: true,
+    })
+    expect(again.status).toBe(409)
     const proposed = (await call("rosa", "GET", `${base}/inicio`)).json.toDo.filter(
       (t: Json) => t.kind === "pregunta",
     )
@@ -1030,7 +1038,7 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
     const told = await tellAnswer(
       deps,
       storeId,
-      chats.map((conversationId) => ({ conversationId, question: "¿Destiñe al lavarla?" })),
+      chats.map((conversationId) => ({ conversationId, product: "Zapatilla de lona" })),
       "No destiñe. Lávala a mano con agua fría.",
     )
     expect(told.told).toBe(2)

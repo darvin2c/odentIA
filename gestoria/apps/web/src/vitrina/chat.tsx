@@ -105,7 +105,13 @@ function Bubble({
               <span style={{ fontSize: 13, color: "var(--vv-ink-2)" }}>
                 {money(order.totalCents, currency)}
                 {open && live?.deal && !live.deal.expired ? ` · vale hasta ${live.deal.until}` : ""}
-                {!open ? " · pagado" : ""}
+                {order.state === "anulado"
+                  ? " · anulado"
+                  : !open
+                    ? order.balance.paid
+                      ? " · pagado"
+                      : " · pago por confirmar"
+                    : ""}
               </span>
               <span>Pedido {order.number}</span>
             </span>

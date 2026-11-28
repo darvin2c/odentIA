@@ -2811,7 +2811,8 @@ export async function payTestOrderIn(
     orderId,
     kind: "comprobante",
     status: "confirmado",
-    amountCents: order.totalCents,
+    // Lo que falta: si pagó una parte antes, solo el resto.
+    amountCents: (await balanceIn(tx, order)).dueCents,
     methodName: `${methodLabel} (prueba)`.slice(0, 80),
     methodType: method.methodType,
     note: "Pago de prueba: no se cobró",

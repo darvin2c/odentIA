@@ -439,7 +439,7 @@ function AnswerQuestion({
         proposal
           ? "Guardado en la ficha: Sofi ya lo sabe"
           : value.tell
-            ? `Respondido: Sofi se lo dice a ${who}`
+            ? `Respondido. Sofi se lo escribe a ${who}, si atiende su chat.`
             : "Respondido",
       )
       onClose()
@@ -463,7 +463,7 @@ function AnswerQuestion({
               rows={3}
               maxLength={1000}
               autoFocus
-              description="Escríbela una vez. Sofi no agrega nada: dice lo que respondes."
+              description="Escríbela una vez. Sofi se lo dice con sus palabras, sin agregar datos."
             />
           )}
         </form.AppField>
@@ -473,7 +473,7 @@ function AnswerQuestion({
               {(field) => (
                 <field.CheckboxField
                   label="Que Sofi se lo diga"
-                  description={`Sofi le escribe la respuesta a ${who} por el mismo chat.`}
+                  description={`Sofi le escribe la respuesta a ${who} por el mismo chat, si ella lo atiende. Si lo atiende una persona, díselo tú.`}
                 />
               )}
             </form.AppField>
@@ -483,7 +483,7 @@ function AnswerQuestion({
                   label="Guardarlo en la ficha"
                   description={
                     editor
-                      ? `Queda en ${item.product}: la próxima vez Sofi responde sin esperar.`
+                      ? `Queda en ${item.product} y en su página de la vitrina, en «Lo que más preguntan»: la próxima vez Sofi responde sin esperar.`
                       : "Lo propones: lo guarda el Dueño o un Administrador."
                   }
                 />

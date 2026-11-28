@@ -538,7 +538,7 @@ export async function collectPushes(ownerDb: Db, now: Date = new Date()): Promis
           join product p on p.id = q.product_id
           join conversation c on c.store_id = q.store_id and c.id = q.conversation_id
         where q.store_id = ${seat.storeId} and q.answer is null and c.channel <> 'prueba'
-        order by q.asked_at desc limit 50`)
+        order by q.asked_at desc limit 200`)
       const askedArray = sql`${`{${asked.map((q) => q.id).join(",")}}`}::uuid[]`
 
       // La primera vez: desde aquí. Lo que ya estaba no se avisa. También si todos sus celulares

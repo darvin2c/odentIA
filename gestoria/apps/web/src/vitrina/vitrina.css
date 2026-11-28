@@ -508,7 +508,8 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.vv .pay span {
+.vv .pay span,
+.vv .pay .zone {
   padding: 6px 11px;
   border-radius: 10px;
   background: var(--vv-screen);
@@ -1226,6 +1227,19 @@
 }
 .vv .msg-btn + .msg-btn {
   border-top: 1px solid var(--vv-line);
+}
+/* La zona de la entrega, en el carrito. */
+.vv .zone {
+  border: 0;
+  cursor: pointer;
+}
+.vv .zone.on {
+  background: var(--vv-brand);
+  color: var(--vv-on);
+}
+/* En oscuro, una muestra negra no se pierde en el fondo: lleva su borde claro. */
+.dark .vv .tone:not(.on) {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28) inset;
 }
 .vvw .card-empty {
   display: block;
