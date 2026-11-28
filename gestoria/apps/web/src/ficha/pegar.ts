@@ -34,9 +34,16 @@ function indexes(values: string[], items: PasteAxisItem[]): (number | null)[] {
  * menos dos, o el único que tiene), o la esquina dice qué son («Talla») y al menos uno coincide.
  * Unos números de stock que por casualidad son tallas no bastan: tienen que serlo todos.
  */
-function isHeader(found: (number | null)[], items: PasteAxisItem[], cornerIsText: boolean) {
+function isHeader(
+  found: (number | null)[],
+  items: PasteAxisItem[],
+  cornerIsText: boolean,
+  allText: boolean,
+) {
   const filled = found.filter((i) => i !== null)
   if (!filled.length) return false
+  // Palabras que no son valores («Rojo», «Verde»): son títulos, estén o no en la ficha.
+  if (allText) return true
   const matched = filled.filter((i) => i >= 0).length
   if (cornerIsText) return matched > 0
   return matched === filled.length && (matched >= 2 || items.length === 1)
@@ -68,24 +75,46 @@ export function readPaste(
     { topIs: null, leftIs: "columns" },
   ]
   const axis = (which: "columns" | "rows") => (which === "columns" ? columns : rows)
-  const fits = (l: Layout) => {
+  const allText = (values: string[]) => {
+    const filled = values.filter((v) => norm(v))
+    return filled.length > 0 && filled.every((v) => parse(v) === undefined)
+  }
+  const fits = (l: Layout, words: boolean) => {
     // Con las dos, la esquina es de las dos; con una sola, la fila o columna entera es título.
     const both = l.topIs !== null && l.leftIs !== null
     const topValues = both ? top : first
     const leftValues = both ? left : table.map((line) => line[0] ?? "")
     if (
       l.topIs &&
-      !isHeader(indexes(topValues, axis(l.topIs)), axis(l.topIs), both && cornerIsText)
+      !isHeader(
+        indexes(topValues, axis(l.topIs)),
+        axis(l.topIs),
+        both && cornerIsText,
+        words && allText(topValues),
+      )
     )
       return false
     if (
       l.leftIs &&
-      !isHeader(indexes(leftValues, axis(l.leftIs)), axis(l.leftIs), both && cornerIsText)
+      !isHeader(
+        indexes(leftValues, axis(l.leftIs)),
+        axis(l.leftIs),
+        both && cornerIsText,
+        words && allText(leftValues),
+      )
     )
       return false
     return true
   }
-  const layout = layouts.find(fits) ?? { topIs: null, leftIs: null }
+  // Primero con títulos de los dos lados y luego de uno; en cada caso, antes por los nombres que
+  // coinciden y después por palabras que no son valores (títulos de lo que no está en la ficha,
+  // que se dice).
+  const both = layouts.filter((l) => l.topIs && l.leftIs)
+  const single = layouts.filter((l) => !(l.topIs && l.leftIs))
+  const layout = both.find((l) => fits(l, false)) ??
+    both.find((l) => fits(l, true)) ??
+    single.find((l) => fits(l, false)) ??
+    single.find((l) => fits(l, true)) ?? { topIs: null, leftIs: null }
 
   const cells: PasteCell[] = []
   const missed: string[] = []

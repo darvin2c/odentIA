@@ -9,7 +9,7 @@ import {
   storeEvent,
 } from "@gestoria/db"
 import { and, eq, isNull } from "drizzle-orm"
-import { MAX_PRODUCTS, makeSku, productInput } from "./catalogo.js"
+import { MAX_PRODUCTS, makeSku, productInput, slugOf } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { parseMoney } from "./dinero.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -402,10 +402,26 @@ export async function uploadSheet(
     for (const p of plan.products)
       for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
     // De a tantas filas por consulta: tres consultas por bloque, no tres por fila.
+    // Cada uno nace con su nombre en el link, sin chocar con otro de la tienda ni de la hoja.
+    const slugs = new Set(
+      (
+        await tx.select({ slug: product.webSlug }).from(product).where(eq(product.storeId, storeId))
+      ).map((r) => r.slug),
+    )
+    const slugFor = (name: string) => {
+      const base = slugOf(name).slice(0, 76).replace(/-+$/, "")
+      if (!base) return null
+      let slug = base
+      for (let n = 2; slugs.has(slug) && n < 1000; n++) slug = `${base}-${n}`
+      if (slugs.has(slug)) return null
+      slugs.add(slug)
+      return slug
+    }
     const created = await tx
       .insert(product)
       .values(
         plan.products.map((p) => ({
+          webSlug: slugFor(p.name),
           storeId,
           name: p.name,
           category: p.category,

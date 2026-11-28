@@ -102,4 +102,25 @@ describe("pegar desde Excel", () => {
     expect(cells).toHaveLength(4)
     expect(missed).toEqual(["2 valores que no caben"])
   })
+
+  it("una columna de colores con uno solo, o con uno que no está, sigue siendo de títulos", () => {
+    const one = readPaste(table("\t35\t36\nnegro\t1\t2"), rows, columns, at, parse, names)
+    expect(one.cells).toEqual([
+      { row: "t35", column: "cn", value: "1" },
+      { row: "t36", column: "cn", value: "2" },
+    ])
+    const unknown = readPaste(
+      table("\t35\t36\nrojo\t1\t2\nverde\t3\t4"),
+      rows,
+      columns,
+      at,
+      parse,
+      names,
+    )
+    expect(unknown.cells).toEqual([])
+    expect(unknown.missed).toEqual([
+      "color «rojo» (no está en la ficha)",
+      "color «verde» (no está en la ficha)",
+    ])
+  })
 })

@@ -327,6 +327,43 @@ describe("la misma ficha en dos pestañas", () => {
     expect(s.now().listPriceCents).toBe(13900)
   })
 
+  it("si las dos cambiaron la cuadrícula, lo de aquí queda sobre el stock de ahora", async () => {
+    let current = sheet({ "35": 3, "36": 3 })
+    const sent: GridBody[] = []
+    const api = {
+      patch: async () => current,
+      grid: async (body: unknown) => {
+        const b = body as GridBody & { version?: string }
+        if (b.version !== current.updatedAt)
+          throw new ApiError(409, "STALE", "Alguien cambió esta ficha mientras la tenías abierta.")
+        sent.push(b)
+        return { product: current }
+      },
+      load: async () => current,
+    } satisfies SaveApi
+    const store = new FichaStore(current, api, () => undefined, false)
+    const grid = () => store.getSnapshot().draft.grid!
+    const key = (size: string) =>
+      cellKey(grid().rows[0]!.id, grid().columns.find((c) => c.value === size)!.id)
+    // Otra pestaña cambia el precio de la 35 y se vende una 36.
+    const other = sheet({ "35": 3, "36": 2 })
+    other.variants[0]!.priceCents = 11900
+    current = { ...other, updatedAt: "2026-11-27T00:00:09.000Z" }
+    // Aquí se sube la 35 a 5.
+    store.change("Stock 35", (d) => {
+      d.grid!.cells[key("35")]!.stock = 5
+    })
+    await store.flush()
+    await until(() => store.getSnapshot().status.kind === "conflict")
+    // La 36 que no se tocó muestra lo de ahora: la venta no se revive.
+    expect(grid().cells[key("36")]!.stock).toBe(2)
+    expect(grid().cells[key("35")]!.stock).toBe(5)
+    store.keepMine()
+    await until(() => sent.length === 1)
+    const c36 = sent[0]!.cells.find((c) => c.column === "36")!
+    expect(c36.stock - (c36.seenStock ?? c36.stock)).toBe(0)
+  })
+
   it("o toma lo de la otra pestaña", async () => {
     const s = versioned()
     const store = new FichaStore(s.now(), s.api, () => undefined, false)

@@ -257,7 +257,8 @@ export class FichaStore {
    * («S/ 1» camino a «S/ 149») y ninguno de esos debe llegar al servidor ni al historial.
    */
   release() {
-    if (!this.held) return
+    // También si el guardado todavía no se había intentado (se salió antes de los 900 ms).
+    if (!this.held && (this.inflight || this.pendingCount() === 0)) return
     this.held = false
     clearTimeout(this.timer)
     this.timer = setTimeout(() => void this.flush(), 0)
@@ -515,17 +516,28 @@ export class FichaStore {
     const fresh = draftOf(latest, gridOf(latest, idsOf(draft.grid)))
     const mine = changedFields(base, draft)
     const theirs = changedFields(base, fresh)
-    const clash: string[] = mine.filter((f) => theirs.includes(f))
+    const clash: string[] = []
+    const nextBase = { ...fresh }
+    const nextDraft = { ...fresh } as Record<string, unknown>
+    for (const field of mine) {
+      const merged = PARTS.has(field)
+        ? mergeMine(base[field], draft[field], fresh[field])
+        : { value: draft[field], clash: true }
+      nextDraft[field] = merged.value
+      // Un dato con partes (los del rubro, el paquete…) choca solo si las dos tocaron la misma.
+      if (theirs.includes(field) && merged.clash) clash.push(field)
+    }
     const gridMine = gridChanged(base, draft)
     const gridTheirs = !same(gridLook(base.grid), gridLook(fresh.grid))
-    if (gridMine && gridTheirs) clash.push("grid")
-    const nextBase = { ...fresh }
-    const nextDraft = { ...fresh }
-    for (const field of mine) (nextDraft as Record<string, unknown>)[field] = draft[field]
-    if (gridMine) {
+    if (gridMine && !gridTheirs) {
       // El stock va por diferencia (`seenStock`): lo que se vio antes sigue siendo la base.
       nextDraft.grid = draft.grid
-      if (!gridTheirs) nextBase.grid = base.grid
+      nextBase.grid = base.grid
+    } else if (gridMine) {
+      // Las dos cambiaron la cuadrícula: lo de aquí, puesto sobre el stock de ahora (lo vendido
+      // o lo que entró allá no se pisa), y la persona elige.
+      clash.push("grid")
+      nextDraft.grid = onSaved(draft.grid, base.grid!, fresh.grid)
     }
     const changed = [
       ...theirs.filter((f) => !mine.includes(f)).map((f) => FIELD_NAMES[f] ?? f),
@@ -536,7 +548,7 @@ export class FichaStore {
     this.set({
       sheet: latest,
       base: nextBase,
-      draft: nextDraft,
+      draft: nextDraft as unknown as Draft,
       news:
         changed.length > 0 && clash.length === 0
           ? `Alguien cambió esta ficha mientras la tenías abierta: ${listOf(changed)}. Ya lo ves aquí; lo tuyo se guarda igual.`
@@ -706,6 +718,33 @@ export class FichaStore {
   idle(): boolean {
     return !this.inflight && (this.closed || this.pendingCount() === 0)
   }
+}
+
+/** Los datos que tienen partes sueltas: cada parte es de quien la cambió. */
+const PARTS = new Set<string>(["rubroData", "package", "offers", "web"])
+
+const isPlain = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v)
+
+/**
+ * Lo de esta pantalla sobre lo de ahora: en un dato con partes (los del rubro, el paquete, lo que
+ * Sofi puede ofrecer), solo las partes que cambió esta pantalla; lo demás queda como lo dejó la
+ * otra. `clash`: las dos cambiaron la misma parte (o el dato entero, si no tiene partes).
+ */
+function mergeMine(
+  before: unknown,
+  mine: unknown,
+  now: unknown,
+): { value: unknown; clash: boolean } {
+  if (!isPlain(before) || !isPlain(mine) || !isPlain(now)) return { value: mine, clash: true }
+  const value: Record<string, unknown> = { ...now }
+  let clash = false
+  for (const key of new Set([...Object.keys(before), ...Object.keys(mine)])) {
+    if (same(before[key] ?? null, mine[key] ?? null)) continue
+    value[key] = mine[key] ?? null
+    if (!same(before[key] ?? null, now[key] ?? null)) clash = true
+  }
+  return { value, clash }
 }
 
 /** El servidor dijo 409: la ficha cambió desde la versión que se vio. */
