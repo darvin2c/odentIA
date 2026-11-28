@@ -1,6 +1,7 @@
 import { Button, cn, Input, useIsMobile } from "@odentia/ui"
 import { Eraser } from "lucide-react"
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react"
+import { readPaste } from "./pegar"
 import { Swatch } from "./piezas"
 
 /**
@@ -227,40 +228,37 @@ export function Hoja(props: HojaProps) {
       apply(table[0]![0]!)
       return
     }
-    const cells: { row: string; column: string; value: string | null }[] = []
-    let skipped = 0
-    table.forEach((line, dr) => {
-      line.forEach((raw, dc) => {
-        const r = r0 + dr
-        const c = c0 + dc
-        if (r >= rows.length || c >= columns.length) {
-          skipped++
-          return
-        }
-        const value = props.parse(raw)
-        if (value === undefined) {
-          skipped++
-          return
-        }
-        cells.push({ row: rows[r]!.id, column: columns[c]!.id, value })
-      })
+    // Con su fila o columna de títulos (las tallas, los colores), cada número va a su nombre.
+    const { cells, missed } = readPaste(table, rows, columns, { r: r0, c: c0 }, props.parse, {
+      row: props.rowLabel.toLocaleLowerCase("es"),
+      column: props.columnLabel.toLocaleLowerCase("es"),
     })
     setProblem(
-      skipped
-        ? `${skipped} ${skipped === 1 ? "valor no se pegó" : "valores no se pegaron"}: no valían o no cabían.`
+      missed.length
+        ? `No entró: ${missed.slice(0, 4).join(", ")}${missed.length > 4 ? ` y ${missed.length - 4} más` : ""}.`
         : null,
     )
     if (!cells.length) return
-    props.set(cells, `Pegaste ${cells.length} valores de ${props.label.toLowerCase()}`)
+    props.set(
+      cells,
+      `Pegaste ${cells.length} ${cells.length === 1 ? "valor" : "valores"} de ${props.label.toLowerCase()}${pasteDelta(cells)}`,
+    )
     glow(cells)
-    setAnchor({ r: r0, c: c0 })
-    setFocus({
-      r: Math.min(rows.length - 1, r0 + table.length - 1),
-      c: Math.min(columns.length - 1, c0 + (table[0]?.length ?? 1) - 1),
-    })
+    // Queda elegido lo que se pegó, de la primera a la última celda.
+    const rs = cells.map((x) => rows.findIndex((r) => r.id === x.row))
+    const cs = cells.map((x) => columns.findIndex((c) => c.id === x.column))
+    setAnchor({ r: Math.min(...rs), c: Math.min(...cs) })
+    setFocus({ r: Math.max(...rs), c: Math.max(...cs) })
   }
 
   const num = (v: string | null) => (v ? Number(v) || 0 : 0)
+  /** Cuánto cambia el total con lo pegado (solo el stock): «: 148 más en total». */
+  function pasteDelta(cells: { row: string; column: string; value: string | null }[]) {
+    if (!props.totals) return ""
+    const delta = cells.reduce((n, x) => n + num(x.value) - num(get(x.row, x.column)), 0)
+    if (delta === 0) return ""
+    return delta > 0 ? `: ${delta} más en total` : `: ${-delta} menos en total`
+  }
   const totalColumn = (c: string) => rows.reduce((n, r) => n + num(get(r.id, c)), 0)
   const totalRow = (r: string) => columns.reduce((n, c) => n + num(get(r, c.id)), 0)
   const changed = rows.reduce(
@@ -547,7 +545,7 @@ export function Hoja(props: HojaProps) {
               ? "Solo lectura."
               : touch
                 ? `Toca una celda para cambiarla, o un nombre para elegir toda la fila o la columna.${columns.length > 4 ? " Desliza para ver las demás." : ""}`
-                : "Arrastra o usa Mayúscula y las flechas para elegir varias, escribe un número y Enter. También pegas desde Excel."}
+                : "Arrastra o usa Mayúscula y las flechas para elegir varias, escribe un número y Enter. Desde Excel: copia la tabla, con sus títulos o sin ellos, elige la primera celda y pega (Ctrl+V)."}
           </span>
         )}
         {problem ? (

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { ApiError } from "../lib/api"
 import { cellKey, type Sheet } from "../lib/ficha"
 import { FichaStore, type GridSaved, type SaveApi } from "./borrador"
 
@@ -78,6 +79,7 @@ describe("la cuadrícula y lo que se vende mientras se edita", () => {
           return new Promise<GridSaved>((resolve) => (release = (product) => resolve({ product })))
         return Promise.resolve({ product: now })
       },
+      load: async () => now,
     } satisfies SaveApi
     const store = new FichaStore(sheet({ "35": 3, "36": 3 }), api, () => undefined, false)
     const grid = () => store.getSnapshot().draft.grid!
@@ -117,6 +119,7 @@ describe("la cuadrícula y lo que se vende mientras se edita", () => {
         sent.push(body as GridBody)
         return { product: sheet({ "35": 5, "36": 3 }) }
       },
+      load: async () => sheet({ "35": 5, "36": 3 }),
     } satisfies SaveApi
     const store = new FichaStore(sheet({ "35": 3, "36": 3 }), api, () => undefined, false)
     const grid = store.getSnapshot().draft.grid!
@@ -131,5 +134,209 @@ describe("la cuadrícula y lo que se vende mientras se edita", () => {
         expect.objectContaining({ column: "36", stock: 3, seenStock: 3 }),
       ]),
     )
+  })
+})
+
+/**
+ * Un servidor de mentira que guarda como el de verdad: suma a su stock lo que cambió cada celda
+ * frente a lo que vio la pantalla (`seenStock`) y devuelve la ficha.
+ */
+function server(start: { "35": number; "36": number }) {
+  const stock = { ...start }
+  const bodies: (GridBody & { reason?: string })[] = []
+  const patches: Record<string, unknown>[] = []
+  const api = {
+    patch: async (body: Record<string, unknown>) => {
+      patches.push(body)
+      return { ...sheet(stock), ...body } as Sheet
+    },
+    grid: async (body: unknown) => {
+      const b = body as GridBody & { reason?: string }
+      bodies.push(b)
+      for (const cell of b.cells) {
+        const size = cell.column as "35" | "36"
+        stock[size] = Math.max(0, stock[size] + cell.stock - (cell.seenStock ?? stock[size]))
+      }
+      return { product: sheet(stock) }
+    },
+    load: async () => sheet(stock),
+  } satisfies SaveApi
+  return { api, stock, bodies, patches, sell: (size: "35" | "36") => stock[size]-- }
+}
+
+function storeOn(
+  s: ReturnType<typeof server>,
+  options?: ConstructorParameters<typeof FichaStore>[4],
+) {
+  const store = new FichaStore(sheet({ ...s.stock }), s.api, () => undefined, false, options)
+  const grid = () => store.getSnapshot().draft.grid!
+  const key = (size: string) =>
+    cellKey(grid().rows[0]!.id, grid().columns.find((c) => c.value === size)!.id)
+  const set = (size: string, n: number) =>
+    store.change(`Stock: ${size} blanca`, (d) => {
+      d.grid!.cells[key(size)]!.stock = n
+    })
+  const shown = (size: string) => grid().cells[key(size)]!.stock
+  /** Guarda lo que falte y espera a que termine (también lo que ya se estaba guardando). */
+  const settled = async () => {
+    await store.flush()
+    await until(() => ["saved", "reason"].includes(store.getSnapshot().status.kind))
+  }
+  return { store, set, shown, settled }
+}
+
+describe("deshacer después de guardar la cuadrícula", () => {
+  it("deshacer una baja ya guardada devuelve el stock que había", async () => {
+    const s = server({ "35": 3, "36": 3 })
+    const { store, set, shown, settled } = storeOn(s)
+    set("36", 1)
+    store.setReason("Conté y corregí")
+    await settled()
+    expect(s.stock["36"]).toBe(1)
+
+    store.undo()
+    expect(shown("36")).toBe(3)
+    await settled()
+    // Subir es una entrada: vuelve a 3 en el servidor, sin pedir motivo.
+    expect(s.stock["36"]).toBe(3)
+    expect(store.getSnapshot().status.kind).toBe("saved")
+  })
+
+  it("rehacer después de deshacer vuelve a bajar, y bajar pide el motivo", async () => {
+    const s = server({ "35": 3, "36": 3 })
+    const { store, set, shown, settled } = storeOn(s)
+    set("36", 1)
+    store.setReason("Conté y corregí")
+    await settled()
+    store.undo()
+    await settled()
+    store.redo()
+    expect(shown("36")).toBe(1)
+    await settled()
+    expect(store.getSnapshot().status.kind).toBe("reason")
+    expect(s.stock["36"]).toBe(3)
+  })
+
+  it("con varios cambios guardados, deshacer todo deja el stock como estaba y no inventa pares", async () => {
+    const s = server({ "35": 3, "36": 3 })
+    const { store, set, shown, settled } = storeOn(s)
+    // Como pegar: dos celdas suben; luego se corrige una hacia abajo y se guarda con motivo.
+    set("35", 9)
+    set("36", 8)
+    await settled()
+    set("36", 2)
+    store.setReason("Conté y corregí")
+    await settled()
+    expect(s.stock).toEqual({ "35": 9, "36": 2 })
+
+    store.undo()
+    expect([shown("35"), shown("36")]).toEqual([9, 8])
+    store.undo()
+    store.undo()
+    expect([shown("35"), shown("36")]).toEqual([3, 3])
+  })
+
+  it("deshacer no revive lo que se vendió después de guardar", async () => {
+    const s = server({ "35": 3, "36": 3 })
+    const { store, set, shown, settled } = storeOn(s)
+    set("36", 1)
+    store.setReason("Conté y corregí")
+    await settled()
+    // Se vende una 35 y la ficha se pone al día.
+    s.sell("35")
+    store.receive(sheet({ ...s.stock }))
+    store.undo()
+    expect([shown("35"), shown("36")]).toEqual([2, 3])
+  })
+})
+
+describe("lo que se escribe en un campo", () => {
+  it("no guarda lo de a medias: espera a que se salga del campo", async () => {
+    vi.useFakeTimers()
+    try {
+      const s = server({ "35": 3, "36": 3 })
+      let typing = true
+      const { store } = storeOn(s, { typing: () => typing })
+      // Ctrl+Z del navegador deja «1» un momento y luego «149».
+      store.change("Cambiaste el precio", (d) => (d.listPriceCents = 100), { group: "precio" })
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(s.patches).toEqual([])
+      store.change("Cambiaste el precio", (d) => (d.listPriceCents = 14900), { group: "precio" })
+      typing = false
+      store.release()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(s.patches).toEqual([expect.objectContaining({ listPriceCents: 14900 })])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("la misma ficha en dos pestañas", () => {
+  /** Un servidor con versión: lo que llega con una versión vieja responde 409, como el de verdad. */
+  function versioned() {
+    let current = { ...sheet({ "35": 3, "36": 3 }), updatedAt: "2026-11-27T00:00:00.000Z" }
+    let n = 0
+    const bump = (change: Partial<Sheet>) => {
+      n++
+      current = { ...current, ...change, updatedAt: `2026-11-27T00:00:0${n}.000Z` }
+    }
+    const api = {
+      patch: async (body: Record<string, unknown>) => {
+        const { version, ...change } = body
+        if (version !== undefined && version !== current.updatedAt)
+          throw new ApiError(409, "STALE", "Alguien cambió esta ficha mientras la tenías abierta.")
+        bump(change as Partial<Sheet>)
+        return current
+      },
+      grid: async () => ({ product: current }),
+      load: async () => current,
+    } satisfies SaveApi
+    return { api, bump, now: () => current }
+  }
+
+  it("lo que cambió la otra pestaña en otro campo se toma, y lo mío se guarda encima", async () => {
+    const s = versioned()
+    const store = new FichaStore(s.now(), s.api, () => undefined, false)
+    // La otra pestaña cambia el nombre.
+    s.bump({ name: "Zapatilla de la otra pestaña" })
+    store.change("Cambiaste el precio", (d) => (d.listPriceCents = 13900))
+    await store.flush()
+    await until(() => store.getSnapshot().status.kind === "saved")
+    expect(s.now()).toMatchObject({ name: "Zapatilla de la otra pestaña", listPriceCents: 13900 })
+    expect(store.getSnapshot().draft.name).toBe("Zapatilla de la otra pestaña")
+    expect(store.getSnapshot().news).toMatch(/Alguien cambió esta ficha/)
+  })
+
+  it("si las dos cambiaron lo mismo, avisa y no pisa: lo escrito se queda", async () => {
+    const s = versioned()
+    const store = new FichaStore(s.now(), s.api, () => undefined, false)
+    s.bump({ listPriceCents: 15900 })
+    store.change("Cambiaste el precio", (d) => (d.listPriceCents = 13900))
+    await store.flush()
+    await until(() => store.getSnapshot().status.kind === "conflict")
+    const status = store.getSnapshot().status
+    expect(status.kind === "conflict" && status.message).toMatch(
+      /Alguien cambió esta ficha.*precio/,
+    )
+    expect(s.now().listPriceCents).toBe(15900)
+    expect(store.getSnapshot().draft.listPriceCents).toBe(13900)
+    // La persona decide: guarda lo suyo.
+    store.keepMine()
+    await until(() => store.getSnapshot().status.kind === "saved")
+    expect(s.now().listPriceCents).toBe(13900)
+  })
+
+  it("o toma lo de la otra pestaña", async () => {
+    const s = versioned()
+    const store = new FichaStore(s.now(), s.api, () => undefined, false)
+    s.bump({ listPriceCents: 15900 })
+    store.change("Cambiaste el precio", (d) => (d.listPriceCents = 13900))
+    await store.flush()
+    await until(() => store.getSnapshot().status.kind === "conflict")
+    store.takeTheirs()
+    await until(() => store.getSnapshot().status.kind === "saved")
+    expect(store.getSnapshot().draft.listPriceCents).toBe(15900)
+    expect(s.now().listPriceCents).toBe(15900)
   })
 })

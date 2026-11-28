@@ -11,7 +11,7 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Download, Package, Plus, Trash2, Upload } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
@@ -96,11 +96,23 @@ export function CatalogPage() {
         meta: { view: { role: "title" } },
         cell: ({ row }) => (
           <span className="flex min-w-0 flex-col">
-            <span className="truncate font-semibold">{row.original.name}</span>
+            {/* El nombre es el enlace a la ficha: con Tab se llega, Enter la abre y el lector
+                de pantalla lo lee por su nombre. Toda la fila también la abre con el mouse. */}
+            <Link
+              to="/tiendas/$id/catalogo/$productId"
+              params={{ id: store.id, productId: row.original.id }}
+              className="truncate rounded-sm font-semibold outline-none hover:underline focus-visible:underline focus-visible:ring-3 focus-visible:ring-ring/40"
+            >
+              {row.original.name}
+            </Link>
             {row.original.category ? (
               <span className="truncate text-xs text-muted-foreground">
                 {row.original.category}
               </span>
+            ) : null}
+            {/* En el celular no hay columna de estado: lo que no es «Disponible» se dice aquí. */}
+            {row.original.state !== "disponible" && row.original.state !== "agotado" ? (
+              <StateBadge state={row.original.state} className="mt-1 self-start md:hidden" />
             ) : null}
           </span>
         ),

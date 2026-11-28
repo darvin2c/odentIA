@@ -32,7 +32,9 @@ import { z } from "zod"
 import { isAgent } from "./agente.js"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
+import { todayIn, variantPrices } from "./pedidos.js"
 import { can, type StoreSeat } from "./permisos.js"
+import { autoUnitCents } from "./precio.js"
 import { applyRubroData, mergeTemplate, RUBROS, readinessOf, templateIn } from "./rubros.js"
 import { lastEntryCost } from "./stock.js"
 import { sameText } from "./texto.js"
@@ -176,6 +178,26 @@ export function slugOf(text: string): string {
     .replace(/-+$/, "")
 }
 
+/**
+ * El nombre en el link para un producto nuevo: el de su nombre y, si ya lo tiene otro de la
+ * tienda, con un número («zapatilla-de-lona-2»). Nulo si el nombre no deja nada (solo signos).
+ */
+export async function freeSlug(tx: Db, storeId: string, name: string): Promise<string | null> {
+  const base = slugOf(name).slice(0, 76).replace(/-+$/, "")
+  if (!base) return null
+  const taken = new Set(
+    (
+      await tx
+        .select({ slug: product.webSlug })
+        .from(product)
+        .where(and(eq(product.storeId, storeId), sql`${product.webSlug} like ${`${base}%`}`))
+    ).map((r) => r.slug),
+  )
+  if (!taken.has(base)) return base
+  for (let n = 2; n < 1000; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`
+  return null
+}
+
 /** Los datos de un producto, sin valores por omisión: un cambio solo toca lo que trae. */
 const productFields = {
   name: label("el nombre del producto", 120),
@@ -208,6 +230,9 @@ export const productInput = z
   })
 
 const dateOnly = z.iso.date("Elige el día")
+
+/** La versión de la ficha que vio la pantalla: su `updatedAt` en ISO 8601. */
+export const versionInput = z.iso.datetime({ offset: true })
 
 export const productPatch = z
   .object({
@@ -280,6 +305,11 @@ export const productPatch = z
     package: packageInput,
     keywords: keywordsInput,
     web: webInput.partial(),
+    /**
+     * La versión de la ficha que vio la pantalla (su `updatedAt`). Si otra pestaña o persona la
+     * cambió después, no se pisa: 409 (`checkVersion`). Sin ella, como antes.
+     */
+    version: versionInput,
   })
   .partial()
   .superRefine((p, ctx) => {
@@ -423,6 +453,18 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
       .select()
       .from(storeTemplateField)
       .where(eq(storeTemplateField.storeId, storeId))
+    // El precio de venta de hoy de cada producto (con su promoción, `precio.ts`), el mismo que da
+    // Sofi: con él se compara «algo más barato». De lo que hay (o se vende sin stock), si no, de todo.
+    const priced = Map.groupBy(
+      await variantPrices(tx, storeId, await todayIn(tx, storeId)),
+      (v) => v.productId,
+    )
+    const saleFromOf = (productId: string) => {
+      const own = priced.get(productId) ?? []
+      const selling = own.filter((v) => v.stock > 0 || v.sellsWithoutStock)
+      const prices = (selling.length ? selling : own).map((v) => autoUnitCents(v.pricing, 1))
+      return prices.length ? Math.min(...prices) : null
+    }
     const variants = await tx
       .select({
         productId: productVariant.productId,
@@ -509,11 +551,38 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
           soldOut: own.filter((v) => v.stock === 0).length,
           fromCents: prices.length ? Math.min(...prices) : p.listPriceCents,
           toCents: prices.length ? Math.max(...prices) : p.listPriceCents,
+          /** El precio de venta de hoy, desde (con su promoción); nulo si ya no se vende. */
+          saleFromCents: saleFromOf(p.id),
           photoId: ownPhotos[0]?.id ?? null,
         }
       }),
     }
   })
+}
+
+/**
+ * Si la ficha cambió desde la versión que vio la pantalla (otra pestaña, otra persona), no se
+ * guarda encima: 409. Toma la fila mientras se guarda, así dos guardados a la vez no pasan los dos.
+ */
+export async function checkVersion(
+  tx: Db,
+  storeId: string,
+  productId: string,
+  version: string | undefined,
+) {
+  if (version === undefined) return
+  uuidOr404(productId, "Ese producto ya no está")
+  const [row] = await tx
+    .select({ updatedAt: product.updatedAt })
+    .from(product)
+    .where(and(eq(product.id, productId), eq(product.storeId, storeId)))
+    .for("update")
+  if (row && Date.parse(version) !== row.updatedAt.getTime())
+    throw new StoreError(
+      409,
+      "STALE",
+      "Alguien cambió esta ficha mientras la tenías abierta. Lo tuyo sigue aquí, sin guardar.",
+    )
 }
 
 export async function productRow(tx: Db, storeId: string, productId: string) {
@@ -783,7 +852,7 @@ export async function productHistory(
   productId: string,
 ) {
   return inStore(appDb, person, storeId, "catalogo.ver", async (tx, role) => {
-    await productRow(tx, storeId, productId)
+    const current = await productRow(tx, storeId, productId)
     const rows = await tx
       .select()
       .from(productEvent)
@@ -796,16 +865,26 @@ export async function productHistory(
     )
     // Lo que costó solo lo ve quien puede ver costos.
     const costs = can(role, "costos.ver")
-    return {
-      events: rows.map((r) => ({
-        id: r.id,
-        action: r.action,
-        actorName: who.get(r.actorUserId) ?? null,
-        changes: costs ? r.changes : r.changes.filter((c) => c.field !== "unitCostCents"),
-        reason: r.reason,
-        createdAt: r.createdAt,
-      })),
-    }
+    const events = rows.map((r) => ({
+      id: r.id,
+      action: r.action as string,
+      actorName: who.get(r.actorUserId) ?? null,
+      changes: costs ? r.changes : r.changes.filter((c) => c.field !== "unitCostCents"),
+      reason: r.reason,
+      createdAt: r.createdAt,
+    }))
+    // «Creó el producto» va siempre al final: uno que se creó sin anotarlo (antes, o desde otra
+    // pantalla) lo dice con su fecha, sin el nombre que no se sabe.
+    if (rows.length < 200 && !rows.some((r) => r.action === "creado"))
+      events.push({
+        id: `creado-${productId}`,
+        action: "creado",
+        actorName: null,
+        changes: [],
+        reason: null,
+        createdAt: current.createdAt,
+      })
+    return { events }
   })
 }
 
@@ -836,6 +915,8 @@ export async function createProductIn(
       minPriceCents: input.minPriceCents,
       options: input.options,
       colorOption: colorOptionOf(input.options),
+      // Nace con su link: el catálogo web y «Copiar el link» lo tienen desde el principio.
+      webSlug: await freeSlug(tx, storeId, input.name),
     })
     .returning({ id: product.id })
   const skus = taken ?? (await takenSkus(tx, storeId))
@@ -967,6 +1048,7 @@ export async function updateProduct(
   patch: z.infer<typeof productPatch>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    await checkVersion(tx, storeId, productId, patch.version)
     const current = await productRow(tx, storeId, productId)
     const before = sheetOf(await detailIn(tx, storeId, productId))
     const listPriceCents = patch.listPriceCents ?? current.listPriceCents

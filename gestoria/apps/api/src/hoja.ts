@@ -2,6 +2,7 @@ import {
   type Db,
   type ProductOption,
   product,
+  productEvent,
   productVariant,
   stockMovement,
   store,
@@ -414,6 +415,17 @@ export async function uploadSheet(
         })),
       )
       .returning({ id: product.id, name: product.name })
+    // Cada producto que entra con la hoja tiene su «Creó el producto» en «Quién cambió qué».
+    if (created.length > 0)
+      await tx.insert(productEvent).values(
+        created.map((row) => ({
+          storeId,
+          productId: row.id,
+          actorUserId: person.userId,
+          action: "creado" as const,
+          changes: [],
+        })),
+      )
     const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
     const rows = plan.products.flatMap((p) =>
       p.variants.map((v) => ({

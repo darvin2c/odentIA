@@ -86,6 +86,7 @@ function SaveState({ status, pending }: { status: SaveStatus; pending: number })
     rejected: <CircleAlert className="size-4 text-destructive" aria-hidden />,
     reason: <CircleAlert className="size-4 text-warning" aria-hidden />,
     incomplete: <span className="size-2 rounded-full bg-warning" aria-hidden />,
+    conflict: <CircleAlert className="size-4 text-warning" aria-hidden />,
   }[status.kind]
   const text = {
     saved: "Guardado",
@@ -95,6 +96,7 @@ function SaveState({ status, pending }: { status: SaveStatus; pending: number })
     rejected: "No se guardó todo",
     reason: "Falta el motivo del stock",
     incomplete: "Falta completar el paquete",
+    conflict: "Alguien cambió esta ficha",
   }[status.kind]
   const detail = "message" in status ? status.message : undefined
   return (
@@ -225,7 +227,7 @@ function SofiLine({ readiness }: { readiness: Readiness }) {
 
 function FichaSkeleton() {
   return (
-    <SkeletonRegion message="Cargando el producto" className="flex flex-col gap-4">
+    <SkeletonRegion message="Cargando el producto" className="@container/ficha flex flex-col gap-4">
       <Skeleton className="h-5 w-24" />
       <div className="flex items-center gap-3">
         <Skeleton className="size-10 rounded-lg" />
@@ -233,7 +235,7 @@ function FichaSkeleton() {
       </div>
       <Skeleton className="h-6 w-80 max-w-full" />
       <Skeleton className="h-9 w-72 max-w-full rounded-full" />
-      <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="grid min-w-0 items-start gap-5 @4xl/ficha:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex flex-col gap-5">
           <Skeleton className="h-72 rounded-xl" />
           <Skeleton className="h-48 rounded-xl" />
@@ -269,6 +271,10 @@ export function ProductPage() {
           method: "POST",
           body,
         }),
+      load: () =>
+        api<{ product: Sheet }>(`/api/tiendas/${store.id}/productos/${productId}`).then(
+          (r) => r.product,
+        ),
     }),
     [store.id, productId],
   )
@@ -356,6 +362,12 @@ function ProductSheet({
       })
   }, [fichaStore])
 
+  // Lo que cambió otra pestaña u otra persona y ya se ve aquí.
+  const news = state.news
+  useEffect(() => {
+    if (news) toast.info(news, { id: "ficha-otra-pestana", duration: 10_000 })
+  }, [news])
+
   // Lo que se vendió mientras se editaba: se dice, y lo escrito se sumó a eso.
   const sold = state.sold
   useEffect(() => {
@@ -368,13 +380,24 @@ function ProductSheet({
     if (!last || last.label.startsWith("Deshiciste") || last.label.startsWith("Rehiciste")) return
     toast(last.label, {
       id: "ficha-cambio",
+      // Lo pegado se queda a la vista más tiempo: puede ser mucho stock de una vez.
+      duration: last.label.startsWith("Pegaste") ? 15_000 : undefined,
       action: { label: "Deshacer", onClick: () => fichaStore.undo() },
     })
   }, [last, fichaStore])
 
+  // Lo que se escribe en un campo se guarda al salir de él o con Enter, nunca a medias: así el
+  // deshacer del campo (Ctrl+Z) no deja en el servidor un valor que nadie escribió.
+  useEffect(() => {
+    const release = () => fichaStore.release()
+    window.addEventListener("focusout", release)
+    return () => window.removeEventListener("focusout", release)
+  }, [fichaStore])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey
+      if (e.key === "Enter" && e.target instanceof HTMLInputElement) fichaStore.release()
       // En un campo, Ctrl+Z es el del campo; en la cuadrícula, el de la ficha.
       if (mod && e.key.toLowerCase() === "z" && !typing(e.target)) {
         e.preventDefault()
@@ -404,10 +427,11 @@ function ProductSheet({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [undo, redo])
+  }, [undo, redo, fichaStore])
 
   // Salir con algo que no se pudo guardar (sin red, rechazado o sin el motivo) pregunta antes.
-  const stuck = pending > 0 && ["offline", "rejected", "reason", "incomplete"].includes(status.kind)
+  const stuck =
+    pending > 0 && ["offline", "rejected", "reason", "incomplete", "conflict"].includes(status.kind)
   const blocker = useDraftBlocker({
     disabled: !stuck,
     enableBeforeUnload: stuck,
@@ -551,7 +575,10 @@ function ProductSheet({
 
   return (
     <FichaContext.Provider value={ficha}>
-      <div className={cn("flex min-w-0 flex-col gap-4", isMobile && edit && "pb-20")}>
+      {/* El ancho de la ficha, no el de la ventana: con un panel al lado, las columnas se acomodan. */}
+      <div
+        className={cn("@container/ficha flex min-w-0 flex-col gap-4", isMobile && edit && "pb-20")}
+      >
         {back}
         <div className="flex min-w-0 items-center gap-3">
           {!isMobile && sheet.photos[0] ? (
@@ -626,6 +653,24 @@ function ProductSheet({
             {status.message} Lo demás sí se guardó. Corrígelo o deshazlo.
           </PageNotice>
         ) : null}
+        {status.kind === "conflict" && edit ? (
+          <PageNotice
+            tone="alarma"
+            label="Otra pestaña"
+            action={
+              <span className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => fichaStore.keepMine()}>
+                  Guardar lo mío
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => fichaStore.takeTheirs()}>
+                  Quedarme con lo otro
+                </Button>
+              </span>
+            }
+          >
+            {status.message}
+          </PageNotice>
+        ) : null}
 
         {isMobile ? (
           <div className="flex flex-col gap-3">
@@ -634,7 +679,7 @@ function ProductSheet({
             {side}
           </div>
         ) : (
-          <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="grid min-w-0 items-start gap-5 @4xl/ficha:grid-cols-[minmax(0,1fr)_18rem] @6xl/ficha:grid-cols-[minmax(0,1fr)_20rem]">
             <div className="flex min-w-0 flex-col gap-5">{main}</div>
             <div className="flex min-w-0 flex-col gap-4">{side}</div>
           </div>
