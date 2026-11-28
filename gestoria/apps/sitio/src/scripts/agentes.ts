@@ -119,7 +119,7 @@ function regla(sofi: Sofi) {
       if (sofiEl) sofi.humor(sofiEl, "feliz")
       sofi.festejar()
     })
-    .from(".regla-g__marca--oferta", { opacity: 0, y: 10, duration: 0.5 }, "-=0.4")
+    .from(".regla-g__marca--oferta", { opacity: 0, duration: 0.5 }, "-=0.4")
 }
 
 export function iniciarSofi() {
@@ -178,13 +178,16 @@ function dia(sofi: Sofi) {
   const hora = $("[data-dia-hora]", pin)
   const avance = $("[data-dia-avance]", pin)
   const sofiEl = $(".dia__sofi", pin)
-  gsap.set(eventos, { opacity: 0, x: 40 })
+  // En el celular entran desde abajo: desde el costado sobresalían del borde mientras se movían.
+  const oculto = window.innerWidth < 1024 ? { opacity: 0, y: 16 } : { opacity: 0, x: 40 }
+  gsap.set(eventos, oculto)
   let visto = -1
   const mostrar = (n: number) => {
     if (n === visto) return
     for (const [i, e] of eventos.entries()) {
-      if (i <= n && i > visto) gsap.to(e, { opacity: 1, x: 0, duration: 0.6, ease: "expo.out" })
-      if (i > n && i <= visto) gsap.to(e, { opacity: 0, x: 40, duration: 0.3 })
+      if (i <= n && i > visto)
+        gsap.to(e, { opacity: 1, x: 0, y: 0, duration: 0.6, ease: "expo.out" })
+      if (i > n && i <= visto) gsap.to(e, { ...oculto, duration: 0.3 })
       e.classList.toggle("es-ahora", i === n)
     }
     visto = n

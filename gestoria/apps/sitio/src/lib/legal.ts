@@ -280,7 +280,7 @@ export const TERMINOS: LegalDoc = {
       id: "plan",
       title: "Plan y precio",
       blocks: [
-        "El plan cuesta USD 19 al mes y ese monto vuelve como saldo. Del saldo sale el 1 % de cada pedido que gestorIA genera sola, como una venta que cerró Sofi en el chat. Si en un mes el 1 % pasa de USD 19, la Tienda paga la diferencia solo ese mes. Lo que anota el equipo no paga el 1 %, y lo que se devuelve de un pedido de Sofi se descuenta. No hay cobro por persona del equipo.",
+        "El plan cuesta USD 19 al mes y ese monto vuelve como saldo. Del saldo sale el 1 % del total, con el envío, de cada venta completada: cuando el pedido está pagado y entregado a la clienta o despachado por agencia, venga del chat, del catálogo, de una campaña o lo anote el equipo. Si en un mes el 1 % pasa de USD 19, la Tienda paga la diferencia solo ese mes. Lo que se devuelve de un pedido se descuenta. No hay cobro por persona del equipo.",
         "Los precios no incluyen impuestos: se suman los que correspondan según el país de la Tienda (en el Perú, el IGV), y el comprobante se emite conforme a la ley.",
         "Las tarifas de terceros las cobra cada uno directamente a la Tienda: Meta por las plantillas de WhatsApp para iniciar conversaciones y Mercado Pago por cada cobro, según sus propias tarifas.",
         "gestorIA puede cambiar el precio avisando con al menos 30 días por correo y dentro de la app. El nuevo precio rige desde el periodo siguiente al aviso; si la Tienda no está de acuerdo, puede irse antes.",
@@ -360,7 +360,7 @@ export const TERMINOS: LegalDoc = {
       id: "duracion",
       title: "Duración y salida",
       blocks: [
-        `El contrato es por tiempo indefinido y se renueva cada mes. La Tienda puede terminarlo cuando quiera desde Ayuda o escribiendo a ${CORREO}; rige al terminar el mes en curso y se cobra el 1 % generado hasta ese día.`,
+        `El contrato es por tiempo indefinido y se renueva cada mes. La Tienda puede terminarlo cuando quiera desde Ayuda o escribiendo a ${CORREO}; rige al terminar el mes en curso y se cobra el 1 % de lo vendido hasta ese día.`,
         "gestorIA puede terminarlo por un incumplimiento grave de la Tienda o avisando con 30 días de anticipación.",
         "Durante el contrato y los 30 días siguientes, la Tienda puede pedirnos una copia de sus datos en formatos de uso común. Vencido ese plazo, los eliminamos, salvo lo que la ley obligue a conservar.",
       ],

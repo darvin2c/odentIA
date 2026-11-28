@@ -1,6 +1,6 @@
 ---
-// Precios (web v5): el plan que definió el dueño. USD 19 al mes que vuelven como saldo, y el 1 % de
-// cada pedido que gestorIA genera sola, que sale de ese saldo. Los ejemplos son cuentas exactas en
+// Precios (web v5): el plan que definió el dueño. USD 19 al mes que vuelven como saldo, y el 1 % del
+// total de cada venta completada (pagada y entregada), venga de donde venga, que sale de ese saldo (lo devuelto se descuenta). Los ejemplos son cuentas exactas en
 // dólares, sin tipo de cambio.
 import Acordeon from "../components/Acordeon.astro"
 import PaginaHeroe from "../components/PaginaHeroe.astro"
@@ -24,11 +24,11 @@ const incluye = [
 const preguntas: Pregunta[] = [
   [
     "¿Qué cuenta para el 1 %?",
-    "Cada pedido que gestorIA genera sola, como una venta que cerró Sofi en el chat. Lo que anota tu equipo no paga el 1 %.",
+    "Cada venta completada, del pedido a la entrega, venga de donde venga: lo que vende Sofi en el chat, el catálogo, una campaña o lo que anota tu equipo. Cuenta cuando está pagada y entregada (o despachada por agencia), sobre el total con el envío, y lo que devuelves se descuenta.",
   ],
   [
     "¿Y si el 1 % pasa de USD 19?",
-    "Pagas la diferencia, solo ese mes. Si gestorIA vende poco, no pagas más que los USD 19.",
+    "Pagas la diferencia, solo ese mes. Si vendes poco, no pagas más que los USD 19.",
   ],
   ["¿Hay cobro por persona del equipo?", "No. El plan es uno solo para la tienda."],
 ]
@@ -37,7 +37,7 @@ const oferta = {
   "@type": "Product",
   name: "gestorIA",
   description:
-    "Plan de gestorIA: USD 19 al mes que vuelven como saldo, más el 1 % de cada pedido que gestorIA genera sola.",
+    "Plan de gestorIA: USD 19 al mes que vuelven como saldo, más el 1 % del total de cada venta completada.",
   url: `${SITE_URL}/precios`,
   offers: { "@type": "Offer", price: "19", priceCurrency: "USD", url: `${SITE_URL}/precios` },
 }
@@ -46,14 +46,14 @@ const check =
 ---
 <Base
   title="Precios de gestorIA: USD 19 al mes que vuelven como saldo"
-  description="Un plan: USD 19 al mes que vuelven a tu tienda como saldo, y de ahí el 1 % de cada pedido que gestorIA genera sola. Pagas la diferencia solo si el saldo se acaba."
+  description="Un plan: USD 19 al mes que vuelven a tu tienda como saldo, y de ahí el 1 % del total de cada venta completada. Pagas la diferencia solo si el saldo se acaba."
   ld={[oferta, faqLd(preguntas)]}
 >
   <PaginaHeroe
     etiqueta="Precios"
     titulo="USD 19 al mes,"
     acento="que vuelven como saldo."
-    bajada="De ese saldo sale el 1 % de cada pedido que gestorIA genera sola. Pagas la diferencia solo si el saldo se acaba. Lo que anota tu equipo no paga el 1 %."
+    bajada="De ese saldo sale el 1 % del total de cada venta completada, venga de donde venga. Pagas la diferencia solo si el saldo se acaba. Lo que devuelves se descuenta."
     humor="feliz"
     segundo={{ href: "/preguntas", label: "Ver las preguntas" }}
   />

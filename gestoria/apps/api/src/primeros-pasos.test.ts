@@ -84,6 +84,9 @@ describe("cómo va cada paso", () => {
     }
     expect(setupFinished(setupSteps(ready, []))).toBe(false)
     expect(setupFinished(setupSteps(ready, ["sofi", "equipo"]))).toBe(true)
+    // Invitar al equipo no frena la venta: sin él, la lista también queda lista.
+    expect(setupSteps(ready, []).find((s) => s.step === "equipo")?.sells).toBe(false)
+    expect(setupFinished(setupSteps(ready, ["sofi"]))).toBe(true)
     // Con los chats ya conectables y sin conectar, falta ese paso.
     expect(setupFinished(setupSteps({ ...ready, chats: false }, ["sofi", "equipo"]))).toBe(false)
     expect(setupFinished(setupSteps({ ...ready, chats: true }, ["sofi", "equipo"]))).toBe(true)
