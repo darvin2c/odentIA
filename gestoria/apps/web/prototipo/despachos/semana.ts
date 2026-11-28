@@ -302,6 +302,8 @@ function contraEntrega(p: Pedido) {
   const pol = COBRO_TIENDA
   const regla = alRecibirPara(pol, { nombre: n, zona: p.entrega.zona, monto: k.total, envio: p.entrega.envio, compras: 1 })
   if (p.id === "0155") {
+    p.origen = { k: "sofi" }
+    p.canal = "whatsapp"
     p.pagaCon = Math.ceil((k.falta + 1) / 100) * 100
     p.chat.push(
       msg("clienta", "¿Lo puedo pagar cuando llegue?", "Ayer · 7:40 p. m."),
@@ -355,6 +357,13 @@ function contraEntrega(p: Pedido) {
       quien: "Jhon",
       texto: "«No se entregó»: no quiso recibirlo («Ya no lo necesito, me lo regalaron»). Lo trae de vuelta a la tienda.",
     })
+    p.avisos.push({
+      id: nuevoId("a"),
+      cuando: "Hoy · 11:56 a. m.",
+      clave: "falla",
+      estado: "enviado",
+      texto: `${n}, Jhon no pudo dejarte tu pedido y vuelve a la tienda. Si lo quieres otro día, te lo llevamos: el viaje de hoy (${money(p.entrega.envio)}) se suma a tu saldo, como dice la política de la tienda.`,
+    })
     p.chat.push(
       msg(
         "sofi",
@@ -370,7 +379,7 @@ function contraEntrega(p: Pedido) {
   if (p.id === "0187") {
     const no = alRecibirPara(pol, { nombre: n, zona: p.entrega.zona, monto: k.total, envio: p.entrega.envio, compras: 0 })
     p.reglaCobro = no.regla
-    p.separadoHasta = "Vie 28 · 12 p. m."
+    p.separadoHasta = "Vie 28 · 9:30 a. m."
     p.chat.push(
       msg("clienta", "Hola, ¿puedo pagar al recibir? Vivo en Carabayllo", "Hoy · 9:30 a. m."),
       msg("sofi", no.sofi, "Hoy · 9:30 a. m."),

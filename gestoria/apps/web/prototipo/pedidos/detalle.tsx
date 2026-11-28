@@ -102,7 +102,7 @@ export function queSigue(p: Pedido): { texto: string; persona: boolean } {
       return { texto: "sale hoy.", persona: false }
     case "por_salir":
       return {
-        texto: `espera que ${p.entrega.repartidor ?? "el repartidor"} toque «Salí» en su app.${k.falta ? ` Cobra ${money(k.falta)} en la puerta.` : ""}`,
+        texto: `espera que ${p.entrega.repartidor ?? "el repartidor"} toque «Salí» en su app.${k.falta ? ` Cobra ${money(k.falta)} en la puerta${p.pagaCon && p.pagaCon > k.falta ? ` y lleva vuelto de ${money(p.pagaCon - k.falta)}` : ""}.` : ""}`,
         persona: false,
       }
     case "en_camino":
@@ -394,7 +394,9 @@ export function Saldo({
     <Bloque
       title="El saldo y los pagos"
       extra={
-        k.pagado ? (
+        p.rechazo ? (
+          <Badge variant="outline">No se cobró: no lo recibió</Badge>
+        ) : k.pagado ? (
           <Badge variant="success">Pagado</Badge>
         ) : k.falta ? (
           <Badge variant="warning">Falta {money(k.falta)}</Badge>
@@ -407,7 +409,7 @@ export function Saldo({
         {[
           ["Total", money(k.total)],
           ["Cobrado", money(k.confirmado)],
-          [k.alRecibir && k.falta ? "Falta · al recibir" : "Falta", money(k.falta)],
+          [p.rechazo ? "Si lo quiere otro día" : k.alRecibir && k.falta ? "Falta · al recibir" : "Falta", money(k.falta)],
         ].map(([a, b]) => (
           <div key={a} className="rounded-xl bg-muted/60 px-2 py-2">
             <dt className="text-[11px] text-muted-foreground">{a}</dt>

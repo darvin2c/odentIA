@@ -46,6 +46,8 @@ export function EtapaBadge({ p }: { p: Pedido }) {
 export function CobroCorto({ p }: { p: Pedido }) {
   const k = cuentas(p)
   if (p.paso === "anulado" || p.vuelta) return null
+  if (p.rechazo)
+    return k.cargos ? <span className="font-medium text-warning">Viaje {money(k.cargos)} a su saldo</span> : null
   if (k.pagado)
     return p.paso === "pagado" ? null : <span className="font-medium text-success">Pagado</span>
   if (k.alRecibir && !k.confirmado)

@@ -2023,6 +2023,8 @@ export interface Falta {
 
 /** Lo que falta, en orden: quién lo va a mover y cuándo. Casi todo lo hace gestorIA sola. */
 export function loQueFalta(p: Pedido): Falta[] {
+  // No lo recibió: no queda nada por hacer en la puerta; Sofi espera si lo quiere otro día.
+  if (p.rechazo) return []
   const n = p.clienta.split(" ")[0]!
   const e = p.entrega
   const k = cuentas(p)
