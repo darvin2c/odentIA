@@ -2,8 +2,8 @@
 // la categoría, nunca con una marca. Lo que el ARM hace tiene que ser cierto en gestorIA hoy: Sofi
 // atiende, negocia sin bajar del mínimo (una oferta, con plazo) y cobra con el link; el stock baja
 // solo al confirmarse el pago y la compra queda sola en la ficha de la clienta (gestorIA); empacar
-// y entregar lo hace el equipo, y una captura de Yape la confirma una persona. Ningún texto dice
-// que un aviso a la clienta se envió.
+// y entregar lo hace el equipo, y una captura de Yape la confirma una persona. Sofi confirma y le
+// avisa a la clienta cada estado del pedido (decisión del dueño, 27 nov).
 import type { Pregunta } from "./contenido"
 
 /** Una fila del duelo: el paso, cómo se hace con el otro y cómo con el ARM. `tuyo`: lo hace tu equipo. */
@@ -139,7 +139,7 @@ export const CHAT_SOFI: Msg[] = [
 
 /** Lo que pasa después del chat: con el ARM se hace solo; con el chatbot, queda para ti. */
 export const DESPUES_SOFI: [string, string][] = [
-  ["21:18", "Pago confirmado con el link"],
+  ["21:18", "Pago confirmado con el link, y Andrea avisada"],
   ["21:18", "Pedido 1042 anotado, con su envío"],
   ["21:18", "Stock de la talla 38: de 2 a 1"],
   ["21:18", "En Despachos, listo para salir"],

@@ -458,13 +458,13 @@ function proceso() {
       rotulo.textContent = estado.dataset.nombre ?? ""
       gsap.fromTo(rotulo, { scale: 0.8 }, { scale: 1, duration: 0.4, ease: "back.out(3)" })
     }
-    // Sofi va al último estado suyo que ya pasó, con la cara de ese estado; si el paso es de tu
-    // equipo, se queda y se inclina hacia él para avisarte.
+    // Sofi va a cada estado con su cara (en todos confirma y le avisa a la clienta); si además hay
+    // algo de tu equipo, se inclina hacia él para avisarte.
     let k = n
     while (k > 0 && !estados[k]?.dataset.cara) k--
     const celda = celdasSofi[k]
     const cara = estados[k]?.dataset.cara
-    const tuyo = k !== n
+    const tuyo = estados[n]?.dataset.tuyo !== undefined
     if (sofi && celda && salto) {
       const x = celda.offsetLeft + celda.offsetWidth / 2 - sofi.offsetWidth / 2 - sofi.offsetLeft
       const cambia = Math.abs(Number(gsap.getProperty(sofi, "x")) - x) > 2
@@ -485,8 +485,12 @@ function proceso() {
           { y: -16, duration: 0.18, yoyo: true, repeat: 1, ease: "sine.out" },
         )
       }
-      gsap.to(salto, { rotate: tuyo ? 14 : 0, duration: 0.5, ease: "back.out(2)" })
-      if (cara === "feliz" && !tuyo) {
+      gsap.to(salto, {
+        rotate: tuyo && cara !== "feliz" ? 14 : 0,
+        duration: 0.5,
+        ease: "back.out(2)",
+      })
+      if (cara === "feliz") {
         gsap.fromTo(
           salto,
           { rotate: 0 },
@@ -499,6 +503,7 @@ function proceso() {
     if (dice && estado) {
       dice.textContent = estado.dataset.dice ?? ""
       dice.classList.toggle("es-tuyo", tuyo)
+      dice.classList.toggle("es-izq", k >= total - 2)
       gsap.fromTo(
         dice,
         { scale: 0.4, opacity: 0, y: 10 },

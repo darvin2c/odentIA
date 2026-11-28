@@ -84,7 +84,7 @@
   min-height: 74px;
 }
 .proceso__fila--sofi .proceso__celda {
-  min-height: 132px;
+  min-height: 150px;
   align-items: flex-end;
 }
 .tarea {
@@ -151,6 +151,12 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--texto);
+}
+/* En las últimas columnas el globito va a la izquierda, para no salirse. */
+.proceso__dice.es-izq {
+  left: auto;
+  right: calc(100% - 4px);
+  border-radius: 14px 14px 4px 14px;
 }
 .proceso__dice.es-tuyo {
   background: var(--tinta);
@@ -300,4 +306,18 @@
   [data-col="6"] {
     order: 6;
   }
+}
+
+/* Fija en la pantalla, la escena entera tiene que caber: título más bajo y menos aire. */
+.proceso .titulo-2 {
+  font-size: clamp(32px, 3.6vw, 50px);
+}
+.proceso--vivo .proceso__pin {
+  padding-block: calc(var(--cabecera) + 16px) 24px;
+}
+.proceso--vivo .proceso__fila--sofi .proceso__celda {
+  min-height: 136px;
+}
+.proceso--vivo .proceso__celda {
+  min-height: 62px;
 }
