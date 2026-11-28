@@ -15,21 +15,24 @@ import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { fractionDigits } from "./dinero.js"
 import type { LinkPayment } from "./link-de-pago.js"
-import { type LinkDeps, linkNotificationURL, storeRow } from "./pedidos.js"
+import { type LinkDeps, linkNotificationURL, storeRow, withLinkToken } from "./pedidos.js"
 import { openSecret, sealSecret } from "./secretos.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
  * La pasarela de la tienda en Cobros (lienzo «gestorIA · Configuración, de nuevo», tablero 6; ADR
- * 0232): se conecta entrando a la cuenta de Mercado Pago (OAuth con PKCE), sin copiar llaves.
- * Empieza en modo prueba: un link de S/ 1 que se paga con la tarjeta de prueba y queda pagado solo,
+ * 0232), con dos puertas: entrando a la cuenta de Mercado Pago con la aplicación de gestorIA (OAuth
+ * con PKCE), o con las claves de la tienda, el Access Token de su propia aplicación en Mercado Pago
+ * Developers, que pega en Cobros (así no depende de la aplicación de gestorIA). Empieza en modo prueba: un link de S/ 1 que se paga con la tarjeta de prueba y queda pagado solo,
  * como un pedido. «Cobrar de verdad» vuelve a pedir permiso con las credenciales reales. En modo
  * prueba ningún pedido se cobra por link y Sofi no lo ofrece: el modo queda guardado y cada pedido
  * lo dice.
  *
- * Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador. El token se renueva
- * solo antes de vencer (`renewPaymentLinks`). Si Mercado Pago avisa que la tienda quitó el permiso
- * (`mp-connect`), se comprueba con su API antes de creerlo.
+ * Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador. El token de la cuenta
+ * se renueva solo antes de vencer (`renewPaymentLinks`); el de las claves no vence y se revisa una
+ * vez al día (`checkKeyLinks`). Si Mercado Pago avisa que la tienda quitó el permiso (`mp-connect`),
+ * se comprueba con su API antes de creerlo; si deja de reconocer el token al usarlo, queda «sin
+ * permiso» (`revokeLinkIn`).
  */
 
 /** Lo que vale un intento de conectar: lo que vale el código de Mercado Pago. */
@@ -50,6 +53,7 @@ export async function linkStateIn(tx: Db, storeId: string, now = new Date()) {
       revokedAt: storePaymentLink.revokedAt,
       expiresAt: storePaymentLink.expiresAt,
       accountLabel: storePaymentLink.accountLabel,
+      connectedWith: storePaymentLink.connectedWith,
       connectedBy: storePaymentLink.connectedBy,
       connectedAt: storePaymentLink.connectedAt,
     })
@@ -114,6 +118,15 @@ function unavailable(): StoreError {
   )
 }
 
+/** Entrar a la cuenta necesita la aplicación de gestorIA en Mercado Pago; las claves, no. */
+function accountDoorClosed(): StoreError {
+  return new StoreError(
+    409,
+    "LINK_ACCOUNT_UNAVAILABLE",
+    "Conecta Mercado Pago con tus claves: toca «Conectar con mis claves» en Cobros.",
+  )
+}
+
 /** Lo que ve la pantalla: nunca el token, solo cómo está, el modo y la cuenta a medias. */
 export async function paymentLinkStatus(
   appDb: Db,
@@ -150,10 +163,14 @@ export async function paymentLinkStatus(
       .orderBy(desc(storePaymentMethod.isActive), storePaymentMethod.createdAt)
       .limit(1)
     return {
-      available: Boolean(deps.secretsKey && deps.app),
+      /** Se puede conectar: con las claves de la tienda, siempre que haya con qué cifrarlas. */
+      available: Boolean(deps.secretsKey),
+      /** También entrando a la cuenta: con la aplicación de gestorIA en Mercado Pago. */
+      accountDoor: Boolean(deps.secretsKey && deps.app),
       connection: link
         ? {
             provider: link.row.provider,
+            via: link.row.connectedWith,
             state: link.state,
             mode: link.mode,
             account: link.row.accountLabel,
@@ -187,7 +204,8 @@ export async function startConnect(
   now = new Date(),
 ) {
   const app = deps.app
-  if (!deps.secretsKey || !app) throw unavailable()
+  if (!deps.secretsKey) throw unavailable()
+  if (!app) throw accountDoorClosed()
   const secret = base64url(randomBytes(32))
   const verifier = base64url(randomBytes(32))
   const state = `${storeId}.${secret}`
@@ -234,7 +252,8 @@ export async function finishConnect(
 ) {
   const app = deps.app
   const key = deps.secretsKey
-  if (!key || !app) throw unavailable()
+  if (!key) throw unavailable()
+  if (!app) throw accountDoorClosed()
   const parts = STATE_FORMAT.exec(input.state)
   if (!parts)
     throw new StoreError(400, "LINK_STATE", "Ese regreso no es de gestorIA. Vuelve a conectar.")
@@ -275,11 +294,7 @@ export async function finishConnect(
       "Mercado Pago no reconoce esa cuenta. Vuelve a conectar.",
     )
   await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [before] = await tx
-      .select({ providerUserId: storePaymentLink.providerUserId, mode: storePaymentLink.mode })
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
-    const values = {
+    await saveConnection(tx, person, storeId, {
       provider: attempt.provider,
       accessTokenEnc: sealSecret(key, storeId, tokens.accessToken),
       refreshTokenEnc: tokens.refreshToken ? sealSecret(key, storeId, tokens.refreshToken) : null,
@@ -292,39 +307,281 @@ export async function finishConnect(
       // se lee siempre de Mercado Pago.
       webhookSecretEnc: null,
       hint: tokens.accessToken.slice(-4),
+      connectedWith: "cuenta",
+      checkedAt: now,
       connectedBy: person.userId,
       connectedAt: now,
-    }
-    await tx
-      .insert(storePaymentLink)
-      .values({ storeId, ...values })
-      .onConflictDoUpdate({ target: storePaymentLink.storeId, set: values })
-    if (!before || before.providerUserId !== account.id || before.mode !== attempt.mode)
-      await forgetOpenLinks(tx, storeId)
-    // Cobrando de verdad, Sofi ofrece el link: si la tienda no tenía su medio, se crea encendido.
-    if (attempt.mode === "real") {
-      const [method] = await tx
-        .select({ id: storePaymentMethod.id })
-        .from(storePaymentMethod)
-        .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.kind, "link")))
-      if (!method)
-        await tx.insert(storePaymentMethod).values({
-          storeId,
-          kind: "link",
-          name: "Link de pago (Yape o tarjeta)",
-          typeCode: "68",
-          collection: "link",
-        })
-    }
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.pago",
-      subject: "Link de pago",
-      detail: { conectado: attempt.provider, modo: attempt.mode },
     })
   })
   return { storeId, mode: attempt.mode as PaymentLinkMode }
+}
+
+/**
+ * Guarda la conexión (con la cuenta o con las claves): los links abiertos de otra cuenta o de otro
+ * modo se olvidan, cobrando de verdad la tienda tiene su medio «link» para Sofi, y queda anotado.
+ */
+async function saveConnection(
+  tx: Db,
+  person: Person,
+  storeId: string,
+  values: Omit<typeof storePaymentLink.$inferInsert, "storeId">,
+) {
+  const [before] = await tx
+    .select({ providerUserId: storePaymentLink.providerUserId, mode: storePaymentLink.mode })
+    .from(storePaymentLink)
+    .where(eq(storePaymentLink.storeId, storeId))
+  await tx
+    .insert(storePaymentLink)
+    .values({ storeId, ...values })
+    .onConflictDoUpdate({ target: storePaymentLink.storeId, set: values })
+  if (!before || before.providerUserId !== values.providerUserId || before.mode !== values.mode)
+    await forgetOpenLinks(tx, storeId)
+  // Cobrando de verdad, Sofi ofrece el link: si la tienda no tenía su medio, se crea encendido.
+  if (values.mode === "real") {
+    const [method] = await tx
+      .select({ id: storePaymentMethod.id })
+      .from(storePaymentMethod)
+      .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.kind, "link")))
+    if (!method)
+      await tx.insert(storePaymentMethod).values({
+        storeId,
+        kind: "link",
+        name: "Link de pago (Yape o tarjeta)",
+        typeCode: "68",
+        collection: "link",
+      })
+  }
+  await tx.insert(storeEvent).values({
+    storeId,
+    actorUserId: person.userId,
+    action: "configuracion.pago",
+    subject: "Link de pago",
+    detail: { conectado: values.provider, modo: values.mode, con: values.connectedWith },
+  })
+}
+
+/* ------------------------------------------------------- con las claves de la tienda */
+
+/**
+ * Lo que se pega es el Access Token de la aplicación de la tienda en Mercado Pago Developers
+ * («Credenciales»: el de «Prueba» para probar y el de «Producción» para cobrar de verdad). Hoy los
+ * dos empiezan con `APP_USR-`; los de prueba de antes, con `TEST-`.
+ */
+const ACCESS_TOKEN = /^(APP_USR|TEST)-[A-Za-z0-9_-]{20,250}$/
+/** La Public Key: el mismo prefijo y un UUID (va en el navegador, no sirve para cobrar). */
+const PUBLIC_KEY = /^(APP_USR|TEST)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** El Client Secret (32 letras y números) y el Client ID (solo números): de la otra puerta. */
+const CLIENT_SECRET = /^[A-Za-z0-9]{32}$/
+const CLIENT_ID = /^\d{6,20}$/
+
+export const keysInput = z.object({
+  mode: z.enum(["prueba", "real"]),
+  accessToken: z.string().trim().max(400),
+})
+
+const tokenError = (message: string) =>
+  new StoreError(400, "LINK_KEYS", message, { accessToken: message })
+
+/** Lo que se ve mal en lo pegado, antes de preguntar a Mercado Pago. */
+export function keysProblem(token: string, mode: PaymentLinkMode): string | null {
+  const what = mode === "prueba" ? "de prueba" : "de producción"
+  if (!token) return `Pega aquí el Access Token ${what}.`
+  if (PUBLIC_KEY.test(token))
+    return "Esa es la «Public Key». Copia la otra clave, la que dice «Access Token»."
+  if (CLIENT_SECRET.test(token) || CLIENT_ID.test(token))
+    return "Ese es el «Client ID» o el «Client Secret». Copia la clave que dice «Access Token»."
+  if (!ACCESS_TOKEN.test(token))
+    return "Eso no parece un Access Token: empieza con APP_USR- y es largo. Cópialo de nuevo, entero."
+  if (mode === "real" && token.startsWith("TEST-"))
+    return "Ese es el Access Token de prueba. Para cobrar de verdad, copia el de «Producción»."
+  return null
+}
+
+/** Probar claves llama a Mercado Pago: a lo más 10 veces por minuto en cada tienda. */
+const keysTried = new Map<string, { since: number; count: number }>()
+function tryBudget(storeId: string, now: number) {
+  const seen = keysTried.get(storeId)
+  if (!seen || now - seen.since > 60_000) {
+    if (keysTried.size > 10_000) keysTried.clear()
+    keysTried.set(storeId, { since: now, count: 1 })
+  } else if (++seen.count > 10)
+    throw new StoreError(429, "TOO_MANY", "Probaste muchas veces seguidas. Espera un minuto.")
+}
+
+/**
+ * Revisa las claves con Mercado Pago: que reconozca el token (`/users/me`), de qué cuenta es y que
+ * sea del modo pedido hasta donde se puede saber (Mercado Pago no lo dice en el token: un `TEST-`,
+ * una cuenta de prueba o el mismo token con el que ya prueba la tienda no van donde va el de
+ * producción).
+ */
+async function verifyKeys(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof keysInput>,
+  deps: LinkDeps,
+  now: Date,
+) {
+  const key = deps.secretsKey
+  if (!key) throw unavailable()
+  // Primero el permiso: quien no conecta no usa esto para preguntar por tokens.
+  const current = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const [row] = await tx
+      .select({ mode: storePaymentLink.mode, token: storePaymentLink.accessTokenEnc })
+      .from(storePaymentLink)
+      .where(eq(storePaymentLink.storeId, storeId))
+    return row ?? null
+  })
+  const problem = keysProblem(input.accessToken, input.mode)
+  if (problem) throw tokenError(problem)
+  tryBudget(storeId, now.getTime())
+  const account = await deps.adapters.mercadopago.account(input.accessToken)
+  if (account === "sin_permiso")
+    throw tokenError(
+      "Mercado Pago no reconoce ese Access Token. Cópialo de nuevo desde «Credenciales», entero.",
+    )
+  if (input.mode === "real") {
+    if (account.test)
+      throw tokenError(
+        "Ese es de una cuenta de prueba. Para cobrar de verdad, copia el Access Token de «Producción».",
+      )
+    if (current?.mode === "prueba" && openSecret(key, storeId, current.token) === input.accessToken)
+      throw tokenError(
+        "Es el mismo Access Token con el que pruebas. Para cobrar de verdad, copia el de «Producción».",
+      )
+  }
+  return { key, account }
+}
+
+/** «Probar»: dice si las claves sirven y de qué cuenta son, sin guardar nada. */
+export async function tryKeys(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof keysInput>,
+  deps: LinkDeps,
+  now = new Date(),
+) {
+  const { account } = await verifyKeys(appDb, person, storeId, input, deps, now)
+  return { account: account.label }
+}
+
+/**
+ * Conecta con las claves de la tienda: las revisa otra vez y las guarda cifradas. No vence ni se
+ * renueva (no hay `refresh_token`); empieza en prueba y «Cobrar de verdad» pide el de producción.
+ */
+export async function connectWithKeys(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof keysInput>,
+  deps: LinkDeps,
+  now = new Date(),
+) {
+  const { key, account } = await verifyKeys(appDb, person, storeId, input, deps, now)
+  await inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    await saveConnection(tx, person, storeId, {
+      provider: "mercadopago",
+      accessTokenEnc: sealSecret(key, storeId, input.accessToken),
+      refreshTokenEnc: null,
+      expiresAt: null,
+      mode: input.mode,
+      providerUserId: account.id,
+      accountLabel: account.label,
+      revokedAt: null,
+      // El pago se lee siempre de Mercado Pago: no hace falta la clave de los avisos.
+      webhookSecretEnc: null,
+      hint: input.accessToken.slice(-4),
+      connectedWith: "claves",
+      checkedAt: now,
+      connectedBy: person.userId,
+      connectedAt: now,
+    })
+  })
+  return { storeId, mode: input.mode, account: account.label }
+}
+
+/**
+ * Mercado Pago ya no reconoce el token al usarlo: la pasarela queda «sin permiso» y los links
+ * abiertos se olvidan. Lo anota el sistema (el dueño de la base), y solo si el token sigue siendo
+ * ese: si la tienda volvió a conectar entre medio, vale lo nuevo.
+ */
+export async function revokeLinkIn(ownerDb: Db, storeId: string, accessTokenEnc: string) {
+  await ownerDb.transaction(async (tx) => {
+    const [row] = await tx
+      .update(storePaymentLink)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(storePaymentLink.storeId, storeId),
+          eq(storePaymentLink.accessTokenEnc, accessTokenEnc),
+          isNull(storePaymentLink.revokedAt),
+        ),
+      )
+      .returning({ provider: storePaymentLink.provider })
+    if (!row) return
+    await forgetOpenLinks(tx as unknown as Db, storeId)
+    await tx.insert(storeEvent).values({
+      storeId,
+      actorUserId: null,
+      action: "configuracion.pago",
+      subject: "Link de pago",
+      detail: { sinPermiso: row.provider },
+    })
+  })
+}
+
+/** Cada cuánto se pregunta a Mercado Pago si sigue reconociendo las claves pegadas. */
+export const CHECK_KEYS_HOURS = 24
+
+/**
+ * Las claves no vencen, pero la tienda puede cambiarlas o borrar su aplicación en su panel: una vez
+ * al día se pregunta a Mercado Pago (`/users/me`) si las sigue reconociendo. Si no, «sin permiso».
+ * Si no responde, se intenta en la vuelta siguiente.
+ */
+export async function checkKeyLinks(ownerDb: Db, deps: LinkDeps, now = new Date()) {
+  const key = deps.secretsKey
+  if (!key) return { checked: 0, revoked: 0 }
+  const rows = await ownerDb
+    .select({
+      storeId: storePaymentLink.storeId,
+      provider: storePaymentLink.provider,
+      accessTokenEnc: storePaymentLink.accessTokenEnc,
+    })
+    .from(storePaymentLink)
+    .where(
+      and(
+        eq(storePaymentLink.connectedWith, "claves"),
+        isNull(storePaymentLink.revokedAt),
+        or(
+          isNull(storePaymentLink.checkedAt),
+          lt(storePaymentLink.checkedAt, new Date(now.getTime() - CHECK_KEYS_HOURS * 3_600_000)),
+        ),
+      ),
+    )
+  let checked = 0
+  let revoked = 0
+  for (const row of rows) {
+    const known = await deps.adapters[row.provider]
+      .account(openSecret(key, row.storeId, row.accessTokenEnc))
+      .catch(() => null)
+    if (known === null) continue
+    checked++
+    if (known === "sin_permiso") {
+      await revokeLinkIn(ownerDb, row.storeId, row.accessTokenEnc)
+      revoked++
+    } else
+      await ownerDb
+        .update(storePaymentLink)
+        .set({ checkedAt: now })
+        .where(
+          and(
+            eq(storePaymentLink.storeId, row.storeId),
+            eq(storePaymentLink.accessTokenEnc, row.accessTokenEnc),
+          ),
+        )
+  }
+  return { checked, revoked }
 }
 
 export async function disconnectPaymentLink(appDb: Db, person: Person, storeId: string) {
@@ -408,23 +665,26 @@ export async function createTrialLink(
       .limit(1)
     if (open) return open
     const { name, currency } = await storeRow(tx, storeId)
-    const token = openSecret(key, storeId, await linkTokenIn(tx, storeId))
+    const sealed = await linkTokenIn(tx, storeId)
+    const token = openSecret(key, storeId, sealed)
     const id = randomUUID()
     const amountCents = trialCents(currency)
-    const created = await deps.adapters[link.row.provider].create(
-      token,
-      {
-        id,
-        reference: `prueba:${id}`,
-        number: "prueba",
-        title: `Prueba de gestorIA · ${name}`,
-        storeName: name,
-        totalCents: amountCents,
-        currency,
-        expiresAt: null,
-        notificationURL: linkNotificationURL(deps, storeId),
-      },
-      { test: true },
+    const created = await withLinkToken(deps, storeId, sealed, () =>
+      deps.adapters[link.row.provider].create(
+        token,
+        {
+          id,
+          reference: `prueba:${id}`,
+          number: "prueba",
+          title: `Prueba de gestorIA · ${name}`,
+          storeName: name,
+          totalCents: amountCents,
+          currency,
+          expiresAt: null,
+          notificationURL: linkNotificationURL(deps, storeId),
+        },
+        { test: true },
+      ),
     )
     const [trial] = await tx
       .insert(storePaymentLinkTrial)

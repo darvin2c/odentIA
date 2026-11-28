@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
 import { dayIn } from "./hora.js"
 import { mercadoPago } from "./link-de-pago.js"
-import { renewPaymentLinks } from "./pasarela.js"
+import { checkKeyLinks, renewPaymentLinks } from "./pasarela.js"
 import type { LinkDeps } from "./pedidos.js"
 import { openSecret, sealSecret } from "./secretos.js"
 
@@ -33,11 +33,15 @@ const MP_APP = {
   redirectURL: `${WEB}/mercadopago/vuelta`,
 }
 const MP_SECRET = "clave-secreta-del-webhook"
+/** Las claves de la tienda: el Access Token de prueba (de su cuenta de prueba) y el de producción. */
+const KEYS_TEST = "APP_USR-5555555555-112233-clavedeprueba0rosa-4512"
+const KEYS_REAL = "APP_USR-6666666666-445566-clavedeproduccion-0077"
 
 let db: TestDb
 let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"]
 let app: ReturnType<typeof createApp>
 let linkDeps: LinkDeps
+let accountKeys: ReturnType<typeof createLocalJWKSet>
 
 const people = {
   rosa: { id: "u-rosa", email: "rosa@calzados.test", name: "Rosa Quispe" },
@@ -55,6 +59,12 @@ const mp = {
   preferences: [] as Record<string, unknown>[],
   /** La tienda desvinculó la aplicación: Mercado Pago ya no reconoce sus tokens. */
   revoked: false,
+  /** Los tokens que la tienda borró o cambió en su panel. */
+  revokedTokens: new Set<string>(),
+  /** Mercado Pago marca la cuenta de prueba (`test_user`); si no, no se sabe. */
+  testUsers: true,
+  /** Cuántas veces se le preguntó de qué cuenta es un token. */
+  usersMe: 0,
 }
 const fakeMercadoPago: typeof fetch = async (input, init) => {
   const url = new URL(String(input))
@@ -83,11 +93,20 @@ const fakeMercadoPago: typeof fetch = async (input, init) => {
     })
   }
   const auth = new Headers(init?.headers).get("authorization")
-  const known = [MP_TOKEN, MP_TEST_TOKEN, MP_TOKEN_RENEWED].map((token) => `Bearer ${token}`)
+  if (url.pathname === "/users/me") mp.usersMe++
+  const known = [MP_TOKEN, MP_TEST_TOKEN, MP_TOKEN_RENEWED, KEYS_TEST, KEYS_REAL]
+    .filter((token) => !mp.revokedTokens.has(token))
+    .map((token) => `Bearer ${token}`)
   if (mp.revoked || !auth || !known.includes(auth))
     return Response.json({ message: "invalid" }, { status: 401 })
   if (url.pathname === "/users/me")
-    return Response.json({ id: 77, email: "rosa.quispe@correo.test" })
+    return Response.json(
+      auth === `Bearer ${KEYS_TEST}`
+        ? mp.testUsers
+          ? { id: 4512, email: "test_user_4512@testuser.com", tags: ["normal", "test_user"] }
+          : { id: 4512, nickname: "TIENDAROSA" }
+        : { id: 77, email: "rosa.quispe@correo.test", tags: ["normal"] },
+    )
   if (url.pathname === "/checkout/preferences") {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>
     mp.preferences.push(body)
@@ -197,10 +216,11 @@ beforeAll(async () => {
   const pair = await generateKeyPair("EdDSA", { crv: "Ed25519" })
   privateKey = pair.privateKey
   const jwk: JWK = { ...(await exportJWK(pair.publicKey)), alg: "EdDSA", kid: "k1" }
+  accountKeys = createLocalJWKSet({ keys: [jwk] })
   app = createApp({
     appDb: db.appDb,
     ownerDb: db.ownerDb,
-    account: { url: ACCOUNT, eventsSecret: "", keys: createLocalJWKSet({ keys: [jwk] }) },
+    account: { url: ACCOUNT, eventsSecret: "", keys: accountKeys },
     webURL: WEB,
     link: linkDeps,
   })
@@ -579,6 +599,7 @@ describe("el link de pago (Mercado Pago entrando a la cuenta, con un proveedor c
       provider: "mercadopago",
       state: "conectada",
       mode: "prueba",
+      via: "cuenta",
       account: "rosa.quispe@…",
     })
     expect(JSON.stringify(seen.json)).not.toContain(MP_TEST_TOKEN)
@@ -810,6 +831,188 @@ describe("el link de pago (Mercado Pago entrando a la cuenta, con un proveedor c
     expect(detail).toMatchObject({ linkUrl: null, linkConnected: false, linkTestMode: false })
     // Un aviso para una tienda sin cuenta conectada responde igual y no hace nada.
     expect((await mpNotice("9001")).json.message).toBe("Recibido")
+  })
+})
+
+describe("el link de pago con las claves de la tienda (su Access Token, con un proveedor controlado)", () => {
+  const status = async () => (await call("rosa", "GET", `${base}/link-de-pago`)).json
+  const keys = (who: Who, mode: "prueba" | "real", accessToken: string, tryOnly = false) =>
+    call(who, "POST", `${base}/link-de-pago/claves${tryOnly ? "/probar" : ""}`, {
+      mode,
+      accessToken,
+    })
+
+  it("solo quien configura prueba y conecta; Ventas no, ni para preguntar por un token", async () => {
+    const calls = mp.usersMe
+    expect((await keys("lucia", "prueba", KEYS_TEST, true)).status).toBe(403)
+    expect((await keys("lucia", "prueba", KEYS_TEST)).status).toBe(403)
+    expect((await keys("ajena", "prueba", KEYS_TEST, true)).status).toBe(404)
+    expect(mp.usersMe).toBe(calls)
+    expect((await status()).connection).toBeNull()
+  })
+
+  it("lo que no es el Access Token se dice en su campo, sin preguntar a Mercado Pago", async () => {
+    const calls = mp.usersMe
+    const publicKey = await keys(
+      "rosa",
+      "prueba",
+      "APP_USR-9f8e7d6c-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+      true,
+    )
+    expect(publicKey.status).toBe(400)
+    expect(publicKey.json.error.fields.accessToken).toContain("Public Key")
+    const secret = await keys("rosa", "prueba", "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF", true)
+    expect(secret.json.error.fields.accessToken).toContain("Client Secret")
+    const empty = await keys("rosa", "prueba", "   ", true)
+    expect(empty.json.error.fields.accessToken).toContain("Access Token de prueba")
+    const oldTest = await keys("rosa", "real", "TEST-1234567890-112233-abcdefabcdef-123456", true)
+    expect(oldTest.json.error.fields.accessToken).toContain("de prueba")
+    expect(mp.usersMe).toBe(calls)
+    // Bien escrito, pero Mercado Pago no lo reconoce.
+    const unknown = await keys("rosa", "prueba", "APP_USR-0000000000-000000-noexiste-000000", true)
+    expect(unknown.status).toBe(400)
+    expect(unknown.json.error.fields.accessToken).toContain("no reconoce")
+  })
+
+  it("«Probar» dice de qué cuenta es sin guardar; conectar empieza en prueba y el token no vuelve", async () => {
+    const tried = await keys("rosa", "prueba", ` ${KEYS_TEST}\n`, true)
+    expect(tried.status).toBe(200)
+    expect(tried.json).toEqual({ account: "test_user_4512@…" })
+    expect((await status()).connection).toBeNull()
+    const saved = await keys("rosa", "prueba", KEYS_TEST)
+    expect(saved.json).toEqual({ storeId, mode: "prueba", account: "test_user_4512@…" })
+    const seen = await call("lucia", "GET", `${base}/link-de-pago`)
+    expect(seen.json.connection).toMatchObject({
+      via: "claves",
+      state: "conectada",
+      mode: "prueba",
+      expiresAt: null,
+    })
+    expect(JSON.stringify(seen.json)).not.toContain(KEYS_TEST)
+    const [row] = await db.ownerDb
+      .select()
+      .from(storePaymentLink)
+      .where(eq(storePaymentLink.storeId, storeId))
+    expect(row!.accessTokenEnc).not.toContain(KEYS_TEST)
+    expect(openSecret(KEY, storeId, row!.accessTokenEnc)).toBe(KEYS_TEST)
+    expect(row).toMatchObject({
+      refreshTokenEnc: null,
+      connectedWith: "claves",
+      hint: KEYS_TEST.slice(-4),
+    })
+    // En prueba: el link de S/ 1 sí, los pedidos no.
+    const trial = await call("rosa", "POST", `${base}/link-de-pago/prueba`)
+    expect(trial.json.trial.url).toMatch(/^https:\/\/sandbox\.mercadopago\.test\//)
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
+    ).json.order.id
+    expect((await call("lucia", "POST", `${base}/pedidos/${id}/link`)).json.error.code).toBe(
+      "LINK_TEST_MODE",
+    )
+  })
+
+  it("«Cobrar de verdad» pide el de producción: el de prueba no pasa, ni el mismo con el que prueba", async () => {
+    const test = await keys("rosa", "real", KEYS_TEST)
+    expect(test.status).toBe(400)
+    expect(test.json.error.fields.accessToken).toContain("prueba")
+    // Un token que Mercado Pago no marca como de prueba, pero es el mismo con el que se prueba.
+    mp.testUsers = false
+    const same = await keys("rosa", "real", KEYS_TEST)
+    mp.testUsers = true
+    expect(same.json.error.fields.accessToken).toContain("mismo Access Token")
+    expect((await status()).connection.mode).toBe("prueba")
+    const real = await keys("rosa", "real", KEYS_REAL)
+    expect(real.json).toEqual({ storeId, mode: "real", account: "rosa.quispe@…" })
+    expect((await status()).connection).toMatchObject({ via: "claves", mode: "real" })
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
+    ).json.order.id
+    const link = await call("lucia", "POST", `${base}/pedidos/${id}/link`)
+    expect(link.json.url).toBe(`https://www.mercadopago.test/checkout?pref=${id}`)
+    // El aviso va en cada link: la tienda no configura nada en su panel.
+    expect(mp.preferences.at(-1)).toMatchObject({
+      notification_url: `${SERVER}/avisos/link-de-pago/${storeId}`,
+    })
+    // Pagado por el link: se lee con el token de la tienda y queda pagado solo.
+    mp.payments.set("9501", {
+      id: 9501,
+      status: "approved",
+      external_reference: id,
+      transaction_amount: 139,
+      currency_id: "PEN",
+    })
+    await mpNotice("9501", null)
+    expect((await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order.state).toBe("por_salir")
+  })
+
+  it("no se renueva; si Mercado Pago deja de reconocerlo, al revisarlo queda «sin permiso»", async () => {
+    expect(await renewPaymentLinks(db.ownerDb, linkDeps)).toEqual({ renewed: 0, failed: 0 })
+    // Recién conectada no se vuelve a preguntar; pasado un día, sí.
+    expect(await checkKeyLinks(db.ownerDb, linkDeps)).toEqual({ checked: 0, revoked: 0 })
+    await db.ownerDb
+      .update(storePaymentLink)
+      .set({ checkedAt: new Date(Date.now() - 25 * 3_600_000) })
+      .where(eq(storePaymentLink.storeId, storeId))
+    expect(await checkKeyLinks(db.ownerDb, linkDeps)).toEqual({ checked: 1, revoked: 0 })
+    await db.ownerDb
+      .update(storePaymentLink)
+      .set({ checkedAt: new Date(Date.now() - 25 * 3_600_000) })
+      .where(eq(storePaymentLink.storeId, storeId))
+    mp.revokedTokens.add(KEYS_REAL)
+    expect(await checkKeyLinks(db.ownerDb, linkDeps)).toEqual({ checked: 1, revoked: 1 })
+    expect((await status()).connection.state).toBe("sin_permiso")
+    mp.revokedTokens.delete(KEYS_REAL)
+  })
+
+  it("si Mercado Pago no lo reconoce al usarlo, queda «sin permiso» y se vuelve a conectar", async () => {
+    expect((await keys("rosa", "real", KEYS_REAL)).status).toBe(200)
+    expect((await status()).connection.state).toBe("conectada")
+    mp.revokedTokens.add(KEYS_REAL)
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
+    ).json.order.id
+    const link = await call("lucia", "POST", `${base}/pedidos/${id}/link`)
+    expect(link.json.error.code).toBe("LINK_REVOKED")
+    expect((await status()).connection.state).toBe("sin_permiso")
+    mp.revokedTokens.delete(KEYS_REAL)
+    expect((await keys("rosa", "real", KEYS_REAL)).status).toBe(200)
+    expect((await status()).connection.state).toBe("conectada")
+    expect((await call("rosa", "DELETE", `${base}/link-de-pago`)).status).toBe(204)
+  })
+
+  it("sin la aplicación de gestorIA no se entra a la cuenta, pero sí se conecta con las claves", async () => {
+    const bare = createApp({
+      appDb: db.appDb,
+      ownerDb: db.ownerDb,
+      account: { url: ACCOUNT, eventsSecret: "", keys: accountKeys },
+      webURL: WEB,
+      link: { ...linkDeps, app: null },
+    })
+    const ask = async (method: string, path: string, body?: unknown) => {
+      const response = await bare.request(`${SERVER}${path}`, {
+        method,
+        headers: {
+          origin: WEB,
+          authorization: `Bearer ${await tokenFor("rosa")}`,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+      return { status: response.status, json: (await response.json().catch(() => ({}))) as Json }
+    }
+    expect((await ask("GET", `${base}/link-de-pago`)).json).toMatchObject({
+      available: true,
+      accountDoor: false,
+      connection: null,
+    })
+    const started = await ask("POST", `${base}/link-de-pago/conectar`, { mode: "prueba" })
+    expect(started.json.error.code).toBe("LINK_ACCOUNT_UNAVAILABLE")
+    const saved = await ask("POST", `${base}/link-de-pago/claves`, {
+      mode: "prueba",
+      accessToken: KEYS_TEST,
+    })
+    expect(saved.json.mode).toBe("prueba")
+    expect((await ask("DELETE", `${base}/link-de-pago`)).status).toBe(204)
   })
 })
 

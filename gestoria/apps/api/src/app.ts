@@ -137,13 +137,17 @@ import {
 } from "./marca.js"
 import {
   connectInput,
+  connectWithKeys,
   createTrialLink,
   disconnectPaymentLink,
   finishConnect,
   finishInput,
+  keysInput,
   paymentLinkStatus,
   receiveConnectNotice,
+  revokeLinkIn,
   startConnect,
+  tryKeys,
 } from "./pasarela.js"
 import {
   addReceipt,
@@ -307,10 +311,10 @@ async function bodyOf<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
 export function createApp(deps: AppDeps) {
   const keys: JWTVerifyGetKey = accountKeys(deps.account)
   const webOrigin = new URL(deps.webURL).origin
-  const link: LinkDeps = deps.link ?? {
-    adapters: defaultLinkAdapters(),
-    secretsKey: null,
-    apiURL: deps.webURL,
+  const link: LinkDeps = {
+    ...(deps.link ?? { adapters: defaultLinkAdapters(), secretsKey: null, apiURL: deps.webURL }),
+    // Si Mercado Pago ya no reconoce el token al usarlo, lo anota el sistema.
+    revoke: (storeId, accessTokenEnc) => revokeLinkIn(deps.ownerDb, storeId, accessTokenEnc),
   }
   const app = new Hono<Env>()
   const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
@@ -1022,7 +1026,8 @@ export function createApp(deps: AppDeps) {
     return c.json(await correctFact(deps.appDb, c.get("person"), id, customerId, input))
   })
 
-  // La pasarela de la tienda (Cobros, tablero 6): se conecta entrando a la cuenta de Mercado Pago.
+  // La pasarela de la tienda (Cobros, tablero 6): se conecta entrando a la cuenta de Mercado Pago
+  // o con las claves de la tienda (su Access Token).
   app.get("/api/tiendas/:id/link-de-pago", async (c) =>
     c.json(await paymentLinkStatus(deps.appDb, c.get("person"), c.req.param("id"), link)),
   )
@@ -1034,6 +1039,17 @@ export function createApp(deps: AppDeps) {
   app.post("/api/link-de-pago/vuelta", async (c) => {
     const input = await bodyOf(c, finishInput)
     return c.json(await finishConnect(deps.appDb, c.get("person"), input, link))
+  })
+  // «Probar» las claves: si sirven y de qué cuenta son, sin guardar nada.
+  app.post("/api/tiendas/:id/link-de-pago/claves/probar", async (c) => {
+    const input = await bodyOf(c, keysInput)
+    return c.json(await tryKeys(deps.appDb, c.get("person"), c.req.param("id"), input, link))
+  })
+  app.post("/api/tiendas/:id/link-de-pago/claves", async (c) => {
+    const input = await bodyOf(c, keysInput)
+    return c.json(
+      await connectWithKeys(deps.appDb, c.get("person"), c.req.param("id"), input, link),
+    )
   })
   app.post("/api/tiendas/:id/link-de-pago/prueba", async (c) =>
     c.json({ trial: await createTrialLink(deps.appDb, c.get("person"), c.req.param("id"), link) }),
