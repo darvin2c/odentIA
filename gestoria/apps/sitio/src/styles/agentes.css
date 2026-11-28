@@ -181,7 +181,7 @@ html:not(.mueve) .ag-heroe__pista {
 }
 @media (max-width: 960px) {
   .ag-heroe__marco {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
   }
   .ag-heroe__escena {

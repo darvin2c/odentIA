@@ -712,9 +712,10 @@ export async function recordRefund(
 }
 
 /**
- * Lo que volvió (a lo que se pagó) de los pedidos que armó gestorIA sola, desde `since` (ISO): lo
- * que el cobro del 1 % descuenta (tablero 18; el cobro llega en la Fase C). Cuenta cuando vuelve a
- * la tienda, no cuando se anota el cambio. Lo de prueba no cuenta.
+ * Lo que volvió (a lo que se pagó) de los pedidos que armó gestorIA sola, desde `since` (ISO), para
+ * medir lo que vendió Sofi en Reportes. El cobro del 1 % es sobre toda venta completada y descuenta
+ * todo lo devuelto, no solo esto. Cuenta cuando vuelve a la tienda, no cuando se anota el cambio. Lo de
+ * prueba no cuenta.
  */
 export async function agentReturnsIn(tx: Db, storeId: string, since: string): Promise<number> {
   const [row] = await tx.execute<{ cents: string | number }>(sql`

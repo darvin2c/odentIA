@@ -1,0 +1,163 @@
+---
+// Qué es un ARM (web v5): gestorIA es el primer ARM para tiendas que venden por chat. Por qué: el
+// ciclo completo de una venta en 8 pasos (de atender al reparto) y cuánto de él cubre cada uno; las
+// tres letras, la boleta de un pedido y las dos comparaciones, cada una en su página.
+import Acordeon from "../components/Acordeon.astro"
+import Boleta from "../components/escenas/Boleta.astro"
+import Golpe from "../components/escenas/Golpe.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { CICLO, PREGUNTAS_ARM } from "../lib/arm"
+import { faqLd } from "../lib/contenido"
+import { SITE_URL } from "../lib/sitio"
+import "../styles/arm.css"
+
+const letras = [
+  { l: "A", palabra: "Agentes", texto: "Sofi y Argos hacen el trabajo: atienden, venden, cobran y ordenan, dentro de tus reglas." },
+  { l: "R", palabra: "Relación", texto: "Cada clienta con su historia, escriba por WhatsApp, Instagram o Messenger." },
+  { l: "M", palabra: "Gestión", texto: "Pedidos, cobros, stock y entregas del día, en un solo lugar." },
+]
+const comparar = [
+  { href: "/arm-vs-crm", otro: "CRM", frase: "Un CRM te pide que anotes.", acento: "Un ARM lo hace por ti." },
+  { href: "/arm-vs-chatbot", otro: "chatbot", frase: "Un chatbot contesta.", acento: "Un ARM vende." },
+]
+const cobertura = [
+  { nombre: "Un chatbot", n: CICLO.filter((p) => p.chatbot).length, nota: "Solo atiende" },
+  { nombre: "Un CRM", n: CICLO.filter((p) => p.crm).length, nota: "Solo recuerda, y a mano" },
+  { nombre: "gestorIA", n: CICLO.length, nota: "El ciclo completo", arm: true },
+]
+const termino = {
+  "@context": "https://schema.org",
+  "@type": "DefinedTerm",
+  name: "ARM (Agentic Relationship Management)",
+  description:
+    "Gestión de la relación con las clientas hecha por agentes de IA que atienden, venden, cobran y ordenan dentro de las reglas de la tienda.",
+  url: `${SITE_URL}/arm`,
+}
+---
+<Base
+  title="Qué es un ARM: agentes de IA que venden, cobran y ordenan tu tienda"
+  description="ARM es Agentic Relationship Management: agentes de IA que llevan la relación con tus clientas de la venta a la entrega. gestorIA es el primer ARM para tiendas que venden por chat."
+  ld={[termino, faqLd(PREGUNTAS_ARM)]}
+>
+  <PaginaHeroe
+    etiqueta="Qué es un ARM"
+    titulo="Un CRM guarda. Un chatbot contesta."
+    acento="Un ARM vende, cobra y ordena."
+    bajada="ARM quiere decir Agentic Relationship Management: agentes de IA que llevan la relación con tus clientas de la venta a la entrega. gestorIA es el primer ARM para tiendas que venden por chat."
+    humor="decidida"
+    segundo={{ href: "#ciclo", label: "Mira el ciclo completo" }}
+  />
+
+  <section class="ciclo" id="ciclo" aria-labelledby="ciclo-h" data-ciclo>
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Por qué somos un ARM</p>
+        <h2 id="ciclo-h" class="titulo-2">Hacemos el ciclo completo: <span class="cur">del chat al reparto.</span></h2>
+        <p class="bajada">Un chatbot cubre un paso. Un CRM, otro, y a mano. gestorIA cubre los ocho: seis los hacen los agentes solos y, en los otros dos, tu equipo tiene todo listo en la app.</p>
+      </div>
+    </div>
+    <div class="ciclo__ventana">
+      <ol class="ciclo__pista" data-ciclo-pista>
+        {CICLO.map((p, i) => (
+          <li class={`etapa${p.quien === "Tu equipo" || p.quien === "Tu repartidor" ? " etapa--tuyo" : ""}`} data-etapa>
+            <span class="etapa__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+            <span class="etapa__quien">{p.quien}</span>
+            <h3 class="etapa__verbo">{p.verbo}</h3>
+            <p class="etapa__texto">{p.texto}</p>
+            {p.pronto && <p class="etapa__pronto"><span class="pronto">Pronto</span> {p.pronto}</p>}
+            <a class="etapa__ir" href={p.href}>{p.enlace} →</a>
+          </li>
+        ))}
+      </ol>
+      <div class="ciclo__barra" aria-hidden="true"><span data-ciclo-barra></span></div>
+    </div>
+  </section>
+
+  <section class="cobertura" aria-labelledby="cob-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Saca la cuenta</p>
+        <h2 id="cob-h" class="titulo-2">¿Cuánto del ciclo <span class="cur">hace cada uno?</span></h2>
+      </div>
+      <ul class="cobertura__lista" data-cobertura>
+        {cobertura.map((c) => (
+          <li class={`barra${c.arm ? " barra--arm" : ""}`}>
+            <span class="barra__nombre">{c.arm ? <span class="marca-texto">{c.nombre}</span> : c.nombre}</span>
+            <span class="barra__riel"><span class="barra__lleno" style={`--n:${c.n / CICLO.length}`} data-barra></span></span>
+            <span class="barra__cifra"><b>{c.n}</b> de {CICLO.length} · {c.nota}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="letras" id="letras" aria-labelledby="letras-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Las tres letras</p>
+        <h2 id="letras-h" class="titulo-2">A, R, M: <span class="cur">qué hace cada una</span></h2>
+      </div>
+      <div class="letras__caja" data-letras>
+        <span class="letras__linea" data-letras-linea aria-hidden="true"></span>
+        <ol class="letras__lista">
+          {letras.map((x) => (
+            <li class="letra" data-letra>
+              <span class="letra__g" aria-hidden="true"><span>{x.l}</span></span>
+              <b class="letra__palabra">{x.palabra}</b>
+              <p class="letra__texto">{x.texto}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="cuenta cuenta--suave" aria-labelledby="cuenta-h">
+    <div class="marco cuenta__marco">
+      <div class="cuenta__texto">
+        <p class="etiqueta">Así se ve</p>
+        <h2 id="cuenta-h" class="titulo-2">Saca la cuenta de un pedido: <span class="cur">el total lo hacemos nosotros.</span></h2>
+        <p class="bajada">La boleta de una venta de Calzados Rosa, con quién hizo cada paso. De los 8, a tu equipo le tocaron 2: empacar y entregar.</p>
+      </div>
+      <Boleta />
+    </div>
+  </section>
+
+  <section class="p-bloques" aria-labelledby="comparar-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Compáralo</p>
+        <h2 id="comparar-h" class="titulo-2">¿En qué se diferencia <span class="cur">de lo que ya conoces?</span></h2>
+      </div>
+      <ul class="versus">
+        {comparar.map((c) => (
+          <li>
+            <a class="versus__tarjeta" href={c.href} data-inclina>
+              <span class="versus__vs" aria-hidden="true"><b>ARM</b><i>vs</i><b>{c.otro}</b></span>
+              <span class="versus__frase">{c.frase} <span class="cur">{c.acento}</span></span>
+              <span class="versus__ir">Ver ARM vs {c.otro} →</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <Golpe frase="No es un CRM con IA pegada." acento="Es un equipo de IA que vende, cobra y ordena por ti." />
+
+  <section class="p-bloques p-bloques--suave" aria-labelledby="preg-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Preguntas</p>
+        <h2 id="preg-h" class="titulo-2">Sobre el <span class="cur">ARM</span></h2>
+      </div>
+      <Acordeon preguntas={PREGUNTAS_ARM} />
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { iniciarArm } from "../scripts/arm"
+  iniciarArm()
+</script>
