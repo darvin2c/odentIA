@@ -2,7 +2,7 @@
  * Dominio de detalle de lectura: shell compartido (`DetailSurface`), contenedores
  * (`DetailPanel` lateral y `DetailDrawer` modal), el selector automático por
  * ancho (`Detail`) y las primitivas de contenido (`DetailSection`,
- * `DetailList`, `DetailField`).
+ * `DetailList`, `DetailField`) y el cuerpo de dos columnas (`DetailSplit`).
  *
  * El barrel raíz reexporta esta carpeta completa; `detail-surface` es interno
  * (lo consumen los dos contenedores, no las páginas).
@@ -22,3 +22,4 @@ export {
   DetailSection,
   type DetailSectionProps,
 } from "./detail-rows.js"
+export { DetailSplit, type DetailSplitProps } from "./detail-split.js"

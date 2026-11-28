@@ -112,7 +112,8 @@ export function RadioChips<T extends string>({
         <FieldLabel
           key={option.value}
           className={cn(
-            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal transition-shadow",
+            // 40 px con el mouse; 44 con el dedo (`touch:`, pantalla táctil o teléfono).
+            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal transition-shadow touch:min-h-11",
             value === option.value && "border-primary bg-primary-soft",
             // El foco del teclado se ve en toda la pastilla, como el anillo de un botón, y se
             // distingue de «elegida» (borde y fondo): con foco, el anillo; sin foco, nada más.
@@ -143,7 +144,7 @@ export function RadioChips<T extends string>({
           // Enter pasa de pregunta en pregunta (`advanceOnEnter`): no se detiene en un botón que borra.
           data-enter-skip=""
           aria-describedby={aria["aria-labelledby"]}
-          className="h-auto min-h-8 px-2 text-muted-foreground max-sm:min-h-11 pointer-coarse:min-h-11"
+          className="h-auto min-h-8 px-2 text-muted-foreground touch:min-h-11"
           onClick={() => {
             onClear()
             // El botón desaparece con la respuesta: el foco vuelve al grupo, a su primera opción.

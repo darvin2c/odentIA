@@ -70,6 +70,8 @@ export const common = {
     moreFilters: "Más filtros",
     label: "Filtros",
     clear: "Limpiar",
+    /** La ficha de la tira que no filtra nada. */
+    all: "Todas",
     noResults: "Sin resultados",
     min: "Mín",
     max: "Máx",

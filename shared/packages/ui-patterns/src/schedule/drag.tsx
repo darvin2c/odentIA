@@ -16,6 +16,10 @@
  * El patrón nunca muta los datos: al soltar dispara `onMove`/`onResize` y el
  * padre decide. Mientras tanto, el fantasma sigue al puntero y una región
  * viva anuncia cada destino.
+ *
+ * Lo que se arrastra es una cita de la agenda por defecto; cualquier cosa con
+ * `id` y `title` sirve (`DragEntry`), y los anuncios se pueden decir con otras
+ * palabras (`messages`): así lo usan los destinos discretos de `drop.tsx`.
  */
 
 import * as React from "react"
@@ -24,46 +28,81 @@ import type { ScheduleEntry } from "./types.js"
 
 const LONG_PRESS_MS = 400
 const MOUSE_THRESHOLD_PX = 4
-const TOUCH_CANCEL_PX = 10
+/** Lo que se mueve el dedo antes de los 400 ms sin dejar de ser un desplazamiento (lo lee `drop.tsx`). */
+export const TOUCH_CANCEL_PX = 10
 const EDGE_PX = 56
 const EDGE_STEP_PX = 14
 const CLICK_SUPPRESS_MS = 350
 
-/** Geometría que cada vista conoce y el núcleo no: dónde cae el destino. */
 /** Borde de la cita que se redimensiona: inicio (asa izquierda/superior) o fin. */
 export type ResizeEdge = "start" | "end"
 
-export interface DragGeometry<TTarget> {
+/** Lo mínimo que el núcleo lee de lo que se arrastra: quién es y cómo se dice en voz alta. */
+export interface DragEntry {
+  id: string
+  title: string
+}
+
+/** Geometría que cada vista conoce y el núcleo no: dónde cae el destino. */
+export interface DragGeometry<TTarget, TEntry extends DragEntry = ScheduleEntry> {
   /**
    * Destino bajo el puntero; null cuando está fuera de cualquier carril.
    * `grab` es el punto del pointerdown: la cita conserva el desfase de donde
    * se agarró, no salta a la posición del cursor.
    */
   targetFromPoint(
-    entry: ScheduleEntry,
+    entry: TEntry,
     point: { x: number; y: number },
     resizing: ResizeEdge | null,
     grab?: { x: number; y: number },
   ): TTarget | null
   /** Destino de partida del modo teclado: la posición actual de la cita. */
-  initialTarget(entry: ScheduleEntry): TTarget
+  initialTarget(entry: TEntry): TTarget
   /**
    * Siguiente destino de teclado. `key` llega como «ArrowUp», «Alt+ArrowUp»
    * (borde de fin) o «Alt+Shift+ArrowUp» (borde de inicio).
    * Null = la tecla no hace nada.
    */
-  keyboardTarget(entry: ScheduleEntry, current: TTarget, key: string): TTarget | null
+  keyboardTarget(entry: TEntry, current: TTarget, key: string): TTarget | null
   sameTarget(a: TTarget, b: TTarget): boolean
   /** Frase para la región viva: «Dra. Ana Quispe, 10:30 a 11:15». */
-  describe(entry: ScheduleEntry, target: TTarget): string
-  onMove(entry: ScheduleEntry, target: TTarget): void
-  onResize?(entry: ScheduleEntry, target: TTarget): void
+  describe(entry: TEntry, target: TTarget): string
+  /**
+   * Al soltar en otro destino. Devolver `false` dice que no pasó nada (soltar
+   * en una flecha, o donde ya estaba aunque el destino se llame distinto): se
+   * anuncia como si no hubiera cambiado de lugar.
+   */
+  onMove(entry: TEntry, target: TTarget): boolean | void
+  onResize?(entry: TEntry, target: TTarget): void
 }
 
-export interface UseEntryDragOptions {
+/**
+ * Lo que dice la región viva, si no es lo de la agenda («Moviendo…», «Cita
+ * movida…»). Lo que falta se dice como siempre; lo de cambiar la duración no
+ * cambia.
+ */
+export interface EntryDragMessages<TTarget, TEntry extends DragEntry = ScheduleEntry> {
+  /** Al levantar con el puntero o el dedo. */
+  lift?: (entry: TEntry) => string
+  /** Al levantar con Alt+Intro: qué teclas hay. */
+  keyboardLift?: (entry: TEntry) => string
+  /** Al soltar en otro destino. */
+  moved?: (entry: TEntry, target: TTarget) => string
+  /** Al soltar donde estaba. */
+  unchanged?: string
+  /** Escape o un gesto interrumpido. */
+  cancelled?: string
+}
+
+export interface UseEntryDragOptions<TTarget = unknown, TEntry extends DragEntry = ScheduleEntry> {
   enabled?: boolean
-  /** Contenedor con scroll, para el auto-scroll al arrastrar cerca del borde. */
+  /**
+   * Contenedor con scroll, para el auto-scroll al arrastrar cerca del borde.
+   * `document.scrollingElement` es la página: el borde es el de la ventana.
+   */
   scrollContainer?: () => HTMLElement | null
+  /** Los anuncios con otras palabras; sin esto, los de la agenda. */
+  messages?: EntryDragMessages<TTarget, TEntry>
 }
 
 export interface DragSessionInfo<TTarget> {
@@ -73,8 +112,8 @@ export interface DragSessionInfo<TTarget> {
   keyboard: boolean
 }
 
-interface PendingDrag {
-  entry: ScheduleEntry
+interface PendingDrag<TEntry> {
+  entry: TEntry
   pointerId: number
   pointerType: string
   startX: number
@@ -83,8 +122,8 @@ interface PendingDrag {
   longPress: number | null
 }
 
-interface ActiveDrag<TTarget> {
-  entry: ScheduleEntry
+interface ActiveDrag<TTarget, TEntry> {
+  entry: TEntry
   target: TTarget
   resizing: ResizeEdge | null
   keyboard: boolean
@@ -106,26 +145,28 @@ export interface EntryDragResizeProps {
 }
 
 /** Lo que devuelve `useEntryDrag`: sesión, fantasma, anuncios y props. */
-export interface UseEntryDragResult<TTarget> {
+export interface UseEntryDragResult<TTarget, TEntry extends DragEntry = ScheduleEntry> {
   session: DragSessionInfo<TTarget> | null
   ghostDelta: { x: number; y: number } | null
   announcement: string
-  getBlockProps: (entry: ScheduleEntry) => EntryDragBlockProps
-  getResizeProps: ((entry: ScheduleEntry, edge: ResizeEdge) => EntryDragResizeProps) | null
+  getBlockProps: (entry: TEntry) => EntryDragBlockProps
+  getResizeProps: ((entry: TEntry, edge: ResizeEdge) => EntryDragResizeProps) | null
   suppressClick: () => boolean
+  /** Termina el arrastre en curso sin moverlo (Escape con el puntero, el foco que se va). */
+  cancel: () => void
 }
 
-export function useEntryDrag<TTarget>(
-  geometry: DragGeometry<TTarget>,
-  options?: UseEntryDragOptions,
-): UseEntryDragResult<TTarget> {
+export function useEntryDrag<TTarget, TEntry extends DragEntry = ScheduleEntry>(
+  geometry: DragGeometry<TTarget, TEntry>,
+  options?: UseEntryDragOptions<TTarget, TEntry>,
+): UseEntryDragResult<TTarget, TEntry> {
   const enabled = options?.enabled ?? true
-  const [session, setSession] = React.useState<ActiveDrag<TTarget> | null>(null)
+  const [session, setSession] = React.useState<ActiveDrag<TTarget, TEntry> | null>(null)
   const [ghostDelta, setGhostDelta] = React.useState<{ x: number; y: number } | null>(null)
   const [announcement, setAnnouncement] = React.useState("")
 
-  const sessionRef = React.useRef<ActiveDrag<TTarget> | null>(null)
-  const pendingRef = React.useRef<PendingDrag | null>(null)
+  const sessionRef = React.useRef<ActiveDrag<TTarget, TEntry> | null>(null)
+  const pendingRef = React.useRef<PendingDrag<TEntry> | null>(null)
   const grabRef = React.useRef({ x: 0, y: 0 })
   const suppressClickAtRef = React.useRef(0)
   const listeningRef = React.useRef(false)
@@ -133,9 +174,11 @@ export function useEntryDrag<TTarget>(
   geometryRef.current = geometry
   const scrollContainerRef = React.useRef(options?.scrollContainer)
   scrollContainerRef.current = options?.scrollContainer
+  const messagesRef = React.useRef(options?.messages)
+  messagesRef.current = options?.messages
 
   const handlers = React.useMemo(() => {
-    const applySession = (next: ActiveDrag<TTarget> | null) => {
+    const applySession = (next: ActiveDrag<TTarget, TEntry> | null) => {
       sessionRef.current = next
       setSession(next)
       if (!next) setGhostDelta(null)
@@ -151,7 +194,11 @@ export function useEntryDrag<TTarget>(
     const autoScroll = (x: number, y: number) => {
       const container = scrollContainerRef.current?.()
       if (!container) return
-      const rect = container.getBoundingClientRect()
+      // La página entera se mide por la ventana, no por su caja (que mide todo lo que se desplaza).
+      const rect =
+        container === document.scrollingElement
+          ? { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth }
+          : container.getBoundingClientRect()
       let dx = 0
       let dy = 0
       if (y < rect.top + EDGE_PX) dy = -EDGE_STEP_PX
@@ -161,7 +208,7 @@ export function useEntryDrag<TTarget>(
       if (dx !== 0 || dy !== 0) container.scrollBy(dx, dy)
     }
 
-    const activate = (pending: PendingDrag) => {
+    const activate = (pending: PendingDrag<TEntry>) => {
       const target = geometryRef.current.initialTarget(pending.entry)
       grabRef.current = { x: pending.startX, y: pending.startY }
       applySession({
@@ -176,7 +223,7 @@ export function useEntryDrag<TTarget>(
           ? pending.resizing === "start"
             ? `Cambiando el inicio de ${pending.entry.title}`
             : `Cambiando la duración de ${pending.entry.title}`
-          : `Moviendo ${pending.entry.title}`,
+          : (messagesRef.current?.lift?.(pending.entry) ?? `Moviendo ${pending.entry.title}`),
       )
       if (pending.pointerType === "touch") navigator.vibrate?.(20)
     }
@@ -188,21 +235,25 @@ export function useEntryDrag<TTarget>(
       applySession(null)
       maybeDetach()
       if (!commit) {
-        setAnnouncement("Movimiento cancelado")
+        setAnnouncement(messagesRef.current?.cancelled ?? "Movimiento cancelado")
         return
       }
       const initial = geometryRef.current.initialTarget(active.entry)
       if (!active.resizing && geometryRef.current.sameTarget(active.target, initial)) {
-        setAnnouncement("La cita no cambió de lugar")
+        setAnnouncement(messagesRef.current?.unchanged ?? "La cita no cambió de lugar")
         return
       }
       if (active.resizing && geometryRef.current.onResize) {
         geometryRef.current.onResize(active.entry, active.target)
-      } else {
-        geometryRef.current.onMove(active.entry, active.target)
+      } else if (geometryRef.current.onMove(active.entry, active.target) === false) {
+        setAnnouncement(messagesRef.current?.unchanged ?? "La cita no cambió de lugar")
+        return
       }
+      const moved = active.resizing ? undefined : messagesRef.current?.moved
       setAnnouncement(
-        `${active.resizing ? (active.resizing === "start" ? "Inicio cambiado" : "Duración cambiada") : "Cita movida"}: ${geometryRef.current.describe(active.entry, active.target)}`,
+        moved
+          ? moved(active.entry, active.target)
+          : `${active.resizing ? (active.resizing === "start" ? "Inicio cambiado" : "Duración cambiada") : "Cita movida"}: ${geometryRef.current.describe(active.entry, active.target)}`,
       )
     }
 
@@ -271,10 +322,10 @@ export function useEntryDrag<TTarget>(
 
     return { attach, cancelPending, finish, onBlockPointerDown, onBlockKeyDown, onResizeKeyDown }
 
-    function onBlockPointerDown(entry: ScheduleEntry, resizing: ResizeEdge | null) {
+    function onBlockPointerDown(entry: TEntry, resizing: ResizeEdge | null) {
       return (event: React.PointerEvent) => {
         if (!enabled || event.button !== 0) return
-        const pending: PendingDrag = {
+        const pending: PendingDrag<TEntry> = {
           entry,
           pointerId: event.pointerId,
           pointerType: event.pointerType,
@@ -296,7 +347,7 @@ export function useEntryDrag<TTarget>(
       }
     }
 
-    function onBlockKeyDown(entry: ScheduleEntry) {
+    function onBlockKeyDown(entry: TEntry) {
       return (event: React.KeyboardEvent) => {
         if (!enabled) return
         const active = sessionRef.current
@@ -305,7 +356,8 @@ export function useEntryDrag<TTarget>(
           const target = geometryRef.current.initialTarget(entry)
           applySession({ entry, target, resizing: null, keyboard: true })
           setAnnouncement(
-            `Moviendo ${entry.title}. Flechas para mover, Alt y flecha para el fin, Alt+Mayús y flecha para el inicio, Intro para soltar, Escape para cancelar.`,
+            messagesRef.current?.keyboardLift?.(entry) ??
+              `Moviendo ${entry.title}. Flechas para mover, Alt y flecha para el fin, Alt+Mayús y flecha para el inicio, Intro para soltar, Escape para cancelar.`,
           )
           return
         }
@@ -335,7 +387,7 @@ export function useEntryDrag<TTarget>(
       }
     }
 
-    function onResizeKeyDown(entry: ScheduleEntry, edge: ResizeEdge) {
+    function onResizeKeyDown(entry: TEntry, edge: ResizeEdge) {
       return (event: React.KeyboardEvent) => {
         if (!enabled || !geometryRef.current.onResize) return
         if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
@@ -375,7 +427,7 @@ export function useEntryDrag<TTarget>(
     ghostDelta: session && !session.keyboard ? ghostDelta : null,
     announcement,
     /** Props del bloque: arrastre de cuerpo entero + teclado. */
-    getBlockProps(entry: ScheduleEntry) {
+    getBlockProps(entry: TEntry) {
       const dragging = session?.entry.id === entry.id
       return {
         onPointerDown: handlers.onBlockPointerDown(entry, null),
@@ -389,7 +441,7 @@ export function useEntryDrag<TTarget>(
     },
     /** Props del asa de un borde; null cuando la vista no permite redimensionar. */
     getResizeProps: geometry.onResize
-      ? (entry: ScheduleEntry, edge: ResizeEdge) => ({
+      ? (entry: TEntry, edge: ResizeEdge) => ({
           onPointerDown: handlers.onBlockPointerDown(entry, edge),
           onKeyDown: handlers.onResizeKeyDown(entry, edge),
           onClick: (event: React.MouseEvent) => event.stopPropagation(),
@@ -397,6 +449,7 @@ export function useEntryDrag<TTarget>(
       : null,
     /** Tras soltar, el clic fantasma del gesto no debe abrir la cita. */
     suppressClick: () => Date.now() - suppressClickAtRef.current < CLICK_SUPPRESS_MS,
+    cancel: () => handlers.finish(false),
   }
 }
 

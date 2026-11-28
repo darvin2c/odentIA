@@ -102,7 +102,8 @@ export function SurfaceShell({
               type="button"
               variant="ghost"
               size="icon-lg"
-              className="-mt-0.5 shrink-0"
+              // 40 px con el mouse; 44 con el dedo (`touch:`, pantalla táctil o teléfono).
+              className="-mt-0.5 shrink-0 touch:size-11"
               aria-label={common.actions.close}
               disabled={closeDisabled}
               onClick={onClose}

@@ -29,7 +29,8 @@ export function SortMenu({ options, compact = false }: SortMenuProps) {
           <Button
             type="button"
             variant="outline"
-            className="rounded-full"
+            // 36 px con el mouse; 44 con el dedo (`touch:`).
+            className="rounded-full touch:h-11"
             aria-label={active?.label ?? common.filters.sort}
           >
             <ArrowUpDown />

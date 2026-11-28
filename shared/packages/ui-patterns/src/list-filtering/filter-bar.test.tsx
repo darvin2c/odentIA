@@ -5,6 +5,7 @@ import { Calendar } from "./calendar.js"
 import { FilterBar } from "./filter-bar.js"
 import { setFormatRegion } from "../locale.js"
 import { FilterControl, filterSummary } from "./filter-control.js"
+import { FilterStrip } from "./filter-strip.js"
 import { SearchInput } from "./search-input.js"
 import { SortMenu } from "./sort-menu.js"
 
@@ -462,5 +463,118 @@ describe("filtros de listas", () => {
     expect(typed(0)).toBe("1500")
     expect(typed(2)).toBe("150000")
     expect(typed(3)).toBe("1500000")
+  })
+})
+
+const stageFilter = {
+  type: "strip" as const,
+  key: "etapa",
+  label: "Etapa",
+  options: [
+    { value: "por_confirmar", label: "Pago por confirmar", count: 1, tone: "warning" as const },
+    { value: "preparando", label: "Preparando", count: 6, tone: "soft" as const },
+    { value: "en_camino", label: "En camino", count: 0, tone: "soft" as const },
+    { value: "entregado", label: "Entregado", count: 3, tone: "success" as const },
+  ],
+}
+
+describe("la tira de un filtro", () => {
+  it("cuenta cada opción, suma «Todas» y no ofrece lo que no tiene ninguna", () => {
+    render(<FilterStrip filter={stageFilter} />)
+    const strip = within(screen.getByRole("group", { name: "Etapa" }))
+    const all = strip.getByRole("button", { name: "Todas 10" })
+    expect(all.getAttribute("aria-pressed")).toBe("true")
+    expect(strip.getByRole("button", { name: "Preparando 6" }).getAttribute("aria-pressed")).toBe("false")
+    expect(strip.queryByRole("button", { name: /En camino/ })).toBeNull()
+  })
+
+  it("tocar una filtra; tocarla otra vez, o «Todas», lo quita", () => {
+    const { rerender } = render(<FilterStrip filter={stageFilter} />)
+    fireEvent.click(screen.getByRole("button", { name: "Preparando 6" }))
+    expect(mocks.setParam).toHaveBeenLastCalledWith("etapa", "preparando")
+    mocks.values = { etapa: "preparando" }
+    rerender(<FilterStrip filter={stageFilter} />)
+    const chosen = screen.getByRole("button", { name: "Preparando 6" })
+    expect(chosen.getAttribute("aria-pressed")).toBe("true")
+    // La elegida lleva su «×» a la vista.
+    expect(chosen.querySelector("svg")).toBeTruthy()
+    fireEvent.click(chosen)
+    expect(mocks.setParam).toHaveBeenLastCalledWith("etapa", undefined)
+    fireEvent.click(screen.getByRole("button", { name: /Todas/ }))
+    expect(mocks.setParam).toHaveBeenLastCalledWith("etapa", undefined)
+  })
+
+  it("la elegida se queda aunque ya no tenga ninguna (otro día)", () => {
+    mocks.values = { etapa: "en_camino" }
+    render(<FilterStrip filter={stageFilter} />)
+    expect(screen.getByRole("button", { name: "En camino 0" }).getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("con algo elegido que ya no está, queda «Todas» para quitarlo", () => {
+    mocks.values = { etapa: "empacado" }
+    render(
+      <FilterStrip filter={{ ...stageFilter, options: stageFilter.options.map((option) => ({ ...option, count: 0 })) }} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Todas/ }))
+    expect(mocks.setParam).toHaveBeenLastCalledWith("etapa", undefined)
+  })
+
+  it("sin nada que contar no se pinta", () => {
+    const { container } = render(
+      <FilterStrip filter={{ ...stageFilter, options: stageFilter.options.map((option) => ({ ...option, count: 0 })) }} />,
+    )
+    expect(container.innerHTML).toBe("")
+  })
+
+  it("en el FilterBar va en su fila, no en la de los filtros, y «Limpiar» la cuenta", () => {
+    mocks.values = { etapa: "preparando" }
+    const { container } = render(<FilterBar filters={[statusFilter, stageFilter]} sortOptions={[]} />)
+    expect(within(desktopRow(container)).queryByRole("group", { name: "Etapa" })).toBeNull()
+    expect(within(compactRow(container)).queryByRole("group", { name: "Etapa" })).toBeNull()
+    expect(screen.getAllByRole("group", { name: "Etapa" })).toHaveLength(1)
+    fireEvent.click(within(desktopRow(container)).getByRole("button", { name: "Limpiar" }))
+    expect(mocks.resetFilters).toHaveBeenCalled()
+  })
+
+  it("con `apart` la pinta la página; el FilterBar igual la cuenta en «Limpiar»", () => {
+    mocks.values = { etapa: "preparando" }
+    const apart = { ...stageFilter, placement: "apart" as const }
+    const { container } = render(<FilterBar filters={[statusFilter, apart]} sortOptions={[]} />)
+    expect(screen.queryByRole("group", { name: "Etapa" })).toBeNull()
+    expect(within(desktopRow(container)).getByRole("button", { name: "Limpiar" })).toBeTruthy()
+  })
+
+  it("sin otra tira, la barra queda como siempre (sin envoltorio)", () => {
+    const { container } = render(<FilterBar filters={[statusFilter]} sortOptions={[]} className="mi-barra" />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain("mi-barra")
+    expect(root.querySelector(':scope > [data-filter-row="desktop"]')).toBeTruthy()
+  })
+
+  it("el nombre del resumen es el de la opción elegida", () => {
+    expect(filterSummary(stageFilter, (key) => (key === "etapa" ? "entregado" : undefined))).toBe("Entregado")
+  })
+})
+
+describe("con el dedo, 44 px; con el mouse, como siempre", () => {
+  it("el buscador, el filtro y su «×», las opciones y «Limpiar»", async () => {
+    mocks.values = { status: "ready", q: "ana" }
+    const { container } = render(<FilterBar filters={[statusFilter]} sortOptions={[{ value: "fecha", label: "Fecha" }]} />)
+    const compact = within(compactRow(container))
+    const search = compactRow(container).querySelector('[data-slot="input-group"]') as HTMLElement
+    expect(search.className).toMatch(/\bh-9\b/)
+    expect(search.className).toContain("touch:h-11")
+    const clearOne = compact.getByRole("button", { name: "Limpiar: Estado" })
+    expect(clearOne.className).toContain("size-7")
+    expect(clearOne.className).toContain("touch:size-11")
+    const chip = clearOne.parentElement as HTMLElement
+    expect(chip.className).toMatch(/\bh-9\b/)
+    expect(chip.className).toContain("touch:h-[46px]")
+    expect(compact.getByText("Limpiar").closest("button")?.className).toContain("touch:h-11")
+    expect(compact.getByRole("button", { name: "Ordenar" }).className).toContain("touch:h-11")
+    fireEvent.click(compact.getByRole("button", { name: /Estado: Listo/ }))
+    const option = await screen.findByRole("option", { name: "Completado" })
+    expect(option.className).toContain("min-h-9")
+    expect(option.className).toContain("touch:min-h-11")
   })
 })

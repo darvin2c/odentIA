@@ -31,7 +31,13 @@ export function DetailSection({ title, actions, children, className }: DetailSec
           {title != null ? (
             <h3 className="font-heading text-sm font-medium text-foreground">{title}</h3>
           ) : null}
-          {actions != null ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
+          {actions != null ? (
+            // Los botones de la sección traen 32 px: con el dedo (`touch:`) miden 44 de alto y de
+            // ancho. Solo los de su fila: lo de adentro (un enlace en una línea) es del contenido.
+            <div className="ml-auto flex items-center gap-2 touch:[&_[data-slot=button]]:min-h-11 touch:[&_[data-slot=button]]:min-w-11">
+              {actions}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {children}

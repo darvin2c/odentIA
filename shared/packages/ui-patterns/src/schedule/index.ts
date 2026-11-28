@@ -2,7 +2,9 @@
  * Agenda: la rejilla vertical por recurso (Día), por día (Semana) y de un solo
  * carril (teléfono), la lista del día, los huecos y sus piezas. Contrato en
  * `types.ts`; la aritmética de tiempo en `time.ts`; el núcleo de arrastre en
- * `drag.ts` (puntero, pulsación larga táctil y teclado con Alt+Intro).
+ * `drag.ts` (puntero, pulsación larga táctil y teclado con Alt+Intro), y sobre
+ * él, el arrastre a un destino discreto (un día, una franja, un recurso) en
+ * `drop.tsx`.
  */
 
 export {
@@ -26,15 +28,29 @@ export {
   type ScheduleTeamWeekProps,
 } from "./team-week.js"
 export {
+  type DragEntry,
   type DragGeometry,
   DragLiveRegion,
   type DragSessionInfo,
   type EntryDragBlockProps,
+  type EntryDragMessages,
   type EntryDragResizeProps,
   type ResizeEdge,
+  type UseEntryDragOptions,
   type UseEntryDragResult,
   useEntryDrag,
 } from "./drag.js"
+export {
+  type ScheduleDraggableItem,
+  type ScheduleDraggableProps,
+  ScheduleDropProvider,
+  type ScheduleDropProviderProps,
+  type ScheduleDropTarget,
+  ScheduleStepArrow,
+  type ScheduleStepArrowProps,
+  useScheduleDraggable,
+  useScheduleDropTarget,
+} from "./drop.js"
 export { ScheduleGrid, type ScheduleGridProps } from "./grid.js"
 export { type LanePlacement, layoutOverlaps } from "./layout.js"
 export { SCHEDULE_SMALL_QUERY, useMediaQuery } from "./media.js"

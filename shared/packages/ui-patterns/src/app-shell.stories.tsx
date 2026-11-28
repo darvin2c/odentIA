@@ -1,15 +1,7 @@
 import { Badge, Button } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router"
 import { Contact, Inbox, Kanban, Plus, Smile, Tag } from "lucide-react"
-import { useMemo, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { AppShell, type AppShellNavEntry } from "./app-shell.js"
 import { Brand } from "./brand.js"
 import { KpiCard } from "./kpi-card.js"
@@ -23,6 +15,7 @@ import {
   DemoFields,
   DemoTable,
   demoSubmit,
+  StoryRouter,
 } from "./story-fixtures.js"
 
 /**
@@ -84,23 +77,6 @@ const SORT_OPTIONS: SortOption[] = [
   { value: "nombre", label: "Nombre" },
   { value: "recientes", label: "Recientes" },
 ]
-
-/** Router de memoria: `FilterBar` lee y escribe search plano de la URL. */
-function StoryRouter({ children }: { children: ReactNode }) {
-  const router = useMemo(() => {
-    const rootRoute = createRootRoute({ component: Outlet })
-    const indexRoute = createRoute({
-      getParentRoute: () => rootRoute,
-      path: "/",
-      component: () => children,
-    })
-    return createRouter({
-      routeTree: rootRoute.addChildren([indexRoute]),
-      history: createMemoryHistory({ initialEntries: ["/"] }),
-    })
-  }, [children])
-  return <RouterProvider router={router} />
-}
 
 function Shell({ children }: { children: ReactNode }) {
   return (

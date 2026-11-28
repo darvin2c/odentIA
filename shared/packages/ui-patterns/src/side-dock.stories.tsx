@@ -17,7 +17,7 @@ import { FormDrawer } from "./form/form-drawer.js"
 import { FormPanel } from "./form/form-panel.js"
 import { MasterDetail } from "./master-detail.js"
 import { SideDockProvider, SideDockSlot } from "./side-dock.js"
-import { DemoFields, demoSubmit } from "./story-fixtures.js"
+import { DemoFields, DemoSplitBody, demoSubmit } from "./story-fixtures.js"
 
 /**
  * Columna lateral del layout: el detalle de una lista se monta a todo el alto,
@@ -177,6 +177,34 @@ export const CajonDesdeLaColumna: Story = {
           <h1 className="text-2xl font-bold tracking-tight">Configuración</h1>
           <p className="text-muted-foreground">Abre el cajón, elige un medio y ciérralo: la columna sigue sin cambios.</p>
           <DetailWithNestedForm />
+        </div>
+        <SideDockSlot />
+      </div>
+    </SideDockProvider>
+  ),
+}
+
+/**
+ * El detalle de dos columnas en la columna lateral: abre tan ancho como su cajón (68rem) y la
+ * columna lo recorta a lo que cabe dejando a la página su mínimo. Angosto se apila; ensanchándolo
+ * (o en una pantalla grande) se ve en dos columnas.
+ */
+export const DosColumnasEnLaColumna: Story = {
+  render: () => (
+    <SideDockProvider>
+      <div className="flex min-h-svh">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 p-6">
+          <h1 className="text-2xl font-bold tracking-tight">Despachos</h1>
+          <p className="text-muted-foreground">El día sigue a la vista al lado del pedido.</p>
+          <DetailDrawer
+            open
+            size="split"
+            title="Brenda Choque · 0169"
+            description="Independencia · hoy · 2 a 6 p. m. · Jhon"
+            onClose={() => {}}
+          >
+            <DemoSplitBody />
+          </DetailDrawer>
         </div>
         <SideDockSlot />
       </div>

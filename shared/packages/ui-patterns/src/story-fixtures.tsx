@@ -10,10 +10,19 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { CalendarDays } from "lucide-react"
 import { type FormEvent, type ReactNode, useMemo, useState } from "react"
 import { DataTable } from "./data-table.js"
+import { DetailSplit } from "./detail/detail-split.js"
 import { DetailField, DetailList, DetailSection } from "./detail/detail-rows.js"
 import { type WizardStep, WizardSteps } from "./form/wizard-steps.js"
 import { type RowActionItem, RowActions } from "./row-actions.js"
@@ -605,4 +614,95 @@ export const PATIENT_AVATAR_COLUMN: ColumnDef<DemoPatient> = {
       <AvatarFallback>{patientInitials(row.original.name)}</AvatarFallback>
     </Avatar>
   ),
+}
+
+/** Router de memoria: `FilterBar` lee y escribe search plano de la URL. */
+export function StoryRouter({ children }: { children: ReactNode }) {
+  const router = useMemo(() => {
+    const rootRoute = createRootRoute({ component: Outlet })
+    const indexRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => children,
+    })
+    return createRouter({
+      routeTree: rootRoute.addChildren([indexRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+  }, [children])
+  return <RouterProvider router={router} />
+}
+
+/**
+ * La foto de un producto para las stories, sin archivos: un calzado dibujado sobre su color. Las
+ * pantallas reales usan la foto que subió la tienda.
+ */
+export function demoProductImage(color: string, background = "#f1ece6"): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" fill="${background}"/><path d="M14 62c10 0 20-4 28-14l8-12c2-3 6-3 8 0l4 8c3 6 9 9 16 10 4 1 6 4 6 8v4H14z" fill="${color}"/><rect x="14" y="70" width="70" height="6" rx="3" fill="#2b2b2b" opacity=".75"/></svg>`
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
+/**
+ * Un pedido con lo que toca, para el detalle de dos columnas (`DetailSplit`): a la derecha la
+ * acción con su imagen grande y su botón; a la izquierda el pedido, con secciones que traen
+ * botones pequeños (44 px con el dedo).
+ */
+export function DemoSplitBody() {
+  return (
+    <DetailSplit
+      asideLabel="Lo que toca"
+      aside={
+        <>
+          <p className="rounded-xl bg-warning-soft px-3 py-2.5 text-sm">
+            <b>Te toca: </b>Empácalo y dáselo a Jhon. Sale de 2 a 6 p. m.
+          </p>
+          <div className="flex flex-col gap-1">
+            <h3 className="font-heading text-base font-medium">Va en el paquete</h3>
+            <p className="text-sm text-muted-foreground">1 producto. Míralo antes de cerrar la caja.</p>
+          </div>
+          <img
+            src={demoProductImage("#1f1f1f", "#f3c6d6")}
+            alt="Botín de tacón con pasador, negro, talla 37"
+            className="aspect-[4/3] w-full rounded-xl object-cover"
+          />
+          <Button type="button" className="h-11 w-full">
+            Listo: se lo di a Jhon
+          </Button>
+        </>
+      }
+    >
+      <DetailSection
+        title="La etapa"
+        className="elevated rounded-xl border bg-card p-4"
+        actions={
+          <Button type="button" size="sm" variant="ghost">
+            Cómo avanza
+          </Button>
+        }
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <Badge variant="soft">Preparando</Badge>
+          <span className="font-medium text-success">Pagado</span>
+          <span className="ml-auto font-semibold tabular-nums">S/ 189</span>
+        </div>
+      </DetailSection>
+      <DetailSection title="Lo que lleva" className="elevated rounded-xl border bg-card p-4">
+        <DetailList>
+          <DetailField label="Producto">Botín de tacón con pasador</DetailField>
+          <DetailField label="Variante">negro · 37</DetailField>
+        </DetailList>
+      </DetailSection>
+      <DetailSection
+        title="La clienta"
+        className="elevated rounded-xl border bg-card p-4"
+        actions={
+          <Button type="button" size="sm" variant="ghost">
+            Ver su ficha
+          </Button>
+        }
+      >
+        <p className="text-sm">Brenda Choque · 987 654 321 · le escribe por WhatsApp</p>
+      </DetailSection>
+    </DetailSplit>
+  )
 }

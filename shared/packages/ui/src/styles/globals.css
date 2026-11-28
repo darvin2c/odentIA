@@ -6,6 +6,17 @@
 /* Dentro de `.theme-light` (una hoja de papel en pantalla) no rige el oscuro. */
 @custom-variant dark (&:is(.dark *):not(:is(.theme-light, .theme-light *)));
 
+/*
+ * Con el dedo: una pantalla táctil (`pointer: coarse`) o el ancho del teléfono (bajo `md`, el
+ * corte de `useIsMobile`). Lo que se toca mide 44 px con `touch:`; con el mouse en el escritorio
+ * queda como está.
+ */
+@custom-variant touch {
+  @media (pointer: coarse), (width < 48rem) {
+    @slot;
+  }
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Manrope Variable', sans-serif;

@@ -4,6 +4,9 @@ import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { Detail } from "./detail.js"
+import { DetailDrawer } from "./detail-drawer.js"
+import { DetailSection } from "./detail-rows.js"
+import { DetailSplit } from "./detail-split.js"
 
 // Base UI Drawer y ScrollArea en jsdom: matchMedia decide el modo, el resto es
 // andamiaje mínimo (mismo que form-drawer.test).
@@ -89,5 +92,49 @@ describe("Detail", () => {
     expect(screen.queryByText("contenido hijo")).toBeNull()
     expect(screen.queryByRole("region", { name: "Atención del 12/09/2026" })).toBeNull()
     expect(document.querySelector('[data-slot="drawer-popup"]')).toBeNull()
+  })
+})
+
+describe("el detalle de dos columnas", () => {
+  it("el cajón `split` mide 68rem (nunca más que la ventana) y su cuerpo mide por contenedor", async () => {
+    mockMatchMedia(false)
+    render(
+      <DetailDrawer open size="split" title="Carla Mendoza · 0164" onClose={() => {}}>
+        <DetailSplit aside={<p>Confirma el Yape</p>} asideLabel="Lo que toca">
+          <p>El pedido</p>
+        </DetailSplit>
+      </DetailDrawer>,
+    )
+    const dialog = await screen.findByRole("dialog", { name: "Carla Mendoza · 0164" })
+    expect(dialog.className).toContain("[--drawer-content-width:min(68rem,calc(100vw-2rem))]")
+    const aside = screen.getByRole("region", { name: "Lo que toca" })
+    // Lo que toca va primero en el documento: arriba al apilarse, y a la derecha con `@3xl`.
+    expect(aside.compareDocumentPosition(screen.getByText("El pedido")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(aside.className).toContain("@3xl:order-2")
+    expect(aside.closest('[class~="@container"]')).toBeTruthy()
+  })
+
+  it("la «×» mide 44 px con el dedo y 40 con el mouse", async () => {
+    mockMatchMedia(false)
+    render(
+      <DetailDrawer open title="Atención" onClose={() => {}}>
+        <p>cuerpo</p>
+      </DetailDrawer>,
+    )
+    const close = await screen.findByRole("button", { name: "Cerrar" })
+    expect(close.className).toContain("size-10")
+    expect(close.className).toContain("touch:size-11")
+  })
+
+  it("los botones de la fila de una sección miden 44 px con el dedo; lo de adentro es del contenido", () => {
+    render(
+      <DetailSection title="La clienta" actions={<button type="button">Ver</button>}>
+        <p>Carla</p>
+      </DetailSection>,
+    )
+    const actions = screen.getByRole("button", { name: "Ver" }).parentElement as HTMLElement
+    expect(actions.className).toContain("touch:[&_[data-slot=button]]:min-h-11")
+    const section = screen.getByText("La clienta").closest("section") as HTMLElement
+    expect(section.className).not.toContain("[data-slot=button]")
   })
 })
