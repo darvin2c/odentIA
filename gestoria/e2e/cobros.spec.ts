@@ -113,6 +113,7 @@ test("Yape con su QR y la transferencia con su CCI revisado", async ({ page }) =
   await expect(transfer.getByText("20 números, con sus dígitos de control revisados.")).toHaveCount(
     0,
   )
+  await shot(page, "cobros-cci-otro-banco-1440")
   await cci.fill("002 191 002345678012 53")
   await expect(cci).not.toHaveAttribute("aria-invalid", "true")
   await expect(

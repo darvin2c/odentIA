@@ -1197,7 +1197,7 @@ function QrPicker({
           {shown
             ? value && value !== "quitar"
               ? "Se guarda al tocar «Guardar»."
-              : "Es el que ve la clienta."
+              : "Guardado en tu tienda."
             : "Suelta la imagen aquí o pégala."}
         </p>
         <div className="flex flex-wrap gap-2">

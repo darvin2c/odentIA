@@ -26,7 +26,7 @@ describe("el CCI mientras se escribe", () => {
     )
     expect(cciIssue("003 200 003012345678 39", "", banks)).toBeNull()
     expect(cciIssue("002 191 002345678012 55", "002", banks)).toMatch(/dígitos de control/)
-    expect(cciIssue("0021931030", "002", banks)).toBe("El CCI tiene 20 números: llevas 10.")
+    expect(cciIssue("0021931030", "002", banks)).toBe("Faltan números: el CCI tiene 20.")
     expect(cciIssue("", "002", banks)).toBeNull()
     expect(cciReady("0021931030")).toBe(false)
     expect(cciReady("002 191 002345678012 55")).toBe(true)

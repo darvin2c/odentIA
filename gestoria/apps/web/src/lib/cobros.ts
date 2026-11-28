@@ -147,7 +147,7 @@ export function cciIssue(text: string, bankCode: string, banks: Bank[]): string 
   if (check === "numeros") return "El CCI lleva solo números."
   if (check === "incompleto")
     return digits < 20
-      ? `El CCI tiene 20 números: llevas ${digits}.`
+      ? "Faltan números: el CCI tiene 20."
       : "El CCI tiene 20 números: sobran algunos."
   if (check === "control") return "Algún número no coincide con sus dígitos de control: revísalo."
   const chosen = banks.find((bank) => bank.code === bankCode)
