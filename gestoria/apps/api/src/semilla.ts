@@ -203,9 +203,10 @@ async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<
       trialEndsAt: null,
     },
     agents: { trialExhausted: false, capReached: false },
-    // El plan decidido (tablero 10): la cuota de USD 19 vuelve como saldo y de ahí sale el 1 % de
-    // cada pedido que gestorIA genera sola. Este mes va dentro del saldo; el anterior lo pasó un
-    // poco y ese cobro está por pagar.
+    // El plan decidido: la cuota de USD 19 vuelve como saldo y de ahí sale el 1 % del total, con
+    // el envío, de cada venta completada (pagada y entregada, o despachada por agencia con su
+    // número), venga de donde venga; lo devuelto se descuenta. Este mes va dentro del saldo; el
+    // anterior lo pasó un poco y ese cobro está por pagar.
     budget: {
       currency: "USD",
       creditCents: 1900,
@@ -241,7 +242,7 @@ async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<
           },
           {
             kind: "pedido",
-            description: "1 % de los pedidos que pasaron tu saldo",
+            description: "1 % de las ventas completadas que pasaron tu saldo",
             quantity: 18,
             amountCents: 240,
           },

@@ -36,9 +36,13 @@ la Ayuda. La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la
   cuándo cierra el mes y con qué se paga. El precio del plan no se muestra como «pagas X al mes»:
   no es la cifra del mes, y esa la dirá la administración cuando la mande. «Subir comprobante» se
   nombra solo donde está el botón (algo por pagar, cómo pagarlo y la administración conectada). gestorIA no suma ni calcula impuestos o precios:
-  el total de cada cobro es el de la administración, en «Por pagar». Los movimientos por pedido (el
+  el total de cada cobro es el de la administración, en «Por pagar». Los movimientos por venta (el
   1 % del tablero 18) no los manda el acuerdo hoy: la pantalla dice qué se verá, sin inventar
-  filas. Cambiar el tope sigue siendo pedirlo a gestorIA: «Pedir otro tope» abre la Ayuda con
+  filas. El 1 % sale del total, con el envío, de cada venta completada (pagada y entregada, o
+  despachada por agencia con su número), venga de donde venga (Sofi, catálogo, campaña de Argos o
+  anotada por el equipo); lo devuelto se descuenta. De dónde vino una venta es solo para medir y
+  para Reportes: no decide si se cobra (regla del dueño del 27 nov, que reemplaza «solo lo que
+  gestorIA genera sola»). Cambiar el tope sigue siendo pedirlo a gestorIA: «Pedir otro tope» abre la Ayuda con
   el mensaje a soporte ya escrito, que la persona completa y envía.
 - **La tarjeta para instalar y activar los avisos va en Inicio**, la entrada de la tienda.
 
@@ -47,7 +51,7 @@ la Ayuda. La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la
 - Mandar la invitación por la API de WhatsApp de la tienda: cuesta mensajes de Meta y la tienda
   puede no tener WhatsApp conectado; desde su celular es gratis y lo ve salir.
 - Una invitación para el repartidor con un link que todavía no lleva a nada.
-- Escribir «el 1 % de cada pedido» en la pantalla: hoy la administración cobra lo que diga el plan
+- Escribir «el 1 % de cada venta» en la pantalla: hoy la administración cobra lo que diga el plan
   cargado, y la app no lo sabe; lo dirá cuando el acuerdo mande la comisión y sus movimientos.
 
 ## Consecuencias

@@ -246,9 +246,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   saldo usado y lo que pasó del saldo y el tope, tal como lo manda la administración (`budget`). El
   precio del plan no es «pagas X al mes»: esa cifra la manda la administración o no se dice.
   gestorIA no suma, no calcula impuestos ni precios; el total de cada cobro es el suyo. «Subir
-  comprobante» se nombra solo donde está el botón (`receiptHere`). Los movimientos por pedido llegan cuando el
+  comprobante» se nombra solo donde está el botón (`receiptHere`). Los movimientos por venta llegan cuando el
   acuerdo los mande (tablero 18): hasta entonces, un `EmptyState` que dice qué se verá, sin filas
-  inventadas. Se pregunta desde la Ayuda de la cabecera, escribiendo a soporte, no con un
+  inventadas. El 1 % sale del total, con el envío, de cada venta completada (pagada y
+  entregada, o despachada por agencia con su número), venga de donde venga; lo devuelto se
+  descuenta. Ningún texto dice que algo cuenta para el 1 % por su origen: el origen es para medir. Se pregunta desde la Ayuda de la cabecera, escribiendo a soporte, no con un
   formulario en la página; «Pedir otro tope» abre la Ayuda con ese mensaje ya escrito
   (`openSupportRequest` de `@odentia/ui-patterns`), que la persona completa y envía.
   El comprobante de un cargo sale en su aviso (`pago.comprobante`), mirado por su contenido.

@@ -46,7 +46,7 @@ import { StoreHeader, useStoreContext } from "./tiendas"
 /**
  * «Plan y pagos» (lienzo B, paso B7; lienzo «gestorIA · Configuración, de nuevo», tablero 10): lo
  * que la administración dice de la tienda, de arriba abajo: lo que se debe y cuándo vence, el saldo
- * usado y el tope, cada pedido que cuenta (cuando el acuerdo lo mande), lo que se cobró y los
+ * usado y el tope, cada venta del cobro (cuando el acuerdo la mande), lo que se cobró y los
  * pagos. Nada se suma ni se calcula aquí: solo lo que falta de un cobro y lo que queda del saldo,
  * restando las dos cifras que manda la administración. Solo el
  * Dueño (el plan, decisión 7). Se pregunta desde la Ayuda de arriba, como en toda la tienda. Si
@@ -396,21 +396,23 @@ function ChargeLines({ charge }: { charge: Charge }) {
 }
 
 /**
- * Cada pedido que cuenta para el cobro (tablero 10, paso 3). Los manda la administración por el
- * acuerdo cuando empiece a cobrar por pedido (tablero 18 del lienzo principal); hoy no los manda:
- * aquí se dice qué se verá y cuándo, sin inventar filas.
+ * Cada venta del cobro (tablero 10, paso 3). El 1 % sale del total con envío de cada venta
+ * completada (pagada y entregada, o despachada por agencia con su número), venga de donde venga;
+ * lo devuelto se descuenta. Las manda la administración por el acuerdo cuando empiece a cobrar
+ * así (tablero 18 del lienzo principal); hoy no las manda: aquí se dice qué se verá y cuándo, sin
+ * inventar filas.
  */
 function Movements() {
   return (
     <section aria-labelledby="plan-movimientos" className="flex flex-col gap-3">
       <h2 id="plan-movimientos" className="text-lg font-bold">
-        Cada pedido
+        Cada venta
       </h2>
       <div className="rounded-xl border bg-card">
         <EmptyState
           icon={ReceiptText}
-          title="Aquí verás cada pedido que cuenta para tu cobro"
-          description="Si tu plan cobra por pedido, cada pedido de Sofi o de tu catálogo tendrá aquí su fila, con la venta, lo que se cobró y tu saldo; los anulados y las devoluciones, también. Aparecen cuando gestorIA los reciba con tu plan. Mientras, cada cobro se ve completo en «Por pagar» y en «Lo que se te cobró»."
+          title="Aquí verás cada venta de tu cobro"
+          description="Si tu plan cobra por venta, cada venta completada (pagada y entregada, o despachada por agencia con su número) tendrá aquí su fila, venga de donde venga, con su total con envío, lo que se cobró y tu saldo; lo devuelto se descuenta. Aparecen cuando gestorIA las reciba con tu plan. Mientras, cada cobro se ve completo en «Por pagar» y en «Lo que se te cobró»."
         />
       </div>
     </section>

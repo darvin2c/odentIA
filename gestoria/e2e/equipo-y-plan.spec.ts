@@ -157,7 +157,7 @@ test("Rosa suma a Kevin con su pago por entrega, lo cambia y lo saca", async ({ 
   await expect(couriers.getByRole("listitem").filter({ hasText: "Kevin Ramos" })).toHaveCount(0)
 })
 
-test("Plan y pagos: primero lo que se debe, después el saldo y el tope, y qué se verá de cada pedido", async ({
+test("Plan y pagos: primero lo que se debe, después el saldo y el tope, y qué se verá de cada venta", async ({
   page,
 }) => {
   await as("rosa")
@@ -175,9 +175,7 @@ test("Plan y pagos: primero lo que se debe, después el saldo y el tope, y qué 
   // Con la administración conectada está el botón, y solo entonces la página lo nombra.
   await expect(page.getByRole("button", { name: "Subir comprobante" })).toBeVisible()
   await expect(page.getByText("Y subes el comprobante arriba, en «Por pagar».")).toBeVisible()
-  await expect(
-    page.getByText("Aquí verás cada pedido que cuenta para tu cobro", { exact: true }),
-  ).toBeVisible()
+  await expect(page.getByText("Aquí verás cada venta de tu cobro", { exact: true })).toBeVisible()
   // Se pregunta desde la Ayuda de arriba: la página no lleva su propio formulario. «Pedir otro
   // tope» abre la Ayuda con el mensaje a soporte ya escrito; no se envía solo.
   await expect(page.getByLabel("Tu pregunta")).toHaveCount(0)
