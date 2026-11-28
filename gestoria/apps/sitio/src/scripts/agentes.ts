@@ -325,3 +325,82 @@ export function iniciarArgos() {
   equipo()
   cierre()
 }
+
+/** Dónde está un elemento en la página, sin contar las transformaciones. */
+function enPagina(el: HTMLElement) {
+  let x = 0
+  let y = 0
+  for (let e: HTMLElement | null = el; e; e = e.offsetParent as HTMLElement | null) {
+    x += e.offsetLeft
+    y += e.offsetTop
+  }
+  return { x, y }
+}
+
+/**
+ * El teléfono del héroe baja con el scroll hasta el teléfono de la venta, al lado de los capítulos,
+ * y ahí se funde con él: es el mismo teléfono, que ahora muestra lo que pasa. Solo en computadora.
+ */
+function viajeCel() {
+  const desdeCel = document.querySelector<HTMLElement>(".p-heroe .p-cel")
+  const hastaCel = document.querySelector<HTMLElement>(".venta__cel")
+  const pin = document.querySelector<HTMLElement>("[data-venta-pin]")
+  if (!desdeCel || !hastaCel || !pin || !window.matchMedia("(min-width: 1024px)").matches) return
+  const heroe = desdeCel.closest<HTMLElement>(".p-heroe")
+  if (heroe) heroe.style.overflow = "visible"
+  desdeCel.style.position = "relative"
+  desdeCel.style.zIndex = "30"
+  const delta = () => {
+    const a = enPagina(desdeCel)
+    const b = enPagina(hastaCel)
+    return { x: b.x - a.x, y: b.y - a.y, s: hastaCel.offsetWidth / desdeCel.offsetWidth }
+  }
+  // Aquí el teléfono de la venta no tiene su propia entrada: llega con el del héroe.
+  for (const t of gsap.getTweensOf(hastaCel)) {
+    t.scrollTrigger?.kill()
+    t.kill()
+  }
+  gsap.set(hastaCel, { clearProps: "transform,opacity" })
+  gsap.set(desdeCel, { transformOrigin: "0 0" })
+  gsap
+    .timeline({
+      scrollTrigger: {
+        trigger: heroe ?? desdeCel,
+        start: "top top",
+        endTrigger: pin,
+        end: "top top",
+        scrub: 0.6,
+        invalidateOnRefresh: true,
+      },
+    })
+    .fromTo(
+      desdeCel,
+      { x: 0, y: 0, scale: 1, rotate: 0 },
+      {
+        x: () => delta().x,
+        y: () => delta().y,
+        scale: () => delta().s,
+        rotate: 0,
+        ease: "power2.inOut",
+        duration: 1,
+      },
+      0,
+    )
+    .to(desdeCel, { rotate: -4, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0)
+    .fromTo(hastaCel, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: "none" }, 0.88)
+    .to(desdeCel, { opacity: 0, duration: 0.12, ease: "none" }, 0.88)
+}
+
+/**
+ * Cómo funciona: la venta por capítulos en el teléfono, con Sofi, como en el Inicio; el teléfono del
+ * héroe baja hasta ella.
+ */
+export function iniciarComoFunciona() {
+  const quieta = reduceMovimiento()
+  const sofi = cargarSofi(quieta)
+  if (quieta) return
+  prepararScroll()
+  venta(sofi)
+  viajeCel()
+  cierre()
+}

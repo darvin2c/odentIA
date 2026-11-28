@@ -677,13 +677,15 @@
 }
 
 /* ---------- La tabla comparativa ---------- */
+/* Sin barra de desplazamiento: en el celular se apila, y así las filas pueden entrar desde los lados
+   sin que aparezca una barra mientras se animan. */
 .comp {
   margin-top: 32px;
-  overflow-x: auto;
+  overflow: clip;
+  overflow-clip-margin: 40px;
 }
 .comp table {
   width: 100%;
-  min-width: 560px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 16px;
@@ -893,11 +895,11 @@
   display: flex;
   width: max-content;
 }
-.ciclo--corre .paso {
+.ciclo--corre .etapa {
   width: 320px;
   flex: none;
 }
-.paso {
+.etapa {
   position: relative;
   display: grid;
   align-content: start;
@@ -909,7 +911,7 @@
   color: #fff;
   overflow: hidden;
 }
-.paso::after {
+.etapa::after {
   content: "";
   position: absolute;
   inset: auto -30% -50% auto;
@@ -919,15 +921,15 @@
   background: radial-gradient(circle, rgba(254, 79, 2, 0.45), transparent 65%);
   pointer-events: none;
 }
-.paso--tuyo {
+.etapa--tuyo {
   background: var(--papel);
   color: var(--texto);
   border: 1px solid var(--linea-2);
 }
-.paso--tuyo::after {
+.etapa--tuyo::after {
   display: none;
 }
-.paso__n {
+.etapa__n {
   font-family: var(--serif);
   font-style: italic;
   font-size: 56px;
@@ -937,7 +939,7 @@
   background-clip: text;
   color: transparent;
 }
-.paso__quien {
+.etapa__quien {
   justify-self: start;
   padding: 4px 10px;
   border-radius: 999px;
@@ -947,28 +949,28 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.paso--tuyo .paso__quien {
+.etapa--tuyo .etapa__quien {
   background: var(--papel-2);
   color: var(--texto-2);
 }
-.paso__verbo {
+.etapa__verbo {
   margin-top: 6px;
   font-size: clamp(30px, 3vw, 38px);
   font-weight: 300;
   letter-spacing: -0.04em;
 }
-.paso__texto {
+.etapa__texto {
   font-size: 15px;
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.72);
 }
-.paso--tuyo .paso__texto {
+.etapa--tuyo .etapa__texto {
   color: var(--texto-2);
 }
-.paso__pronto {
+.etapa__pronto {
   font-size: 13.5px;
 }
-.paso__ir {
+.etapa__ir {
   position: relative;
   z-index: 1;
   align-self: end;
@@ -976,7 +978,7 @@
   font-size: 14.5px;
   color: var(--naranja-claro);
 }
-.paso--tuyo .paso__ir {
+.etapa--tuyo .etapa__ir {
   color: var(--naranja);
 }
 .ciclo__barra {

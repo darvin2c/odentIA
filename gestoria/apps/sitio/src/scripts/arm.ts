@@ -1,6 +1,6 @@
 // El movimiento del ARM (web v5): la boleta de un pedido, las tres letras de «Qué es un ARM», el
 // duelo con un CRM, los dos teléfonos con un chatbot, la frase grande que se enciende y los títulos
-// palabra por palabra. También los seis capítulos de Cómo funciona. Todo con GSAP y ScrollTrigger.
+// palabra por palabra. Todo con GSAP y ScrollTrigger.
 // Con «reducir movimiento» no corre nada: la página ya está completa y quieta (arm.css).
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
@@ -344,7 +344,7 @@ function ciclo() {
   const c = document.querySelector<HTMLElement>("[data-ciclo]")
   const pista = c?.querySelector<HTMLElement>("[data-ciclo-pista]")
   if (!c || !pista) return
-  const pasos = $$("[data-paso]", pista)
+  const pasos = $$("[data-etapa]", pista)
   if (!window.matchMedia("(min-width: 1024px)").matches) {
     for (const p of pasos)
       gsap.from(p, {
@@ -408,45 +408,4 @@ export function iniciarArm() {
   telefonos()
   tablas()
   versus()
-}
-
-/**
- * Los seis capítulos de Cómo funciona: un riel naranja se llena con el scroll y cada capítulo se
- * enciende al llegar a la mitad de la pantalla (su número pasa de contorno a lleno).
- */
-export function iniciarCapitulos() {
-  const lista = document.querySelector<HTMLElement>("[data-capitulos]")
-  if (!lista || reduceMovimiento()) return
-  document.documentElement.classList.add("capitulos-vivos")
-  gsap.fromTo(
-    "[data-riel] span",
-    { scaleY: 0 },
-    {
-      scaleY: 1,
-      ease: "none",
-      scrollTrigger: { trigger: lista, start: "top 60%", end: "bottom 60%", scrub: 0.4 },
-    },
-  )
-  for (const c of $$("[data-capitulo]", lista)) {
-    ScrollTrigger.create({
-      trigger: c,
-      start: "top 62%",
-      onEnter: () => {
-        c.classList.add("es-activo")
-        gsap.fromTo(
-          $$(".p-capitulo__n", c),
-          { scale: 0.6, rotate: -10 },
-          { scale: 1, rotate: 0, duration: 0.7, ease: "back.out(2.4)" },
-        )
-        gsap.from($$("h2, p", c), {
-          x: 30,
-          opacity: 0,
-          duration: 0.6,
-          stagger: 0.08,
-          ease: "expo.out",
-        })
-      },
-      onLeaveBack: () => c.classList.remove("es-activo"),
-    })
-  }
 }

@@ -76,8 +76,8 @@ export type Msg = {
 
 export const CHAT_CLIENTA: Msg[] = [
   { turno: 0, de: "ella", hora: "21:14", texto: "Hola, ¿tienes la zapatilla blanca en talla 38?" },
-  { turno: 1, de: "ella", hora: "21:15", texto: "¿Me la dejas en 110?" },
-  { turno: 2, de: "ella", hora: "21:16", texto: "Ya, sepáramela. Es para Surco" },
+  { turno: 1, de: "ella", hora: "21:15", texto: "¿Me la dejas en 110? Es para Surco" },
+  { turno: 2, de: "ella", hora: "21:16", texto: "Ya, anótala" },
 ]
 export const CHAT_BOT: Msg[] = [
   {
@@ -108,28 +108,30 @@ export const CHAT_SOFI: Msg[] = [
     turno: 0,
     de: "sofi",
     hora: "21:14",
-    texto: "¡Hola, Andrea! Sí, en talla 38 me quedan 2 pares. Es de cuero y la horma es cómoda.",
+    texto:
+      "¡Hola, Andrea! Sí, en talla 38 me quedan 2 pares. Es de cuero sintético con planta de goma y horma normal.",
     nota: "Miró tu catálogo y tu stock",
-    tarjeta: { titulo: "Zapatilla Urbana Blanca", detalle: "Talla 38 · quedan 2", cifra: "S/ 139" },
+    tarjeta: { titulo: "Zapatilla urbana blanca", detalle: "Talla 38 · quedan 2", cifra: "S/ 129" },
   },
   {
     turno: 1,
     de: "sofi",
     hora: "21:15",
     texto:
-      "A 110 no llego. Si la pagas hoy antes de las 23:00, te la dejo en S/ 129. ¿Te la separo?",
+      "A 110 no llego, pero te regalo el envío a Surco y te la dejo en S/ 120, todo incluido, si la pagas hasta mañana a las 10:00. ¿Te la anoto?",
     nota: "Una oferta, con plazo, sobre tu mínimo",
   },
   {
     turno: 2,
     de: "sofi",
     hora: "21:16",
-    texto: "¡Listo! Con el envío a Surco son S/ 139. Aquí tienes tu link de pago:",
-    nota: "Sumó el envío y armó el cobro",
+    texto:
+      "¡Listo, Andrea! Anoté tu pedido con el envío a Surco: S/ 120. Aquí tienes tu link de pago:",
+    nota: "Anotó el pedido y armó el cobro",
     tarjeta: {
       titulo: "Pedido 1042",
       detalle: "Zapatilla 38 + envío a Surco",
-      cifra: "S/ 139",
+      cifra: "S/ 120",
       boton: "Pagar",
     },
   },

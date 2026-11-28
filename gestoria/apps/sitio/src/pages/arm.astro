@@ -60,13 +60,13 @@ const termino = {
     <div class="ciclo__ventana">
       <ol class="ciclo__pista" data-ciclo-pista>
         {CICLO.map((p, i) => (
-          <li class={`paso${p.quien === "Tu equipo" || p.quien === "Tu repartidor" ? " paso--tuyo" : ""}`} data-paso>
-            <span class="paso__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
-            <span class="paso__quien">{p.quien}</span>
-            <h3 class="paso__verbo">{p.verbo}</h3>
-            <p class="paso__texto">{p.texto}</p>
-            {p.pronto && <p class="paso__pronto"><span class="pronto">Pronto</span> {p.pronto}</p>}
-            <a class="paso__ir" href={p.href}>{p.enlace} →</a>
+          <li class={`etapa${p.quien === "Tu equipo" || p.quien === "Tu repartidor" ? " etapa--tuyo" : ""}`} data-etapa>
+            <span class="etapa__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+            <span class="etapa__quien">{p.quien}</span>
+            <h3 class="etapa__verbo">{p.verbo}</h3>
+            <p class="etapa__texto">{p.texto}</p>
+            {p.pronto && <p class="etapa__pronto"><span class="pronto">Pronto</span> {p.pronto}</p>}
+            <a class="etapa__ir" href={p.href}>{p.enlace} →</a>
           </li>
         ))}
       </ol>
