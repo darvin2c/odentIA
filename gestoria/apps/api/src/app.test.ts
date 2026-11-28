@@ -460,6 +460,25 @@ describe("Configuración: lo que falta para vender", () => {
     ).toBe(404)
     expect(JSON.stringify(rosa.json)).not.toMatch(/token|secret|Enc"/i)
   })
+
+  it("un link de pago sin pasarela no cobra: no cuenta como forma de pago, ni aquí ni en Inicio", async () => {
+    const base = `/api/tiendas/${storeId}`
+    const link = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      name: "Link de pago",
+      typeCode: "68",
+      collection: "link",
+    })
+    expect(link.status).toBe(201)
+    const pagos = (list: { step: string; state: string }[]) =>
+      list.find((s) => s.step === "pagos")?.state
+    expect(pagos((await call("rosa", "GET", `${base}/configuracion/resumen`)).json.steps)).toBe(
+      "falta",
+    )
+    expect(pagos((await call("rosa", "GET", `${base}/inicio`)).json.setup.steps)).toBe("falta")
+    expect(
+      (await call("rosa", "DELETE", `${base}/medios-de-pago/${link.json.method.id}`)).status,
+    ).toBe(204)
+  })
 })
 
 describe("Configuración: Datos de la tienda y Tu marca (tablero 10)", () => {
@@ -894,11 +913,14 @@ describe("la tienda de ejemplo", () => {
       await asYo("GET", `/api/tiendas/${DEMO_STORE_ID}/configuracion/resumen`)
     ).json()) as {
       paymentLink: unknown
+      plan: { name: string; status: string; toPay: boolean } | null
       sofi: { enabled: boolean; tried: boolean; toAnswer: number }
       team: { supportAsks: number }
       catalog: { withStock: number }
     }
     expect(overview.paymentLink).toBeNull()
+    // El cobro de la semilla espera su pago: el plan lleva su punto.
+    expect(overview.plan).toMatchObject({ name: "Tienda", status: "activa", toPay: true })
     // Y tres preguntas que Sofi no supo, por responder en «Lo que aprendió».
     expect(overview.sofi).toEqual({ enabled: true, tried: false, toAnswer: 3 })
     expect(overview.team.supportAsks).toBe(1)
@@ -911,7 +933,9 @@ describe("la tienda de ejemplo", () => {
     expect(help.questions).toEqual([
       expect.objectContaining({
         question: "¿Dónde le digo a Sofi el horario de la tienda?",
-        replies: [expect.objectContaining({ body: expect.stringContaining("«Cuándo te pasa el chat»") })],
+        replies: [
+          expect.objectContaining({ body: expect.stringContaining("«Cuándo te pasa el chat»") }),
+        ],
       }),
     ])
   })

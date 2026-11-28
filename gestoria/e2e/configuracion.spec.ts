@@ -73,7 +73,11 @@ test("Configuración abre en «Lo que falta», con sus grupos y cada parte en un
     await expect(sections.getByRole("link", { name, exact: true })).toBeVisible()
   // Lo que falta, con lo guardado: o la lista con su cuenta, o una sola línea con todo listo.
   await expect(
-    page.getByText(/^(Para vender te faltan? \d+ cosas?|Tienes todo para vender)/).first(),
+    page
+      .getByText(
+        /^(Para (que Sofi venda sola|vender) te faltan? \d+ cosas?|Tienes todo para vender)/,
+      )
+      .first(),
   ).toBeVisible()
   const parts = page.getByRole("region", { name: "Cómo está cada parte" })
   await expect(parts.getByRole("link", { name: /^Cobros/ })).toBeVisible()
@@ -110,6 +114,11 @@ test("el buscador de Configuración encuentra lo que hay dentro y lo abre con el
   await search.press("ArrowDown")
   await search.press("Enter")
   await expect(page).toHaveURL(/\/configuracion\/entregas$/)
+  // El foco queda en el título de la parte abierta, no perdido en la página.
+  await expect(page.getByRole("heading", { level: 1, name: "Entregas" })).toBeFocused()
+  // «plantilla» (la de las zonas de Lima) lleva a Entregas.
+  await search.fill("plantilla")
+  await expect(results.getByRole("option").first()).toContainText("Entregas")
   // Con las palabras de quien vende, sin tildes.
   await search.fill("envio gratis")
   await expect(results.getByRole("option").first()).toContainText("Envío gratis")
@@ -235,7 +244,9 @@ test("Ventas, al abrir Configuración, llega a sus avisos al celular", async ({ 
   await page.goto(`${BASE}/configuracion`)
   await expect(page).toHaveURL(/\/configuracion\/avisos$/)
   await page.goto(`${BASE}/configuracion/sofi`)
-  await expect(page.getByText("Esto lo ajusta quien configura la tienda")).toBeVisible()
+  await expect(page.getByText("Esto lo cambian el Dueño y el Administrador")).toBeVisible()
+  // Una línea le dice por qué solo ve lo suyo, sin una tarjeta vacía.
+  await expect(page.getByText(/^Aquí ves lo que cambias tú\./)).toBeVisible()
   await expect(page.getByRole("button", { name: /Probar|Escribir/ })).toHaveCount(0)
   await page.setViewportSize(PHONE)
   await noSideScroll(page)

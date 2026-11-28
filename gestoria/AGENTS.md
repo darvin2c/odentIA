@@ -75,6 +75,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   datos de los primeros pasos (`setupFactsIn`), nunca marcas a mano. Lo que todavía no existe no
   viene ni se dibuja. Soporte lo mira sin Sofi ni el plan; a nadie le llegan llaves, costos ni
   datos de cobro. Una parte nueva suma su línea ahí y en `configLines`.
+- Inicio y «Lo que falta» cuentan con la misma función (`setupProgress` de
+  `apps/web/src/lib/configuracion.ts`), sobre los pasos del servidor y su `sells`: lo que no frena
+  la venta (invitar al equipo, Tu marca, el link de pago) se muestra, pero nunca se cuenta como
+  falta ni deja abierta la lista. Un link de pago sin pasarela no es una forma de cobrar
+  (`chargingPaymentsIn`).
 - El buscador de Configuración no es el de Ctrl+K: es el `Combobox` común sobre `SEARCH_INDEX`
   (lo que hay dentro de cada parte, con las palabras de quien vende) y los nombres que guardó la
   tienda (`namesIndex`). Una pantalla que suma algo que se busca suma su entrada, solo de lo que
