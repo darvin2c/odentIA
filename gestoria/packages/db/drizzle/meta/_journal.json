@@ -306,29 +306,43 @@
     {
       "idx": 59,
       "version": "7",
-      "when": 1795849204896,
-      "tag": "0059_la_ficha_del_producto",
+      "when": 1795849083145,
+      "tag": "0059_equipo_y_repartidores",
       "breakpoints": true
     },
     {
       "idx": 60,
       "version": "7",
-      "when": 1795849205896,
-      "tag": "0060_reglas_la_ficha_del_producto",
+      "when": 1795849090305,
+      "tag": "0060_reglas_equipo_y_repartidores",
       "breakpoints": true
     },
     {
       "idx": 61,
       "version": "7",
-      "when": 1795849206896,
-      "tag": "0061_el_precio_de_la_ficha",
+      "when": 1795849757155,
+      "tag": "0061_la_ficha_del_producto",
       "breakpoints": true
     },
     {
       "idx": 62,
       "version": "7",
-      "when": 1795849207896,
-      "tag": "0062_reglas_precio_de_la_ficha",
+      "when": 1795849758155,
+      "tag": "0062_reglas_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1795849759155,
+      "tag": "0063_el_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1795849760155,
+      "tag": "0064_reglas_precio_de_la_ficha",
       "breakpoints": true
     }
   ]

@@ -170,12 +170,30 @@ export async function courierFor(
 ): Promise<{ id: string; name: string } | null> {
   if (choice === null) return null
   if ("courierId" in choice) {
+    // Se toma su fila: así no se le asigna nada mientras la tienda lo saca (Equipo y repartidores).
     const [row] = await tx
-      .select({ id: storeCourier.id, name: storeCourier.name, account: accountCopy.name })
+      .select({
+        id: storeCourier.id,
+        name: storeCourier.name,
+        account: accountCopy.name,
+        userId: storeCourier.userId,
+        isActive: storeCourier.isActive,
+        member: storeMember.userId,
+      })
       .from(storeCourier)
       .leftJoin(accountCopy, eq(accountCopy.userId, storeCourier.userId))
+      .leftJoin(
+        storeMember,
+        and(
+          eq(storeMember.storeId, storeCourier.storeId),
+          eq(storeMember.userId, storeCourier.userId),
+        ),
+      )
       .where(and(eq(storeCourier.storeId, storeId), eq(storeCourier.id, choice.courierId)))
-    if (!row)
+      .for("share", { of: storeCourier })
+    // Uno de fuera que la tienda sacó, o alguien que dejó el equipo, ya no se elige por su id (otra
+    // pantalla abierta, por ejemplo).
+    if (!row || (row.userId === null ? !row.isActive : row.member === null))
       throw new StoreError(400, "VALIDATION_ERROR", "Ese repartidor ya no está", {
         courier: "Ese repartidor ya no está",
       })
