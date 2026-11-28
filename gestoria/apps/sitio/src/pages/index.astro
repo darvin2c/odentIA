@@ -83,14 +83,14 @@ const app = {
   operatingSystem: "Web",
   url: `${SITE_URL}/`,
   description:
-    "Vendedora con IA para tiendas que venden por WhatsApp, Instagram y Messenger: Sofi atiende, negocia sin bajar del precio mínimo y cobra antes de entregar.",
+    "El primer ARM para tiendas que venden por chat: agentes de IA que llevan la tienda de la venta a la entrega. Sofi atiende WhatsApp, Instagram y Messenger, negocia sin bajar del precio mínimo y cobra antes de entregar.",
   offers: { "@type": "Offer", price: "19", priceCurrency: "USD" },
 }
 ---
 <Base
   sofiPropia
-  title="gestorIA: vendedora con IA para tiendas por chat"
-  description="Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar. USD 19 al mes, que vuelven como saldo."
+  title="gestorIA: el primer ARM para tiendas que venden por chat"
+  description="De la venta a la entrega, en automático: Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu mínimo y cobra antes de entregar. Un solo plan: USD 19 al mes, que vuelven como saldo."
   ld={[app, faqLd(PREGUNTAS)]}
 >
   <!-- ============================================================ héroe -->
@@ -98,13 +98,13 @@ const app = {
     <div class="heroe__fondo" aria-hidden="true"><span class="heroe__luz"></span></div>
     <div class="marco heroe__marco">
       <div class="heroe__texto" data-heroe-texto>
-        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span>Para tiendas que venden por chat</p>
+        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span>El primer ARM para tiendas que venden por chat</p>
         <h1 id="heroe-h" class="heroe__h">
-          <span class="linea"><span>Tu tienda vende</span></span>
-          <span class="linea"><span>por chat. Sofi</span></span>
-          <span class="linea"><span><span class="cur">cierra</span> la venta.</span></span>
+          <span class="linea"><span>De la venta</span></span>
+          <span class="linea"><span>a la entrega,</span></span>
+          <span class="linea"><span><span class="cur">en automático.</span></span></span>
         </h1>
-        <p class="heroe__bajada" data-entra>Sofi es la vendedora con IA de tu tienda. Atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar.</p>
+        <p class="heroe__bajada" data-entra>gestorIA es un ARM: agentes de IA que llevan tu tienda. Sofi vende y cobra en tu WhatsApp, Instagram y Messenger sin bajar de tu mínimo, y Argos cuida tu stock y a tus clientas. Tú solo empacas. Un solo plan, sin paquetes ni letra chica.</p>
         <div class="heroe__botones" data-entra>
           <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
           <a class="boton boton--fantasma" href="#venta">Mira cómo vende</a>
@@ -118,6 +118,15 @@ const app = {
 
       <Chat />
     </div>
+  </section>
+
+  <!-- ============================================================ la ruta: vende, cobra, entrega -->
+  <section class="ruta" aria-label="De la venta a la entrega">
+    <ol class="marco ruta__lista">
+      <li><span class="ruta__n">1</span><div><b>Vende</b><p>Sofi atiende el chat y cierra sin bajar de tu mínimo.</p></div></li>
+      <li><span class="ruta__n">2</span><div><b>Cobra</b><p>Pide el pago y, sin pago confirmado, el pedido no sale.</p></div></li>
+      <li><span class="ruta__n">3</span><div><b>Entrega</b><p>Tus entregas del día en orden, cada una con su pago.</p></div></li>
+    </ol>
   </section>
 
   <!-- ============================================================ Sofi trabajando -->
