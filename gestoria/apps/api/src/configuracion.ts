@@ -14,7 +14,6 @@ import {
   storeInvitation,
   storeLink,
   storeMember,
-  storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
 import { accountState } from "@odentia/contract"
