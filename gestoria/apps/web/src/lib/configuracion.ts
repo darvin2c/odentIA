@@ -1,4 +1,5 @@
 import type { MyStore } from "./api"
+import type { SetupStep, SetupStepState } from "./inicio"
 import { STATUS_WORDS } from "./plan"
 import type { DeliveryCost, DeliveryType, PaymentCollection, PaymentTypeCode } from "./tienda"
 import { money } from "./tienda"
@@ -164,6 +165,42 @@ export function configEntryFor(store: Seat): ConfigSection | null {
   return configGroupsFor(store)[0]?.items[0] ?? null
 }
 
+/**
+ * Lo que se le dice a quien abre por su dirección una parte que no ve, según quién es y qué pide
+ * la parte. Repite quién cambia cada cosa de `permisos.ts` (la pantalla solo recibe los permisos
+ * propios): si cambia la matriz, cambia aquí.
+ */
+export function notYoursText(
+  store: Seat,
+  section: ConfigSection | null,
+): { title: string; description: string } {
+  if (!section)
+    return {
+      title: "Esta parte no está en Configuración",
+      description: "Puede que la dirección esté mal escrita. Elige lo que buscas en Configuración.",
+    }
+  if (store.role === "support")
+    return {
+      title: "Soporte de gestorIA no mira esta parte",
+      description:
+        "Mientras la tienda te deja entrar, miras lo que está en Configuración, sin cambiar nada.",
+    }
+  if (section.needs === "plan")
+    return {
+      title: "El plan y los pagos los ve el Dueño",
+      description: "Si algo del plan hay que pagar o cambiar, pídeselo al Dueño de la tienda.",
+    }
+  return {
+    title: "Esto lo cambian el Dueño y el Administrador",
+    description:
+      "Tu rol atiende y vende con lo que ya está configurado. Si algo hay que cambiar, pídeselo a ellos.",
+  }
+}
+
+/** A quien no configura la tienda (Ventas), por qué solo ve lo suyo. Repite la misma matriz. */
+export const ONLY_YOURS_TEXT =
+  "Aquí ves lo que cambias tú. Los datos de la tienda, Sofi, los cobros, las entregas y el equipo los cambian el Dueño y el Administrador."
+
 /** El apartado de una ruta de la tienda (`/configuracion/marca`), o null si no es uno. */
 export function configSectionOf(path: string): ConfigSection | null {
   return CONFIG_GROUPS.flatMap((group) => group.items).find((item) => item.path === path) ?? null
@@ -179,10 +216,24 @@ export function sectionById(id: ConfigSectionId): ConfigSection {
  * palabras de la pantalla. Nada se marca a mano.
  */
 
-type SetupStep = "datos" | "catalogo" | "pagos" | "entregas" | "chats" | "sofi" | "equipo"
+/**
+ * La única cuenta de lo que falta para vender: la de Inicio («Tu tienda está casi lista · 3 de
+ * 5») y la de Configuración («Lo que falta», «3 de 5 listas»). Sale de los pasos del servidor
+ * (`setupSteps`): hecho o saltado está listo; lo de «Muy pronto» y lo que no frena la venta
+ * (`sells`: invitar al equipo) no cuentan.
+ */
+export function setupProgress(steps: readonly { state: SetupStepState; sells: boolean }[]): {
+  done: number
+  total: number
+  left: number
+} {
+  const counted = steps.filter((s) => s.state !== "pronto" && s.sells)
+  const done = counted.filter((s) => s.state === "hecho" || s.state === "saltado").length
+  return { done, total: counted.length, left: counted.length - done }
+}
 
 export interface ConfigOverview {
-  steps: { step: SetupStep; state: "hecho" | "falta" | "saltado" | "pronto"; skippable: boolean }[]
+  steps: { step: SetupStep; state: SetupStepState; skippable: boolean; sells: boolean }[]
   brand: {
     publicName: string | null
     brandColor: string | null
@@ -190,9 +241,14 @@ export interface ConfigOverview {
     link: string | null
   }
   catalog: { products: number; withStock: number }
+  /** Los medios con que se cobra: un link de pago sin pasarela no viene (no cobra). */
   payments: { name: string; typeCode: PaymentTypeCode; collection: PaymentCollection }[]
-  /** La pasarela del link de pago: solo si está conectada y con qué. */
-  paymentLink: { provider: "mercadopago" } | null
+  /** La pasarela del link de pago: con qué, en qué modo y si sirve (sin cuenta ni llaves). */
+  paymentLink: {
+    provider: "mercadopago"
+    mode: "prueba" | "real"
+    state: "conectada" | "vencida" | "sin_permiso"
+  } | null
   deliveries: {
     name: string
     type: DeliveryType
@@ -219,6 +275,8 @@ export interface ConfigOverview {
     status: keyof typeof STATUS_WORDS | null
     creditLeftCents: number | null
     currency: string | null
+    /** Hay un cobro del plan por pagar (pendiente o pagado en parte). */
+    toPay: boolean
   } | null
 }
 
@@ -247,10 +305,15 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
-/** Una cosa por hacer (o ya hecha) para vender, con su botón. */
+/**
+ * Una cosa por hacer (o ya hecha), con su botón. Las que frenan la venta son los pasos del servidor
+ * y se cuentan; las que no la frenan (Tu marca, el link de pago) van aparte, en «Para vender más»,
+ * y nunca se cuentan como falta.
+ */
 export interface ToDoItem {
   id: "datos" | "catalogo" | "marca" | "pagos" | "link" | "entregas" | "sofi"
-  state: "hecho" | "falta" | "saltado"
+  /** «opcional»: todavía no está, pero no frena la venta. */
+  state: "hecho" | "falta" | "saltado" | "opcional"
   title: string
   /** Cómo está, en una línea. */
   detail: string
@@ -258,14 +321,24 @@ export interface ToDoItem {
   action: { label: string; path: string }
 }
 
-/** Lo que falta para vender, en su orden: lo hecho queda con su ✓ y lo pendiente, con su botón. */
-export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">): ToDoItem[] {
-  const stepOf = (step: SetupStep) => overview.steps.find((s) => s.step === step)?.state
-  const items: ToDoItem[] = []
-  const country = stepOf("datos") === "hecho"
-  items.push({
+/**
+ * Lo que falta para vender, en su orden (`selling`), y lo que ayuda a vender más (`more`): lo hecho
+ * queda con su ✓ y lo pendiente, con su botón. El estado de lo que frena la venta es el del paso
+ * del servidor: el mismo que ve Inicio.
+ */
+export function toDoItems(
+  overview: ConfigOverview,
+  store: Pick<MyStore, "name">,
+): { selling: ToDoItem[]; more: ToDoItem[] } {
+  const stateOf = (step: SetupStep): ToDoItem["state"] => {
+    const state = overview.steps.find((s) => s.step === step)?.state
+    return state === "hecho" ? "hecho" : state === "saltado" ? "saltado" : "falta"
+  }
+  const selling: ToDoItem[] = []
+  const country = stateOf("datos") === "hecho"
+  selling.push({
     id: "datos",
-    state: country ? "hecho" : "falta",
+    state: stateOf("datos"),
     title: "El país y la hora de tu tienda",
     detail: country
       ? "Con su hora se cuentan «hoy», los reportes y las promociones."
@@ -273,22 +346,61 @@ export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">
     action: { label: country ? "Ver" : "Completar", path: SECTIONS.datos.path },
   })
   const { products, withStock } = overview.catalog
-  items.push({
+  const stocked = stateOf("catalogo") === "hecho"
+  selling.push({
     id: "catalogo",
-    state: withStock > 0 ? "hecho" : "falta",
+    state: stateOf("catalogo"),
     title: "Tu catálogo con precios y stock",
-    detail:
-      withStock > 0
-        ? plural(withStock, "producto con stock", "productos con stock")
-        : products > 0
-          ? `${plural(products, "producto", "productos")}, todavía sin stock.`
-          : "Sube tus productos con sus tallas, precios y stock.",
-    action: { label: withStock > 0 ? "Ver" : "Ir al catálogo", path: "/catalogo" },
+    detail: stocked
+      ? plural(withStock, "producto con stock", "productos con stock")
+      : products > 0
+        ? `${plural(products, "producto", "productos")}, todavía sin stock.`
+        : "Sube tus productos con sus tallas, precios y stock.",
+    action: { label: stocked ? "Ver" : "Ir al catálogo", path: "/catalogo" },
   })
+  const names = overview.payments.map((p) => p.name)
+  const paid = stateOf("pagos") === "hecho"
+  selling.push({
+    id: "pagos",
+    state: stateOf("pagos"),
+    title: "Cómo te pagan",
+    detail: paid && names.length > 0 ? listText(names) : "Yape, Plin, transferencia o al recibir.",
+    action: { label: paid ? "Ver" : "Agregar un medio", path: SECTIONS.pagos.path },
+  })
+  const deliveries = overview.deliveries.map((d) => d.name)
+  const delivers = stateOf("entregas") === "hecho"
+  selling.push({
+    id: "entregas",
+    state: stateOf("entregas"),
+    title: "Cómo entregas",
+    detail:
+      delivers && deliveries.length > 0
+        ? listText(deliveries)
+        : "Tu reparto, el recojo en la tienda o la agencia, con su precio.",
+    action: { label: delivers ? "Ver" : "Agregar una forma", path: SECTIONS.entregas.path },
+  })
+  // Cuando los chats se puedan conectar (`CHATS_READY` del servidor), su paso suma aquí su fila:
+  // hoy dice «Muy pronto» y no cuenta.
+  // Soporte no abre Sofi, pero su paso cuenta igual: lo ve sin botón, como todo lo demás.
+  const sofi = stateOf("sofi")
+  selling.push({
+    id: "sofi",
+    state: sofi,
+    title: "Probar a Sofi",
+    detail:
+      sofi === "hecho"
+        ? "Ya le escribiste como una clienta."
+        : sofi === "saltado"
+          ? "Dijiste que no la usas por ahora."
+          : "Escríbele como una clienta y mira cómo vende con tus precios.",
+    action: { label: sofi === "hecho" ? "Ver" : "Probar a Sofi", path: SECTIONS.sofi.path },
+  })
+
+  const more: ToDoItem[] = []
   const { logo, brandColor } = overview.brand
-  items.push({
+  more.push({
     id: "marca",
-    state: logo && brandColor ? "hecho" : "falta",
+    state: logo && brandColor ? "hecho" : "opcional",
     title: "Tu marca: logo y color",
     detail:
       logo && brandColor
@@ -300,69 +412,45 @@ export function toDoItems(overview: ConfigOverview, store: Pick<MyStore, "name">
             : "Falta el color de tu marca.",
     action: { label: logo && brandColor ? "Ver" : "Completar", path: SECTIONS.marca.path },
   })
-  const names = overview.payments.map((p) => p.name)
-  items.push({
-    id: "pagos",
-    state: names.length > 0 ? "hecho" : "falta",
-    title: "Cómo te pagan",
-    detail: names.length > 0 ? listText(names) : "Yape, Plin, transferencia o al recibir.",
-    action: { label: names.length > 0 ? "Ver" : "Agregar un medio", path: SECTIONS.pagos.path },
-  })
   const byCapture = overview.payments
     .filter((p) => p.collection === "comprobante")
     .map((p) => p.name)
-  items.push({
+  const gateway = overview.paymentLink
+  const charging = gateway?.state === "conectada" && gateway.mode === "real"
+  // No frena la venta: aunque esté a medias (en prueba o sin permiso) va en «Para vender más».
+  more.push({
     id: "link",
-    state: overview.paymentLink ? "hecho" : "falta",
+    state: charging ? "hecho" : "opcional",
     title: "Cobrar por link de pago",
-    detail: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}: el pago se confirma solo.`
-      : byCapture.length > 0
+    detail: !gateway
+      ? byCapture.length > 0
         ? `El pago se confirma solo. Ya cobras con ${listText(byCapture)} por captura.`
-        : "El pago se confirma solo, sin revisar capturas.",
+        : "El pago se confirma solo, sin revisar capturas."
+      : gateway.state !== "conectada"
+        ? `${PROVIDER_NAMES[gateway.provider]} ya no deja cobrar: vuelve a conectarlo.`
+        : gateway.mode === "prueba"
+          ? `${PROVIDER_NAMES[gateway.provider]} en modo prueba: prueba con S/ 1 y pasa a cobrar de verdad.`
+          : `Con ${PROVIDER_NAMES[gateway.provider]}: el pago se confirma solo.`,
     action: {
-      label: overview.paymentLink ? "Ver" : "Conectar pasarela",
+      label: charging ? "Ver" : gateway ? "Terminar" : "Conectar pasarela",
       path: SECTIONS.pagos.path,
     },
   })
-  const deliveries = overview.deliveries.map((d) => d.name)
-  items.push({
-    id: "entregas",
-    state: deliveries.length > 0 ? "hecho" : "falta",
-    title: "Cómo entregas",
-    detail:
-      deliveries.length > 0
-        ? listText(deliveries)
-        : "Tu reparto, el recojo en la tienda o la agencia, con su precio.",
-    action: {
-      label: deliveries.length > 0 ? "Ver" : "Agregar una forma",
-      path: SECTIONS.entregas.path,
-    },
-  })
-  // Soporte no mira Sofi: su paso no se le muestra.
-  if (overview.sofi) {
-    const sofi = stepOf("sofi")
-    items.push({
-      id: "sofi",
-      state: sofi === "hecho" ? "hecho" : sofi === "saltado" ? "saltado" : "falta",
-      title: "Probar a Sofi",
-      detail:
-        sofi === "hecho"
-          ? "Ya le escribiste como una clienta."
-          : sofi === "saltado"
-            ? "Dijiste que no la usas por ahora."
-            : "Escríbele como una clienta y mira cómo vende con tus precios.",
-      action: { label: sofi === "hecho" ? "Ver" : "Probar a Sofi", path: SECTIONS.sofi.path },
-    })
-  }
-  return items
+  return { selling, more }
 }
 
-/** «Para vender te faltan 2 cosas» o, con todo listo, que ya está. */
-export function toDoTitle(items: readonly ToDoItem[]): string {
-  const left = items.filter((item) => item.state === "falta").length
+/**
+ * «Para que Sofi venda sola te faltan 2 cosas» o, sin nada por hacer, que ya puede vender. Solo
+ * promete que Sofi venda sola si de verdad puede: con los chats conectables (no «Muy pronto») y
+ * sin haberla saltado. Mientras tanto dice «Para vender…».
+ */
+export function toDoTitle(steps: ConfigOverview["steps"]): string {
+  const { left } = setupProgress(steps)
   if (left === 0) return "Tienes todo para vender"
-  return left === 1 ? "Para vender te falta 1 cosa" : `Para vender te faltan ${left} cosas`
+  const stateOf = (step: SetupStep) => steps.find((s) => s.step === step)?.state
+  const sofiSells = stateOf("chats") !== "pronto" && stateOf("sofi") !== "saltado"
+  const lead = sofiSells ? "Para que Sofi venda sola" : "Para vender"
+  return left === 1 ? `${lead} te falta 1 cosa` : `${lead} te faltan ${left} cosas`
 }
 
 /** Cómo está una parte, en una línea, y si tiene algo pendiente (su punto naranja). */
@@ -410,19 +498,19 @@ export function configLines(
           : !brand.logo
             ? "Sin logo"
             : "Sin color",
-    pending: !brand.logo || !brand.brandColor,
+    // Tu marca no frena la venta: dice cómo está, sin punto.
+    pending: false,
   }
   if (overview.sofi) {
     const skipped = overview.steps.some((s) => s.step === "sofi" && s.state === "saltado")
+    const onOff = overview.sofi.enabled ? "Encendida" : "Apagada"
+    const pending = !overview.sofi.tried && !skipped
     lines.sofi = {
       id: "sofi",
-      summary: overview.sofi.tried
-        ? "Ya la probaste"
-        : skipped
-          ? "No la usas por ahora"
-          : "Sin probar",
-      status: overview.sofi.enabled ? "Encendida" : "Apagada",
-      pending: !overview.sofi.tried && !skipped,
+      // Lo pendiente va en el estado, junto a su punto: «Encendida · ● Sin probar».
+      summary: overview.sofi.tried ? "Ya la probaste" : skipped ? "No la usas por ahora" : onOff,
+      status: pending ? "Sin probar" : onOff,
+      pending,
     }
   }
   const byCollection = (collection: PaymentCollection) =>
@@ -436,10 +524,22 @@ export function configLines(
   lines.pagos = {
     id: "pagos",
     summary: paymentParts.length > 0 ? paymentParts.join(" · ") : "Sin medios de pago",
-    status: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
-      : "Sin pasarela",
-    pending: overview.payments.length === 0 || !overview.paymentLink,
+    status:
+      overview.payments.length === 0
+        ? "Falta"
+        : !overview.paymentLink
+          ? "Sin pasarela"
+          : overview.paymentLink.state !== "conectada"
+            ? `${PROVIDER_NAMES[overview.paymentLink.provider]}: sin permiso`
+            : overview.paymentLink.mode === "prueba"
+              ? `${PROVIDER_NAMES[overview.paymentLink.provider]} en prueba`
+              : `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`,
+    // Sin pasarela se vende igual (con captura o al recibir): el punto, sin forma de cobrar o con
+    // la pasarela a medias (en prueba o sin permiso).
+    pending:
+      overview.payments.length === 0 ||
+      (overview.paymentLink !== null &&
+        (overview.paymentLink.state !== "conectada" || overview.paymentLink.mode !== "real")),
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
   const ownFleet = overview.deliveries.some((d) => d.type === "DeliveryModeOwnFleet")
@@ -495,8 +595,9 @@ export function configLines(
       ]
         .filter(Boolean)
         .join(" · "),
-      status: plan.status ? STATUS_WORDS[plan.status] : "—",
-      pending: late,
+      // Un cobro por pagar lleva su punto aunque la cuenta siga activa.
+      status: plan.toPay && !late ? "Por pagar" : plan.status ? STATUS_WORDS[plan.status] : "—",
+      pending: late || plan.toPay,
     }
   }
   return lines
@@ -537,8 +638,12 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   { text: "Moneda", section: "datos", terms: ["moneda", "soles", "dólares"] },
   { text: "Logo y portada", section: "marca", terms: ["logo", "portada", "foto", "imagen"] },
   { text: "Color de tu marca", section: "marca", terms: ["color", "colores"] },
-  { text: "Nombre que ve el cliente", section: "marca", terms: ["nombre", "marca", "cliente"] },
-  { text: "Nombre de tu link", section: "marca", terms: ["link", "enlace", "url", "dirección"] },
+  {
+    text: "Nombre que ve la clienta",
+    section: "marca",
+    terms: ["nombre", "marca", "cliente", "clienta"],
+  },
+  { text: "Tu link", section: "marca", terms: ["link", "enlace", "url", "dirección", "dominio"] },
   { text: "Encender o apagar a Sofi", section: "sofi", terms: ["sofi", "vendedora", "apagar"] },
   {
     text: "Lo que Sofi debe saber",
@@ -562,6 +667,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     terms: ["link", "pasarela", "mercado pago", "tarjeta", "yape", "enlace"],
   },
   {
+    text: "Probar Mercado Pago con S/ 1",
+    section: "pagos",
+    terms: ["prueba", "probar", "modo prueba", "cobrar de verdad", "comisión"],
+  },
+  {
     text: "Quién confirma un pago con captura",
     section: "pagos",
     terms: ["captura", "comprobante", "voucher", "confirmar", "yape"],
@@ -574,7 +684,18 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   {
     text: "Reparto propio y zonas",
     section: "entregas",
-    terms: ["reparto", "delivery", "zona", "zonas", "distrito", "motorizado", "envío", "envio"],
+    terms: [
+      "reparto",
+      "delivery",
+      "zona",
+      "zonas",
+      "distrito",
+      "motorizado",
+      "envío",
+      "envio",
+      "plantilla",
+      "lima",
+    ],
   },
   { text: "Recojo en tienda", section: "entregas", terms: ["recojo", "recoger", "tienda"] },
   {

@@ -74,6 +74,25 @@ export const HELP_SCREENS = {
       "devolución",
     ],
   },
+  clientes: {
+    label: "Clientes",
+    path: "/clientes",
+    opens: "ventas.atender",
+    purpose:
+      "Cada clienta con sus compras y lo que Argos sabe de ella (talla, distrito, cumpleaños, canal), con su fuente, para corregirlo, y si acepta promociones.",
+    terms: [
+      "clientes",
+      "clientas",
+      "ficha",
+      "talla",
+      "distrito",
+      "cumpleaños",
+      "corregir",
+      "promociones",
+      "baja",
+      "Argos",
+    ],
+  },
   catalogo: {
     label: "Catálogo",
     path: "/catalogo",
@@ -217,6 +236,11 @@ export interface HelpFaq {
   /** El permiso para hacer lo que explica: de ahí sale quién puede. */
   needs: StorePermission
   screen: HelpScreen
+  /**
+   * Se sugiere solo a quien NO tiene `needs`: la pregunta es por qué no puede (como Ventas en
+   * Configuración). Su respuesta lleva a quién pedírselo (`restrictionFor`).
+   */
+  forWhoCannot?: true
 }
 
 export interface HelpGroup {
@@ -485,6 +509,44 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
     ],
   },
   {
+    id: "clientas",
+    title: "Clientas",
+    faqs: [
+      {
+        id: "lo-que-sabe-argos",
+        q: "¿De dónde saca Argos lo que sabe de una clienta?",
+        a: [
+          "En la ficha de cada clienta, «Lo que Argos sabe de ella»: su talla (o como se llame la medida en tu catálogo), su distrito, su cumpleaños, por dónde prefiere escribir, su Instagram y lo que le gusta. Nadie tiene que llenarlo: Argos lo anota solo, de sus compras y de lo que ella escribió en el chat.",
+          "Cada dato dice de dónde salió y cuándo: sus compras, la dirección de una entrega o lo que ella dijo, con sus palabras tal cual. Lo que ella no dijo, Argos no lo supone. Lo que no tiene claro, como dos tallas que compra por igual, lo usa igual y lo marca «Por confirmar»: no frena ninguna venta.",
+          "Lee cada conversación cuando ella deja de escribir un rato, nunca a media conversación, y no lee las de prueba. Tampoco junta fichas por el teléfono: si dos fichas son la misma clienta, lo decide una persona.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "corregir-dato",
+        q: "¿Cómo corrijo un dato de una clienta?",
+        a: [
+          "En su ficha, en «Lo que Argos sabe de ella», «Corregir» junto al dato. Lo que pones queda «Lo puso la tienda», con tu nombre, y Argos ya no lo cambia aunque ella diga otra cosa después.",
+          "Nada se borra: cada dato guarda su historial, con lo que anotó Argos antes y lo que corrigió la tienda. Si un dato está «Por confirmar», al corregirlo eliges el que es.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "no-quiere-promociones",
+        q: "¿Qué pasa si una clienta dice que no quiere promociones?",
+        a: [
+          "En su ficha, «Cuándo se le puede escribir» dice lo último que ella contestó sobre las «Promociones»: «Acepta», «Pidió que no le escriban» o «Sin permiso todavía». Sofi se lo pregunta en su primera compra y anota lo que ella responde, con sus palabras.",
+          "Si en el chat pide que no le escriban más, Sofi lo anota en ese momento y desde entonces no se le escriben promociones. Lo de sus pedidos, como el pago y la entrega, sigue igual.",
+          "Nadie del equipo puede decir por ella que sí: solo cambia si ella lo vuelve a escribir.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+    ],
+  },
+  {
     id: "catalogo",
     title: "Catálogo",
     faqs: [
@@ -698,11 +760,23 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "lo-que-falta",
         q: "¿Qué me falta para vender y cómo está cada parte?",
         a: [
-          "Configuración abre en «Lo que falta»: arriba, lo que falta para vender, cada cosa con su botón para hacerla (como «Conectar pasarela» o «Probar a Sofi»); lo que ya está lleva su ✓. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano. Cuando no falta nada, lo dice en una línea.",
-          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin pasarela». Toca la línea para abrirla.",
+          "Configuración abre en «Lo que falta»: arriba, lo que falta para vender, cada cosa con su botón para hacerla (como «Probar a Sofi»); lo que ya está lleva su ✓. Es la misma cuenta que «Tu tienda está casi lista» de Inicio. Se marca solo con lo que guardas en cada parte: nadie lo marca a mano.",
+          "Debajo, en «Para vender más», lo que ayuda pero no frena la venta, como tu logo o «Conectar pasarela» para cobrar por link: no se cuenta como falta. Cuando no falta nada, lo dice en una línea.",
+          "Debajo, en «Cómo está cada parte», cada parte dice en una línea cómo está, y la que tiene algo pendiente lleva un punto y lo dice, como «Sin probar» o «Por pagar». Toca la línea para abrirla.",
         ],
         needs: "configuracion",
         screen: "configuracion",
+      },
+      {
+        id: "configuracion-sin-permiso",
+        q: "¿Por qué en Configuración solo veo mis avisos?",
+        a: [
+          "En Configuración cada quien ve lo que puede cambiar. Tus avisos al celular son tuyos: eliges tú qué te llega.",
+          "Los datos de la tienda, Tu marca, Sofi, Cobros, Entregas y el equipo los cambia quien configura la tienda. Tú sigues atendiendo y vendiendo con lo que ahí se puso; si algo hay que cambiar, pídeselo.",
+        ],
+        needs: "configuracion",
+        screen: "avisos",
+        forWhoCannot: true,
       },
       {
         id: "buscar-en-configuracion",
@@ -726,8 +800,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "tu-marca",
         q: "¿Cómo pongo mi logo y el color de mi marca?",
         a: [
-          "En Configuración, en Tu marca: el logo, el nombre que ve el cliente, la foto de portada, el nombre del link de tu tienda y el color. Te sugerimos colores de tu logo y de una foto de tu letrero; cualquier color vale, y los tonos para que se lea bien se calculan solos.",
-          "El color se ve en gestorIA para todo tu equipo. El nombre del link va sin tildes ni espacios, y algunos nombres están reservados.",
+          "En Configuración, en Tu marca: suelta tu logo en el recuadro o pégalo con Ctrl + V; si aún no tienes logo, también lo eliges con «Elegir imagen», y si ya tienes uno, lo cambias con «Cambiar». Con «Ajustar» lo recortas. Salen los colores de tu logo: toca uno, o usa «Otro color». Cualquier color vale; si no se lee bien, te lo dice y los botones usan un tono más oscuro.",
+          "También pones la portada, el nombre que ve la clienta y tu link, sin tildes ni espacios: al escribirlo te dice si está libre. Al lado (en el celular, «Ver cómo queda») ves cómo lo verá tu clienta. Nada se guarda hasta «Guardar»; si sales antes, te pregunta.",
         ],
         needs: "configuracion",
         screen: "marca",
@@ -736,7 +810,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar otra forma de cobro» y eliges cómo te paga. Yape y Plin piden tu celular, a nombre de quién está y tu QR (lo sueltas o lo pegas con Ctrl+V). Ves cómo le llega el dato a la clienta: tu número, a nombre de quién y el monto. Tu QR queda guardado: Sofi lo enviará cuando el chat por WhatsApp esté conectado. La transferencia pide tu banco de la lista, la cuenta y el CCI, que se revisa con sus dígitos de control.",
+          "Lo que confirma una persona (Yape, Plin, la transferencia) espera a que alguien del equipo revise la captura; lo que se cobra al recibir lo confirma el repartidor. Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -755,7 +830,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar con Mercado Pago»: entras con la cuenta de la tienda y das permiso, sin copiar ninguna clave. El dinero de cada link llega directo a tu cuenta.",
+          "Empieza en modo prueba: «Probar con S/ 1» crea un link que pagas con la tarjeta de prueba de Mercado Pago, y ves cómo queda pagado solo. En modo prueba ningún pedido se cobra por link. Cuando te guste, «Cobrar de verdad» vuelve a pedir el permiso, esta vez para cobrar.",
+          "Si lo desconectas, los links ya enviados dejan de confirmarse solos: esos pagos los revisas tú.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -899,7 +976,13 @@ export function helpScreenView(
   if (!screen) return { title: null, suggestions: [] }
   return {
     title: HELP_SCREENS[screen].label,
-    suggestions: FAQS.filter((faq) => faq.screen === screen && can(seat, faq.needs))
+    suggestions: FAQS.filter(
+      (faq) =>
+        faq.screen === screen &&
+        (faq.forWhoCannot
+          ? !can(seat, faq.needs) && can(seat, HELP_SCREENS[screen].opens)
+          : can(seat, faq.needs)),
+    )
       .slice(0, 3)
       .map((faq) => faq.q),
   }

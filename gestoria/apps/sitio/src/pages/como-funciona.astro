@@ -1,44 +1,26 @@
 ---
-// Cómo funciona (web v5): una venta por chat en seis capítulos, con lo que hace Sofi, lo que hace
-// la tienda y lo que vigila Argos. Lo que viene («Pagar ahora», gestorIA Reparto) va como «pronto».
+// Cómo funciona (web v5): una venta por chat en seis capítulos, en la escena del teléfono que
+// avanza con el scroll (la misma del Inicio), con lo que hace Sofi, lo que hace la tienda y lo que
+// vigila Argos. Lo que viene («Pagar ahora», gestorIA Reparto) va como «pronto».
 import { Image } from "astro:assets"
 import pedidoPorConfirmar from "../assets/pantallas/pedido-por-confirmar.png"
+import Proceso from "../components/escenas/Proceso.astro"
+import Venta from "../components/escenas/Venta.astro"
 import PaginaHeroe from "../components/PaginaHeroe.astro"
 import Base from "../layouts/Base.astro"
+import { PASOS_VENTA } from "../lib/venta"
+import "../styles/inicio.css"
+import "../styles/proceso.css"
 
-const capitulos = [
-  {
-    t: "La clienta escribe",
-    d: "Por WhatsApp, Instagram o Messenger, a la hora que sea. Sofi contesta al instante con tu catálogo y tu stock.",
-  },
-  {
-    t: "Sofi muestra el valor y negocia",
-    d: "Precio, material y horma. Si piden rebaja, una sola oferta con plazo, sin bajar de tu mínimo.",
-  },
-  {
-    t: "Anota el pedido y pide el pago",
-    d: "Con su envío y su total, con tus medios de pago.",
-    pronto: "«Pagar ahora» con Yape o tarjeta",
-  },
-  {
-    t: "Tu equipo confirma el pago",
-    d: "Una captura de Yape la confirma una persona; el link de pago, solo. Sofi le avisa a la clienta.",
-  },
-  {
-    t: "Empacas y sale",
-    d: "Sin pago confirmado no se entrega. Si paga al recibir, quien entrega anota cuánto cobró y con qué.",
-    pronto: "gestorIA Reparto, la app del repartidor",
-  },
-  { t: "Antes de que salga, algo más", d: "Sofi ofrece sumar algo para el mismo envío." },
-]
 const howTo = {
   "@context": "https://schema.org",
   "@type": "HowTo",
   name: "Cómo vende gestorIA por chat",
-  step: capitulos.map((c, i) => ({ "@type": "HowToStep", position: i + 1, name: c.t, text: c.d })),
+  step: PASOS_VENTA.map((c, i) => ({ "@type": "HowToStep", position: i + 1, name: c.t, text: c.d })),
 }
 ---
 <Base
+  sofiPropia
   title="Cómo funciona gestorIA: una venta por chat en seis pasos"
   description="De la pregunta al envío: Sofi atiende, negocia sin bajar de tu mínimo y pide el pago; tu equipo confirma, empaca y entrega con el pago confirmado."
   ld={[howTo]}
@@ -48,33 +30,17 @@ const howTo = {
     titulo="Una venta por chat"
     acento="en seis capítulos"
     bajada="Sofi hace casi todo sola y te deja lo que pide manos: confirmar un pago, empacar y entregar."
-    segundo={{ href: "/#venta", label: "Verla en el teléfono" }}
+    segundo={{ href: "#venta", label: "Verla en el teléfono" }}
   >
     <div class="p-cel" slot="visual">
       <Image src={pedidoPorConfirmar} alt="Un pedido con el pago por Yape por confirmar, en la app de gestorIA: así lo ve tu equipo" widths={[300, 600]} sizes="300px" />
     </div>
   </PaginaHeroe>
-  <section class="p-bloques" aria-label="Los seis capítulos">
-    <div class="marco">
-      <ol class="p-capitulos">
-        {capitulos.map((c, i) => (
-          <li class="p-capitulo" data-aparece>
-            <span class="p-capitulo__n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
-            <div>
-              <h2>{c.t}</h2>
-              <p>{c.d}</p>
-              {c.pronto && <p><span class="pronto">Pronto</span> {c.pronto}</p>}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
-  </section>
-  <section class="p-bloques p-bloques--suave" aria-label="Quién hace qué">
-    <div class="marco p-bloques__lista">
-      <div class="p-bloque" data-aparece><p class="etiqueta">Lo hace Sofi</p><h3>Atender, ofrecer y anotar</h3><p>Muestra el valor, ofrece una vez sin bajar de tu mínimo, anota el pedido y avisa.</p></div>
-      <div class="p-bloque" data-aparece><p class="etiqueta">Lo haces tú</p><h3>Confirmar, empacar y entregar</h3><p>Una captura la confirma una persona. Sin pago confirmado, no se entrega.</p></div>
-      <div class="p-bloque" data-aparece><p class="etiqueta">Lo vigila Argos</p><h3>Lo que te toca hoy</h3><p>Te avisa de los pagos por confirmar y de lo que sale hoy.</p></div>
-    </div>
-  </section>
+  <Venta />
+  <Proceso />
 </Base>
+
+<script>
+  import { iniciarComoFunciona } from "../scripts/agentes"
+  iniciarComoFunciona()
+</script>

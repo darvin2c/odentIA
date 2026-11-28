@@ -44,7 +44,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 ## La configuración de la tienda (B3)
 
 - Medios de pago con los tipos de UN/CEFACT 4461 y cómo se confirma el pago, en el orden en que
-  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Formas de entrega con la
+  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Cada forma lleva sus datos
+  (ADR 0232, `apps/api/src/cobros.ts`): Yape y Plin con su celular en E.164, su titular y su QR (en
+  la base, por su contenido); la transferencia con su banco de la lista y su CCI, revisado con sus
+  dígitos de control (`cci.ts`) y del mismo banco. Lo que Sofi envía (`details`) lo arma el
+  servidor con esos datos; nunca se pide un texto libre para lo que tiene campos. Formas de entrega con la
   lista `DeliveryMethod` de Schema.org, su costo y lo que Sofi puede negociar del envío.
 - El catálogo: un producto agrupa hasta tres opciones (Schema.org `ProductGroup`); cada
   combinación es una variante con su código, su stock y, si quiere, su precio y su foto. Sin precio
@@ -88,7 +92,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   anota lo que costó) y sus propuestas, `ai_proposal` (campo, valor, por qué, estado propuesta /
   usada / cambiada / descartada, quién y cuándo). Pedir, usar, cambiar, descartar y «Aplicar
   todos» es `configuracion`; ver, `catalogo.ver` (las de una carga, `configuracion`). Sofi y
-  Argos no las ven (`0041_reglas_ia_de_fotos.sql`).
+  Argos no las ven (`0062_reglas_ia_de_fotos.sql`).
 - Usar una propuesta pasa por la operación de siempre (`updateProductIn`, `saveGridIn`,
   `updatePhotoIn`; en la carga, `applyItem` y `joinPhotosIn`), con «Propuesta de la IA» en el
   historial. En un producto de una carga solo se usan el nombre, la categoría, la descripción y
@@ -172,6 +176,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   datos de los primeros pasos (`setupFactsIn`), nunca marcas a mano. Lo que todavía no existe no
   viene ni se dibuja. Soporte lo mira sin Sofi ni el plan; a nadie le llegan llaves, costos ni
   datos de cobro. Una parte nueva suma su línea ahí y en `configLines`.
+- Inicio y «Lo que falta» cuentan con la misma función (`setupProgress` de
+  `apps/web/src/lib/configuracion.ts`), sobre los pasos del servidor y su `sells`: lo que no frena
+  la venta (invitar al equipo, Tu marca, el link de pago) se muestra, pero nunca se cuenta como
+  falta ni deja abierta la lista. Un link de pago sin pasarela no es una forma de cobrar
+  (`chargingPaymentsIn`).
 - El buscador de Configuración no es el de Ctrl+K: es el `Combobox` común sobre `SEARCH_INDEX`
   (lo que hay dentro de cada parte, con las palabras de quien vende) y los nombres que guardó la
   tienda (`namesIndex`). Una pantalla que suma algo que se busca suma su entrada, solo de lo que
@@ -186,7 +195,14 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - «Tu marca» (`apps/api/src/marca.ts`): el color pinta la app con `brandColorCss` de
   `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
-  los bloquea `linkNameProblem`.
+  los bloquea `linkNameProblem`. Si está libre se dice al escribirlo (`checkLinkName`); de otra
+  tienda solo se sabe si tiene el nombre (`store_link_taken`, `0052`), nunca cuál.
+- Tu marca se guarda una sola vez (`saveStoreBrand`): el nombre, el color, el link, el logo y la
+  portada en una transacción; si algo no se puede, no queda nada a medias. El logo se suelta, se
+  elige o se pega (arrastrar nunca es la única forma), se recorta con `ImageAdjust` y sube como
+  imagen con `renderAdjustedImage`: un SVG se pasa a imagen en el navegador, nunca se guarda como
+  SVG (el servidor mira el contenido). La vista previa de la clienta dice que el catálogo con link
+  aún no se publica.
 
 ## Inicio y los primeros pasos (entregas 3 y 6 del lienzo «gestorIA como odentIA»; ADR 0227)
 
@@ -233,6 +249,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
+- La pasarela se conecta entrando a la cuenta (OAuth con PKCE, `pasarela.ts`; ADR 0232): nunca se
+  pide copiar llaves. El intento vale 10 minutos, una vez y para quien lo empezó; el token se renueva
+  solo antes de vencer. En modo prueba (`store_payment_link.mode`) solo se paga el link de S/ 1 de la
+  tienda: ningún pedido se cobra por link, Sofi no lo ofrece (`chargesOrders`) y un pago de prueba
+  nunca paga un pedido. El aviso `mp-connect` se comprueba con el proveedor antes de creerlo.
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 
@@ -269,8 +290,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   marcar «Entregado» el cambio (`recordReturn` de `stock.ts`); nunca antes. No vuelve dos veces lo
   mismo, salvo que el cambio se anule. Un cambio no se «Cambia».
 - El dinero devuelto se anota en `order_refund` (medio y quién, `pagos.confirmar`) y el saldo único
-  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto; lo que
-  vuelve de un pedido de Sofi queda para el cobro del 1 % (`agentReturnsIn`).
+  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto, y el cobro
+  del 1 % también lo descuenta. `agentReturnsIn` solo mide lo que volvió de lo que vendió Sofi.
 
 ## Las clientas (entrega 4)
 
@@ -317,11 +338,31 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   las preguntas guardadas, los colores con su foto, el video y lo que puede ofrecer de ese
   producto. Lo que la ficha no dice no lo afirma: lo deja a la tienda. «Qué usó Sofi» sale de lo
   que leyó y está en lo que escribió (`usedIn`), no del modelo.
-- Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
-  fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
+- Argos no decide con el modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son
+  textos fijos, uno por motivo y pedido. El modelo solo lee lo que dijo la clienta (abajo, «El perfil
+  de la clienta»). Solo Dueño y Administrador ven Reportes (`reportes.ver`).
 - Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
   `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
   las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
+
+## El perfil de la clienta (ADR 0240)
+
+- Argos perfila solo (`apps/api/src/sofi/perfilar.ts`, en su vuelta) y la ficha lo muestra
+  (`customerProfileIn` de `apps/api/src/perfil.ts`, sobre la familia de fichas unidas). Cada dato es
+  una fila de `customer_fact` con su fuente, su cita y su hora: nada se edita. El de hoy es el último
+  de la tienda o, si no hay, el último. Lo que corrige una persona («Corregir», `ventas.atender`)
+  queda «Lo puso la tienda» y Argos no lo vuelve a escribir; la base también se lo niega (`0051`).
+- Argos usa el modelo (el de Sofi) SOLO para leer lo que ella escribió y la dirección de su última
+  entrega: lo de ella va como mensaje del usuario y cada dato trae su cita, que el código comprueba
+  tal cual en el mensaje o la dirección, con la medida del catálogo y una fecha que existe; lo demás
+  se descarta. Lee cada mensaje una vez (`argos_reading`), nunca a media conversación ni «Probar a
+  Sofi». Las cifras (la medida de sus compras, su canal) y toda decisión siguen siendo cuentas fijas.
+  Lo que cuesta leer queda en el registro de la vuelta: no se cobra.
+- El permiso para escribirle (`customer_consent`) lo anota solo Sofi, del último mensaje de ella y con
+  sus palabras. Nadie del equipo dice por ella que sí.
+- Argos y Sofi anotan en la ficha propia del pedido del chat (`conversationFichasIn`), no en la que se
+  ve: «Separar» se lleva lo suyo. Un chat con pedidos de familias distintas puede no ser de ella: no
+  se le anota nada de lo que dice y su permiso queda sin ficha, que no cuenta para nadie.
 
 ## El acuerdo con la administración (B7)
 
@@ -406,7 +447,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
 - Solo dice lo que gestorIA hace; lo que todavía no existe va como «pronto» y nunca se muestra como
   pantalla. El precio es el que definió el usuario: USD 19 al mes, que vuelven como saldo, más el
-  1 % de cada pedido que gestorIA genera sola. Términos y
+  1 % del total (con el envío) de cada venta completada: pagada y entregada, o despachada por
+  agencia, venga de donde venga; lo devuelto se descuenta. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a

@@ -105,6 +105,18 @@ export type SideDockScope = "page" | "column" | "overlay" | "fixed"
 
 const SideDockScopeContext = React.createContext<SideDockScope>("page")
 
+/**
+ * La columna se entera de que se abrió un cajón desde ella: lo que se toca o se escribe en él
+ * (y en sus listas, que viven en otro portal) es del cajón, aunque el evento de React suba
+ * hasta la columna. Devuelve cómo avisar que se cerró.
+ */
+type OverlayOpenedHere = () => () => void
+
+const OverlayOpenedHereContext = React.createContext<OverlayOpenedHere | null>(null)
+
+/** Lo pone la superficie de la columna para contar los cajones que se abren desde ella. */
+export const OverlayOpenedHereProvider = OverlayOpenedHereContext.Provider
+
 /** Marca lo que hay dentro de la columna o de un cajón (regla 2). */
 export function SideDockScopeProvider({
   value,
@@ -113,6 +125,8 @@ export function SideDockScopeProvider({
   value: SideDockScope
   children: React.ReactNode
 }) {
+  const opened = React.useContext(OverlayOpenedHereContext)
+  React.useEffect(() => (value === "overlay" && opened ? opened() : undefined), [value, opened])
   return <SideDockScopeContext.Provider value={value}>{children}</SideDockScopeContext.Provider>
 }
 

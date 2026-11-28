@@ -27,8 +27,11 @@ import { combinations, makeSku } from "./catalogo.js"
 const OWNER = "semilla-rosa"
 const ADMIN = "semilla-mario"
 
-/** Una foto de ejemplo de un color, hecha aquí, para lo que no tiene una foto de verdad en `semilla-fotos/`. */
-export function solidPng(rgb: [number, number, number], size = 240): Buffer {
+/**
+ * Un PNG hecho aquí, para no guardar imágenes en el repositorio: `rows` son las filas de píxeles
+ * sin el byte de filtro; `channels`, 3 (RGB) o 4 (RGBA).
+ */
+export function pngOf(size: number, channels: 3 | 4, rows: Buffer[]): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const length = Buffer.alloc(4)
     length.writeUInt32BE(data.length)
@@ -41,16 +44,25 @@ export function solidPng(rgb: [number, number, number], size = 240): Buffer {
   header.writeUInt32BE(size, 0)
   header.writeUInt32BE(size, 4)
   header.writeUInt8(8, 8) // 8 bits por canal
-  header.writeUInt8(2, 9) // RGB
-  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3)])
-  for (let x = 0; x < size; x++) row.set(rgb, 1 + x * 3)
-  const pixels = Buffer.concat(Array.from({ length: size }, () => row))
+  header.writeUInt8(channels === 4 ? 6 : 2, 9) // RGBA o RGB
+  const pixels = Buffer.concat(rows.map((row) => Buffer.concat([Buffer.from([0]), row])))
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
     chunk("IDAT", deflateSync(pixels)),
     chunk("IEND", Buffer.alloc(0)),
   ])
+}
+
+/** Una foto de ejemplo: un PNG de un color. */
+export function solidPng(rgb: [number, number, number], size = 240): Buffer {
+  const row = Buffer.alloc(size * 3)
+  for (let x = 0; x < size; x++) row.set(rgb, x * 3)
+  return pngOf(
+    size,
+    3,
+    Array.from({ length: size }, () => row),
+  )
 }
 
 /** Hace tantos días, para que el kardex de ejemplo quede siempre en el pasado. */
@@ -158,42 +170,66 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
     .where(eq(storePaymentMethod.storeId, storeId))
     .limit(1)
   if (!anyPayment)
+    // Cobros (tablero 6): Yape y Plin con su celular y su titular (el QR lo suma semilla-cobros.ts),
+    // la transferencia con su banco, su cuenta y un CCI con sus dígitos de control, y lo de al
+    // recibir con su nota. Lo que envía Sofi lo arma el servidor igual que aquí.
     await tx.insert(storePaymentMethod).values([
       {
         storeId,
+        kind: "yape",
         name: "Yape",
         typeCode: "68",
         collection: "comprobante",
-        details: "987 654 321 · Rosa Quispe",
+        phone: "+51987654321",
+        holder: "Rosa Quispe M.",
+        details: "Yape al 987 654 321 a nombre de Rosa Quispe M.",
       },
       {
         storeId,
+        kind: "plin",
         name: "Plin",
         typeCode: "68",
         collection: "comprobante",
-        details: "987 654 321 · Rosa Quispe",
+        phone: "+51987654321",
+        holder: "Rosa Quispe M.",
+        details: "Plin al 987 654 321 a nombre de Rosa Quispe M.",
       },
       {
         storeId,
+        kind: "transferencia",
         name: "Transferencia BCP",
         typeCode: "30",
         collection: "comprobante",
-        details: "Cuenta 191-2345678-0-12 a nombre de Rosa Quispe. CCI al pedirlo.",
+        bankCode: "002",
+        accountNumber: "191-2345678-0-12",
+        cci: "00219100234567801253",
+        holder: "Rosa Quispe Mamani",
+        details:
+          "BCP · cuenta 191-2345678-0-12 · CCI 002 191 002345678012 53 · a nombre de Rosa Quispe Mamani",
       },
       {
         storeId,
+        kind: "efectivo",
         name: "Efectivo al recibir",
         typeCode: "10",
         collection: "al_recibir",
-        details: "Solo con reparto propio",
+        details: "Solo en tus zonas de Lima, con tu repartidor",
       },
       {
         storeId,
-        name: "Tarjeta con enlace",
+        kind: "pos",
+        name: "Tarjeta con tu POS",
         typeCode: "48",
+        collection: "al_recibir",
+        details: "Kevin lleva el POS de la tienda",
+      },
+      {
+        storeId,
+        kind: "link",
+        name: "Link de pago (Yape o tarjeta)",
+        typeCode: "68",
         collection: "link",
         details: "",
-        isActive: false,
       },
     ])
   const [anyDelivery] = await tx

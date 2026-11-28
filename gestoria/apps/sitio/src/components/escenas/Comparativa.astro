@@ -1,0 +1,25 @@
+---
+// La tabla comparativa (web v5): una tabla de verdad, para leerla y para los buscadores. Las filas
+// entran de a una con `tablas()` de scripts/arm.ts.
+import type { FilaComp } from "../../lib/arm"
+
+interface Props {
+  otro: string
+  filas: FilaComp[]
+  titulo: string
+}
+const { otro, filas, titulo } = Astro.props
+---
+<div class="comp" data-comp>
+  <table>
+    <caption class="sr">{titulo}</caption>
+    <thead>
+      <tr><th scope="col"><span class="sr">Qué se compara</span></th><th scope="col">{otro}</th><th scope="col" class="comp__arm"><span class="marca-texto">gestorIA</span> <small>ARM</small></th></tr>
+    </thead>
+    <tbody>
+      {filas.map(([que, a, b]) => (
+        <tr><th scope="row">{que}</th><td data-quien={otro}>{a}</td><td class="comp__arm" data-quien="gestorIA">{b}</td></tr>
+      ))}
+    </tbody>
+  </table>
+</div>

@@ -803,7 +803,7 @@ function LoadView({
         title="Cargar muchos"
         subtitle={
           counts
-            ? `${allPhotos} ${allPhotos === 1 ? "foto" : "fotos"} en ${counts.items} ${counts.items === 1 ? "producto" : "productos"} · ${ready} ${ready === 1 ? "listo" : "listos"}${counts.doubts ? ` · ${counts.doubts} con dudas` : ""}${counts.withoutPrice ? ` · ${counts.withoutPrice} sin precio` : ""}`
+            ? `${allPhotos} ${allPhotos === 1 ? "foto" : "fotos"} en ${counts.items} ${counts.items === 1 ? "producto" : "productos"} · ${ready} ${ready === 1 ? "listo" : "listos"}${counts.doubts ? ` · ${counts.doubts} con ${counts.doubts === 1 ? "duda" : "dudas"}` : ""}${counts.withoutPrice ? ` · ${counts.withoutPrice} sin precio` : ""}`
             : "Nada pasa al catálogo hasta «Crear»."
         }
         primary={{
@@ -986,20 +986,25 @@ function TextCell({
 }
 
 function ItemState({ item, error }: { item: LoadItem; error?: string }) {
+  // La etiqueta es corta; lo que dice va debajo, entero y legible, sin salirse de la fila.
+  const note = (badge: React.ReactNode, text: string, tone: string) => (
+    <span className="flex max-w-56 min-w-0 flex-col items-start gap-1">
+      {badge}
+      <span className={cn("text-xs leading-snug [overflow-wrap:anywhere]", tone)}>{text}</span>
+    </span>
+  )
   if (error)
-    return (
-      <Badge variant="destructive" className="max-w-56 whitespace-normal">
-        {error}
-      </Badge>
-    )
+    return note(<Badge variant="destructive">No se puede crear</Badge>, error, "text-destructive")
   if (item.doubt)
-    return (
+    return note(
       <Badge
         variant="outline"
-        className="max-w-56 border-warning/50 bg-warning-soft whitespace-normal text-warning-foreground"
+        className="border-warning/50 bg-warning-soft text-warning-foreground"
       >
-        {item.doubt}
-      </Badge>
+        Con duda
+      </Badge>,
+      item.doubt,
+      "text-muted-foreground",
     )
   if (!item.name.trim()) return <Badge variant="outline">Sin nombre</Badge>
   if (!item.listPriceCents) return <Badge variant="outline">Sin precio</Badge>
