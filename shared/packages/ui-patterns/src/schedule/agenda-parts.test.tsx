@@ -280,6 +280,50 @@ describe("recursos y días", () => {
     expect(empty.querySelector("[data-dots]")).toBeNull()
   })
 
+  it("con el número, cada día dice cuántas hay, el feriado y lo que pide mirar, con su sustantivo", () => {
+    render(
+      <ScheduleDayStrip
+        dates={AGENDA_WEEK}
+        value={AGENDA_TODAY}
+        onChange={() => {}}
+        loadDisplay="count"
+        noun={["entrega", "entregas"]}
+        arrowSize="touch"
+        onNext={() => {}}
+        load={(date) =>
+          date === AGENDA_WEEK[1]
+            ? { count: 19, alert: "algo no se entregó" }
+            : date === AGENDA_WEEK[2]
+              ? { count: 1, holiday: "Inmaculada Concepción" }
+              : date === AGENDA_WEEK[3]
+                ? { count: 0 }
+                : undefined
+        }
+      />,
+    )
+    const busy = screen.getByRole("button", { name: "Martes 13 de octubre, 19 entregas, algo no se entregó" })
+    expect(busy.querySelector("[data-count]")?.textContent).toBe("19")
+    expect(busy.querySelector("[data-alert]")).toBeTruthy()
+    expect(busy.querySelector("[data-dots]")).toBeNull()
+    const holiday = screen.getByRole("button", {
+      name: "Miércoles 14 de octubre, feriado: Inmaculada Concepción, 1 entrega",
+    })
+    expect(holiday.querySelector("[data-count]")?.textContent).toBe("Feriado")
+    expect(holiday.className).toContain("border-dashed")
+    expect(screen.getByRole("button", { name: "Jueves 15 de octubre, sin entregas" }).querySelector("[data-count]")?.textContent).toBe("·")
+    expect(screen.getByRole("button", { name: "Semana siguiente" }).className).toContain("size-11")
+  })
+
+  it("sin las opciones nuevas, la franja de la agenda queda como estaba", () => {
+    render(<ScheduleDayStrip dates={AGENDA_WEEK} value={AGENDA_TODAY} onChange={() => {}} onPrevious={() => {}} />)
+    const arrow = screen.getByRole("button", { name: "Semana anterior" })
+    expect(arrow.className).toContain("h-[50px] w-[26px]")
+    const today = screen.getByRole("button", { name: /Lunes 12 de octubre/ })
+    expect(today.className).toContain("h-[54px]")
+    expect(today.querySelector("[data-count]")).toBeNull()
+    expect(today.hasAttribute("data-drop-target")).toBe(false)
+  })
+
   it("la semana del equipo dice las horas libres y tocar un día avisa con quién y cuándo", () => {
     const onPick = vi.fn()
     const window = { startMinutes: 480, endMinutes: 840 }
