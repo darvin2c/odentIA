@@ -1,0 +1,75 @@
+---
+// Lo que Sofi lee de la tienda (web v5): las líneas se dibujan hacia ella al bajar
+// (src/scripts/inicio.ts, trazarMapa y mapa).
+const check =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+const fuentes = [
+  {
+    t: "Tu catálogo",
+    d: "Fotos, material y horma",
+    i: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  },
+  {
+    t: "Stock por talla",
+    d: "Y por color o tamaño",
+    i: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
+  },
+  { t: "Tu precio mínimo", d: "Nunca baja de ahí", i: '<path d="M4 17h16M7 13l3-3 3 2 4-5"/>' },
+  {
+    t: "Medios de pago",
+    d: "Yape, Plin, transferencia",
+    i: '<rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10h18M7 14.5h3"/>',
+  },
+  {
+    t: "Formas de entrega",
+    d: "Reparto, envío o recojo",
+    i: '<path d="M3 7.5h11v8H3zM14 10.5h4l3 3v2h-7"/><circle cx="7" cy="17" r="1.6"/><circle cx="17" cy="17" r="1.6"/>',
+  },
+  {
+    t: "La ficha de la clienta",
+    d: "Su talla y sus compras",
+    i: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/>',
+  },
+]
+const hace = [
+  { t: "Responde con el valor", d: "Precio, material y horma, sin inventar" },
+  { t: "Ofrece una sola vez", d: "Con un plazo para pagar" },
+  { t: "Cobra antes de entregar", d: "Con tus medios de pago" },
+]
+---
+  <!-- ============================================================ conoce tu tienda -->
+  <section class="conoce" id="sofi" aria-labelledby="conoce-h">
+    <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
+        <p class="etiqueta">Sofi, tu vendedora</p>
+        <h2 id="conoce-h" class="titulo-2">Conoce tu tienda <span class="cur">antes de contestar</span></h2>
+        <p class="bajada">Lee tu catálogo, tu stock, tus precios mínimos y tus medios de pago y de entrega. Con eso atiende, sin inventar nada.</p>
+      </div>
+      <div class="mapa" data-mapa>
+        <svg class="mapa__lineas" aria-hidden="true" data-mapa-lineas></svg>
+        <ul class="mapa__fuentes" aria-label="Lo que Sofi lee de tu tienda">
+          {fuentes.map((f, i) => (
+            <li class="chip" data-fuente={i}>
+              <span class="chip__icono" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={f.i}></svg></span>
+              <span><b>{f.t}</b><small>{f.d}</small></span>
+            </li>
+          ))}
+        </ul>
+        <div class="mapa__centro" aria-hidden="true">
+          <span class="mapa__anillo"></span>
+          <span class="mapa__anillo mapa__anillo--b"></span>
+          <span class="mapa__sofi" data-sofi="atenta" data-sofi-escala="0.5"></span>
+          <span class="mapa__nombre">Sofi</span>
+        </div>
+        <ul class="mapa__hace" aria-label="Lo que hace con eso">
+          {hace.map((h, i) => (
+            <li class="chip chip--hace" data-hace={i}>
+              <span class="chip__icono" aria-hidden="true"><Fragment set:html={check} /></span>
+              <span><b>{h.t}</b><small>{h.d}</small></span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>

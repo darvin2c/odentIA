@@ -386,6 +386,9 @@ export function crearSofi(quieta: boolean): Sofi | null {
       { passive: true },
     )
   }
+  window.addEventListener("sofi:tocar", () => {
+    if (lugar?.juego) sofi.tocar()
+  })
   document.addEventListener("pointerdown", (e) => {
     if (quieta || !lugar?.juego || radio < 4) return
     const dx = e.clientX - pos.x

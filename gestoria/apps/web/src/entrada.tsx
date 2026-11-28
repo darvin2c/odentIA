@@ -386,7 +386,7 @@ export function RegisterPage() {
                     Acepto los{" "}
                     <a
                       className="text-primary underline"
-                      href="https://odentia32.com/terminos"
+                      href="https://gestoria24.com/terminos"
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -395,7 +395,7 @@ export function RegisterPage() {
                     y el{" "}
                     <a
                       className="text-primary underline"
-                      href="https://odentia32.com/privacidad"
+                      href="https://gestoria24.com/privacidad"
                       target="_blank"
                       rel="noreferrer"
                     >

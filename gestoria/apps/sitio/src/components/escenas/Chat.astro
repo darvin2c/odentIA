@@ -1,0 +1,38 @@
+---
+// El chat que se puede tocar (web v5): la visitante elige una pregunta y Sofi contesta con la
+// respuesta de muestra (src/scripts/inicio.ts, chatVivo). Sin JavaScript se ve la conversación entera.
+import { CHAT_VIVO, SALUDO } from "../../lib/venta"
+---
+<div class="chat" data-chat-vivo>
+  <div class="chat__escena">
+    <span class="chat__tarjeta" aria-hidden="true"></span>
+    <span class="chat__sofi" data-sofi="atenta" data-sofi-escala="0.5" data-sofi-chat aria-hidden="true"></span>
+    <div class="cel chat__cel">
+      <div class="cel__isla" aria-hidden="true"></div>
+      <div class="cel__estado" aria-hidden="true"><span>9:41</span><span class="cel__senal"><i></i><i></i><i></i></span></div>
+      <div class="cel__cabeza">
+        <span class="cel__avatar" aria-hidden="true">CR</span>
+        <span class="cel__quien"><b>Calzados Rosa</b><small data-chat-estado>en línea</small></span>
+      </div>
+      <ol class="cel__chat" aria-label="Chat de ejemplo con Sofi, de Calzados Rosa" aria-live="polite" data-chat-lista>
+        <li class="msj msj--sofi"><span class="sr">Sofi:</span>{SALUDO}<span class="msj__hora" aria-hidden="true">9:41</span></li>
+        {CHAT_VIVO.map((p) => (
+          <Fragment>
+            <li class="msj msj--ella" data-sin-js><span class="sr">Clienta:</span>{p.q}<span class="msj__hora" aria-hidden="true">9:42</span></li>
+            <li class="msj msj--sofi" data-sin-js><span class="sr">Sofi:</span>{p.a}<span class="msj__hora" aria-hidden="true">9:42</span></li>
+          </Fragment>
+        ))}
+        <li class="msj-escribe" aria-hidden="true" data-escribe><i></i><i></i><i></i></li>
+      </ol>
+      <div class="cel__entrada" aria-hidden="true"><span>Mensaje</span><i></i></div>
+    </div>
+  </div>
+  <div class="chat__panel">
+    <p class="etiqueta">Pregúntale tú, como si fueras la clienta</p>
+    <div class="chat__chips" data-chips>
+      {CHAT_VIVO.map((p, i) => <button type="button" class="chat__chip" data-pregunta={i}>{p.q}</button>)}
+      <button type="button" class="chat__otra" data-reiniciar>Empezar de nuevo</button>
+    </div>
+    <p class="chat__nota">Ejemplo con respuestas de muestra de Calzados Rosa. En tu tienda, Sofi responde con tu catálogo.</p>
+  </div>
+</div>

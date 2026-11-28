@@ -98,10 +98,10 @@ describe("los enlaces", () => {
 })
 
 describe("términos y privacidad", () => {
-  it("mientras tengan marcas, se sabe", () => {
-    expect(hasPending(TERMINOS)).toBe(true)
-    expect(hasPending(PRIVACIDAD)).toBe(true)
-    expect(hasPending({ ...TERMINOS, since: "1 de enero de 2027", sections: [] })).toBe(false)
+  it("están completos: sin marcas, se indexan", () => {
+    expect(hasPending(TERMINOS)).toBe(false)
+    expect(hasPending(PRIVACIDAD)).toBe(false)
+    expect(hasPending({ ...TERMINOS, since: "[Por completar: fecha]" })).toBe(true)
   })
 
   it("llevan los datos de la empresa", () => {

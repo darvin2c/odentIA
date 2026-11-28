@@ -1,9 +1,12 @@
 ---
 // La cabecera de todas las páginas (web v5): transparente sobre el héroe y blanca con desenfoque
-// al bajar (lo pidió el dueño). Sobre un héroe oscuro empieza con letras blancas (`tono="oscuro"`).
-// «Producto» abre su menú; «Entrar» lleva al ingreso real de la app. En el celular, el menú es una
-// hoja a pantalla completa.
-import { cta, hrefOf, LOGIN_URL, mainNav, SITE_MAP } from "../lib/sitio"
+// al bajar (lo pidió el dueño). «Producto» abre un menú en dos partes: «Tus agentes» (Sofi y Argos,
+// con su cara y su oficio: trabajan solos) y «Funciones» (lo que la tienda usa en la app). «Entrar»
+// lleva al ingreso real de la app. En el celular, el menú es una hoja a pantalla completa.
+import { Image } from "astro:assets"
+import isotipo from "../assets/isotipo.svg?raw"
+import sofiCara from "../assets/sofi-atenta.png"
+import { cta, hrefOf, LOGIN_URL, mainNav, type Pagina, SITE_MAP } from "../lib/sitio"
 import Logo from "./Logo.astro"
 
 interface Props {
@@ -12,7 +15,6 @@ interface Props {
 const { tono = "claro" } = Astro.props
 
 const iconos: Record<string, string> = {
-  Sofi: '<path d="M4 5.5h16v10H9l-5 4z"/><circle cx="9.5" cy="10.5" r="1"/><circle cx="14.5" cy="10.5" r="1"/>',
   Cobros: '<rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10h18M7 14.5h3"/>',
   Entregas:
     '<path d="M3 7.5h11v8H3zM14 10.5h4l3 3v2h-7"/><circle cx="7" cy="17" r="1.6"/><circle cx="17" cy="17" r="1.6"/>',
@@ -21,15 +23,22 @@ const iconos: Record<string, string> = {
   Catálogo:
     '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
   Inventario: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
-  Argos:
-    '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v3M20 12h-3"/>',
 }
-const producto = SITE_MAP.producto
-  .map((p) => ({ ...p, href: hrefOf(p) }))
-  .filter((p): p is typeof p & { href: string } => p.href !== null)
+const con = <T extends Pagina>(ps: T[]) =>
+  ps
+    .map((p) => ({ ...p, href: hrefOf(p) }))
+    .filter((p): p is T & { href: string } => p.href !== null)
+const agentes = con(SITE_MAP.agentes)
+const funciones = con(SITE_MAP.funciones)
+const [sofi, argos] = agentes
+const marca = isotipo
+  .replace(/ role="[^"]*"/, "")
+  .replace(/ aria-label="[^"]*"/, "")
+  .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
 const [, ...resto] = mainNav
 const grupos = [
-  { titulo: "Producto", enlaces: producto.map((p) => ({ href: p.href, label: p.label })) },
+  { titulo: "Tus agentes", enlaces: agentes.map((p) => ({ href: p.href, label: p.label })) },
+  { titulo: "Funciones", enlaces: funciones.map((p) => ({ href: p.href, label: p.label })) },
   { titulo: "Más", enlaces: resto },
 ]
 const flecha =
@@ -43,13 +52,32 @@ const flecha =
       <div class="cabecera__item">
         <a class="cabecera__enlace" href="/#venta" aria-haspopup="true">Producto <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
         <div class="cabecera__menu">
-          {producto.map((p) => (
-            <a href={p.href}>
-              <span class="cabecera__icono"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={iconos[p.label] ?? ""}></svg></span>
-              <b>{p.label}</b>
-              <small>{p.hint}</small>
-            </a>
-          ))}
+          <div class="menu__agentes">
+            <p class="menu__titulo">Tus agentes de IA</p>
+            {sofi && (
+              <a class="agente" href={sofi.href}>
+                <span class="agente__cara agente__cara--sofi"><Image src={sofiCara} alt="" width={56} height={53} /></span>
+                <span class="agente__texto"><b>{sofi.label}</b><small>{sofi.hint}</small></span>
+              </a>
+            )}
+            {argos && (
+              <a class="agente" href={argos.href}>
+                <span class="agente__cara agente__cara--argos"><span class="agente__barrido"></span><Fragment set:html={marca} /></span>
+                <span class="agente__texto"><b>{argos.label}</b><small>{argos.hint}</small></span>
+              </a>
+            )}
+            <p class="menu__nota">Trabajan solos, dentro de tus reglas.</p>
+          </div>
+          <div class="menu__funciones">
+            <p class="menu__titulo">Funciones</p>
+            {funciones.map((p) => (
+              <a class="funcion" href={p.href}>
+                <span class="cabecera__icono"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={iconos[p.label] ?? ""}></svg></span>
+                <span><b>{p.label}</b><small>{p.hint}</small></span>
+              </a>
+            ))}
+            <a class="menu__todo" href="/como-funciona">Cómo funciona todo junto<Fragment set:html={flecha} /></a>
+          </div>
         </div>
       </div>
       {resto.map((link) => <a class="cabecera__enlace" href={link.href}>{link.label}</a>)}

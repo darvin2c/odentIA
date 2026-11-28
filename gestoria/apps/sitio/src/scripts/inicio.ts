@@ -7,7 +7,7 @@
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 import { CHAT_VIVO } from "../lib/venta"
-import { reduceMovimiento, scrollSuave } from "./sitio"
+import { desde, reduceMovimiento, scrollSuave } from "./sitio"
 import type { Humor, Sofi } from "./sofi"
 
 gsap.registerPlugin(ScrollTrigger)
@@ -24,7 +24,7 @@ const centro = (el: Element) => {
 }
 
 /** Las líneas del mapa «Sofi conoce tu tienda», de cada fuente a Sofi y de Sofi a lo que hace. */
-function trazarMapa(): SVGPathElement[] {
+export function trazarMapa(): SVGPathElement[] {
   const mapa = $("[data-mapa]")
   const svg = $<SVGSVGElement>("[data-mapa-lineas]")
   const nucleo = $(".mapa__centro")
@@ -87,7 +87,7 @@ function trazarMapa(): SVGPathElement[] {
 }
 
 /** El chat del héroe: la visitante toca una pregunta y Sofi contesta con la respuesta de muestra. */
-function chatVivo(sofi: Sofi, quieta: boolean) {
+export function chatVivo(sofi: Sofi, quieta: boolean) {
   const caja = $("[data-chat-vivo]")
   const lista = $("[data-chat-lista]")
   const escribe = $("[data-escribe]")
@@ -159,6 +159,7 @@ function chatVivo(sofi: Sofi, quieta: boolean) {
 }
 
 function heroe() {
+  if (!$(".heroe__h")) return
   const t0 = gsap.timeline({ defaults: { ease: "expo.out" } })
   t0.from(
     ".heroe__h .linea > span",
@@ -193,7 +194,7 @@ function trabajo(sofi: Sofi) {
         cual === "pensando" ? "Pensando" : cual === "esperando" ? "Esperando" : "Listo"
   }
   for (const i of pasos.keys()) marcar(i, "esperando")
-  const tl = gsap.timeline({ scrollTrigger: { trigger: caja, start: "top 70%" } })
+  const tl = gsap.timeline({ scrollTrigger: { trigger: caja, start: desde("top 70%", "top 80%") } })
   tl.from([...caja.children], { y: 50, opacity: 0, duration: 1.1, stagger: 0.12, ease: "expo.out" })
   for (const [i, p] of pasos.entries()) {
     tl.call(() => {
@@ -216,7 +217,7 @@ function trabajo(sofi: Sofi) {
       v: fin,
       duration: 1.6,
       ease: "power3.out",
-      scrollTrigger: { trigger: caja, start: "top 70%" },
+      scrollTrigger: { trigger: caja, start: desde("top 70%") },
       onUpdate: () => {
         b.textContent = String(Math.round(n.v))
       },
@@ -230,22 +231,36 @@ function decides() {
   if (!g) return
   const cajas = $$(".decides__caja", g)
   const apilado = matchMedia("(max-width: 860px)").matches
-  const desde = (x: number) => ({
+  const desdeX = (x: number) => ({
     x: apilado ? 0 : x,
     y: apilado ? 40 : 0,
     opacity: 0,
     duration: 1.1,
     ease: "expo.out",
   })
+  if (apilado) {
+    for (const caja of cajas) {
+      gsap
+        .timeline({ scrollTrigger: { trigger: caja, start: "top 94%" } })
+        .from(caja, { y: 40, opacity: 0, duration: 0.9, ease: "expo.out" })
+        .from($$(".lista-ok li", caja), { x: -12, opacity: 0, duration: 0.45, stagger: 0.05 }, 0.15)
+    }
+    gsap.from("[data-puente]", {
+      scaleY: 0,
+      duration: 0.6,
+      scrollTrigger: { trigger: "[data-puente]", start: "top 94%" },
+    })
+    return
+  }
   gsap
     .timeline({ scrollTrigger: { trigger: g, start: "top 72%" } })
-    .from(cajas[0] ?? [], desde(-60))
+    .from(cajas[0] ?? [], desdeX(-60))
     .from(
       "[data-puente]",
       { [apilado ? "scaleY" : "scaleX"]: 0, duration: 0.8, ease: "power2.inOut" },
       "-=0.5",
     )
-    .from(cajas[1] ?? [], desde(60), "-=0.3")
+    .from(cajas[1] ?? [], desdeX(60), "-=0.3")
     .from(
       $$(".lista-ok li", g),
       { x: -12, opacity: 0, duration: 0.5, stagger: 0.05, ease: "expo.out" },
@@ -253,7 +268,7 @@ function decides() {
     )
 }
 
-function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
+export function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   const mapaEl = $("[data-mapa]")
   if (!mapaEl) return
   const fuentes = $$("[data-fuente]", mapaEl)
@@ -308,7 +323,7 @@ function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   }
   ScrollTrigger.create({
     trigger: mapaEl,
-    start: "top 70%",
+    start: desde("top 70%"),
     end: "bottom 45%",
     onUpdate: (st) => encender(Math.min(total, Math.floor(st.progress * (total + 0.999)))),
     onLeave: () => sofi?.mirar(null),
@@ -353,7 +368,7 @@ function mapa(sofi: Sofi | null, lineas: SVGPathElement[]) {
   })
 }
 
-function venta(sofi: Sofi | null) {
+export function venta(sofi: Sofi | null) {
   const seccion = $("[data-venta]")
   const pin = $("[data-venta-pin]")
   const escena = $("[data-venta-escena]")
@@ -492,7 +507,7 @@ function venta(sofi: Sofi | null) {
     opacity: 0,
     duration: 1.4,
     ease: "expo.out",
-    scrollTrigger: { trigger: seccion, start: "top 70%" },
+    scrollTrigger: { trigger: seccion, start: desde("top 70%") },
   })
 }
 
@@ -507,7 +522,9 @@ function cobro(sofi: Sofi | null) {
   const sofiEl = $(".cobro__sofi", escena)
   if (sofi && sofiEl) sofi.humor(sofiEl, "atenta")
   const apilado = matchMedia("(max-width: 900px)").matches
-  const tl = gsap.timeline({ scrollTrigger: { trigger: escena, start: "top 68%" } })
+  const tl = gsap.timeline({
+    scrollTrigger: { trigger: escena, start: desde("top 68%", "top 80%") },
+  })
   tl.from(a, { x: -60, rotateY: 14, opacity: 0, duration: 1.2, ease: "expo.out" })
     .from(
       linea,
@@ -537,7 +554,7 @@ function argos() {
     duration: 1,
     stagger: 0.18,
     ease: "expo.out",
-    scrollTrigger: { trigger: ".argos__lista", start: "top 85%" },
+    scrollTrigger: { trigger: ".argos__lista", start: desde("top 85%") },
   })
   gsap.fromTo(
     "[data-vitrina]",
@@ -553,6 +570,7 @@ function argos() {
 }
 
 function rubros() {
+  if (!$(".rubros")) return
   gsap.from(".rubro", {
     y: 60,
     opacity: 0,
@@ -560,7 +578,7 @@ function rubros() {
     duration: 1.1,
     stagger: 0.1,
     ease: "expo.out",
-    scrollTrigger: { trigger: "[data-rubros-tarjetas]", start: "top 82%" },
+    scrollTrigger: { trigger: "[data-rubros-tarjetas]", start: desde("top 82%") },
   })
   const cintas = $$("[data-cinta]")
   const tweens = cintas.map((c) => {
@@ -604,7 +622,7 @@ function precio() {
   const cifra = $("[data-cuenta]")
   if (!plan || !cifra) return
   const n = { v: 0 }
-  const tl = gsap.timeline({ scrollTrigger: { trigger: plan, start: "top 75%" } })
+  const tl = gsap.timeline({ scrollTrigger: { trigger: plan, start: desde("top 75%") } })
   tl.from(plan, { y: 60, scale: 0.96, opacity: 0, duration: 1.3, ease: "expo.out" })
     .to(
       n,
@@ -623,39 +641,53 @@ function precio() {
     )
 }
 
-function cierre() {
+export function cierre() {
+  if (!$(".cierre__sofi")) return
   gsap.from(".cierre__sofi", {
     scale: 0.4,
     opacity: 0,
     duration: 1.4,
     ease: "elastic.out(1, 0.6)",
-    scrollTrigger: { trigger: ".cierre", start: "top 70%" },
+    scrollTrigger: { trigger: ".cierre", start: desde("top 70%") },
   })
 }
 
-export function iniciarInicio() {
-  const quieta = reduceMovimiento()
-  const lineas = trazarMapa()
-  // three.js pesa: Sofi se carga aparte, sin frenar lo demás. Mientras llega, lo que se le pide
-  // no hace nada.
+/**
+ * Carga a Sofi aparte (three.js pesa) y devuelve con qué pedirle cosas: mientras llega, lo que se le
+ * pide no hace nada. La página que la carga así lo dice en su HTML (`sofiPropia` de Base.astro)
+ * para que sitio.ts no la cargue otra vez.
+ */
+export function cargarSofi(quieta: boolean): Sofi {
   let real: Sofi | null = null
-  const sofi: Sofi = {
+  import("./sofi").then((m) => {
+    real = m.crearSofi(quieta)
+  })
+  return {
     humor: (el, h) => real?.humor(el, h),
     mirar: (p) => real?.mirar(p),
     festejar: () => real?.festejar(),
     tocar: () => real?.tocar(),
     hablar: () => real?.hablar(),
   }
-  import("./sofi").then((m) => {
-    real = m.crearSofi(quieta)
-  })
+}
+
+/** Lenis y ScrollTrigger van juntos, y todo se recalcula cuando cargan fuentes e imágenes. */
+export function prepararScroll() {
+  const lenis = scrollSuave()
+  if (lenis) lenis.on("scroll", ScrollTrigger.update)
+  window.addEventListener("load", () => ScrollTrigger.refresh())
+  document.fonts?.ready.then(() => ScrollTrigger.refresh())
+}
+
+export function iniciarInicio() {
+  const quieta = reduceMovimiento()
+  const lineas = trazarMapa()
+  const sofi = cargarSofi(quieta)
   chatVivo(sofi, quieta)
   const puntos = $<HTMLCanvasElement>("[data-puntos]")
   if (puntos) import("./puntos").then((m) => m.marDePuntos(puntos, quieta))
   if (quieta) return
-
-  const lenis = scrollSuave()
-  if (lenis) lenis.on("scroll", ScrollTrigger.update)
+  prepararScroll()
 
   heroe()
   trabajo(sofi)
@@ -667,7 +699,4 @@ export function iniciarInicio() {
   rubros()
   precio()
   cierre()
-  // Las fuentes y las imágenes cambian los altos: se recalcula al terminar de cargar.
-  window.addEventListener("load", () => ScrollTrigger.refresh())
-  document.fonts?.ready.then(() => ScrollTrigger.refresh())
 }
