@@ -105,7 +105,7 @@ export async function seedDemoExchanges(tx: Db, storeId: string): Promise<void> 
       reason: "Le quedó chica",
       takes: [{ variantId: b38, quantity: 1 }],
       deliveryMethodId: reparto,
-      zone: "Surco y Miraflores",
+      zone: "Centro y Lima Moderna",
       address: "Av. Javier Prado Oeste 640, San Isidro",
       deliverOn: addDays(today, 1),
     }),

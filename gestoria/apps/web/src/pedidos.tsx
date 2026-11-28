@@ -79,6 +79,7 @@ import {
   when,
 } from "./lib/pedidos"
 import { type DeliveryMethod, money, moneyInput, type PaymentMethod, readMoney } from "./lib/tienda"
+import { agencySite } from "./lib/zonas"
 import { Photo, ReceiptImage, shrinkPhoto } from "./piezas"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
@@ -555,7 +556,24 @@ function OrderBody({ order }: { order: OrderDetail }) {
         {order.slot ? <Row label="Franja">{order.slot.label}</Row> : null}
         {order.courierName ? <Row label="Lo lleva">{order.courierName}</Row> : null}
         {order.agency ? <Row label="Agencia">{order.agency}</Row> : null}
-        {order.tracking ? <Row label="Número de envío">{order.tracking}</Row> : null}
+        {order.tracking ? (
+          <Row label="Número de envío">
+            {order.tracking}
+            {agencySite(order.agency) ? (
+              <>
+                {" · "}
+                <a
+                  className="underline"
+                  href={agencySite(order.agency) ?? ""}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Seguir en la web de {order.agency}
+                </a>
+              </>
+            ) : null}
+          </Row>
+        ) : null}
         {order.notes ? <p className="text-sm">{order.notes}</p> : null}
         {(order.state === "por_salir" || order.state === "en_camino") && can("entregas") ? (
           <DeliveryActions order={order} />

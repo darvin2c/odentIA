@@ -42,7 +42,7 @@ const lucia: Person = {
   name: "Lucía Torres",
 }
 
-const MORNING = { start: 9 * 60, end: 13 * 60 }
+const MORNING = { start: 10 * 60, end: 13 * 60 }
 const AFTERNOON = { start: 14 * 60, end: 18 * 60 }
 const EVENING = { start: 18 * 60, end: 21 * 60 }
 
@@ -128,7 +128,7 @@ export async function seedDemoDispatch(tx: Db, storeId: string): Promise<void> {
     address: "Calle Schell 310, Miraflores",
     lines: [{ variantId: z40, quantity: 1 }],
     deliveryMethodId: reparto,
-    zone: "Surco y Miraflores",
+    zone: "Centro y Lima Moderna",
     paymentMethodId: efectivo,
   })
   await reschedule(tx, lucia, storeId, andres.id, {
