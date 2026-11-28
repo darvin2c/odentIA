@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@odentia/ui"
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@odentia/ui/components/dropdown-menu"
-import { type KeyboardEvent, useRef, useState } from "react"
+import { type KeyboardEvent, useId, useRef, useState } from "react"
 import type { District } from "./lib/zonas"
 import { MAP_COLUMNS, MAP_PLACES, MAP_ROWS, zoneTone } from "./lib/zonas"
 
@@ -97,7 +97,13 @@ export function LimaMap({
     return best
   }
 
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, code: string) => {
+  const hintId = useId()
+  /**
+   * Las flechas solo mueven el foco. Van en la captura, antes que el botón: cada distrito es el
+   * disparador de su menú, y el menú común se abre con ↑ y ↓; así nunca se abre el del distrito
+   * que se deja. Dentro del menú abierto las flechas siguen siendo del menú.
+   */
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLFieldSetElement>) => {
     const moves: Record<string, [number, number]> = {
       ArrowLeft: [-1, 0],
       ArrowRight: [1, 0],
@@ -105,8 +111,10 @@ export function LimaMap({
       ArrowDown: [0, 1],
     }
     const move = moves[event.key]
-    if (!move) return
+    const code = [...refs.current].find(([, node]) => node === event.target)?.[0]
+    if (!move || !code) return
     event.preventDefault()
+    event.stopPropagation()
     const to = next(code, move[0], move[1])
     if (to) {
       setFocused(to)
@@ -117,13 +125,17 @@ export function LimaMap({
   return (
     <div className="@container w-full">
       <fieldset
+        aria-label="Mapa de Lima y Callao por zona"
+        aria-describedby={hintId}
+        onKeyDownCapture={onKeyDownCapture}
         className="relative m-0 w-full min-w-0 border-0 p-0"
         style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
       >
-        <legend className="sr-only">
-          Mapa esquemático de Lima y Callao, por zona. Flechas para moverse entre distritos; Enter
-          para cambiar su zona.
-        </legend>
+        <p id={hintId} className="sr-only">
+          {canEdit
+            ? "Flechas para pasar de un distrito a otro; Enter para cambiar la zona del distrito elegido."
+            : "Flechas para pasar de un distrito a otro."}
+        </p>
         <svg
           aria-hidden
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
@@ -160,7 +172,6 @@ export function LimaMap({
               aria-label={label}
               title={label}
               onFocus={() => setFocused(district.code)}
-              onKeyDown={(event) => onKeyDown(event, district.code)}
               className={cn(
                 "absolute flex flex-col items-center justify-center overflow-hidden rounded-md border-[1.5px] px-0.5 text-center leading-tight font-semibold text-foreground transition-colors",
                 "focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none",
