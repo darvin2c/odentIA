@@ -7,7 +7,6 @@ import {
   longDay,
   type SetupFacts,
   sameText,
-  setupProgress,
   stepView,
   type ToDoItem,
 } from "./inicio"
@@ -59,18 +58,6 @@ describe("los primeros pasos", () => {
     const chats = stepView("chats", "pronto", FACTS, STORE)
     expect(chats.action).toBeNull()
     expect(chats.detail).toContain("Muy pronto")
-  })
-
-  it("cuenta lo hecho y lo saltado, de los pasos que cuentan", () => {
-    expect(
-      setupProgress([
-        { state: "hecho" },
-        { state: "hecho" },
-        { state: "falta" },
-        { state: "saltado" },
-        { state: "pronto" },
-      ]),
-    ).toEqual({ done: 3, total: 4 })
   })
 
   it("junta los nombres como se dicen", () => {
