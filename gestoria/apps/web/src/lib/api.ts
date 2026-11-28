@@ -85,6 +85,14 @@ export interface PendingInvitation {
   expiresAt: string
   createdAt: string
   expired: boolean
+  /** Cómo la llama la tienda hasta que entra con su cuenta. */
+  name: string | null
+  /** Su celular en E.164, para enviarle la invitación por WhatsApp. */
+  phone: string | null
+  /** Cuándo se abrió el WhatsApp con ella: «enviada por ti», nunca que llegó. */
+  sharedAt: string | null
+  /** Quién abrió ese WhatsApp. */
+  sharedBy: string | null
 }
 
 export class ApiError extends Error {
@@ -198,8 +206,8 @@ export const ROLES: Record<StoreRole | "support", { name: string; can: string }>
     name: "Soporte de gestorIA",
     can: "Solo mira la tienda, su equipo y su catálogo, mientras la tienda lo deja.",
   },
-  owner: { name: "Dueño", can: "Todo, también el plan." },
-  admin: { name: "Administrador", can: "Todo menos el plan." },
+  owner: { name: "Dueño", can: "Todo, también el plan y los pagos a gestorIA." },
+  admin: { name: "Administrador", can: "Todo menos el plan. No toca al Dueño." },
   sales: { name: "Ventas", can: "Atiende, confirma pagos y entrega. No cambia la configuración." },
 }
 
