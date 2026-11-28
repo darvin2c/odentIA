@@ -141,7 +141,7 @@ describe("salir de un formulario que se guarda solo", () => {
     await screen.findByText("Cerrado")
     await new Promise((resolve) => setTimeout(resolve, 1500))
     expect(update).toHaveBeenCalledTimes(1)
-  })
+  }, 20_000) // Escribe, sale tres veces y descarta: ~4,5 s en un equipo rápido; en el CI pasa de 5 s.
 
   it("con solo el valor que no vale, dice que lo demás ya está guardado", async () => {
     serverSaves()
