@@ -120,13 +120,38 @@ const app = {
     </div>
   </section>
 
-  <!-- ============================================================ la ruta: vende, cobra, entrega -->
-  <section class="ruta" aria-label="De la venta a la entrega">
-    <ol class="marco ruta__lista">
-      <li><span class="ruta__n">1</span><div><b>Vende</b><p>Sofi atiende el chat y cierra sin bajar de tu mínimo.</p></div></li>
-      <li><span class="ruta__n">2</span><div><b>Cobra</b><p>Pide el pago y, sin pago confirmado, el pedido no sale.</p></div></li>
-      <li><span class="ruta__n">3</span><div><b>Entrega</b><p>Tus entregas del día en orden, cada una con su pago.</p></div></li>
-    </ol>
+  <!-- ============================================================ la cuenta de un pedido -->
+  <section class="cuenta" id="cuenta" aria-labelledby="cuenta-h">
+    <div class="marco cuenta__marco">
+      <div class="cuenta__texto">
+        <p class="etiqueta">De la venta a la entrega</p>
+        <h2 id="cuenta-h" class="titulo-2">Saca la cuenta de un pedido: <span class="cur">el total lo hacemos nosotros.</span></h2>
+        <p class="bajada">Esta es la boleta de una venta de Calzados Rosa. Mira quién hizo cada paso: de los 8, a tu equipo le tocaron 2.</p>
+      </div>
+      <div class="boleta__sombra" data-boleta>
+      <figure class="boleta">
+        <figcaption class="boleta__cabeza">
+          <b>Calzados Rosa</b>
+          <span>Pedido 1042 · Andrea Castillo</span>
+        </figcaption>
+        <ol class="boleta__lineas">
+          <li data-linea-b><time>21:14</time><span>Le respondió por WhatsApp</span><i>Sofi</i></li>
+          <li data-linea-b><time>21:15</time><span>Encontró la talla 38 en tu catálogo</span><i>Sofi</i></li>
+          <li data-linea-b><time>21:16</time><span>Cerró en S/ 129, sobre tu mínimo</span><i>Sofi</i></li>
+          <li data-linea-b><time>21:18</time><span>Cobró con el link de pago</span><i>Sofi</i></li>
+          <li data-linea-b><time>21:18</time><span>Descontó el par de tu stock</span><i>Argos</i></li>
+          <li data-linea-b class="es-tuyo"><time>09:30</time><span>Empacó el pedido</span><i>Tu equipo</i></li>
+          <li data-linea-b class="es-tuyo"><time>15:40</time><span>Lo entregó en Surco</span><i>Tu equipo</i></li>
+          <li data-linea-b><time>15:41</time><span>Guardó la compra en la ficha de Andrea</span><i>Argos</i></li>
+        </ol>
+        <div class="boleta__total" data-total-b>
+          <span>Total</span>
+          <b><span class="boleta__marca">gestorIA</span> <em>6</em> · Tu equipo <em>2</em></b>
+        </div>
+        <p class="boleta__sello" data-sello-b aria-hidden="true">Entregado</p>
+      </figure>
+      </div>
+    </div>
   </section>
 
   <!-- ============================================================ Sofi trabajando -->

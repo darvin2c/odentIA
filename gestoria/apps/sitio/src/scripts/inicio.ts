@@ -552,6 +552,22 @@ function cobro(sofi: Sofi | null) {
     )
 }
 
+/** La boleta de un pedido se imprime línea a línea, y al final caen el total y el sello. */
+function boleta() {
+  const b = $("[data-boleta]")
+  if (!b) return
+  gsap
+    .timeline({ scrollTrigger: { trigger: b, start: desde("top 75%", "top 85%") } })
+    .from(b, { y: 40, opacity: 0, duration: 0.8, ease: "expo.out" })
+    .from($$("[data-linea-b]", b), { opacity: 0, x: -10, duration: 0.35, stagger: 0.16 }, 0.3)
+    .from("[data-total-b]", { opacity: 0, duration: 0.4 })
+    .from(
+      "[data-sello-b]",
+      { scale: 2.2, opacity: 0, duration: 0.35, ease: "back.out(2)" },
+      "+=0.1",
+    )
+}
+
 function argos() {
   gsap.from("[data-alerta]", {
     x: 40,
@@ -695,6 +711,7 @@ export function iniciarInicio() {
   prepararScroll()
 
   heroe()
+  boleta()
   trabajo(sofi)
   mapa(sofi, lineas)
   venta(sofi)
