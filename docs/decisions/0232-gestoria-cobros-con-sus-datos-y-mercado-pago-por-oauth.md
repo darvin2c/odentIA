@@ -42,13 +42,14 @@ cada tienda pueda conectar su propia integración sin depender de esa aplicació
   Secret se reconocen por su forma y se dice en el campo; «Probar» pregunta a Mercado Pago
   (`/users/me`) de qué cuenta es, sin guardar. Mercado Pago no dice en el token si es de prueba (hoy
   los dos empiezan con `APP_USR-`): para «Cobrar de verdad» se rechaza lo que sí se sabe de prueba
-  (un `TEST-`, una cuenta marcada `test_user` o `@testuser.com`, o el mismo token con el que ya
-  prueba la tienda). Va cifrado como el otro, no vence ni se renueva, y se pregunta una vez al día
+  (un `TEST-` o una cuenta marcada `test_user` o `@testuser.com`). El mismo token con el que ya
+  prueba no se rechaza: si pegó el de producción para probar, no tendría salida. Va cifrado como el otro, no vence ni se renueva, y se pregunta una vez al día
   si Mercado Pago lo sigue reconociendo (`checked_at`). No se pide la clave secreta de los avisos:
   la dirección del aviso va en cada link y el pago se lee siempre de Mercado Pago.
 - **Si Mercado Pago deja de reconocer el token** al usarlo (crear un link, el link de prueba, leer
-  un pago) o al revisarlo, la pasarela queda «sin permiso» (lo anota el sistema, solo si el token
-  sigue siendo ese) y la pantalla dice cómo volver a conectar.
+  un pago) y lo confirma `/users/me` (un aviso con el pago de otra cuenta también da 401), o al
+  revisarlo, la pasarela queda «sin permiso» (lo anota el sistema, solo si el token sigue siendo
+  ese) y la pantalla dice cómo volver a conectar. Un 403 no cuenta: puede ser un bloqueo pasajero.
 - **Modo prueba, guardado** (`store_payment_link.mode`): la conexión empieza en prueba, con las
   credenciales de prueba (`test_token`), y solo sirve para el link de S/ 1 de la tienda
   (`store_payment_link_trial`), que queda pagado solo cuando Mercado Pago avisa y se le pregunta.
