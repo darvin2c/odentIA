@@ -6,7 +6,7 @@ import { runPushRound, webPushSender } from "./avisos.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
-import { renewPaymentLinks } from "./pasarela.js"
+import { checkKeyLinks, renewPaymentLinks } from "./pasarela.js"
 import { readSecretsKey } from "./secretos.js"
 import { runArgos } from "./sofi/argos.js"
 import { modelFromEnv } from "./sofi/modelo.js"
@@ -22,8 +22,9 @@ if (!secretsKey)
   console.warn(
     "gestoria-api: sin GESTORIA_SECRETS_KEY y GESTORIA_API_URL no se puede conectar un link de pago.",
   )
-// La tienda conecta su Mercado Pago entrando a su cuenta: con la aplicación de gestorIA en Mercado
-// Pago. Vuelve a la app (`/mercadopago/vuelta`), la misma dirección registrada en la aplicación.
+// La tienda puede conectar su Mercado Pago entrando a su cuenta, con la aplicación de gestorIA en
+// Mercado Pago. Vuelve a la app (`/mercadopago/vuelta`), la misma dirección registrada en la
+// aplicación. Sin ella, la tienda conecta con sus propias claves (su Access Token).
 const mercadoPagoApp =
   env.GESTORIA_MERCADOPAGO_CLIENT_ID && env.GESTORIA_MERCADOPAGO_CLIENT_SECRET
     ? {
@@ -34,7 +35,7 @@ const mercadoPagoApp =
     : null
 if (!mercadoPagoApp)
   console.warn(
-    "gestoria-api: sin GESTORIA_MERCADOPAGO_CLIENT_ID y _CLIENT_SECRET no se puede conectar Mercado Pago.",
+    "gestoria-api: sin GESTORIA_MERCADOPAGO_CLIENT_ID y _CLIENT_SECRET no se entra a la cuenta de Mercado Pago; las tiendas conectan con sus claves.",
   )
 const link = {
   adapters: defaultLinkAdapters(),
@@ -84,16 +85,24 @@ setTimeout(() => void review(), 60_000).unref()
 setInterval(() => void review(), HOUR).unref()
 
 // La pasarela de cada tienda (Cobros): cada hora renueva los tokens a los que les quedan menos de
-// 30 días (el de Mercado Pago dura 180). Un solo servidor a la vez.
+// 30 días (el de Mercado Pago dura 180) y revisa las claves pegadas que no se revisan hace un día.
+// Un solo servidor a la vez.
 async function renewLinks() {
   try {
-    const run = await withSessionLock(ownerDb, "gestoria_pasarela", () =>
-      renewPaymentLinks(ownerDb, link),
-    )
+    // Si renovar falla, las claves se revisan igual: cada parte por su lado.
+    const run = await withSessionLock(ownerDb, "gestoria_pasarela", async () => ({
+      ...(await renewPaymentLinks(ownerDb, link).catch((error: unknown) => {
+        console.error("gestoria-api: la renovación de las pasarelas falló", error)
+        return { renewed: 0, failed: 0 }
+      })),
+      ...(await checkKeyLinks(ownerDb, link)),
+    }))
     if (run?.failed)
       console.warn(`gestoria-api: ${run.failed} pasarela(s) no se pudieron renovar; se reintenta`)
+    if (run?.revoked)
+      console.warn(`gestoria-api: ${run.revoked} pasarela(s) con claves quedaron sin permiso`)
   } catch (error) {
-    console.error("gestoria-api: la renovación de las pasarelas falló", error)
+    console.error("gestoria-api: la revisión de las pasarelas falló", error)
   }
 }
 setTimeout(() => void renewLinks(), 120_000).unref()

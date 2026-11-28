@@ -17,6 +17,13 @@ import type { LinkAdapter, LinkPayment } from "../apps/api/src/link-de-pago.js"
  */
 export const PAY_ORIGIN = "https://mercadopago.e2e"
 
+/**
+ * Las claves de Rosa en su propia aplicación de Mercado Pago: el Access Token de «Prueba» (de su
+ * cuenta de prueba, que Mercado Pago marca así) y el de «Producción».
+ */
+export const KEYS_TEST = "APP_USR-1111111111-222222-pruebadelatiendarosa-4512"
+export const KEYS_REAL = "APP_USR-3333333333-444444-produccionderosa-0077"
+
 export function fakeMercadoPago(options: {
   port: number
   /** Adónde avisa el pago (la dirección de avisos del servidor de la tienda). */
@@ -51,8 +58,11 @@ export function fakeMercadoPago(options: {
         userId: "77",
       }
     },
-    async account() {
-      return { id: "77", label: "rosa.quispe@…" }
+    async account(token) {
+      if (token === KEYS_TEST) return { id: "4512", label: "test_user_4512@…", test: true }
+      if (token === KEYS_REAL || token.endsWith("-e2e-rosa"))
+        return { id: "77", label: "rosa.quispe@…", test: false }
+      return "sin_permiso"
     },
     async create(_token, order) {
       const ref = `pref-${order.reference ?? order.id}`

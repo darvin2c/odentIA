@@ -355,7 +355,7 @@ const bancoLink: LinkAdapter = {
     throw new Error("el banco no se renueva en la medición")
   },
   async account() {
-    return { id: "banco", label: null }
+    return { id: "banco", label: null, test: false }
   },
   async create(_token, order) {
     return { url: `https://pago.prueba/${order.number}`, ref: `ref-${order.id}` }

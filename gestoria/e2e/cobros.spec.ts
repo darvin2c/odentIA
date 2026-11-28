@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { ACCOUNT, choose, MP_PORT, STORE_ID, surface, type Who } from "./entorno"
-import { PAY_ORIGIN } from "./mercadopago-de-prueba"
+import { KEYS_REAL, KEYS_TEST, PAY_ORIGIN } from "./mercadopago-de-prueba"
 
 /**
  * Cobros en un navegador (lienzo «gestorIA · Configuración, de nuevo», tablero 6), contra su
@@ -13,6 +13,9 @@ import { PAY_ORIGIN } from "./mercadopago-de-prueba"
  * - Conecta Mercado Pago entrando a su cuenta (sin copiar llaves) y queda en modo prueba; paga el
  *   link de S/ 1 con la tarjeta de prueba y lo ve pagado solo, sin que nadie confirme.
  * - Pasa a «Cobrar de verdad» y, al desconectar, un cajón le dice qué pasa antes.
+ * - Sin la aplicación de gestorIA en Mercado Pago, conecta con sus propias claves: pega la Public
+ *   Key por error y se le dice en el campo; «Probar» le dice de qué cuenta es; empieza en prueba y
+ *   «Cobrar de verdad» no acepta el de prueba. Con la aplicación, las claves son la otra puerta.
  * Cada pantalla en escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`
  * (o a `CAPTURAS`).
  */
@@ -202,4 +205,106 @@ test("en el teléfono, Cobros y su formulario caben sin desborde", async ({ page
   await expect(form.getByLabel("A nombre de")).toHaveValue("Rosa Quispe M.")
   await expect(form.getByRole("img", { name: "Tu QR" })).toBeVisible()
   await shot(page, "cobros-yape-390")
+})
+
+test("Mercado Pago con tus claves: sin la aplicación de gestorIA, probar, prueba y cobrar de verdad", async ({
+  page,
+}) => {
+  await as("rosa")
+  // Producción hoy: gestorIA no tiene su aplicación en Mercado Pago. El servidor del recorrido sí
+  // la tiene; la respuesta se cambia solo en eso (que el servidor no la ofrezca lo prueba la API).
+  await page.route(/\/api\/tiendas\/[^/]+\/link-de-pago$/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    const response = await route.fetch()
+    const body = (await response.json()) as Record<string, unknown>
+    await route.fulfill({ response, json: { ...body, accountDoor: false } })
+  })
+  await page.setViewportSize(DESKTOP)
+  await page.goto(COBROS)
+  await expect(page.getByRole("button", { name: "Conectar con mis claves" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Conectar con Mercado Pago" })).toHaveCount(0)
+  await expect(page.getByText(/te guiamos paso a paso/)).toBeVisible()
+  await expect(page.getByText(/aplicación de gestorIA/)).toHaveCount(0)
+  await shot(page, "mp-claves-tarjeta-sin-aplicacion-1440")
+  await page.setViewportSize(PHONE)
+  await noSideScroll(page)
+  await shot(page, "mp-claves-tarjeta-sin-aplicacion-390")
+  await page.setViewportSize(DESKTOP)
+
+  await page.getByRole("button", { name: "Conectar con mis claves" }).click()
+  const form = surface(page, "Conectar con tus claves")
+  await expect(form.getByText("«Tus integraciones»", { exact: false })).toBeVisible()
+  await expect(form.getByRole("link", { name: "Abrir mi panel" })).toHaveAttribute(
+    "href",
+    "https://www.mercadopago.com.pe/developers/panel/app",
+  )
+  await shot(page, "mp-claves-formulario-vacio-1440")
+  // Pegó la Public Key: se dice en su campo, sin guardar nada.
+  const token = form.getByLabel("Access Token de prueba")
+  await token.fill("APP_USR-9f8e7d6c-1a2b-4c3d-8e9f-0a1b2c3d4e5f")
+  await form.getByRole("button", { name: "Probar" }).click()
+  await expect(form.getByText(/Esa es la «Public Key»/)).toBeVisible()
+  await expect(token).toHaveAttribute("aria-invalid", "true")
+  await shot(page, "mp-claves-formulario-error-1440")
+  await token.fill(KEYS_TEST)
+  await form.getByRole("button", { name: "Probar" }).click()
+  await expect(form.getByText("Sirve: es la cuenta test_user_4512@…")).toBeVisible()
+  await expect(token).not.toHaveAttribute("aria-invalid", "true")
+  await shot(page, "mp-claves-formulario-probado-1440")
+  await form.getByRole("button", { name: "Conectar en modo prueba" }).click()
+  await expect(form).toBeHidden()
+  await expect(page.getByText("Modo prueba", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Conectada con tus claves · Cuenta test_user_4512@…/)).toBeVisible()
+  await expect(page.getByRole("button", { name: /Probar con S\/\s1/ })).toBeVisible()
+  await shot(page, "mp-claves-conectada-prueba-1440")
+  await page.setViewportSize(PHONE)
+  await noSideScroll(page)
+  await shot(page, "mp-claves-conectada-prueba-390")
+  await page.setViewportSize(DESKTOP)
+
+  // «Cobrar de verdad» pide el Access Token de producción: el de prueba no pasa.
+  await page.getByRole("button", { name: "Cobrar de verdad" }).click()
+  const real = surface(page, "Cobrar de verdad con tus claves")
+  await expect(real.getByText(/elige «Producción»/)).toBeVisible()
+  const production = real.getByLabel("Access Token de producción")
+  await production.fill(KEYS_TEST)
+  await real.getByRole("button", { name: "Cobrar de verdad" }).click()
+  await expect(real.getByText(/Ese es de una cuenta de prueba/)).toBeVisible()
+  await production.fill(KEYS_REAL)
+  await real.getByRole("button", { name: "Cobrar de verdad" }).click()
+  await expect(real).toBeHidden()
+  await expect(page.getByText("Cobrando de verdad")).toBeVisible()
+  await expect(page.getByText(/Conectada con tus claves · Cuenta rosa\.quispe@…/)).toBeVisible()
+  await expect(page.getByText(/Sofi ofrece el link primero/)).toBeVisible()
+  await shot(page, "mp-claves-conectada-real-1440")
+  await page.setViewportSize(PHONE)
+  await noSideScroll(page)
+  await shot(page, "mp-claves-conectada-real-390")
+  await page.setViewportSize(DESKTOP)
+
+  await page.getByRole("button", { name: "Desconectar Mercado Pago" }).click()
+  await surface(page, "Desconectar Mercado Pago")
+    .getByRole("button", { name: "Desconectar" })
+    .click()
+  await expect(page.getByRole("button", { name: "Conectar con mis claves" })).toBeVisible()
+
+  // Con la aplicación de gestorIA: el botón de siempre y, debajo, la otra puerta.
+  await page.unrouteAll({ behavior: "wait" })
+  await page.reload()
+  await expect(page.getByRole("button", { name: "Conectar con Mercado Pago" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "¿Prefieres usar tus propias claves?" }),
+  ).toBeVisible()
+  await shot(page, "mp-claves-tarjeta-con-aplicacion-1440")
+  await page.setViewportSize(PHONE)
+  await noSideScroll(page)
+  await shot(page, "mp-claves-tarjeta-con-aplicacion-390")
+  await page.getByRole("button", { name: "¿Prefieres usar tus propias claves?" }).click()
+  const phone = surface(page, "Conectar con tus claves")
+  await expect(phone).toBeVisible()
+  await shot(page, "mp-claves-formulario-vacio-390")
+  await phone.getByLabel("Access Token de prueba").fill(KEYS_TEST)
+  await phone.getByRole("button", { name: "Probar" }).click()
+  await expect(phone.getByText("Sirve: es la cuenta test_user_4512@…")).toBeVisible()
+  await shot(page, "mp-claves-formulario-probado-390")
 })
