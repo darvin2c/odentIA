@@ -101,6 +101,9 @@ export async function seedDemoPayments(
       })
       .onConflictDoNothing()
   if (!secretsKey) return
+  // Conectada con sus claves (el Access Token de prueba de su propia aplicación), como se conecta
+  // hoy sin la aplicación de gestorIA en Mercado Pago. El token es inventado: la revisión de cada
+  // día no lo mira (`checked_at` lejano), si no la demo quedaría «sin permiso».
   const token = "TEST-0000000000000000-semilla-calzados-rosa"
   await tx
     .insert(storePaymentLink)
@@ -108,8 +111,8 @@ export async function seedDemoPayments(
       storeId,
       provider: "mercadopago",
       accessTokenEnc: sealSecret(secretsKey, storeId, token),
-      refreshTokenEnc: sealSecret(secretsKey, storeId, "TG-semilla-calzados-rosa"),
-      expiresAt: new Date(Date.now() + 180 * 86_400_000),
+      connectedWith: "claves",
+      checkedAt: new Date("2100-01-01T00:00:00Z"),
       mode: "prueba",
       providerUserId: "0",
       accountLabel: "rosa.quispe@…",
