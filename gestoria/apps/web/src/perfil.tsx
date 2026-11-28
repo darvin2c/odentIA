@@ -53,24 +53,31 @@ import { useStoreContext } from "./tiendas"
  */
 
 /** «Lo hizo Argos»: la marca del agente junto a lo que anotó. */
-function DeArgos({ children }: { children: ReactNode }) {
+export function DeArgos({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className="flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground">
+    <span
+      className={cn("flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground", className)}
+    >
       <AgentMark size="sm" className="shrink-0" />
       <span className="min-w-0 break-words pt-0.5">{children}</span>
     </span>
   )
 }
 
-/** Una tarjeta dentro de la ficha, con su título y, si hace falta, la frase que la explica. */
-function ProfileCard({
+/**
+ * Una tarjeta de la ficha (la tarjeta de página común: `elevated rounded-xl border bg-card`), con su
+ * título, la frase que la explica si hace falta y su acción.
+ */
+export function ProfileCard({
   title,
   subtitle,
+  action,
   className,
   children,
 }: {
   title: string
   subtitle?: string
+  action?: ReactNode
   className?: string
   children: ReactNode
 }) {
@@ -78,13 +85,19 @@ function ProfileCard({
   return (
     <section
       aria-labelledby={id}
-      className={cn("flex min-w-0 flex-col gap-3 rounded-lg border p-4", className)}
+      className={cn(
+        "elevated flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4 sm:p-5",
+        className,
+      )}
     >
-      <div className="flex flex-col gap-0.5">
-        <h3 id={id} className="text-base font-semibold">
-          {title}
-        </h3>
-        {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <h2 id={id} className="text-base font-semibold">
+            {title}
+          </h2>
+          {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+        </div>
+        {action}
       </div>
       {children}
     </section>

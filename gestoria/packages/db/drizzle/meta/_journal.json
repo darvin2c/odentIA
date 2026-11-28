@@ -330,6 +330,20 @@
       "when": 1795867234127,
       "tag": "0062_reglas_pasarela_con_claves",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1795870826470,
+      "tag": "0063_los_grupos_de_clientas",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1795870827847,
+      "tag": "0064_reglas_grupos_de_clientas",
+      "breakpoints": true
     }
   ]
 }

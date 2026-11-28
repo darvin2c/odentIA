@@ -292,6 +292,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   se descarta. Lee cada mensaje una vez (`argos_reading`), nunca a media conversación ni «Probar a
   Sofi». Las cifras (la medida de sus compras, su canal) y toda decisión siguen siendo cuentas fijas.
   Lo que cuesta leer queda en el registro de la vuelta: no se cobra.
+- Su grupo (nueva, frecuente, VIP, en riesgo, dormida, perdida, sin compras) y sus cifras son
+  cuentas fijas sobre sus compras (`computedOf` de `apps/api/src/clientas-perfil.ts`), nunca del
+  modelo. `customer_profile` lo escribe solo el dueño de la base, cada noche pasadas las 03:00 de la
+  tienda (`runNightlyProfiles`); lo que cambió después se calcula en el momento con la misma cuenta.
+  Un grupo guardado (`customer_group`) son filtros, nunca clientas.
 - El permiso para escribirle (`customer_consent`) lo anota solo Sofi, del último mensaje de ella y con
   sus palabras. Nadie del equipo dice por ella que sí.
 - Argos y Sofi anotan en la ficha propia del pedido del chat (`conversationFichasIn`), no en la que se

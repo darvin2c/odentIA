@@ -65,7 +65,7 @@ export interface CustomerProfile {
 export const FACT_COLUMNS: { key: CustomerFactKey; label: string | null; empty: string }[][] = [
   [
     { key: "medida", label: null, empty: "Todavía no lo dijo" },
-    { key: "distrito", label: "Distrito", empty: "Sin entregas todavía" },
+    { key: "distrito", label: "Distrito", empty: "Argos lo anota de su dirección o del chat" },
     { key: "cumpleanos", label: "Cumpleaños", empty: "Solo si ella lo dice" },
   ],
   [

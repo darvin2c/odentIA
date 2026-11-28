@@ -2293,6 +2293,115 @@ export const argosReading = pgTable(
   ],
 )
 
+/**
+ * El grupo de cada clienta (nueva, frecuente, VIP, en riesgo, dormida, perdida o sin compras) y lo
+ * que se filtra en Clientes. Son cuentas fijas sobre sus compras, nunca del modelo
+ * (`apps/api/src/clientas-perfil.ts`).
+ */
+export const CUSTOMER_SEGMENTS = [
+  "vip",
+  "frecuente",
+  "nueva",
+  "riesgo",
+  "dormida",
+  "perdida",
+  "sin_compras",
+] as const
+export type CustomerSegment = (typeof CUSTOMER_SEGMENTS)[number]
+
+/** Si es sensible al precio: pide rebaja (se cedió algo) o compra en liquidación (promoción). */
+export const PRICE_SENSITIVITIES = ["rebaja", "liquidacion"] as const
+export type PriceSensitivity = (typeof PRICE_SENSITIVITIES)[number]
+
+/**
+ * Lo que Argos calcula de cada clienta, una fila por ficha que se ve (la raíz de cada familia): su
+ * grupo, por qué, sus compras y lo que se filtra en Clientes. Lo recalcula entero cada noche el
+ * dueño de la base, tienda por tienda, pasadas las 03:00 de su hora; la aplicación solo lo lee.
+ * Lo de hoy (una ficha nueva, una compra de hoy) se calcula en el momento con la misma cuenta.
+ */
+export const customerProfile = pgTable(
+  "customer_profile",
+  {
+    storeId: uuid("store_id").notNull(),
+    customerId: uuid("customer_id").notNull(),
+    segment: text("segment").$type<CustomerSegment>().notNull(),
+    /** Por qué está en su grupo: «Compraba cada 40 días y ya van 62.» */
+    why: text("why").notNull(),
+    ordersCount: integer("orders_count").notNull(),
+    /** Lo que gastó: el total de sus compras menos lo que volvió en sus cambios. */
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    /** El día de su última compra, en la hora de la tienda. */
+    lastBoughtOn: date("last_bought_on"),
+    rhythmDays: integer("rhythm_days"),
+    /** Para filtrar: la primera es la que se muestra (la del perfil o la que más compra). */
+    measures: text("measures").array().notNull().default(sql`'{}'::text[]`),
+    categories: text("categories").array().notNull().default(sql`'{}'::text[]`),
+    /** Para filtrar: el del perfil primero, después las zonas de sus entregas. */
+    districts: text("districts").array().notNull().default(sql`'{}'::text[]`),
+    priceSensitivity: text("price_sensitivity").$type<PriceSensitivity>(),
+    /** El día de la tienda para el que se calculó. */
+    computedFor: date("computed_for").notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.customerId] }),
+    check("customer_profile_segment_check", inList("segment", CUSTOMER_SEGMENTS)),
+    check(
+      "customer_profile_sensitivity_check",
+      sql`${table.priceSensitivity} is null or ${inList("price_sensitivity", PRICE_SENSITIVITIES)}`,
+    ),
+    check(
+      "customer_profile_counts_check",
+      sql`${table.ordersCount} >= 0 and (${table.rhythmDays} is null or ${table.rhythmDays} >= 0) and char_length(${table.why}) between 1 and 200`,
+    ),
+    foreignKey({
+      name: "customer_profile_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    index("customer_profile_segment_idx").on(table.storeId, table.segment),
+  ],
+)
+
+/** Lo que guarda un grupo de clientas: los filtros de Clientes, nunca las clientas. */
+export interface CustomerGroupFilters {
+  grupo?: CustomerSegment
+  medida?: string
+  categoria?: string
+  distrito?: string
+  promociones?: "si" | "no"
+  /** Con «-», al revés: la flecha del menú de la lista. */
+  orden?: "reciente" | "-reciente" | "gasto" | "-gasto"
+  q?: string
+}
+
+/**
+ * Un grupo guardado de Clientes («Guardar como grupo»): un nombre y sus filtros. Argos lo pone al
+ * día solo porque guarda los filtros, no las clientas. No se borra: quitarlo lo marca.
+ */
+export const customerGroup = pgTable(
+  "customer_group",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    name: text("name").notNull(),
+    filters: jsonb("filters").$type<CustomerGroupFilters>().notNull().default({}),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("customer_group_name_check", sql`char_length(btrim(${table.name})) between 1 and 60`),
+    check("customer_group_filters_check", sql`jsonb_typeof(${table.filters}) = 'object'`),
+    foreignKey({
+      name: "customer_group_store_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("customer_group_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
 /*
  * El acuerdo con la administración (paso B7 del lienzo B; ADR 0211 y 0212): gestorIA le avisa
  * lo que pasó y le pregunta el estado de cada tienda, firmando con su secreto.
