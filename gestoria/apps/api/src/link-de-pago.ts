@@ -238,7 +238,12 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
     },
     async account(accessToken) {
       const response = await call(accessToken, "/users/me")
-      if (response.status === 401 || response.status === 403) return "sin_permiso"
+      // Solo 401 es «no reconozco este token»: un 403 puede ser un bloqueo pasajero.
+      if (response.status === 401) return "sin_permiso"
+      if (response.status === 403)
+        throw providerError(
+          "Mercado Pago no deja usar esa cuenta ahora. Revisa en tu panel de Mercado Pago que la aplicación esté activa.",
+        )
       if (!response.ok) throw providerError("Mercado Pago no respondió. Inténtalo de nuevo.")
       const body = (await response.json().catch(() => ({}))) as {
         id?: number | string

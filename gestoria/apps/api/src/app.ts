@@ -313,8 +313,8 @@ export function createApp(deps: AppDeps) {
   const webOrigin = new URL(deps.webURL).origin
   const link: LinkDeps = {
     ...(deps.link ?? { adapters: defaultLinkAdapters(), secretsKey: null, apiURL: deps.webURL }),
-    // Si Mercado Pago ya no reconoce el token al usarlo, lo anota el sistema.
-    revoke: (storeId, accessTokenEnc) => revokeLinkIn(deps.ownerDb, storeId, accessTokenEnc),
+    // Si Mercado Pago ya no reconoce el token al usarlo (y lo confirma), lo anota el sistema.
+    revoke: (storeId, accessTokenEnc) => revokeLinkIn(deps.ownerDb, link, storeId, accessTokenEnc),
   }
   const app = new Hono<Env>()
   const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }

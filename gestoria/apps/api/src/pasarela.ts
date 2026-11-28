@@ -3,6 +3,7 @@ import {
   accountCopy,
   type Db,
   type PaymentLinkMode,
+  type PaymentLinkProvider,
   saleOrder,
   storeEvent,
   storePaymentLink,
@@ -10,7 +11,7 @@ import {
   storePaymentLinkTrial,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, count, desc, eq, gt, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
+import { and, count, desc, eq, gt, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { fractionDigits } from "./dinero.js"
@@ -410,9 +411,9 @@ function tryBudget(storeId: string, now: number) {
 
 /**
  * Revisa las claves con Mercado Pago: que reconozca el token (`/users/me`), de qué cuenta es y que
- * sea del modo pedido hasta donde se puede saber (Mercado Pago no lo dice en el token: un `TEST-`,
- * una cuenta de prueba o el mismo token con el que ya prueba la tienda no van donde va el de
- * producción).
+ * sea del modo pedido hasta donde se puede saber. Mercado Pago no lo dice en el token: un `TEST-` o
+ * una cuenta que marca de prueba no van donde va el de producción. No se rechaza el mismo token con
+ * el que ya prueba la tienda: si pegó el de producción para probar, no tendría cómo seguir.
  */
 async function verifyKeys(
   appDb: Db,
@@ -425,13 +426,7 @@ async function verifyKeys(
   const key = deps.secretsKey
   if (!key) throw unavailable()
   // Primero el permiso: quien no conecta no usa esto para preguntar por tokens.
-  const current = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [row] = await tx
-      .select({ mode: storePaymentLink.mode, token: storePaymentLink.accessTokenEnc })
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
-    return row ?? null
-  })
+  await inStore(appDb, person, storeId, "configuracion", async () => {})
   const problem = keysProblem(input.accessToken, input.mode)
   if (problem) throw tokenError(problem)
   tryBudget(storeId, now.getTime())
@@ -440,16 +435,10 @@ async function verifyKeys(
     throw tokenError(
       "Mercado Pago no reconoce ese Access Token. Cópialo de nuevo desde «Credenciales», entero.",
     )
-  if (input.mode === "real") {
-    if (account.test)
-      throw tokenError(
-        "Ese es de una cuenta de prueba. Para cobrar de verdad, copia el Access Token de «Producción».",
-      )
-    if (current?.mode === "prueba" && openSecret(key, storeId, current.token) === input.accessToken)
-      throw tokenError(
-        "Es el mismo Access Token con el que pruebas. Para cobrar de verdad, copia el de «Producción».",
-      )
-  }
+  if (input.mode === "real" && account.test)
+    throw tokenError(
+      "Ese es de una cuenta de prueba. Para cobrar de verdad, copia el Access Token de «Producción».",
+    )
   return { key, account }
 }
 
@@ -502,11 +491,55 @@ export async function connectWithKeys(
 }
 
 /**
- * Mercado Pago ya no reconoce el token al usarlo: la pasarela queda «sin permiso» y los links
- * abiertos se olvidan. Lo anota el sistema (el dueño de la base), y solo si el token sigue siendo
- * ese: si la tienda volvió a conectar entre medio, vale lo nuevo.
+ * La cuenta de la demo (semilla de Calzados Rosa): su token es inventado, así que nunca se revisa ni
+ * queda «sin permiso» (la demo se vería rota).
  */
-export async function revokeLinkIn(ownerDb: Db, storeId: string, accessTokenEnc: string) {
+export const DEMO_PROVIDER_USER = "semilla"
+const notDemo = or(
+  isNull(storePaymentLink.providerUserId),
+  ne(storePaymentLink.providerUserId, DEMO_PROVIDER_USER),
+)
+
+/**
+ * De qué cuenta es el token guardado de una tienda, según el proveedor; null si no se pudo saber
+ * (no responde, o el token no se puede abrir): quien pregunta no decide nada con eso.
+ */
+async function accountOf(
+  deps: LinkDeps,
+  key: Buffer,
+  row: { storeId: string; provider: PaymentLinkProvider; accessTokenEnc: string },
+) {
+  try {
+    return await deps.adapters[row.provider].account(
+      openSecret(key, row.storeId, row.accessTokenEnc),
+    )
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Mercado Pago respondió que no reconoce el token al usarlo (crear un link, leer un pago): antes de
+ * creerlo se le pregunta de qué cuenta es (`/users/me`), porque un aviso con el pago de otra cuenta
+ * también puede dar 401. Solo si tampoco lo reconoce ahí, la pasarela queda «sin permiso» y los
+ * links abiertos se olvidan. Lo anota el sistema (el dueño de la base), y solo si el token sigue
+ * siendo ese: si la tienda volvió a conectar entre medio, vale lo nuevo. `confirmed`: ya se preguntó.
+ */
+export async function revokeLinkIn(
+  ownerDb: Db,
+  deps: LinkDeps,
+  storeId: string,
+  accessTokenEnc: string,
+  confirmed = false,
+) {
+  const key = deps.secretsKey
+  if (!key) return
+  if (
+    !confirmed &&
+    (await accountOf(deps, key, { storeId, provider: "mercadopago", accessTokenEnc })) !==
+      "sin_permiso"
+  )
+    return
   await ownerDb.transaction(async (tx) => {
     const [row] = await tx
       .update(storePaymentLink)
@@ -516,6 +549,7 @@ export async function revokeLinkIn(ownerDb: Db, storeId: string, accessTokenEnc:
           eq(storePaymentLink.storeId, storeId),
           eq(storePaymentLink.accessTokenEnc, accessTokenEnc),
           isNull(storePaymentLink.revokedAt),
+          notDemo,
         ),
       )
       .returning({ provider: storePaymentLink.provider })
@@ -553,6 +587,7 @@ export async function checkKeyLinks(ownerDb: Db, deps: LinkDeps, now = new Date(
       and(
         eq(storePaymentLink.connectedWith, "claves"),
         isNull(storePaymentLink.revokedAt),
+        notDemo,
         or(
           isNull(storePaymentLink.checkedAt),
           lt(storePaymentLink.checkedAt, new Date(now.getTime() - CHECK_KEYS_HOURS * 3_600_000)),
@@ -562,13 +597,13 @@ export async function checkKeyLinks(ownerDb: Db, deps: LinkDeps, now = new Date(
   let checked = 0
   let revoked = 0
   for (const row of rows) {
-    const known = await deps.adapters[row.provider]
-      .account(openSecret(key, row.storeId, row.accessTokenEnc))
-      .catch(() => null)
+    // Un token que no se puede leer o un Mercado Pago que no responde no frena a las demás tiendas:
+    // esa se intenta en la vuelta siguiente.
+    const known = await accountOf(deps, key, row)
     if (known === null) continue
     checked++
     if (known === "sin_permiso") {
-      await revokeLinkIn(ownerDb, row.storeId, row.accessTokenEnc)
+      await revokeLinkIn(ownerDb, deps, row.storeId, row.accessTokenEnc, true)
       revoked++
     } else
       await ownerDb
@@ -788,24 +823,8 @@ export async function receiveConnectNotice(
   for (const row of rows) {
     // Si Mercado Pago no responde, esa tienda queda como estaba y se sigue con las demás: el aviso
     // responde igual (no cuenta qué tiendas hay) y la próxima vez que se use el token se sabrá.
-    const known = await deps.adapters[row.provider]
-      .account(openSecret(key, row.storeId, row.accessTokenEnc))
-      .catch(() => null)
-    if (known !== "sin_permiso") continue
-    await ownerDb.transaction(async (tx) => {
-      await tx
-        .update(storePaymentLink)
-        .set({ revokedAt: new Date() })
-        .where(eq(storePaymentLink.storeId, row.storeId))
-      await forgetOpenLinks(tx as unknown as Db, row.storeId)
-      await tx.insert(storeEvent).values({
-        storeId: row.storeId,
-        actorUserId: null,
-        action: "configuracion.pago",
-        subject: "Link de pago",
-        detail: { sinPermiso: row.provider },
-      })
-    })
+    if ((await accountOf(deps, key, row)) !== "sin_permiso") continue
+    await revokeLinkIn(ownerDb, deps, row.storeId, row.accessTokenEnc, true)
   }
 }
 

@@ -5,5 +5,7 @@
 ALTER TABLE "store_payment_link" ADD COLUMN "connected_with" text DEFAULT 'cuenta' NOT NULL;--> statement-breakpoint
 ALTER TABLE "store_payment_link" ADD COLUMN "checked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "store_payment_link" ADD CONSTRAINT "store_payment_link_connected_with_check" CHECK (connected_with IN ('cuenta','claves'));--> statement-breakpoint
--- Las conexiones de antes sin `refresh_token` son tokens pegados a mano: claves de la tienda.
-UPDATE "store_payment_link" SET "connected_with" = 'claves' WHERE "refresh_token_enc" IS NULL;
+-- Las conexiones de antes sin `refresh_token` ni vencimiento son tokens pegados a mano: claves de
+-- la tienda. Las que entraron a la cuenta siempre vencen.
+UPDATE "store_payment_link" SET "connected_with" = 'claves'
+  WHERE "refresh_token_enc" IS NULL AND "expires_at" IS NULL;

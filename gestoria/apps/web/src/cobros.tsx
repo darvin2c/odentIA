@@ -411,23 +411,18 @@ function LinkCard({
         {canEdit ? (
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {data?.accountDoor ? (
-                <Button
-                  className="bg-[#00b1ea] text-white hover:bg-[#009fd3]"
-                  disabled={connect.isPending}
-                  onClick={() => connect.mutate("prueba")}
-                >
-                  {connect.isPending ? "Abriendo Mercado Pago…" : "Conectar con Mercado Pago"}
-                </Button>
-              ) : (
-                <Button
-                  className="bg-[#00b1ea] text-white hover:bg-[#009fd3]"
-                  onClick={() => setKeys("prueba")}
-                >
-                  <KeyRound aria-hidden />
-                  Conectar con mis claves
-                </Button>
-              )}
+              <Button
+                className="bg-[#00b1ea] text-white hover:bg-[#009fd3]"
+                disabled={connect.isPending}
+                onClick={() => reconnect("prueba")}
+              >
+                {byKeys ? <KeyRound aria-hidden /> : null}
+                {byKeys
+                  ? "Conectar con mis claves"
+                  : connect.isPending
+                    ? "Abriendo Mercado Pago…"
+                    : "Conectar con Mercado Pago"}
+              </Button>
               <a
                 href="https://www.mercadopago.com.pe"
                 target="_blank"
@@ -611,13 +606,13 @@ function KeysDrawer({
 }) {
   const queryClient = useQueryClient()
   const real = mode === "real"
-  const save = useMutation({
-    mutationFn: (accessToken: string) =>
-      api<{ account: string | null }>(`/api/tiendas/${storeId}/link-de-pago/claves`, {
-        method: "POST",
-        body: { mode, accessToken },
-      }),
-  })
+  // «Probar» y conectar mandan lo mismo; solo cambia si se guarda.
+  const sendKeys = (path: string) => (accessToken: string) =>
+    api<{ account: string | null }>(`/api/tiendas/${storeId}/link-de-pago/${path}`, {
+      method: "POST",
+      body: { mode, accessToken },
+    })
+  const save = useMutation({ mutationFn: sendKeys("claves") })
   // Lo que dijo «Probar», para el token que se probó: si cambia lo pegado, ya no vale.
   const [tried, setTried] = useState<{ token: string; account: string | null } | null>(null)
   const form = useAppForm({
@@ -637,11 +632,7 @@ function KeysDrawer({
   const surface = useFormSurface(form)
   const token = useStore(form.store, (s) => s.values.accessToken).trim()
   const probe = useMutation({
-    mutationFn: (accessToken: string) =>
-      api<{ account: string | null }>(`/api/tiendas/${storeId}/link-de-pago/claves/probar`, {
-        method: "POST",
-        body: { mode, accessToken },
-      }),
+    mutationFn: sendKeys("claves/probar"),
     onSuccess: ({ account }, accessToken) => {
       clearSubmitErrors(form, (name) => name === "accessToken")
       setTried({ token: accessToken, account })

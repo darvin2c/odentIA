@@ -89,8 +89,12 @@ setInterval(() => void review(), HOUR).unref()
 // Un solo servidor a la vez.
 async function renewLinks() {
   try {
+    // Si renovar falla, las claves se revisan igual: cada parte por su lado.
     const run = await withSessionLock(ownerDb, "gestoria_pasarela", async () => ({
-      ...(await renewPaymentLinks(ownerDb, link)),
+      ...(await renewPaymentLinks(ownerDb, link).catch((error: unknown) => {
+        console.error("gestoria-api: la renovación de las pasarelas falló", error)
+        return { renewed: 0, failed: 0 }
+      })),
       ...(await checkKeyLinks(ownerDb, link)),
     }))
     if (run?.failed)
@@ -98,7 +102,7 @@ async function renewLinks() {
     if (run?.revoked)
       console.warn(`gestoria-api: ${run.revoked} pasarela(s) con claves quedaron sin permiso`)
   } catch (error) {
-    console.error("gestoria-api: la renovación de las pasarelas falló", error)
+    console.error("gestoria-api: la revisión de las pasarelas falló", error)
   }
 }
 setTimeout(() => void renewLinks(), 120_000).unref()

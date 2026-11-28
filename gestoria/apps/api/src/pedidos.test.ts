@@ -61,10 +61,10 @@ const mp = {
   revoked: false,
   /** Los tokens que la tienda borró o cambió en su panel. */
   revokedTokens: new Set<string>(),
-  /** Mercado Pago marca la cuenta de prueba (`test_user`); si no, no se sabe. */
-  testUsers: true,
   /** Cuántas veces se le preguntó de qué cuenta es un token. */
   usersMe: 0,
+  /** Pagos de otra cuenta: Mercado Pago responde 401 aunque el token de la tienda sirva. */
+  foreignPayments: new Set<string>(),
 }
 const fakeMercadoPago: typeof fetch = async (input, init) => {
   const url = new URL(String(input))
@@ -101,10 +101,9 @@ const fakeMercadoPago: typeof fetch = async (input, init) => {
     return Response.json({ message: "invalid" }, { status: 401 })
   if (url.pathname === "/users/me")
     return Response.json(
+      // Mercado Pago marca la cuenta de prueba (`test_user`).
       auth === `Bearer ${KEYS_TEST}`
-        ? mp.testUsers
-          ? { id: 4512, email: "test_user_4512@testuser.com", tags: ["normal", "test_user"] }
-          : { id: 4512, nickname: "TIENDAROSA" }
+        ? { id: 4512, email: "test_user_4512@testuser.com", tags: ["normal", "test_user"] }
         : { id: 77, email: "rosa.quispe@correo.test", tags: ["normal"] },
     )
   if (url.pathname === "/checkout/preferences") {
@@ -117,6 +116,8 @@ const fakeMercadoPago: typeof fetch = async (input, init) => {
     })
   }
   const payment = /^\/v1\/payments\/(\d+)$/.exec(url.pathname)
+  if (payment && mp.foreignPayments.has(payment[1]!))
+    return Response.json({ message: "unauthorized" }, { status: 401 })
   if (payment) {
     const found = mp.payments.get(payment[1]!)
     return found ? Response.json(found) : Response.json({}, { status: 404 })
@@ -911,15 +912,10 @@ describe("el link de pago con las claves de la tienda (su Access Token, con un p
     )
   })
 
-  it("«Cobrar de verdad» pide el de producción: el de prueba no pasa, ni el mismo con el que prueba", async () => {
+  it("«Cobrar de verdad» pide el de producción: el de una cuenta de prueba no pasa", async () => {
     const test = await keys("rosa", "real", KEYS_TEST)
     expect(test.status).toBe(400)
     expect(test.json.error.fields.accessToken).toContain("prueba")
-    // Un token que Mercado Pago no marca como de prueba, pero es el mismo con el que se prueba.
-    mp.testUsers = false
-    const same = await keys("rosa", "real", KEYS_TEST)
-    mp.testUsers = true
-    expect(same.json.error.fields.accessToken).toContain("mismo Access Token")
     expect((await status()).connection.mode).toBe("prueba")
     const real = await keys("rosa", "real", KEYS_REAL)
     expect(real.json).toEqual({ storeId, mode: "real", account: "rosa.quispe@…" })
@@ -966,6 +962,10 @@ describe("el link de pago con las claves de la tienda (su Access Token, con un p
 
   it("si Mercado Pago no lo reconoce al usarlo, queda «sin permiso» y se vuelve a conectar", async () => {
     expect((await keys("rosa", "real", KEYS_REAL)).status).toBe(200)
+    expect((await status()).connection.state).toBe("conectada")
+    // Un aviso con el pago de otra cuenta da 401 al leerlo, pero el token sirve: no se desconecta.
+    mp.foreignPayments.add("9901")
+    expect((await mpNotice("9901", null)).json.message).toBe("Recibido")
     expect((await status()).connection.state).toBe("conectada")
     mp.revokedTokens.add(KEYS_REAL)
     const id = (

@@ -2697,7 +2697,7 @@ export async function receiveLinkNotice(
     .catch(async (error: unknown) => {
       // Ya no reconoce el token: «sin permiso», y el aviso no vuelve sin fin.
       if (!(error instanceof StoreError && error.code === LINK_REVOKED)) throw error
-      await revokeLinkIn(ownerDb, storeId, connection.accessTokenEnc)
+      await revokeLinkIn(ownerDb, deps, storeId, connection.accessTokenEnc)
       return "sin_permiso" as const
     })
   if (payment === "sin_permiso") return done
