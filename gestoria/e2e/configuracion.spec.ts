@@ -210,9 +210,11 @@ test("Tu marca: se suelta o se pega el logo, sus colores se eligen con un toque 
     input.remove()
     return data
   })
-  const zone = page.getByText("Suelta aquí tu logo")
-  await zone.dispatchEvent("dragover", { dataTransfer: dropped })
-  await zone.dispatchEvent("drop", { dataTransfer: dropped })
+  // La misma zona de principio a fin: al pasar por encima cambia su texto a «Suéltalo aquí».
+  const zone = await page.getByText("Suelta aquí tu logo").elementHandle()
+  await zone?.dispatchEvent("dragover", { dataTransfer: dropped })
+  await expect(page.getByText("Suéltalo aquí")).toBeVisible()
+  await zone?.dispatchEvent("drop", { dataTransfer: dropped })
   await expect(page.getByText(/soltado\.svg · 1024 × 1024/)).toBeVisible()
   // Abrir «Ajustar» y cerrarlo sin tocar nada no pregunta.
   await page.getByRole("button", { name: "Ajustar" }).click()

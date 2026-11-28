@@ -756,7 +756,7 @@ function LogoField({
             </span>
             <div className="flex flex-col gap-1">
               <p className="flex items-center justify-center gap-1.5 text-sm font-semibold">
-                <Upload aria-hidden className="size-4" />
+                {canEdit ? <Upload aria-hidden className="size-4" /> : null}
                 {!canEdit ? "Sin logo" : over ? "Suéltalo aquí" : "Suelta aquí tu logo"}
               </p>
               {canEdit ? (
