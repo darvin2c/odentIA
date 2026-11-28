@@ -135,6 +135,11 @@ export interface ClientTestProps {
   extraQuick?: string[]
   /** El alto del celular: lo decide quien lo muestra (el cajón de la ficha o Configuración). */
   phoneClassName: string
+  /**
+   * En el cajón del teléfono: todo en una fila arriba y el chat sin su cabecera, para que la
+   * conversación tenga más de la mitad del alto.
+   */
+  compact?: boolean
 }
 
 /**
@@ -150,6 +155,7 @@ function useClientTest({
   onGo,
   extraQuick = [],
   phoneClassName,
+  compact = false,
 }: ClientTestProps): { header: ReactNode; body: ReactNode; footer: ReactNode } {
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
@@ -329,8 +335,8 @@ function useClientTest({
   const cost = view.data?.costMicros
 
   const header = (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-end gap-1">
+    <div className={cn("flex gap-2", compact ? "flex-row-reverse items-center" : "flex-col")}>
+      <div className="flex shrink-0 items-center justify-end gap-1">
         <Popover>
           <PopoverTrigger
             render={<Button variant="ghost" size="icon-sm" aria-label="Cómo funciona la prueba" />}
@@ -356,15 +362,21 @@ function useClientTest({
             Devolver a Sofi
           </Button>
         ) : null}
-        <Button variant="ghost" size="sm" onClick={restart}>
+        <Button
+          variant="ghost"
+          size={compact ? "icon-sm" : "sm"}
+          onClick={restart}
+          aria-label={compact ? "Empezar de nuevo" : undefined}
+          title={compact ? "Empezar de nuevo" : undefined}
+        >
           <RotateCcw aria-hidden />
-          Empezar de nuevo
+          {compact ? null : "Empezar de nuevo"}
         </Button>
       </div>
       <ToggleGroup
         value={[tab]}
         onValueChange={(value) => value[0] && setTab(value[0] as "chat" | "vitrina")}
-        className="w-full rounded-full bg-muted p-1"
+        className="w-full min-w-0 rounded-full bg-muted p-1"
         aria-label="Cómo llega la clienta"
       >
         <ToggleGroupItem
@@ -489,6 +501,7 @@ function useClientTest({
                 pending={pending}
                 quick={quick}
                 blocked={blocked}
+                compact={compact}
                 onSend={(text) => send.mutate(text)}
                 onOpenCart={() => {
                   setTab("vitrina")
@@ -596,7 +609,7 @@ function useClientTest({
  * conversación; en la computadora, lo que cabe al lado sin pasar de un celular de verdad.
  */
 const PHONE_IN_DRAWER =
-  "h-[calc(100dvh-16rem)] min-h-[30rem] sm:h-[min(760px,calc(100dvh-24rem))] sm:min-h-[26rem]"
+  "h-[calc(100dvh-15rem)] min-h-[26rem] sm:h-[min(760px,calc(100dvh-24rem))] sm:min-h-[26rem]"
 
 /** «Probar como clienta» en la ficha: al lado, en la columna lateral (en el celular, un cajón). */
 export function ProbarPanel({ onClose }: { onClose: () => void }) {
@@ -627,6 +640,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
       setTimeout(() => goTo(anchorOf(target)), isMobile ? 280 : 0)
     },
     phoneClassName: PHONE_IN_DRAWER,
+    compact: isMobile,
   })
   return (
     <DetailDrawer
@@ -634,7 +648,8 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       size="md"
       title="Probar como clienta"
-      description="Lo mismo que vive la clienta, con la ficha de ahora"
+      // En el teléfono el alto es para la conversación: lo que es lo dice «Cómo funciona la prueba».
+      description={isMobile ? undefined : "Lo mismo que vive la clienta, con la ficha de ahora"}
       // Escribir como clienta o elegir un color no es un dato que se pierda: cerrar no pregunta.
       headerContent={<div data-draft-ignore>{header}</div>}
       footer={<div data-draft-ignore>{footer}</div>}

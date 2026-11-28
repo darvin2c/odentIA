@@ -177,5 +177,5 @@ test("una respuesta a medias en la ficha no se pierde al salir sin avisar", asyn
     .getByRole("navigation", { name: "Principal" })
     .getByRole("link", { name: "Inicio" })
     .click()
-  await expect(page.getByRole("heading", { name: "Inicio", level: 1 })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Te toca", level: 2 })).toBeVisible()
 })

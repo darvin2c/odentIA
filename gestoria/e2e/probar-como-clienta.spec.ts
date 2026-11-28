@@ -264,7 +264,7 @@ test("la vitrina anuncia lo de la variante elegida y su carrito cobra lo que arm
     // En la 38: «2 o más: S/ 110», sobre su precio.
     await panel.getByRole("button", { name: "Talla 38" }).click()
     await expect(panel.getByText("−30 %")).toHaveCount(0)
-    await expect(panel.getByText("2 o más: S/ 110.00 cada uno")).toBeVisible()
+    await expect(panel.getByText("2 o más: S/ 110 cada uno")).toBeVisible()
     await shot(page, "probar-vitrina-variante-1440")
 
     // Dos pares de la 38: el carrito dice lo que arma el servidor (2 × 110 + 10 de envío).
@@ -273,14 +273,14 @@ test("la vitrina anuncia lo de la variante elegida y su carrito cobra lo que arm
     await panel.getByRole("button", { name: /^Tu carrito, 2/ }).click()
     const cart = panel.getByRole("dialog", { name: "Tu carrito" })
     const payNow = cart.getByRole("button", { name: /^Pagar ahora/ })
-    await expect(payNow).toHaveText("Pagar ahora · S/ 230.00")
-    await expect(cart.getByText("S/ 220.00")).toBeVisible()
+    await expect(payNow).toHaveText("Pagar ahora · S/ 230")
+    await expect(cart.getByText("S/ 220")).toBeVisible()
     await shot(page, "probar-vitrina-carrito-cantidad-1440")
     await payNow.click()
 
     // El foco entra a la hoja de pago (no cae al principio de la página).
     const pay = panel.getByRole("dialog", { name: "Pagar" })
-    await expect(pay.getByRole("heading", { name: "Pagar S/ 230.00" })).toBeVisible()
+    await expect(pay.getByRole("heading", { name: "Pagar S/ 230" })).toBeVisible()
     await expect(pay.getByRole("button", { name: "Cerrar" })).toBeFocused()
     // Los medios para pagar ya de la tienda, en su orden.
     const methods = await pay.getByRole("button", { name: /^Pagar con / }).allInnerTexts()
@@ -349,7 +349,8 @@ test("en el teléfono la prueba es un cajón, y la vista previa muestra celular 
   await expect(panel).toHaveCount(0)
 
   // En el teléfono, la vista previa también muestra cómo lo manda Sofi por WhatsApp (la Ayuda lo dice).
-  await page.getByRole("button", { name: "Vista previa" }).click()
+  await page.getByRole("button", { name: "Más opciones" }).click()
+  await page.getByRole("menuitem", { name: "Vista previa" }).click()
   const small = page.getByRole("dialog", { name: "Vista previa" })
   await small.getByText("En WhatsApp, cuando la piden").scrollIntoViewIfNeeded()
   await expect(small.getByText("En WhatsApp, cuando la piden")).toBeVisible()

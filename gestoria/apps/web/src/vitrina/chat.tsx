@@ -32,6 +32,11 @@ export interface ChatPhoneProps {
   onOpenCart: () => void
   /** No se puede escribir (Sofi sin modelo, o la atiende una persona): por qué. */
   blocked: string | null
+  /**
+   * En el cajón del teléfono: sin la cabecera del chat (el cajón ya dice qué es) y con las ideas
+   * en una sola fila, para que la conversación tenga casi todo el alto.
+   */
+  compact?: boolean
 }
 
 function Bubble({
@@ -155,14 +160,16 @@ export function ChatPhone(props: ChatPhoneProps) {
   return (
     <div className="vv" style={{ ...brandStyle(props.brandColor), height: "100%" }}>
       <div className="ch">
-        <div className="ch-head gut">
-          <ArrowLeft className="size-5 shrink-0" aria-hidden />
-          <Logo name={props.storeName} size={38} />
-          <div className="grow" style={{ minWidth: 0 }}>
-            <p style={{ fontWeight: 700, lineHeight: 1.2 }}>{props.storeName}</p>
-            <p className="ch-sub">Cuenta de empresa · responde Sofi</p>
+        {props.compact ? null : (
+          <div className="ch-head gut">
+            <ArrowLeft className="size-5 shrink-0" aria-hidden />
+            <Logo name={props.storeName} size={38} />
+            <div className="grow" style={{ minWidth: 0 }}>
+              <p style={{ fontWeight: 700, lineHeight: 1.2 }}>{props.storeName}</p>
+              <p className="ch-sub">Cuenta de empresa · responde Sofi</p>
+            </div>
           </div>
-        </div>
+        )}
         <p className="ch-strip">Prueba: no se envía nada ni se cobra.</p>
         <div
           ref={body}
@@ -204,7 +211,9 @@ export function ChatPhone(props: ChatPhoneProps) {
         </div>
         {props.quick.length && !props.pending && !props.blocked ? (
           <div className="quick">
-            <p className="quick-l">Lo que podría escribir la clienta</p>
+            <p className={props.compact ? "sr-only" : "quick-l"}>
+              Lo que podría escribir la clienta
+            </p>
             <div className="quick-row">
               {props.quick.map((q) => (
                 <button key={q} type="button" className="qchip" onClick={() => send(q)}>
