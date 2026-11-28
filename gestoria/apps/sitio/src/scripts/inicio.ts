@@ -7,6 +7,7 @@
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 import { CHAT_VIVO } from "../lib/venta"
+import { boleta } from "./arm"
 import { desde, reduceMovimiento, scrollSuave } from "./sitio"
 import type { Humor, Sofi } from "./sofi"
 
@@ -695,6 +696,7 @@ export function iniciarInicio() {
   prepararScroll()
 
   heroe()
+  boleta()
   trabajo(sofi)
   mapa(sofi, lineas)
   venta(sofi)
