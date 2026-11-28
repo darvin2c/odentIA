@@ -108,6 +108,8 @@ export function TeamPage() {
   // Invitar, o «Corregir» una invitación (con sus datos puestos). Vive aquí y no en su fila: al
   // crear la nueva, la fila de la anterior se va y el cajón tiene que seguir para enviarla.
   const [inviting, setInviting] = useState<"nueva" | PendingInvitation | null>(null)
+  // Enviar una invitación, también la nueva de «Invitar otra vez»: vive aquí por lo mismo.
+  const [sharing, setSharing] = useState<PendingInvitation | null>(null)
   // Lo de soporte que hay que responder o que está abierto va primero: ahí lleva la franja.
   const supportNow = (team.data?.support ?? []).some(
     (row) => row.status === "por_aceptar" || row.status === "vigente",
@@ -160,6 +162,7 @@ export function TeamPage() {
                 invitation={invitation}
                 canManage={canManage}
                 onFix={() => setInviting(invitation)}
+                onShare={setSharing}
                 sentBy={
                   invitation.sharedBy === meId
                     ? "ti"
@@ -184,6 +187,9 @@ export function TeamPage() {
           replaces={inviting === "nueva" ? undefined : inviting}
           onClose={() => setInviting(null)}
         />
+      ) : null}
+      {sharing ? (
+        <ShareInvitation store={store} invitation={sharing} onClose={() => setSharing(null)} />
       ) : null}
     </>
   )
@@ -452,6 +458,7 @@ function PendingRow({
   invitation,
   canManage,
   onFix,
+  onShare,
   sentBy,
 }: {
   store: MyStore
@@ -459,11 +466,12 @@ function PendingRow({
   canManage: boolean
   /** «Corregir»: abre el cajón de invitar con sus datos puestos. */
   onFix: () => void
+  /** Abre el cajón para enviarla, en la página: la fila se va si se hace otra. */
+  onShare: (invitation: PendingInvitation) => void
   /** Quién abrió el WhatsApp con ella: «ti» o su nombre. */
   sentBy: string
 }) {
   const queryClient = useQueryClient()
-  const [sharing, setSharing] = useState<PendingInvitation | null>(null)
   const [revoking, setRevoking] = useState(false)
   // Anular no se deshace: el link deja de servir. Por eso se confirma.
   const revoke = useMutation({
@@ -475,7 +483,7 @@ function PendingRow({
       toast.success("Invitación anulada")
     },
   })
-  // Una vencida se hace otra, con lo mismo: la de antes queda anulada.
+  // Una vencida se hace otra, con lo mismo: la de antes queda anulada y su fila se va.
   const renew = useMutation({
     mutationFn: () =>
       api<{ invitation: PendingInvitation }>(`/api/tiendas/${store.id}/invitaciones`, {
@@ -488,8 +496,8 @@ function PendingRow({
         },
       }),
     onSuccess: async ({ invitation: fresh }) => {
+      onShare({ ...fresh, expired: false, sharedAt: null, sharedBy: null })
       await refreshTeam(queryClient, store.id)
-      setSharing({ ...fresh, expired: false, sharedAt: null, sharedBy: null })
     },
     onError: (error) => toast.error(error.message),
   })
@@ -525,7 +533,7 @@ function PendingRow({
                   size="sm"
                   variant="outline"
                   className="max-sm:min-h-11"
-                  onClick={() => setSharing(invitation)}
+                  onClick={() => onShare(invitation)}
                 >
                   <MessageCircle aria-hidden />
                   {invitation.sharedAt ? "Reenviar" : "Enviar"}
@@ -553,9 +561,6 @@ function PendingRow({
           ) : undefined
         }
       />
-      {sharing ? (
-        <ShareInvitation store={store} invitation={sharing} onClose={() => setSharing(null)} />
-      ) : null}
       <ConfirmDialog
         open={revoking}
         title={`¿Anular la invitación de ${shown}?`}

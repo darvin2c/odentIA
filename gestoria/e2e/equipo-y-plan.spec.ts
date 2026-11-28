@@ -120,6 +120,51 @@ test("Rosa corrige el correo de una invitación sin escribir todo de nuevo, y an
   await expect(page.getByRole("listitem").filter({ hasText: "Ana Torres" })).toHaveCount(0)
 })
 
+test("«Invitar otra vez» una vencida deja abierto el cajón para enviar la nueva", async ({
+  page,
+}) => {
+  await as("rosa")
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/configuracion/equipo`)
+  await page.getByRole("button", { name: "Invitar", exact: true }).click()
+  const form = surface(page, "Invitar al equipo")
+  await form.getByLabel("Nombre").fill("Luz Paredes")
+  await form.getByLabel("Correo con el que entrará").fill("luz.paredes@gmail.test")
+  await form.getByRole("button", { name: "Crear la invitación" }).click()
+  const first = surface(page, "Envía la invitación a Luz")
+  const oldLink = await first
+    .getByRole("link", { name: "Enviar por WhatsApp" })
+    .getAttribute("href")
+  await first.getByRole("button", { name: "Listo" }).click()
+
+  // Vencer de verdad toma siete días: la lista dice que venció la que se acaba de crear.
+  await page.route(`**/api/tiendas/${STORE_ID}/equipo`, async (route) => {
+    const response = await route.fetch()
+    const body = (await response.json()) as {
+      invitations: { id: string; expired: boolean }[]
+    }
+    for (const invitation of body.invitations)
+      if (oldLink?.includes(invitation.id)) invitation.expired = true
+    await route.fulfill({ response, json: body })
+  })
+  await page.reload()
+  const row = page.getByRole("listitem").filter({ hasText: "Luz Paredes" })
+  await expect(row.getByText("Venció").first()).toBeVisible()
+  await row.getByRole("button", { name: "Invitar otra vez" }).click()
+
+  // La fila de antes se va al crearse la nueva; el cajón para enviarla sigue abierto.
+  const share = surface(page, "Envía la invitación a Luz")
+  await expect(share).toBeVisible()
+  await expect(page.getByRole("listitem").filter({ hasText: "Luz Paredes" })).toHaveCount(1)
+  await expect(share).toBeVisible()
+  const newLink = await share
+    .getByRole("link", { name: "Enviar por WhatsApp" })
+    .getAttribute("href")
+  expect(newLink).not.toBe(oldLink)
+  await share.getByRole("button", { name: "Listo" }).click()
+  await page.unroute(`**/api/tiendas/${STORE_ID}/equipo`)
+})
+
 test("Rosa suma a Kevin con su pago por entrega, lo cambia y lo saca", async ({ page }) => {
   await as("rosa")
   await page.setViewportSize(DESKTOP)
