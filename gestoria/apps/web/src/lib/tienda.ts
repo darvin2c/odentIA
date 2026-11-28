@@ -147,6 +147,8 @@ export interface CatalogItem {
   soldOut: number
   fromCents: number
   toCents: number
+  /** El precio de venta de hoy, desde (con su promoción, el que da Sofi); nulo si no se vende. */
+  saleFromCents: number | null
   photoId: string | null
 }
 
@@ -247,6 +249,8 @@ export function money(cents: number, currency: string): string {
     })
     formats.set(key, format)
   }
+  // Lo negativo con el signo menos (U+2212), como en el resto de la app: «−S/ 6», no «-S/ 6».
+  if (cents < 0) return `−${format.format(-cents / 10 ** digits)}`
   return format.format(cents / 10 ** digits)
 }
 

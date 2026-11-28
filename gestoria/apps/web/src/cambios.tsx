@@ -28,6 +28,8 @@ import {
   type OrderDetail,
   RETURN_REASONS,
   type SellableVariant,
+  sellableLabel,
+  stockWord,
   storeToday,
   whatsappWithText,
 } from "./lib/pedidos"
@@ -370,8 +372,7 @@ export function ExchangeSheet({ order, onClose }: { order: OrderDetail; onClose:
     if (previewed.current.size > 0) addSubmitErrors(form, shown)
   }, [previewFields, form])
 
-  const variantLabel = (v: SellableVariant) =>
-    `${v.productName}${v.variantName === "Única" ? "" : ` · ${v.variantName}`} — ${money(v.autoUnitCents, cur)}${v.stock === 0 ? " · agotado" : ` · quedan ${v.stock}`}`
+  const variantLabel = (v: SellableVariant) => sellableLabel(v, money(v.autoUnitCents, cur))
   // Lo del mismo producto que vuelve va primero: otra talla u otro color.
   const backProducts = new Set(
     order.lines
@@ -521,9 +522,11 @@ export function ExchangeSheet({ order, onClose }: { order: OrderDetail; onClose:
                                   )}
                                 </form.AppField>
                                 <p className="self-end pb-2 text-sm text-muted-foreground">
-                                  {v.stock === 0
-                                    ? "Agotada: el cambio se crea igual y no sale hasta que entre."
-                                    : `De ${v.variantName === "Única" ? "este producto" : `la ${v.variantName}`} quedan ${v.stock}.`}
+                                  {v.stock === 0 && v.sellsWithoutStock
+                                    ? `Sin stock, ${stockWord(v)}: el cambio espera a que entre.`
+                                    : v.stock === 0
+                                      ? "Agotada: el cambio se crea igual y no sale hasta que entre."
+                                      : `De ${v.variantName === "Única" ? "este producto" : `la ${v.variantName}`} quedan ${v.stock}.`}
                                   {priced && priced.unitCents < v.autoUnitCents
                                     ? ` Va a ${money(priced.unitCents, cur)}, lo que pagó por lo que vuelve.`
                                     : ""}

@@ -60,6 +60,7 @@ import { HOME_KEY } from "./lib/inicio"
 import {
   CHANNELS,
   type ChangePreview,
+  canPick,
   dayName,
   FILTERS,
   missedReason,
@@ -73,6 +74,7 @@ import {
   type Quote,
   type SellableVariant,
   STATE_TONE,
+  sellableLabel,
   stateName,
   storeToday,
   when,
@@ -1597,7 +1599,7 @@ export function NewOrderSheet({
   const repeating = Boolean(draft?.number)
   useEffect(() => {
     if (!repeating || !sellable.data) return
-    const ids = new Set(sellable.data.variants.filter((v) => v.stock > 0).map((v) => v.id))
+    const ids = new Set(sellable.data.variants.filter(canPick).map((v) => v.id))
     form.setFieldValue(
       "lines",
       form
@@ -1851,9 +1853,10 @@ export function NewOrderSheet({
                                 }
                                 options={variants.map((x) => ({
                                   value: x.id,
-                                  label: `${x.productName}${x.variantName === "Única" ? "" : ` · ${x.variantName}`} — ${money(x.autoUnitCents, cur)}${x.stock === 0 ? " · agotado" : ` · quedan ${x.stock}`}`,
+                                  label: sellableLabel(x, money(x.autoUnitCents, cur)),
                                   // Al cambiar se puede: se guarda y no sale hasta que entre.
-                                  disabled: x.stock === 0 && !editing,
+                                  // Por encargo, con cupo o en preventa se vende sin stock.
+                                  disabled: !canPick(x) && !editing,
                                 }))}
                               />
                             )}

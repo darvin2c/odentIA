@@ -22,6 +22,7 @@ import { CategoryOptions, useCatalog } from "../catalogo"
 import { api } from "../lib/api"
 import {
   cellKey,
+  type Draft,
   FIELD_NAMES,
   type HistoryEvent,
   readNumber,
@@ -29,7 +30,7 @@ import {
   STATES,
   type StatusDraft,
 } from "../lib/ficha"
-import { LINK_DOMAIN } from "../lib/marca"
+import { LINK_DOMAIN, linkFromText } from "../lib/marca"
 import { when } from "../lib/pedidos"
 import { money } from "../lib/tienda"
 import { Photo } from "../piezas"
@@ -211,7 +212,7 @@ export function WebCard({ coverId }: { coverId: string | null }) {
   const brand = useQuery({
     queryKey: ["marca", store.id],
     queryFn: () => api<{ brand: { link: string | null } }>(`/api/tiendas/${store.id}/marca`),
-    enabled: edit,
+    // También Ventas: copia el enlace para mandarlo (el servidor se lo da con `tienda.ver`).
     retry: false,
   })
   const link = brand.data?.brand.link
@@ -250,7 +251,7 @@ export function WebCard({ coverId }: { coverId: string | null }) {
               value={slug}
               disabled={!edit}
               maxLength={80}
-              placeholder="zapatilla-de-lona"
+              placeholder={`Ej.: ${linkFromText(draft.name) || "nombre-del-producto"}`}
               aria-invalid={errors["web.slug"] || errors.web ? true : undefined}
               onChange={(e) => {
                 const next = e.target.value
@@ -412,7 +413,7 @@ export function OrganizationCard() {
           value={code}
           maxLength={40}
           disabled={!edit}
-          placeholder="ZAP-URB"
+          placeholder="Opcional"
           aria-invalid={errors.code ? true : undefined}
           onChange={(e) => {
             const next = e.target.value.replace(/\s/g, "")
@@ -429,10 +430,9 @@ export function OrganizationCard() {
   )
 }
 
-export function InventoryCard({ onKardex }: { onKardex: () => void }) {
-  const { draft, unit } = useFichaContext()
-  const grid = draft.grid
-  const cells = grid
+/** Las celdas de una cuadrícula con su nombre y su stock. */
+function stockCells(grid: Draft["grid"]) {
+  return grid
     ? grid.rows.flatMap((r) =>
         grid.columns.map((c) => ({
           name: [r.value, c.value].filter(Boolean).join(" ") || "Única",
@@ -440,7 +440,14 @@ export function InventoryCard({ onKardex }: { onKardex: () => void }) {
         })),
       )
     : []
+}
+
+/** El inventario cuenta lo guardado (lo que hay de verdad); lo que falta guardar se dice aparte. */
+export function InventoryCard({ onKardex }: { onKardex: () => void }) {
+  const { draft, base, unit, unitOne } = useFichaContext()
+  const cells = stockCells(base.grid)
   const total = cells.reduce((n, c) => n + c.stock, 0)
+  const drafted = stockCells(draft.grid).reduce((n, c) => n + c.stock, 0)
   const out = cells.filter((c) => c.stock === 0).map((c) => c.name)
   return (
     <Section
@@ -455,6 +462,11 @@ export function InventoryCard({ onKardex }: { onKardex: () => void }) {
           {unit} en {cells.length} {cells.length === 1 ? "variante" : "variantes"}
         </span>
       </div>
+      {drafted !== total ? (
+        <p className="text-sm text-muted-foreground">
+          Sin guardar todavía: quedarían {drafted} {drafted === 1 ? unitOne : unit}.
+        </p>
+      ) : null}
       {out.length ? (
         <p className="text-sm">
           <span className="text-warning">Sin stock:</span> {out.slice(0, 4).join(", ")}
@@ -595,6 +607,12 @@ export function CrossSellCard() {
   const { draft, sheet, edit, change, store } = useFichaContext()
   const catalog = useCatalog(store.id)
   const others = (catalog.data?.products ?? []).filter((p) => p.id !== sheet.id)
+  // «Algo más barato» se compara con el precio de venta de hoy (el mismo que da Sofi).
+  const ownSale = catalog.data?.products.find((p) => p.id === sheet.id)?.saleFromCents ?? null
+  const cheaperThanThis = (id: string) => {
+    const sale = others.find((o) => o.id === id)?.saleFromCents ?? null
+    return sale !== null && ownSale !== null && sale < ownSale
+  }
   const linked = (kind: "combina" | "parecido") =>
     draft.links
       .filter((l) => l.kind === kind)
@@ -626,7 +644,9 @@ export function CrossSellCard() {
             ? draft.comboPercentOff
               ? `−${draft.comboPercentOff} % si lo lleva junto`
               : "Sofi lo ofrece junto"
-            : "si busca algo más barato"}
+            : cheaperThanThis(o.id) || !catalog.data
+              ? "si busca algo más barato"
+              : "hoy no es más barato: Sofi no lo ofrece así"}
         </span>
       </span>
       {edit ? (
@@ -647,7 +667,9 @@ export function CrossSellCard() {
   )
   const add = (kind: "combina" | "parecido") => {
     const free = others.filter(
-      (o) => !draft.links.some((l) => l.productId === o.id && l.kind === kind),
+      (o) =>
+        !draft.links.some((l) => l.productId === o.id && l.kind === kind) &&
+        (kind === "combina" || cheaperThanThis(o.id)),
     )
     if (!edit || !free.length) return null
     return (
@@ -672,7 +694,7 @@ export function CrossSellCard() {
         <SelectContent>
           {free.map((o) => (
             <SelectItem key={o.id} value={o.id}>
-              {o.name} · {money(o.fromCents, store.currency)}
+              {o.name} · {money(o.saleFromCents ?? o.fromCents, store.currency)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -738,28 +760,62 @@ export function CrossSellCard() {
   )
 }
 
-/** Lo que dice el historial de un cambio, en una línea. */
-export function eventLine(event: HistoryEvent, unit: string): string {
+/** Cómo se dicen las cosas en el historial: la unidad («par», «pares») y el dinero. */
+export interface EventWords {
+  unit: string
+  unitOne: string
+  money: (cents: number) => string
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** Lo que dice el historial de un cambio, en una línea, con el antes y el después que importan. */
+export function eventLine(event: HistoryEvent, words: EventWords): string {
+  const capital = (parts: string[]) =>
+    parts.length ? `${parts[0]![0]!.toUpperCase()}${parts.join(", ").slice(1)}` : ""
+  const money = (v: unknown) => (typeof v === "number" ? words.money(v) : "sin mínimo")
   if (event.action === "creado") return "Creó el producto"
   if (event.action === "cuadricula") {
     const parts: string[] = []
+    // Los colores primero, con su nombre: qué color se sumó, se quitó o cambió.
     for (const c of event.changes) {
-      if (c.field === "stockIn") parts.push(`entraron ${c.to} ${unit}`)
-      else if (c.field === "stockOut") parts.push(`bajó el stock ${c.to}`)
-      else if (c.field === "variantsAdded") parts.push(`sumó ${c.to} variantes`)
-      else if (c.field === "variantsRemoved") parts.push(`quitó ${c.to} variantes`)
-      else if (c.field === "options") parts.push("cambió los colores o las tallas")
+      if (c.field === "colorAdded") parts.push(`sumó el color «${c.to}»`)
+      else if (c.field === "colorRemoved") parts.push(`quitó el color «${c.from}»`)
+      else if (c.field === "colorRenamed") parts.push(`cambió el color «${c.from}» a «${c.to}»`)
+      else if (c.field === "colorLook") parts.push(`cambió cómo se ve el color «${c.to}»`)
+    }
+    const colors = parts.length > 0
+    for (const c of event.changes) {
+      const n = Number(c.to)
+      if (c.field === "stockIn")
+        parts.push(n === 1 ? `entró 1 ${words.unitOne}` : `entraron ${n} ${words.unit}`)
+      else if (c.field === "stockOut") parts.push(`bajó el stock en ${n}`)
+      else if (c.field === "variantsAdded") parts.push(`sumó ${plural(n, "variante", "variantes")}`)
+      else if (c.field === "variantsRemoved")
+        parts.push(`quitó ${plural(n, "variante", "variantes")}`)
+      else if (c.field === "options" && !colors) parts.push("cambió los colores o las tallas")
       else if (c.field.startsWith("price:")) parts.push(`cambió el precio de ${c.field.slice(6)}`)
     }
-    return parts.length
-      ? `${parts[0]![0]!.toUpperCase()}${parts.join(", ").slice(1)}`
-      : "Cambió las variantes"
+    return capital(parts) || "Cambió las variantes"
   }
   if (event.action === "pregunta") return "Guardó una respuesta en la ficha"
-  const names = [...new Set(event.changes.map((c) => FIELD_NAMES[c.field] ?? "la ficha"))]
-  return names.length
-    ? `Cambió ${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}`
-    : "Cambió la ficha"
+  // El precio y el mínimo, con el antes y el después; lo demás, por su nombre.
+  const parts: string[] = []
+  for (const c of event.changes)
+    if (c.field === "listPriceCents")
+      parts.push(`cambió el precio de ${money(c.from)} a ${money(c.to)}`)
+    else if (c.field === "minPriceCents")
+      parts.push(`cambió el mínimo de ${money(c.from)} a ${money(c.to)}`)
+  const names = [
+    ...new Set(
+      event.changes
+        .filter((c) => c.field !== "listPriceCents" && c.field !== "minPriceCents")
+        .map((c) => FIELD_NAMES[c.field] ?? "la ficha"),
+    ),
+  ]
+  if (names.length)
+    parts.push(`cambió ${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}`)
+  return capital(parts) || "Cambió la ficha"
 }
 
 export function useHistory(storeId: string, productId: string) {
@@ -771,9 +827,10 @@ export function useHistory(storeId: string, productId: string) {
 }
 
 export function ActivityCard({ onAll }: { onAll: () => void }) {
-  const { store, sheet, unit } = useFichaContext()
+  const { store, sheet, unit, unitOne } = useFichaContext()
   const history = useHistory(store.id, sheet.id)
   const events = history.data?.events ?? []
+  const words = { unit, unitOne, money: (c: number) => money(c, store.currency) }
   return (
     <Section
       id="actividad"
@@ -781,7 +838,7 @@ export function ActivityCard({ onAll }: { onAll: () => void }) {
       side
       summary={
         events[0]
-          ? `${events[0].actorName ?? "Alguien"}: ${eventLine(events[0], unit)}`
+          ? `${events[0].actorName ?? "Alguien"}: ${eventLine(events[0], words)}`
           : "Sin cambios"
       }
     >
@@ -798,7 +855,7 @@ export function ActivityCard({ onAll }: { onAll: () => void }) {
                 aria-hidden
               />
               <span className="flex min-w-0 flex-col">
-                <span className="leading-snug">{eventLine(e, unit)}</span>
+                <span className="leading-snug">{eventLine(e, words)}</span>
                 <span className="text-xs text-muted-foreground">
                   {e.actorName ?? "Alguien del equipo"} · {when(e.createdAt)}
                 </span>

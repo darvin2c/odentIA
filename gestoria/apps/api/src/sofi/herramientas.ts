@@ -916,18 +916,26 @@ async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_
       const low = Math.min(...prices)
       return { low, varies: prices.some((p) => p !== low), inStock: inStock.length > 0 }
     }
-    const related = (id: string, kind: "parecido" | "combina") =>
-      links
-        .filter((l) => l.kind === kind && (l.a === id || l.b === id))
-        .map((l) => (l.a === id ? l.b : l.a))
-        .map((other) => ({ other, price: fromPrice(other) }))
-        // Nunca algo sin stock (tablero 8).
-        .filter((r) => r.price?.inStock && nameOf.has(r.other))
-        .map((r) => ({
-          producto_id: r.other,
-          nombre: nameOf.get(r.other)!,
-          precio: `${r.price!.varies ? "desde " : ""}${money(r.price!.low)}`,
-        }))
+    const related = (id: string, kind: "parecido" | "combina") => {
+      const own = fromPrice(id)
+      return (
+        links
+          .filter((l) => l.kind === kind && (l.a === id || l.b === id))
+          .map((l) => (l.a === id ? l.b : l.a))
+          .map((other) => ({ other, price: fromPrice(other) }))
+          // Nunca algo sin stock (tablero 8).
+          .filter((r) => r.price?.inStock && nameOf.has(r.other))
+          // «Algo más barato» lo es de verdad: su precio de venta de hoy (`autoUnitCents`, con
+          // su promoción) es menor. El vínculo vale en los dos sentidos; desde el más barato,
+          // el otro no se ofrece como más barato.
+          .filter((r) => kind !== "parecido" || (own !== null && r.price!.low < own.low))
+          .map((r) => ({
+            producto_id: r.other,
+            nombre: nameOf.get(r.other)!,
+            precio: `${r.price!.varies ? "desde " : ""}${money(r.price!.low)}`,
+          }))
+      )
+    }
     return {
       productos: chosen.map((p) => {
         const own = byProduct.get(p.id) ?? []

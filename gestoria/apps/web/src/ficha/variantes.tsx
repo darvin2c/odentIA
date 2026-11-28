@@ -57,13 +57,6 @@ function renameIn(draft: Draft, axis: "rows" | "columns", from: string, to: stri
     if (promo.scope?.axis === axis && sameText(promo.scope.value, from)) promo.scope.value = to
 }
 
-/** Un nombre que todavía no está en la lista: «Color nuevo», «Color nuevo 2»… */
-function freeName(base: string, taken: string[]) {
-  let name = base
-  for (let n = 2; taken.some((t) => sameText(t, name)); n++) name = `${base} ${n}`
-  return name
-}
-
 /* ------------------------------------------------------------------ el cuentagotas */
 
 function Dropper({ src, onPick }: { src: string; onPick: (hex: string) => void }) {
@@ -721,6 +714,87 @@ function StockReason({ cells }: { cells: number }) {
   )
 }
 
+/**
+ * «+ Color»: pide el nombre primero y recién con él lo agrega, así nunca se guarda un «Color nuevo»
+ * que nadie nombró. Después se abre su muestra para elegir cómo se ve.
+ */
+function NewRow({
+  rowLabel,
+  taken,
+  onAdd,
+}: {
+  rowLabel: string
+  taken: string[]
+  onAdd: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [problem, setProblem] = useState<string | null>(null)
+  const inputId = useId()
+  const add = () => {
+    const value = name.trim()
+    if (!value) {
+      setProblem(`Escribe el nombre del ${rowLabel.toLowerCase()}`)
+      return
+    }
+    if (taken.some((t) => sameText(t, value))) {
+      setProblem(`«${value}» ya está`)
+      return
+    }
+    onAdd(value)
+    setName("")
+    setProblem(null)
+    setOpen(false)
+  }
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setProblem(null)
+      }}
+    >
+      <PopoverTrigger render={<Button variant="ghost" size="sm" className="h-9 rounded-full" />}>
+        <Plus aria-hidden />
+        {rowLabel}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-72 max-w-[calc(100vw-2rem)] rounded-2xl p-4"
+      >
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            add()
+          }}
+        >
+          <label htmlFor={inputId} className="text-sm font-medium">
+            Nombre del {rowLabel.toLowerCase()}
+          </label>
+          <Input
+            id={inputId}
+            // biome-ignore lint/a11y/noAutofocus: se abrió para escribir el nombre
+            autoFocus
+            value={name}
+            maxLength={30}
+            aria-invalid={problem ? true : undefined}
+            onChange={(e) => {
+              setName(e.target.value)
+              setProblem(null)
+            }}
+          />
+          <FieldProblem message={problem ?? undefined} />
+          <Button type="submit" size="sm" className="self-end">
+            Agregar
+          </Button>
+        </form>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /** Variantes: las opciones arriba y la cuadrícula abajo. */
 export function VariantsCard() {
   const ficha = useFichaContext()
@@ -815,19 +889,14 @@ export function VariantsCard() {
             ? null
             : grid.rows.map((r) => <ColorChip key={r.id} row={r} startOpen={r.id === fresh} />)}
           {edit ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 rounded-full"
-              onClick={() => {
+            <NewRow
+              rowLabel={rowLabel}
+              taken={grid.rows.map((r) => r.value)}
+              onAdd={(value) => {
                 const id = newId("r")
                 setFresh(id)
-                change(`Agregaste un ${rowLabel.toLowerCase()}`, (d) => {
+                change(`Agregaste el ${rowLabel.toLowerCase()} «${value}»`, (d) => {
                   const g = d.grid!
-                  const value = freeName(
-                    `${rowLabel} nuevo`,
-                    g.rows.map((r) => r.value),
-                  )
                   if (g.rowName === null) {
                     // El primer color: lo que había sin color pasa a ser de él.
                     for (const column of g.columns) {
@@ -846,10 +915,7 @@ export function VariantsCard() {
                   for (const column of g.columns) g.cells[cellKey(id, column.id)] = emptyCell()
                 })
               }}
-            >
-              <Plus aria-hidden />
-              {rowLabel}
-            </Button>
+            />
           ) : grid.rowName === null ? (
             <span className="text-sm text-muted-foreground">Sin {rowLabel.toLowerCase()}</span>
           ) : null}

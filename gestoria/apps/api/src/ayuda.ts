@@ -162,6 +162,35 @@ export const HELP_SCREENS = {
       "hoja",
     ],
   },
+  // La ficha de un producto: su propia pantalla en la Ayuda, con sus preguntas. Su ruta lleva el
+  // producto (`$productId`); el enlace de la Ayuda va al Catálogo, donde se elige.
+  producto: {
+    label: "Ficha del producto",
+    path: "/catalogo/$productId",
+    opens: "catalogo.ver",
+    purpose:
+      "La ficha de un producto, que se guarda sola: fotos, colores y tallas con su stock en una cuadrícula (también pegando desde Excel), precio, mínimo, margen, lo que Sofi puede ofrecer, promociones, estado, datos del rubro, lo que Sofi no supo y quién cambió qué.",
+    terms: [
+      "ficha",
+      "producto",
+      "cuadrícula",
+      "pegar",
+      "excel",
+      "deshacer",
+      "stock",
+      "tallas",
+      "colores",
+      "precio",
+      "mínimo",
+      "margen",
+      "cuánto gano",
+      "simulador",
+      "cuánto cobraría",
+      "estado",
+      "rubro",
+      "otra pestaña",
+    ],
+  },
   caja: {
     label: "Caja",
     path: "/caja",
@@ -720,20 +749,22 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo guardo los cambios de un producto?",
         a: [
           "La ficha se guarda sola: arriba dice «Guardando…» y luego «Guardado». Si algo no se pudo guardar, lo dice ahí y en su campo; lo demás sí se guarda. Sin internet, lo escrito se queda y se guarda al volver.",
-          "Con «Deshacer» y «Rehacer» (o Ctrl+Z y Ctrl+Mayús+Z) vuelves atrás un cambio. En el menú ⋯, «Volver a lo guardado» deja la ficha como estaba y «Quién cambió qué» muestra cada cambio con quién y cuándo.",
+          "Con «Deshacer» y «Rehacer» (o Ctrl+Z y Ctrl+Mayús+Z) vuelves atrás un cambio, también uno ya guardado: el stock vuelve a lo que había, y si al deshacer baja, pide el motivo. Dentro de un campo, Ctrl+Z deshace lo que escribes en ese campo, y lo escrito se guarda al salir de él o con Enter. En el menú ⋯, «Volver a lo guardado» deja la ficha como estaba y «Quién cambió qué» muestra cada cambio con quién y cuándo.",
+          "Si la misma ficha está abierta en otra pestaña o la cambia otra persona, lo de ella no se pisa: lo que cambió en otra cosa ya lo ves, y si cambiaron lo mismo, la ficha dice «Alguien cambió esta ficha» y eliges «Guardar lo mío» o «Quedarme con lo otro». Lo tuyo no se pierde.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "cuadricula",
         q: "¿Cómo lleno el stock de muchas tallas y colores de una vez?",
         a: [
           "En la cuadrícula de «Variantes»: con las flechas te mueves y con Mayúscula y las flechas eliges varias celdas. Escribe un número y Enter: se llena todo lo elegido. Abajo, «Poner» hace lo mismo con un valor para todas.",
-          "También pegas desde Excel o Google Sheets: copia las celdas allá y pégalas con Ctrl+V sobre la primera celda. Las pestañas «Precio» y «Código de barras» se llenan igual; una celda de precio vacía usa el precio del producto.",
+          "También pegas desde Excel o Google Sheets: copia la tabla allá, con su fila de colores y su columna de tallas o sin ellas, toca la primera celda y pega con Ctrl+V. Con sus títulos, cada número va a su talla y su color por el nombre, aunque estén en otro orden; sin títulos, se pega desde la celda que elegiste. Lo que no entra se dice («No entró»), y lo pegado queda marcado, con «Deshacer».",
+          "Las pestañas «Precio» y «Código de barras» se llenan igual; una celda de precio vacía usa el precio del producto.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "cambiar-stock",
@@ -744,7 +775,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Las ventas lo bajan solas cuando se confirma el pago, o cuando el pedido sale si se paga al recibir, y vuelve si se anula.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "color-y-foto",
@@ -754,7 +785,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "También desde «Fotos y videos»: en el menú de cada foto, «Es del color» y «La que manda Sofi» (la ★). Si una foto trae «Sin fondo», es una propuesta: «Usar esta» o «Dejar la original»; la original se guarda siempre.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "precio-minimo",
@@ -765,17 +796,27 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "En «Precio por cantidad y promociones» van el precio por cantidad, el de revendedora («Por mayor») y las promociones con fecha, de todo el producto, de un color o de una talla. No se suman: a cada variante le toca la mejor.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "margen",
-        q: "¿Cuánto gano con cada producto y cuánto cobraría Sofi?",
+        q: "¿Cuánto gano con cada producto?",
         a: [
-          "En «Precio y ofertas de Sofi», con el costo de la última entrada, la barra dice cuánto ganas seguro hasta el mínimo y cuánto puede ceder Sofi. Cambia al momento con el precio o el mínimo.",
-          "En «Probar cuánto cobraría Sofi» eliges cuántos, la entrega y la variante: dice lo menos que cobraría, con la misma cuenta de los pedidos.",
+          "En «Precio y ofertas de Sofi», con el costo (de lo último que entró de cada variante, el más alto), la barra dice cuánto ganas al precio de hoy, cuánto puede ceder Sofi (del precio al mínimo) y cuánto ganas en el mínimo, sin contar el envío. La cuenta la hace gestorIA con lo guardado: se pone al día al guardarse el precio o el mínimo.",
+          "Lo que ganas en el peor caso, con el envío que pone la tienda, lo dice «Probar cuánto cobraría Sofi».",
         ],
         needs: "costos.ver",
-        screen: "catalogo",
+        screen: "producto",
+      },
+      {
+        id: "simulador",
+        q: "¿Cuánto cobraría Sofi por un producto?",
+        a: [
+          "En la ficha, «Probar cuánto cobraría Sofi»: eliges cuántos, la entrega y la variante, y dice lo menos que cobraría, con la misma cuenta de los pedidos. No guarda nada.",
+          "Lo que se gana en cada caso lo ve solo quien ve los costos.",
+        ],
+        needs: "catalogo.ver",
+        screen: "producto",
       },
       {
         id: "estado-producto",
@@ -785,7 +826,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Por encargo, con cupo o en preventa se vende sin stock. En liquidación el precio es el final y no se negocia. Lo que ya no se vende no entra a un pedido nuevo.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "datos-rubro",
@@ -796,7 +837,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Con «Plantilla» ajustas qué pide cada producto de ese rubro en tu tienda: «Sofi lo necesita», «Suma» o «Quitar», y agregar un dato tuyo.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "sofi-no-supo",
@@ -806,7 +847,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Quien atiende y no cambia la ficha la propone con «Proponer la respuesta»; quien cambia la ficha la deja con «Guardar en la ficha».",
         ],
         needs: "ventas.atender",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "web-paquete-cruzada",
@@ -816,7 +857,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "El código del producto va en «Organización» y el código de barras de cada variante, en la cuadrícula, en «Código de barras».",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
     ],
   },
@@ -1050,13 +1091,33 @@ export function storePath(path: string, storeId: string): string {
   return (inside.startsWith("/") ? inside : `/${inside}`).slice(0, 200)
 }
 
+/**
+ * Si la ruta está en esa pantalla o debajo de ella. Una parte variable (`/catalogo/$productId`)
+ * vale para cualquier valor de esa parte.
+ */
+function routeHas(screen: string, path: string): boolean {
+  const want = screen.split("/")
+  const have = path.split("/")
+  if (have.length < want.length) return false
+  return want.every((part, i) => (part.startsWith("$") ? have[i] !== "" : part === have[i]))
+}
+
+/**
+ * Cuán precisa es una pantalla: primero sus partes fijas y, a igual número, lo largo. Así
+ * `/catalogo/cargar` gana a `/catalogo/$productId` para la ruta de «Cargar muchos».
+ */
+function precision(screen: string): number {
+  const fixed = screen.split("/").filter((part) => part !== "" && !part.startsWith("$")).length
+  return fixed * 1000 + screen.length
+}
+
 /** La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. */
 export function helpScreenOf(path: string): HelpScreen | null {
   let found: HelpScreen | null = null
   for (const key of SCREEN_KEYS) {
     const screen: string = HELP_SCREENS[key].path
-    const inside = screen === "/" ? path === "/" : path === screen || path.startsWith(`${screen}/`)
-    if (inside && (!found || screen.length > HELP_SCREENS[found].path.length)) found = key
+    const inside = screen === "/" ? path === "/" : routeHas(screen, path)
+    if (inside && (!found || precision(screen) > precision(HELP_SCREENS[found].path))) found = key
   }
   return found
 }
@@ -1112,8 +1173,10 @@ function restrictionFor(seat: StoreSeat, needs: StorePermission): string | null 
 
 /** La pantalla en la tienda, si el rol la abre. */
 function pathFor(seat: StoreSeat, storeId: string, screen: HelpScreen): string | null {
-  const { path, opens } = HELP_SCREENS[screen]
+  const { path: full, opens } = HELP_SCREENS[screen]
   if (!can(seat, opens)) return null
+  // Una ruta con su parte variable lleva a lo de antes de ella (la ficha, al Catálogo).
+  const path = full.split("/$")[0] || "/"
   return `/tiendas/${storeId}${path === "/" ? "" : path}`
 }
 
