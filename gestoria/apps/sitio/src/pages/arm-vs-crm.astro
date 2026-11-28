@@ -1,0 +1,80 @@
+---
+// ARM vs CRM (web v5): la misma venta con un CRM y con gestorIA, paso a paso (el duelo), la tabla
+// punto por punto y cuándo basta un CRM. Se compara con la categoría, nunca con una marca.
+import Acordeon from "../components/Acordeon.astro"
+import Comparativa from "../components/escenas/Comparativa.astro"
+import Duelo from "../components/escenas/Duelo.astro"
+import Golpe from "../components/escenas/Golpe.astro"
+import PaginaHeroe from "../components/PaginaHeroe.astro"
+import Base from "../layouts/Base.astro"
+import { DUELO_CRM, PREGUNTAS_CRM, TABLA_CRM } from "../lib/arm"
+import { faqLd } from "../lib/contenido"
+import "../styles/arm.css"
+---
+<Base
+  title="ARM vs CRM: por qué un CRM no vende por ti y un ARM sí"
+  description="Un CRM guarda lo que tu equipo anota. Un ARM como gestorIA responde, vende, cobra, anota el pedido y descuenta el stock solo. Compáralos paso a paso."
+  ld={[faqLd(PREGUNTAS_CRM)]}
+>
+  <PaginaHeroe
+    etiqueta="ARM vs CRM"
+    titulo="Un CRM te pide que anotes."
+    acento="Un ARM lo hace por ti."
+    bajada="Un CRM ordena lo que tu equipo escribe. Un ARM hace el trabajo: responde, vende, cobra, anota el pedido y descuenta el stock. A ti te queda empacar, entregar y decidir."
+    humor="decidida"
+    segundo={{ href: "#duelo", label: "Míralo paso a paso" }}
+  />
+
+  <section class="p-bloques" id="duelo" aria-labelledby="duelo-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">La misma venta, dos veces</p>
+        <h2 id="duelo-h" class="titulo-2">21:14, llega un mensaje. <span class="cur">¿Quién lo trabaja?</span></h2>
+        <p class="bajada">Con un CRM, cada paso es una tarea más para ti. Con gestorIA, los agentes la hacen y tú ves quién hizo qué.</p>
+      </div>
+      <Duelo otro="Un CRM" filas={DUELO_CRM} />
+    </div>
+  </section>
+
+  <Golpe frase="Un CRM te da más trabajo." acento="Un ARM te lo quita." />
+
+  <section class="p-bloques p-bloques--suave" aria-labelledby="tabla-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Punto por punto</p>
+        <h2 id="tabla-h" class="titulo-2">CRM vs ARM, <span class="cur">sin vueltas</span></h2>
+      </div>
+      <Comparativa otro="Un CRM" filas={TABLA_CRM} titulo="Un CRM comparado con gestorIA, un ARM" />
+    </div>
+  </section>
+
+  <section class="p-bloques" aria-labelledby="cuando-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Con honestidad</p>
+        <h2 id="cuando-h" class="titulo-2">¿Cuál te <span class="cur">conviene?</span></h2>
+      </div>
+      <div class="p-bloques__lista">
+        <div class="p-bloque" data-aparece><p class="etiqueta">Te basta un CRM</p><h3>Si vendes en persona</h3><p>Y solo necesitas ordenar tus contactos y tus llamadas.</p></div>
+        <div class="p-bloque p-bloque--arm" data-aparece><p class="etiqueta">Necesitas un ARM</p><h3>Si vendes por chat</h3><p>Y quieres que alguien atienda, venda y cobre mientras tú empacas.</p></div>
+        <div class="p-bloque" data-aparece><p class="etiqueta">¿Y un chatbot?</p><h3>Contesta, pero no vende</h3><p><a class="enlace" href="/arm-vs-chatbot">Mira ARM vs chatbot</a></p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="p-bloques p-bloques--suave" aria-labelledby="preg-h">
+    <div class="marco p-dos">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Preguntas</p>
+        <h2 id="preg-h" class="titulo-2">ARM vs <span class="cur">CRM</span></h2>
+        <p class="bajada"><a class="enlace" href="/arm">Qué es un ARM</a></p>
+      </div>
+      <Acordeon preguntas={PREGUNTAS_CRM} />
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { iniciarArm } from "../scripts/arm"
+  iniciarArm()
+</script>

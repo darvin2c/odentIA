@@ -122,6 +122,7 @@ const ROSA: ConfigOverview = {
       type: "DeliveryModeOwnFleet",
       cost: "por_zona",
       zones: 2,
+      districts: 12,
       acceptsPayOnDelivery: true,
     },
     {
@@ -129,6 +130,7 @@ const ROSA: ConfigOverview = {
       type: "OnSitePickup",
       cost: "gratis",
       zones: 0,
+      districts: 0,
       acceptsPayOnDelivery: false,
     },
     {
@@ -136,6 +138,7 @@ const ROSA: ConfigOverview = {
       type: "ParcelService",
       cost: "se_acuerda",
       zones: 0,
+      districts: 0,
       acceptsPayOnDelivery: false,
     },
   ],
@@ -217,6 +220,19 @@ describe("lo que falta para vender", () => {
       "entregas",
       "sofi",
     ])
+    // En modo prueba la pasarela no cobra pedidos: queda por terminar, sin frenar la venta.
+    const testing = toDoItems(
+      { ...ROSA, paymentLink: { provider: "mercadopago", mode: "prueba", state: "conectada" } },
+      STORE,
+    ).more.find((i) => i.id === "link")
+    expect(testing).toMatchObject({ state: "opcional", action: { label: "Terminar" } })
+    expect(testing?.detail).toContain("modo prueba")
+    expect(
+      configLines(
+        { ...ROSA, paymentLink: { provider: "mercadopago", mode: "prueba", state: "conectada" } },
+        STORE,
+      ).pagos,
+    ).toMatchObject({ status: "Mercado Pago en prueba", pending: true })
     expect(toDoTitle(CARMEN.steps)).toBe("Para vender te faltan 3 cosas")
   })
 
@@ -236,7 +252,7 @@ describe("lo que falta para vender", () => {
   it("con todo listo lo dice; sin Sofi, «para vender»", () => {
     const done: ConfigOverview = {
       ...ROSA,
-      paymentLink: { provider: "mercadopago" },
+      paymentLink: { provider: "mercadopago", mode: "real", state: "conectada" },
       steps: ROSA.steps.map((s) => (s.step === "sofi" ? { ...s, state: "saltado" } : s)),
     }
     const { selling } = toDoItems(done, STORE)
@@ -289,7 +305,7 @@ describe("cómo está cada parte", () => {
     expect(named.pagos?.summary).toBe("Yape con captura · Efectivo al recibir")
     expect(lines.entregas).toMatchObject({
       summary: "Reparto en Lima · recojo en tienda · Shalom",
-      status: "2 zonas",
+      status: "12 distritos en 2 zonas",
       pending: false,
     })
     expect(lines.equipo).toMatchObject({

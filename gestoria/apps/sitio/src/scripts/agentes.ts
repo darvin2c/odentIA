@@ -325,3 +325,218 @@ export function iniciarArgos() {
   equipo()
   cierre()
 }
+
+/** Dónde está un elemento en la página, sin contar las transformaciones. */
+function enPagina(el: HTMLElement) {
+  let x = 0
+  let y = 0
+  for (let e: HTMLElement | null = el; e; e = e.offsetParent as HTMLElement | null) {
+    x += e.offsetLeft
+    y += e.offsetTop
+  }
+  return { x, y }
+}
+
+/**
+ * El teléfono del héroe baja con el scroll hasta el teléfono de la venta, al lado de los capítulos,
+ * y ahí se funde con él: es el mismo teléfono, que ahora muestra lo que pasa. Solo en computadora.
+ */
+function viajeCel() {
+  const desdeCel = document.querySelector<HTMLElement>(".p-heroe .p-cel")
+  const hastaCel = document.querySelector<HTMLElement>(".venta__cel")
+  const pin = document.querySelector<HTMLElement>("[data-venta-pin]")
+  if (!desdeCel || !hastaCel || !pin || !window.matchMedia("(min-width: 1024px)").matches) return
+  const heroe = desdeCel.closest<HTMLElement>(".p-heroe")
+  if (heroe) heroe.style.overflow = "visible"
+  desdeCel.style.position = "relative"
+  desdeCel.style.zIndex = "30"
+  const delta = () => {
+    const a = enPagina(desdeCel)
+    const b = enPagina(hastaCel)
+    return { x: b.x - a.x, y: b.y - a.y, s: hastaCel.offsetWidth / desdeCel.offsetWidth }
+  }
+  // Aquí el teléfono de la venta no tiene su propia entrada: llega con el del héroe.
+  for (const t of gsap.getTweensOf(hastaCel)) {
+    t.scrollTrigger?.kill()
+    t.kill()
+  }
+  gsap.set(hastaCel, { clearProps: "transform,opacity" })
+  gsap.set(desdeCel, { transformOrigin: "0 0" })
+  gsap
+    .timeline({
+      scrollTrigger: {
+        trigger: heroe ?? desdeCel,
+        start: "top top",
+        endTrigger: pin,
+        end: "top top",
+        scrub: 0.6,
+        invalidateOnRefresh: true,
+      },
+    })
+    .fromTo(
+      desdeCel,
+      { x: 0, y: 0, scale: 1, rotate: 0 },
+      {
+        x: () => delta().x,
+        y: () => delta().y,
+        scale: () => delta().s,
+        rotate: 0,
+        ease: "power2.inOut",
+        duration: 1,
+      },
+      0,
+    )
+    .to(desdeCel, { rotate: -4, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0)
+    .fromTo(hastaCel, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: "none" }, 0.88)
+    .to(desdeCel, { opacity: 0, duration: 0.12, ease: "none" }, 0.88)
+}
+
+/** Unas chispas naranjas que saltan alrededor de Sofi cuando festeja. */
+function chispas(donde: HTMLElement) {
+  for (let i = 0; i < 10; i++) {
+    const c = document.createElement("span")
+    c.className = "chispa"
+    donde.append(c)
+    const ang = (i / 10) * Math.PI * 2
+    gsap.fromTo(
+      c,
+      { x: 0, y: 0, scale: 1, opacity: 1 },
+      {
+        x: Math.cos(ang) * (50 + Math.random() * 30),
+        y: Math.sin(ang) * (50 + Math.random() * 30) - 20,
+        scale: 0,
+        opacity: 0,
+        duration: 0.9,
+        delay: 0.45,
+        ease: "power3.out",
+        onComplete: () => c.remove(),
+      },
+    )
+  }
+}
+
+/**
+ * Quién hace qué: en computadora la escena se fija y el pedido avanza de estado en estado con el
+ * scroll. Cada estado se enciende al llegar, el rótulo del pedido cambia, Sofi salta al último estado
+ * suyo con su cara, y lo de tu equipo late cuando le toca.
+ */
+function proceso() {
+  const p = document.querySelector<HTMLElement>("[data-proceso]")
+  const pin = p?.querySelector<HTMLElement>("[data-proceso-pin]")
+  if (!p || !pin || !window.matchMedia("(min-width: 1024px)").matches) return
+  p.classList.add("proceso--vivo")
+  const estados = [...p.querySelectorAll<HTMLElement>(".proceso__estado")]
+  const celdasSofi = [...p.querySelectorAll<HTMLElement>(".proceso__fila--sofi .proceso__celda")]
+  const sofi = p.querySelector<HTMLElement>("[data-proceso-sofi]")
+  const rotulo = p.querySelector<HTMLElement>("[data-proceso-estado]")
+  const avance = p.querySelector<HTMLElement>("[data-proceso-avance]")
+  const caras = sofi ? [...sofi.querySelectorAll<HTMLElement>("[data-cara]")] : []
+  const salto = p.querySelector<HTMLElement>("[data-proceso-salto]")
+  const dice = p.querySelector<HTMLElement>("[data-proceso-dice]")
+  // Mientras espera, Sofi flota y se balancea: nunca queda quieta.
+  const flota = p.querySelector<HTMLElement>("[data-proceso-flota]")
+  if (flota) {
+    gsap.to(flota, { y: -8, duration: 1.4, ease: "sine.inOut", yoyo: true, repeat: -1 })
+    gsap.fromTo(
+      flota,
+      { rotate: -5 },
+      { rotate: 5, duration: 2.1, ease: "sine.inOut", yoyo: true, repeat: -1 },
+    )
+  }
+  const total = estados.length
+  let actual = -1
+  const ir = (n: number) => {
+    if (n === actual) return
+    actual = n
+    for (const el of p.querySelectorAll<HTMLElement>("[data-col]")) {
+      const c = Number(el.dataset.col)
+      el.classList.toggle("es-llego", c <= n)
+      el.classList.toggle("es-ahora", c === n)
+    }
+    const estado = estados[n]
+    if (rotulo && estado) {
+      rotulo.textContent = estado.dataset.nombre ?? ""
+      gsap.fromTo(rotulo, { scale: 0.8 }, { scale: 1, duration: 0.4, ease: "back.out(3)" })
+    }
+    // Sofi va a cada estado con su cara (en todos confirma y le avisa a la clienta); si además hay
+    // algo de tu equipo, se inclina hacia él para avisarte.
+    let k = n
+    while (k > 0 && !estados[k]?.dataset.cara) k--
+    const celda = celdasSofi[k]
+    const cara = estados[k]?.dataset.cara
+    const tuyo = estados[n]?.dataset.tuyo !== undefined
+    if (sofi && celda && salto) {
+      const x = celda.offsetLeft + celda.offsetWidth / 2 - sofi.offsetWidth / 2 - sofi.offsetLeft
+      const cambia = Math.abs(Number(gsap.getProperty(sofi, "x")) - x) > 2
+      if (cambia) {
+        // Un salto de verdad: se agacha, se estira en el aire y rebota al caer.
+        gsap.to(sofi, { x, duration: 0.55, ease: "power2.inOut", delay: 0.12 })
+        gsap
+          .timeline()
+          .to(salto, { scaleX: 1.2, scaleY: 0.78, y: 6, duration: 0.12, ease: "power2.out" })
+          .to(salto, { y: -54, scaleX: 0.88, scaleY: 1.16, duration: 0.3, ease: "power2.out" })
+          .to(salto, { y: 0, scaleX: 1, scaleY: 1, duration: 0.25, ease: "power2.in" })
+          .to(salto, { scaleX: 1.18, scaleY: 0.84, duration: 0.08 })
+          .to(salto, { scaleX: 1, scaleY: 1, duration: 0.6, ease: "elastic.out(1.2, 0.35)" })
+      } else {
+        gsap.fromTo(
+          salto,
+          { y: 0 },
+          { y: -16, duration: 0.18, yoyo: true, repeat: 1, ease: "sine.out" },
+        )
+      }
+      gsap.to(salto, {
+        rotate: tuyo && cara !== "feliz" ? 14 : 0,
+        duration: 0.5,
+        ease: "back.out(2)",
+      })
+      if (cara === "feliz") {
+        gsap.fromTo(
+          salto,
+          { rotate: 0 },
+          { rotate: 360, duration: 0.8, ease: "back.out(1.4)", delay: 0.4 },
+        )
+        chispas(sofi)
+      }
+    }
+    for (const img of caras) img.classList.toggle("es-cara", img.dataset.cara === cara)
+    if (dice && estado) {
+      dice.textContent = estado.dataset.dice ?? ""
+      dice.classList.toggle("es-tuyo", tuyo)
+      dice.classList.toggle("es-izq", k >= total - 2)
+      gsap.fromTo(
+        dice,
+        { scale: 0.4, opacity: 0, y: 10 },
+        { scale: 1, opacity: 1, y: 0, duration: 0.45, ease: "back.out(2.6)", delay: 0.35 },
+      )
+    }
+  }
+  ir(0)
+  ScrollTrigger.create({
+    trigger: pin,
+    start: "top top",
+    end: () => `+=${total * 0.5 * window.innerHeight}`,
+    pin: true,
+    scrub: true,
+    invalidateOnRefresh: true,
+    onUpdate: (st) => {
+      ir(Math.min(total - 1, Math.floor(st.progress * total)))
+      if (avance) gsap.set(avance, { scaleX: st.progress })
+    },
+  })
+}
+
+/**
+ * Cómo funciona: la venta por capítulos en el teléfono, con Sofi, como en el Inicio; el teléfono del
+ * héroe baja hasta ella.
+ */
+export function iniciarComoFunciona() {
+  const quieta = reduceMovimiento()
+  const sofi = cargarSofi(quieta)
+  if (quieta) return
+  prepararScroll()
+  venta(sofi)
+  viajeCel()
+  proceso()
+  cierre()
+}

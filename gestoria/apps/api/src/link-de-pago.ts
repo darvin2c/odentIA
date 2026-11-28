@@ -6,7 +6,11 @@ import { StoreError } from "./tiendas.js"
 /**
  * El link de pago (tablero 14: lo primero con que cobra Sofi; se confirma solo). El núcleo de
  * los pedidos conoce solo esta interfaz; cada proveedor es un adaptador intercambiable. El
- * primero es Mercado Pago (Checkout Pro). La tienda pone sus propias credenciales.
+ * primero es Mercado Pago (Checkout Pro).
+ *
+ * La tienda conecta su cuenta entrando a ella (OAuth 2.0 con PKCE, RFC 7636; lienzo «gestorIA ·
+ * Configuración, de nuevo», tablero 6): nunca copia llaves. El token se renueva con su
+ * `refresh_token` antes de vencer.
  *
  * Un aviso del proveedor nunca se cree por lo que trae: solo dice qué pago mirar. El estado, el
  * monto y el pedido se leen del proveedor con las credenciales de la tienda. Si el aviso viene
@@ -23,12 +27,16 @@ export interface LinkOrder {
   expiresAt: Date | null
   /** Adónde avisa el proveedor. */
   notificationURL: string
+  /** Lo que el link lleva para reconocerlo al volver; por omisión, el id del pedido. */
+  reference?: string
+  /** El nombre de lo que se paga; por omisión, «Pedido 0147 · Tienda». */
+  title?: string
 }
 
 export interface LinkPayment {
   ref: string
   approved: boolean
-  /** El pedido que el link llevaba (su id); null si no es de gestorIA. */
+  /** Lo que el link llevaba (el id del pedido, o «prueba:…»); null si no es de gestorIA. */
   orderId: string | null
   amountCents: number
   currency: string
@@ -39,11 +47,41 @@ export type LinkNotification =
   | { kind: "firma_invalida" }
   | { kind: "pago"; ref: string }
 
+/** Las credenciales de la tienda que da el proveedor al conectarla o renovarla. */
+export interface LinkTokens {
+  accessToken: string
+  refreshToken: string | null
+  /** Cuánto vale el token, en segundos; null si el proveedor no lo dice. */
+  expiresIn: number | null
+  /** La cuenta en el proveedor. */
+  userId: string | null
+}
+
+/** La aplicación de gestorIA en el proveedor (su id y su secreto) y adónde vuelve la persona. */
+export interface LinkApp {
+  clientId: string
+  clientSecret: string
+  redirectURL: string
+}
+
 export interface LinkAdapter {
-  /** Comprueba las credenciales antes de guardarlas. */
-  verify(accessToken: string): Promise<void>
+  /** Adónde va la persona para dar permiso, con el `state` y el desafío de PKCE (S256). */
+  authorizeURL(app: LinkApp, state: string, challenge: string): string
+  /** Cambia el código que trajo la persona por las credenciales de la tienda. */
+  exchange(
+    app: LinkApp,
+    input: { code: string; verifier: string; test: boolean },
+  ): Promise<LinkTokens>
+  /** Renueva las credenciales con el `refresh_token`. */
+  refresh(app: LinkApp, refreshToken: string, test: boolean): Promise<LinkTokens>
+  /** La cuenta de esas credenciales; «sin_permiso» si el proveedor ya no las reconoce. */
+  account(accessToken: string): Promise<{ id: string; label: string | null } | "sin_permiso">
   /** Crea el link. Pedirlo otra vez para el mismo pedido no crea otro distinto. */
-  create(accessToken: string, order: LinkOrder): Promise<{ url: string; ref: string }>
+  create(
+    accessToken: string,
+    order: LinkOrder,
+    options?: { test?: boolean },
+  ): Promise<{ url: string; ref: string }>
   read(
     request: { query: URLSearchParams; headers: Headers; body: string },
     secret: string | null,
@@ -63,9 +101,21 @@ function providerError(message: string): StoreError {
 }
 
 /**
+ * La cuenta, dicha a medias: el correo con su nombre y sin su dominio («rosa.quispe@…»), o el
+ * apodo. Basta para reconocerla en la pantalla.
+ */
+export function accountLabel(email: string | null, nickname: string | null): string | null {
+  const name = email?.split("@")[0]?.trim()
+  if (name) return `${name.slice(0, 60)}@…`
+  return nickname?.trim().slice(0, 60) || null
+}
+
+/**
  * Mercado Pago, Checkout Pro: una preferencia por pedido, con el pedido en
  * `external_reference` y el aviso en `notification_url`. `binary_mode` deja solo aprobado o
- * rechazado, sin pagos que quedan pendientes días.
+ * rechazado, sin pagos que quedan pendientes días. La conexión, por OAuth
+ * (`auth.mercadopago.com/authorization`, el código vale 10 minutos y el token 180 días; cada
+ * renovación trae otro `refresh_token`).
  */
 export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
   const API = "https://api.mercadopago.com"
@@ -84,32 +134,107 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
       throw providerError("Mercado Pago no respondió. Inténtalo de nuevo en un momento.")
     }
   }
+  async function post(path: string, body: Record<string, string>) {
+    try {
+      return await fetcher(`${API}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+    } catch {
+      throw providerError("Mercado Pago no respondió. Inténtalo de nuevo en un momento.")
+    }
+  }
+  async function tokens(response: Response, refused: string): Promise<LinkTokens> {
+    const body = (await response.json().catch(() => ({}))) as {
+      access_token?: string
+      refresh_token?: string
+      expires_in?: number
+      user_id?: number | string
+    }
+    if (response.status >= 400 && response.status < 500) throw providerError(refused)
+    if (!response.ok || !body.access_token)
+      throw providerError("Mercado Pago no respondió. Inténtalo de nuevo en un momento.")
+    return {
+      accessToken: body.access_token,
+      refreshToken: body.refresh_token ?? null,
+      expiresIn: typeof body.expires_in === "number" ? body.expires_in : null,
+      userId: body.user_id === undefined ? null : String(body.user_id),
+    }
+  }
   return {
-    async verify(accessToken) {
-      const response = await call(accessToken, "/users/me")
-      if (response.status === 401 || response.status === 403)
-        throw new StoreError(400, "VALIDATION_ERROR", "Mercado Pago no reconoce ese token", {
-          accessToken: "Mercado Pago no reconoce ese token. Copia el «Access token» de producción.",
-        })
-      if (!response.ok) throw providerError("Mercado Pago no respondió. Inténtalo de nuevo.")
+    authorizeURL(app, state, challenge) {
+      const url = new URL("https://auth.mercadopago.com/authorization")
+      url.search = new URLSearchParams({
+        client_id: app.clientId,
+        response_type: "code",
+        platform_id: "mp",
+        state,
+        redirect_uri: app.redirectURL,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      }).toString()
+      return url.toString()
     },
-    async create(accessToken, order) {
+    async exchange(app, { code, verifier, test }) {
+      return tokens(
+        await post("/oauth/token", {
+          client_id: app.clientId,
+          client_secret: app.clientSecret,
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: app.redirectURL,
+          code_verifier: verifier,
+          // Las credenciales de prueba: el link de S/ 1 se paga con la tarjeta de prueba.
+          test_token: test ? "true" : "false",
+        }),
+        "Mercado Pago no aceptó el permiso: pudo vencer (dura 10 minutos). Vuelve a conectar.",
+      )
+    },
+    async refresh(app, refreshToken, test) {
+      return tokens(
+        await post("/oauth/token", {
+          client_id: app.clientId,
+          client_secret: app.clientSecret,
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          // En modo prueba se renueva como prueba: nunca pasa a credenciales reales sin pedirlo.
+          test_token: test ? "true" : "false",
+        }),
+        "Mercado Pago no renovó el permiso de la tienda.",
+      )
+    },
+    async account(accessToken) {
+      const response = await call(accessToken, "/users/me")
+      if (response.status === 401 || response.status === 403) return "sin_permiso"
+      if (!response.ok) throw providerError("Mercado Pago no respondió. Inténtalo de nuevo.")
+      const body = (await response.json().catch(() => ({}))) as {
+        id?: number | string
+        email?: string
+        nickname?: string
+      }
+      if (body.id === undefined) throw providerError("Mercado Pago no dijo de qué cuenta es.")
+      return { id: String(body.id), label: accountLabel(body.email ?? null, body.nickname ?? null) }
+    },
+    async create(accessToken, order, options = {}) {
       const digits = fractionDigits(order.currency)
+      const reference = order.reference ?? order.id
       const response = await call(accessToken, "/checkout/preferences", {
         method: "POST",
         // Repetir con el mismo pedido no crea otro link (un reintento tras un corte).
-        headers: { "x-idempotency-key": `gestoria-${order.id}` },
+        headers: { "x-idempotency-key": `gestoria-${reference}` },
         body: JSON.stringify({
           items: [
             {
               id: order.id,
-              title: `Pedido ${order.number} · ${order.storeName}`,
+              title: order.title ?? `Pedido ${order.number} · ${order.storeName}`,
               quantity: 1,
               unit_price: order.totalCents / 10 ** digits,
               currency_id: order.currency,
             },
           ],
-          external_reference: order.id,
+          external_reference: reference,
           notification_url: order.notificationURL,
           binary_mode: true,
           ...(order.expiresAt
@@ -120,14 +245,18 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
       const body = (await response.json().catch(() => ({}))) as {
         id?: string
         init_point?: string
+        sandbox_init_point?: string
       }
       if (response.status === 401 || response.status === 403)
         throw providerError(
-          "Mercado Pago rechazó las credenciales de la tienda. Revísalas en Pagos y entregas.",
+          "Mercado Pago ya no reconoce la cuenta de la tienda. Vuelve a conectarla en Cobros.",
         )
-      if (!response.ok || !body.id || !body.init_point?.startsWith("https://"))
+      // Con las credenciales de prueba, solo el link que se paga con la tarjeta de prueba: si no
+      // viene, no se cae al link real (cobraría dinero de verdad en una prueba).
+      const url = options.test ? body.sandbox_init_point : body.init_point
+      if (!response.ok || !body.id || !url?.startsWith("https://"))
         throw providerError("Mercado Pago no creó el link. Inténtalo de nuevo.")
-      return { url: body.init_point, ref: body.id }
+      return { url, ref: body.id }
     },
     read({ query, headers, body }, secret) {
       let parsed: { type?: string; data?: { id?: unknown } } = {}
