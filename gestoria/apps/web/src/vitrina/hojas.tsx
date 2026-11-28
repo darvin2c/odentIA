@@ -394,7 +394,7 @@ export function Sheets(props: SheetsProps) {
             <b>{total === null ? "—" : m(total)}</b>
           </div>
         </div>
-        {!open && props.quoteProblem ? (
+        {!open && !needsZone && props.quoteProblem ? (
           <p className="hint" role="status">
             {props.quoteProblem}
           </p>

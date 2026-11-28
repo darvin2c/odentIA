@@ -882,7 +882,7 @@ export async function payTestOrder(
       throw new StoreError(400, "VALIDATION_ERROR", "Ese medio de pago ya no está encendido", {
         paymentMethodId: "Ese medio de pago ya no está encendido",
       })
-    const done = await payTestOrderIn(tx, storeId, person.userId, order.id, method.name)
+    const done = await payTestOrderIn(tx, storeId, person.userId, order.id, method)
     const lines = await tx
       .select({
         name: saleOrderLine.productName,

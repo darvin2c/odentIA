@@ -2608,7 +2608,11 @@ export async function cancelOrderIn(
       "FORBIDDEN",
       "Un pedido que ya tiene un pago lo anula quien confirma pagos",
     )
-  const returned = await cancelSale(tx, storeId, actorUserId, stockReference(order.number))
+  // Una prueba nunca movió stock, y su número es de la numeración de prueba: «Pedido 0005» en el
+  // kardex es el de una venta, que no se toca.
+  const returned = order.test
+    ? 0
+    : await cancelSale(tx, storeId, actorUserId, stockReference(order.number))
   await setState(tx, order, "anulado", { cancelReason: reason })
   const { currency } = await storeRow(tx, storeId)
   await logEvent(tx, storeId, orderId, actorUserId, "anulado", {
@@ -2921,7 +2925,8 @@ export async function payTestOrderIn(
   storeId: string,
   actorUserId: string,
   orderId: string,
-  methodLabel: string,
+  /** El medio de la tienda con que paga en la prueba: su nombre y su tipo. */
+  method: { name: string; typeCode: PaymentTypeCode },
 ) {
   uuidOr404(orderId)
   const order = await lockOrder(tx, storeId, orderId)
@@ -2934,8 +2939,7 @@ export async function payTestOrderIn(
       "Lo acordado venció: el pedido vuelve a su precio. Pídele a Sofi que lo cotice de nuevo.",
     )
   // Un pago por el link solo lo anota el aviso del proveedor (0005): el de prueba lo anota quien
-  // prueba, ya revisado por ella, con el tipo del medio del pedido.
-  const method = await methodFor(tx, storeId, order, "comprobante")
+  // prueba, ya revisado por ella, con el nombre y el tipo del medio que eligió.
   await tx.insert(orderPayment).values({
     storeId,
     orderId,
@@ -2943,8 +2947,8 @@ export async function payTestOrderIn(
     status: "confirmado",
     // Lo que falta: si pagó una parte antes, solo el resto.
     amountCents: (await balanceIn(tx, order)).dueCents,
-    methodName: `${methodLabel} (prueba)`.slice(0, 80),
-    methodType: method.methodType,
+    methodName: `${method.name} (prueba)`.slice(0, 80),
+    methodType: method.typeCode,
     note: "Pago de prueba: no se cobró",
     createdBy: actorUserId,
     reviewedBy: actorUserId,
