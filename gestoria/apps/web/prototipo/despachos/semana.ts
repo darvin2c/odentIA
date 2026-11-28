@@ -272,7 +272,7 @@ function semana(rubro: RubroId): Pedido[] {
       p.toca = {
         texto: "Sale hoy por Olva a Trujillo: falta el número de envío.",
         boton: "Anotar el N.º de Olva",
-        accion: "asignar",
+        accion: "numero",
       }
     return p
   })

@@ -196,9 +196,12 @@ export function AccionCajon({
     pasar: "pasar_d",
     vuelta: vueltaToca(real)?.accion,
   }
-  const principal: A | undefined = pasarInicial
+  const pedida: A | undefined = pasarInicial
     ? "pasar_d"
     : (accion ?? (ent?.boton ? deBoton[ent.boton.tipo] : t?.accion))
+  // Un pedido por agencia no tiene repartidor que elegir: lo que toca es anotar su número de envío.
+  const principal: A | undefined =
+    pedida === "asignar" && x.tipo === "agencia" && !x.numero ? "numero" : pedida
   const [a, setA] = useState<A | undefined>(principal)
   const [pagoId, setPagoId] = useState(pago)
   const [pasarIni, setPasarIni] = useState<Destino>({})
@@ -693,7 +696,7 @@ function Numero({ e, onHecho }: { e: Ent; onHecho: () => void }) {
   const [err, setErr] = useState(false)
   const n = e.p.clienta.split(" ")[0]
   const ag = e.p.entrega.agencia ?? "la agencia"
-  const texto = `${n}, tu pedido ${e.p.id} va por ${ag}, número de envío ${num || "…"}. Lo recoges en su agencia de ${e.p.entrega.zona.split(",")[0]}.`
+  const texto = `${n}, tu pedido ${e.p.id} va por ${ag}, número de envío ${num || "(el que anotes)"}. Lo recoges en su agencia de ${e.p.entrega.zona.split(",")[0]}.`
   const id = useId()
   const fid = useId()
   return (

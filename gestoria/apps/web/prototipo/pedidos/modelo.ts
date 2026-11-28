@@ -204,6 +204,8 @@ export type Accion =
   | "no_entregado"
   | "cambio"
   | "asignar"
+  /** Anotar el número de envío de la agencia (va por Olva, Shalom…). */
+  | "numero"
   | "link"
   | "anular"
   | "cobrar"

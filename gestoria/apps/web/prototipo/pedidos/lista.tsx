@@ -3,7 +3,6 @@ import {
   DataTable,
   FilterBar,
   type FilterDef,
-  KpiCard,
   ListSearchScope,
   PageHeader,
   PageShell,
@@ -26,7 +25,6 @@ import {
 import { useEffect, useMemo, useState } from "react"
 import { foto } from "../datos"
 import { ir, useRuta } from "../ruta"
-import { useTienda } from "../tienda"
 import { Anotar } from "./acciones"
 import { abrirCajon } from "./cajon"
 import { EtapaBadge, TeTocaPanel } from "./tarjeta"
@@ -155,7 +153,6 @@ function OrigenIcon({ p }: { p: Pedido }) {
 function Lista() {
   const { rubro } = useRuta()
   const all = usePedidos(rubro)
-  const owner = useTienda((s) => s.rol === "dueno")
   const isMobile = useIsMobile()
   const { get } = useListSearch()
   const [vista, setVistaS] = useState<Vista>(memo.vista)
@@ -355,12 +352,9 @@ function Lista() {
   const table = useReactTable({ data: filas, columns, getCoreRowModel: getCoreRowModel() })
 
   const abiertos = all.filter((p) => VISTAS.abiertos.pasos!.includes(p.paso))
-  const porCobrar = abiertos.reduce((a, p) => a + cuentas(p).falta, 0)
   const salenHoy = all.filter(
     (p) => p.entrega.dia === "Hoy" && ["preparando", "por_salir", "en_camino"].includes(p.paso),
   ).length
-  const vivos = all.filter((p) => p.paso !== "anulado")
-  const solos = vivos.filter((p) => p.unoPorCiento).length
 
   return (
     <PageShell className="flex flex-col gap-6">
@@ -414,39 +408,6 @@ function Lista() {
           },
         ]}
       />
-      {!isMobile ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <KpiCard
-            title="Por confirmar"
-            value={all.filter((p) => p.paso === "por_confirmar").length}
-            description="Capturas de Yape o Plin"
-          />
-          <KpiCard
-            title="Salen hoy"
-            value={salenHoy}
-            description="Preparando, por salir y en camino"
-          />
-          <KpiCard
-            title="Falta cobrar"
-            value={money(porCobrar)}
-            description="En los pedidos abiertos"
-          />
-          {owner ? (
-            <KpiCard
-              title="Los vendió gestorIA"
-              value={`${solos} de ${vivos.length}`}
-              description="Sofi, catálogo y campañas: cuentan para el 1 %"
-              meter={{ value: solos, total: vivos.length }}
-            />
-          ) : (
-            <KpiCard
-              title="Entregados"
-              value={all.filter((p) => p.paso === "entregado").length}
-              description="Esta semana"
-            />
-          )}
-        </div>
-      ) : null}
       <div className="flex flex-col gap-3">
         <ViewTabs
           label="Qué pedidos ver"
