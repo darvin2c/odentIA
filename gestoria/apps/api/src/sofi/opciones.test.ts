@@ -7,11 +7,14 @@ import {
   DEFAULT_CHOICES,
   daysWords,
   hourWords,
+  notAllowedWords,
   offerKindsOf,
   offerNotAllowed,
+  styleFacts,
   teamHoursInput,
   teamNow,
 } from "./opciones.js"
+import { SOFI_RULES } from "./sofi.js"
 
 const LIMA = "America/Lima"
 const hours = { days: [1, 2, 3, 4, 5, 6], from: "09:00", to: "19:00" }
@@ -85,5 +88,39 @@ describe("lo que Sofi puede ofrecer", () => {
     expect(kinds).toEqual(["segundo"])
     expect(offerNotAllowed(kinds, noDiscount)).toBeNull()
     expect(offerNotAllowed(["envio"], { ...DEFAULT_CHOICES, offerShipping: false })).toBe("envio")
+  })
+})
+
+describe("lo que Sofi lee de cómo habla y de lo que no puede dar", () => {
+  const TONES = ["cercana", "formal", "directa"] as const
+  // Lo que imita el modelo: un ejemplo que saluda la hace saludar en cada mensaje, y uno que abre
+  // con «¡Sí!» la hace decir que sí antes de decir que no.
+  const exampleOf = (tone: (typeof TONES)[number]) => {
+    const [line] = styleFacts({ ...DEFAULT_CHOICES, tone })
+    return /«([^»]+)»/.exec(line!)![1]!
+  }
+
+  it("los ejemplos de tono no empiezan con un saludo ni con un sí", () => {
+    for (const tone of TONES) {
+      const example = exampleOf(tone)
+      expect(example, tone).not.toMatch(/^¡?\s*(hola|buen[oa]s|qué tal)/i)
+      expect(example, tone).not.toMatch(/^¡?\s*(sí|claro|listo|por supuesto)(?!\p{L})/iu)
+    }
+  })
+
+  it("a lo que la tienda no deja dar, no abre con «¡Sí!» ni «¡Claro!»", () => {
+    const noDiscount = { ...DEFAULT_CHOICES, offerDiscount: false }
+    const words = notAllowedWords("descuento", noDiscount)
+    expect(words).toContain("La tienda no deja ofrecer un descuento.")
+    expect(words).toContain("sin abrir con «¡Sí!» ni «¡Claro!»")
+    expect(words).toContain("Puedes ofrecer: envío gratis o más barato; un regalo.")
+    const nothing = notAllowedWords("descuento", {
+      ...noDiscount,
+      offerShipping: false,
+      offerGift: false,
+    })
+    expect(nothing).toContain("sin abrir con «¡Sí!» ni «¡Claro!»")
+    // Y la regla de negociar dice lo mismo para cualquier pedido que no puede dar.
+    expect(SOFI_RULES).toContain("sin abrir con «¡Sí!» ni «¡Claro!»")
   })
 })

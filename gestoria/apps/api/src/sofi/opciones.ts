@@ -94,14 +94,18 @@ export const choicesInput = z.object({
 
 /* ------------------------------------------------------------------ cómo habla */
 
-/** Cómo lo dice cada tono, sin importes: el modelo no copia un precio de un ejemplo. */
+/**
+ * Cómo lo dice cada tono, sin importes: el modelo no copia un precio de un ejemplo. Los ejemplos
+ * son de la mitad de una charla: uno que abre con un saludo la hace saludar en cada mensaje, y uno
+ * que abre con «¡Sí!», decir que sí antes de lo que sea.
+ */
 const TONE_WORDS: Record<AgentTone, string> = {
   cercana:
-    "Cercana: cálida y con entusiasmo, como una amiga que sabe de lo que vende. Por ejemplo: «¡Hola, Ana! Es el que más sale, te va a encantar.»",
+    "Cercana: cálida y con entusiasmo, como una amiga que sabe de lo que vende. Por ejemplo: «Es el que más sale, Ana, ¡te va a encantar!»",
   formal:
-    "Amable y formal: respetuosa y ordenada, sin confianzas ni bromas. Por ejemplo: «Buenas tardes, Ana. Le comento que es nuestro modelo más vendido.»",
+    "Amable y formal: respetuosa y ordenada, sin confianzas ni bromas. Por ejemplo: «Le comento, Ana, que es nuestro modelo más vendido.»",
   directa:
-    "Directa: lo justo, el dato primero y una pregunta para avanzar. Por ejemplo: «Hola, Ana. Sí lo tengo en tu talla. ¿Te lo envío?»",
+    "Directa: lo justo, el dato primero y una pregunta para avanzar. Por ejemplo: «Lo tengo en tu talla. ¿Te lo envío?»",
 }
 const ADDRESS_WORDS: Record<AgentAddress, string> = {
   tu: "Tratas a la clienta de tú.",
@@ -172,10 +176,13 @@ export function offerNotAllowed(kinds: OfferKind[], choices: AgentChoices): Offe
   return kinds.find((kind) => !allowed.includes(kind)) ?? null
 }
 
-/** Lo que dice cotizar cuando la tienda no deja esa oferta. */
+/**
+ * Lo que dice cotizar cuando la tienda no deja esa oferta. Si la clienta la pidió, Sofi no abre
+ * con «¡Sí!» para después decir que no: la clienta lee un sí a lo que pidió.
+ */
 export function notAllowedWords(kind: OfferKind, choices: AgentChoices): string {
   const allowed = allowedOffers(choices)
-  return `La tienda no deja ofrecer ${OFFER_NAMES[kind]}. ${
+  return `La tienda no deja ofrecer ${OFFER_NAMES[kind]}. Si te lo pidió, díselo de entrada, con amabilidad y sin abrir con «¡Sí!» ni «¡Claro!». ${
     allowed.length
       ? `Puedes ofrecer: ${allowed.map((k) => OFFER_NAMES[k]).join("; ")}.`
       : "No ofreces nada: vende con el valor del producto, a su precio."
