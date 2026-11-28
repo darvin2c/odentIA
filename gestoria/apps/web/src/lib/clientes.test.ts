@@ -162,3 +162,13 @@ describe("lo que Argos calcula, en palabras", () => {
     ).toEqual({ value: "Pide rebaja", why: "2 de 3 compras con rebaja" })
   })
 })
+
+describe("una talla en la dirección", () => {
+  it("vale aunque la dirección la lea como número", () => {
+    expect(customerSearch({ medida: 37 }).medida).toBe("37")
+    expect(filtersOf(customerSearch({ grupo: "frecuente", medida: 37 }))).toEqual({
+      grupo: "frecuente",
+      medida: "37",
+    })
+  })
+})

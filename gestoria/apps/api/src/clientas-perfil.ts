@@ -202,10 +202,8 @@ export function whoLine(input: {
 }): string {
   const { computed } = input
   const recent = [...input.purchases].sort((a, b) => (a.day < b.day ? 1 : -1))
-  const district =
-    input.district?.split(",")[0]?.trim() ||
-    recent.find((p) => p.zone?.trim())?.zone?.trim() ||
-    null
+  // El distrito, solo el de su perfil: la zona de reparto de la tienda no es un distrito.
+  const district = input.district?.split(",")[0]?.trim() || null
   if (computed.ordersCount === 0) {
     const first = input.wanted?.[0]
     const asked = first?.item ?? first?.text

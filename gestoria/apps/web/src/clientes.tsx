@@ -296,7 +296,8 @@ export function CustomersIndex() {
         header: "Distrito",
         meta: { view: { tableOnly: true } },
         cell: ({ row }) => {
-          const district = row.original.district ?? row.original.lastZone
+          // Solo el de su perfil: la zona de reparto de la tienda no es un distrito.
+          const district = row.original.district
           return district ? (
             <span className="whitespace-nowrap">{district}</span>
           ) : (
@@ -929,7 +930,10 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
           {customer.profile ? <ArgosKnows customer={customer} profile={customer.profile} /> : null}
           {computed ? <ArgosComputes computed={computed} /> : null}
           {customer.orders.length > 0 ? (
-            <ProfileCard title="Compras" subtitle={plural(customer.purchases, "compra", "compras")}>
+            <ProfileCard
+              title="Compras"
+              subtitle={plural(customer.orders.length, "pedido", "pedidos")}
+            >
               <ul className="-mx-2 flex flex-col divide-y">
                 {customer.orders.map((o) => (
                   <li key={o.id}>

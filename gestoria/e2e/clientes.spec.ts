@@ -171,7 +171,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
     "https://wa.me/51987654321",
   )
   const purchases = card.getByRole("region", { name: "Compras" })
-  await expect(purchases.getByText("2 compras", { exact: true })).toBeVisible()
+  await expect(purchases.getByText("2 pedidos", { exact: true })).toBeVisible()
   const owes = card.getByRole("region", { name: "Debe" })
   await expect(owes.getByText(/^S\/\s278$/)).toBeVisible()
   await expect(
@@ -222,7 +222,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await expect(page.getByText(`Pedido ${next} anotado`)).toBeVisible()
   await expect(page).toHaveURL(/\/pedidos\?pedido=/)
   await page.getByRole("link", { name: "Ver su ficha" }).click()
-  await expect(purchases.getByText("3 compras", { exact: true })).toBeVisible()
+  await expect(purchases.getByText("3 pedidos", { exact: true })).toBeVisible()
 
   // «Separar»: vuelve a ser otra ficha, con su pedido, y no se vuelve a sugerir.
   await card.getByRole("button", { name: "Separar" }).click()

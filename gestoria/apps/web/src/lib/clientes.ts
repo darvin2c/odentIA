@@ -133,8 +133,11 @@ export type CustomerSearch = Omit<CustomerFilters, "orden"> & { q?: string; sort
 
 const ORDERS = ["reciente", "gasto"]
 
-const text = (value: unknown) =>
-  typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : undefined
+// La dirección lee «?medida=37» como el número 37: una talla es texto igual.
+const text = (value: unknown) => {
+  const raw = typeof value === "number" && Number.isFinite(value) ? String(value) : value
+  return typeof raw === "string" && raw.trim() ? raw.trim().slice(0, 120) : undefined
+}
 
 /** Lo que vale de la dirección: lo demás se descarta sin romper la pantalla. */
 export function customerSearch(search: Record<string, unknown>): CustomerSearch {

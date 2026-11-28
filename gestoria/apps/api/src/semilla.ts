@@ -17,7 +17,9 @@ import { seedDemoExchanges } from "./semilla-cambios.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
+import { recomputeStoreIn } from "./clientas-grupos.js"
 import { seedDemoSegments } from "./semilla-grupos.js"
+import { profileStore } from "./sofi/perfilar.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoProfiles } from "./semilla-perfil.js"
@@ -374,6 +376,11 @@ if (isMain) {
   else console.warn("gestoria: sin GESTORIA_APP_DATABASE_URL, las clientas quedan sin perfil")
   // Los grupos de las clientas: sus compras de meses atrás y lo que calcula la vuelta de la noche.
   await seedDemoSegments(db, DEMO_STORE_ID)
+  // Argos pasa por las clientas nuevas de los grupos (lo de sus pedidos) y la noche las recalcula.
+  if (appUrl) {
+    await profileStore(createAppDb(appUrl, { max: 1 }), DEMO_STORE_ID, new Date())
+    await db.transaction((tx) => recomputeStoreIn(tx as unknown as Db, DEMO_STORE_ID))
+  }
   console.log("gestoria: Calzados Rosa lista")
   process.exit(0)
 }

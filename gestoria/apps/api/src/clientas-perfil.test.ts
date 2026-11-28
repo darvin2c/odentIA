@@ -189,9 +189,9 @@ describe("quién es, en una línea", () => {
         district: "San Isidro, su oficina",
       }),
     ).toBe("compra sandalias beige en talla 37 · San Isidro · pide rebaja")
-    // Sin distrito en el perfil, la zona de su última entrega; la medida del perfil manda.
+    // Sin distrito en el perfil, ninguno (la zona de reparto no es un distrito); la medida del perfil manda.
     expect(whoLine({ purchases, computed, measureLabel: "Talla", measure: "38" })).toBe(
-      "compra sandalias beige en talla 38 · Surco · pide rebaja",
+      "compra sandalias beige en talla 38 · pide rebaja",
     )
   })
 

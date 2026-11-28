@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto"
 import {
   conversation,
   conversationMessage,
+  customerFact,
   customerGroup,
   customerProfile,
   type Db,
@@ -298,6 +299,15 @@ beforeAll(async () => {
   await db.ownerDb
     .insert(stockRequest)
     .values({ storeId, variantId: ids.botin43, conversationId: chats.jimena })
+  // El distrito sale solo de su perfil (la zona de reparto no es un distrito): la tienda lo anotó.
+  await db.ownerDb.insert(customerFact).values({
+    storeId,
+    customerId: fichas.andrea!,
+    key: "distrito",
+    value: "San Isidro",
+    source: "tienda",
+    actorUserId: "persona-de-prueba",
+  })
 }, 240_000)
 
 afterAll(async () => {

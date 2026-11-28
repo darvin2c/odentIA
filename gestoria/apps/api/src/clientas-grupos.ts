@@ -211,7 +211,7 @@ export interface ProfileState {
   purchases: Purchase[]
   /** La del perfil o, si no hay, la que más compra. */
   measure: string | null
-  /** El del perfil o, si no hay, la zona de su última entrega. */
+  /** El de su perfil (la zona de reparto no es un distrito). */
   district: string | null
   lastBoughtOn: string | null
   measures: string[]
@@ -269,16 +269,15 @@ export async function profilesIn(
     const computed = computedOf(bought, clock.today, currency)
     const fact = facts.get(id)
     const measure = fact?.measure ?? computed.measures[0]?.[0] ?? null
-    const lastZone = bought.find((p) => p.zone?.trim())?.zone?.trim() ?? null
     out.set(id, {
       computed,
       purchases: bought,
       measure,
-      district: fact?.district ?? lastZone,
+      district: fact?.district ?? null,
       lastBoughtOn: bought[0]?.day ?? null,
       measures: distinct([measure, ...computed.measures.map(([value]) => value)]),
       categories: distinct(computed.categories.map(([value]) => value)),
-      districts: distinct([fact?.district, ...bought.map((p) => p.zone)]),
+      districts: distinct([fact?.district]),
     })
   }
   return out
@@ -504,9 +503,10 @@ export function matches(profile: ListProfile, consent: ConsentView, filters: Lis
   const has = (list: string[], wanted?: string) =>
     !wanted || list.some((value) => fold(value) === fold(wanted))
   if (filters.grupo && profile.segment !== filters.grupo) return false
-  if (!has(profile.measures, filters.medida)) return false
+  // Su talla y su distrito de hoy (los que muestra la lista), no todo lo que alguna vez compró.
+  if (!has(profile.measures.slice(0, 1), filters.medida)) return false
   if (!has(profile.categories, filters.categoria)) return false
-  if (!has(profile.districts, filters.distrito)) return false
+  if (!has(profile.districts.slice(0, 1), filters.distrito)) return false
   if (filters.promociones === "si" && consent !== "si") return false
   if (filters.promociones === "no" && consent === "si") return false
   return true
