@@ -667,7 +667,11 @@ export async function sofiMediaIn(
   const stored = photos.filter((p) => p.objectKey)
   const asked = Boolean(colorValue?.trim())
   const chosen = asked
-    ? (color && stored.find((p) => p.id === color.photoId)) ||
+    ? // La ★ cuenta solo si es de ese color o para todos: nunca una foto de otro color.
+      (color &&
+        stored.find(
+          (p) => p.id === color.photoId && (p.colorId === color.id || p.colorId === null),
+        )) ||
       (color && stored.find((p) => p.colorId === color.id)) ||
       stored.find((p) => p.colorId === null)
     : stored[0]

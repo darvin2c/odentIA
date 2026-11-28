@@ -70,7 +70,13 @@ export async function openLoadRow(tx: Db, person: Person, storeId: string, loadI
       .select({ state: bulkLoad.state, finishedBy: bulkLoad.finishedBy })
       .from(bulkLoad)
       .where(where)
-    throw await closed(now?.state ?? "descartada", now?.finishedBy ?? null)
+    if (!now)
+      throw new StoreError(
+        409,
+        "LOAD_CLOSED",
+        "Esta carga ya no está abierta. Abre otra para seguir.",
+      )
+    throw await closed(now.state, now.finishedBy)
   }
   return locked
 }

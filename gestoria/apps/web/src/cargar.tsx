@@ -624,23 +624,37 @@ function LoadView({
       method: "PATCH",
       body: target === "nuevo" ? { newItem: true } : { itemId: target },
     })
-  const save = (itemId: string, body: Record<string, unknown>, onSuccess?: () => void) => {
+  const save = (itemId: string, body: Record<string, unknown>) => {
     setErrors(({ [itemId]: _, ...rest }) => rest)
     call.mutate(
       { path: `/productos/${itemId}`, method: "PATCH", body },
-      { onError: () => setReset((n) => n + 1), onSuccess },
+      { onError: () => setReset((n) => n + 1) },
     )
   }
   const nameOf = (item: LoadItem) => (item.name.trim() ? `«${item.name.trim()}»` : "Este producto")
-  /** «No crear este», con «Deshacer» en el aviso y «Volver a incluir» abajo de la tabla. */
-  const leaveOut = (item: LoadItem) =>
-    save(item.id, { state: "quitado" }, () =>
+  /**
+   * «No crear este», con «Deshacer» en el aviso y «Volver a incluir» abajo de la tabla. Va en su
+   * propia mutación: el aviso sale siempre, aunque otro dato se guarde a la vez.
+   */
+  const leave = useMutation({
+    mutationFn: (item: LoadItem) =>
+      api(`${base}/productos/${item.id}`, { method: "PATCH", body: { state: "quitado" } }),
+    onSuccess: async (_, item) => {
+      await refresh()
       toast.success(`${nameOf(item)} no se va a crear`, {
         description: "Sigue abajo de la tabla, con «Volver a incluir».",
         action: { label: "Deshacer", onClick: () => save(item.id, { state: item.state }) },
-      }),
-    )
-  const include = (item: LoadItem) => save(item.id, { state: "revisar" })
+      })
+    },
+    onError: async (error) => {
+      await refresh()
+      toast.error(error.message)
+    },
+  })
+  const leaveOut = (item: LoadItem) => leave.mutate(item)
+  // Vuelve como se ve: con nombre y precio, lista para crear; si no, por revisar.
+  const include = (item: LoadItem) =>
+    save(item.id, { state: item.name.trim() && item.listPriceCents ? "listo" : "revisar" })
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: las acciones no cambian la forma de la tabla
   const columns = useMemo<ColumnDef<LoadItem>[]>(
@@ -857,15 +871,13 @@ function LoadView({
       <ConfirmDialog
         open={discarding}
         title="¿Descartar la carga?"
-        description={`${
+        description={discardText(
           detail.data && detail.data.load.createdBy !== meId
-            ? `Es la carga que abrió ${detail.data.load.createdByName ?? "otra persona del equipo"}. `
-            : ""
-        }Se borran ${everyPhoto === 1 ? "su foto" : `sus ${everyPhoto} fotos`} y ${
-          items.length + removed.length === 1
-            ? "su producto"
-            : `sus ${items.length + removed.length} productos`
-        } por crear, y nada pasa al catálogo. No se puede deshacer.`}
+            ? (detail.data.load.createdByName ?? "otra persona del equipo")
+            : null,
+          everyPhoto,
+          items.length,
+        )}
         confirmLabel="Descartar la carga"
         cancelLabel="Seguir con la carga"
         pending={discard.isPending}
@@ -1008,6 +1020,20 @@ function LoadView({
   )
 }
 
+/** Lo que borra «Descartar la carga», sin nombrar lo que no tiene. */
+export function discardText(otherName: string | null, photos: number, products: number) {
+  const parts = [
+    photos ? (photos === 1 ? "su foto" : `sus ${photos} fotos`) : null,
+    products
+      ? products === 1
+        ? "su producto por crear"
+        : `sus ${products} productos por crear`
+      : null,
+  ].filter(Boolean)
+  const gone = parts.length ? `Se borran ${parts.join(" y ")}, y nada` : "Nada"
+  return `${otherName ? `Es la carga que abrió ${otherName}. ` : ""}${gone} pasa al catálogo. No se puede deshacer.`
+}
+
 /** De quién es la carga abierta y desde cuándo: la carga es de la tienda, y se dice de quién es. */
 function LoadOwner({ load, meId }: { load: LoadDetail["load"]; meId: string }) {
   const mine = load.createdBy === meId
@@ -1015,7 +1041,7 @@ function LoadOwner({ load, meId }: { load: LoadDetail["load"]; meId: string }) {
     <p className="text-sm text-muted-foreground">
       {mine
         ? `Abriste esta carga el ${when(load.createdAt)}.`
-        : `Esta carga la abrió ${load.createdByName ?? "otra persona del equipo"} el ${when(load.createdAt)}. Lo que cambies, crees o descartes aquí es de esa carga.`}
+        : `Esta carga la abrió ${load.createdByName ?? "otra persona del equipo"} el ${when(load.createdAt)}. Si la cambias, la creas o la descartas, cambia también para quien la abrió.`}
     </p>
   )
 }

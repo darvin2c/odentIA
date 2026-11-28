@@ -331,6 +331,16 @@ describe("las fotos en el almacenamiento", () => {
     expect(media.photo).toBeNull()
     // Un color que el producto no tiene tampoco recibe la foto de otro.
     expect((await ask("roja")).photo).toBeNull()
+    // Ni aunque la ★ de la blanca apunte a una foto de la negra.
+    await db.ownerDb
+      .update(productColor)
+      .set({ photoId: first })
+      .where(eq(productColor.value, "blanca"))
+    expect((await ask("blanca")).photo).toBeNull()
+    await db.ownerDb
+      .update(productColor)
+      .set({ photoId: null })
+      .where(eq(productColor.value, "blanca"))
     // Con el color, la foto dice de qué color es; así Sofi dice el hecho.
     expect((await ask("Negra")).photo).toMatchObject({ id: first, color: "negra" })
     // Una foto sin color es para todos: esa sí va con la blanca, y dice que es de todos.
