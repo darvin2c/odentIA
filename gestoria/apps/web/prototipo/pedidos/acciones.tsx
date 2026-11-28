@@ -1,6 +1,8 @@
 import { Checkbox, cn, Input, toast } from "@odentia/ui"
 import { Textarea } from "@odentia/ui/components/textarea"
-import { AgentMark, FormDrawer, RadioChips } from "@odentia/ui-patterns"
+import { AgentMark, RadioChips } from "@odentia/ui-patterns"
+import { Ampliable, ImagenPago } from "./ejemplos"
+import { Hoja } from "./hoja"
 import { CircleAlert, Link2, MessageCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { DISTRITOS, foto, RUBROS } from "../datos"
@@ -88,26 +90,120 @@ function Resumen({ rows }: { rows: [string, string, ("falta" | "favor" | "ok")?]
   )
 }
 
-/* ---------- Empacar: un toque, sin cajón ---------- */
+/* ---------- Empacar: se confirma en el cajón, con lo que va en el paquete a la vista ---------- */
 
-/** «Listo: se lo di a Kevin». Pasa a «Por salir» y a Kevin le llega a su app. */
+/**
+ * «Listo: se lo di a Kevin». Pasa a «Por salir» y a Kevin le llega a su app; si va por agencia,
+ * queda en la agencia. La misma operación desde Pedidos, Inicio y Despachos. El aviso trae
+ * «Deshacer» por si se tocó antes de tiempo.
+ */
 export function empacar(rubro: Parameters<typeof mover>[0], p: Pedido) {
-  const rep = p.entrega.repartidor ?? "el repartidor"
+  const agencia = p.entrega.tipo === "agencia"
+  const rep = agencia ? (p.entrega.agencia ?? "la agencia") : (p.entrega.repartidor ?? "el repartidor")
   mover(
     rubro,
     p.id,
     (x) => {
-      x.paso = "por_salir"
+      x.paso = agencia ? "en_camino" : "por_salir"
       x.toca = undefined
     },
     {
       actor: "persona",
       quien: "Rosa",
-      texto: `Lo empacó y se lo dio a ${rep}. Le llegó a su app.`,
-      paso: "por_salir",
+      texto: agencia ? `Lo dejó en ${rep}.` : `Lo empacó y se lo dio a ${rep}. Le llegó a su app.`,
+      paso: agencia ? "en_camino" : "por_salir",
     },
   )
-  toast.success(`Listo: lo tiene ${rep}. Sigue solo.`)
+  toast.success(agencia ? `${p.clienta.split(" ")[0]}: en ${rep}.` : `Listo: lo tiene ${rep}. Sigue solo.`, {
+    description: agencia ? undefined : `Sale cuando ${rep} toque «Salí» en su app.`,
+    action: {
+      label: "Deshacer",
+      onClick: () =>
+        mover(
+          rubro,
+          p.id,
+          (x) => {
+            x.paso = "preparando"
+          },
+          { actor: "persona", quien: "Rosa", texto: "Deshizo «Listo»: todavía no salió." },
+        ),
+    },
+  })
+}
+
+/**
+ * Confirmar lo que llegó de un Yape o Plin: la misma operación desde el cajón de la acción, la
+ * página o el cajón «pedido + lo que toca». Si falta una parte, Sofi la cobra con su link; si sale
+ * hoy, gestorIA le asigna al repartidor de siempre.
+ */
+export function confirmarPago(
+  rubro: Parameters<typeof mover>[0],
+  p: Pedido,
+  n: number,
+  sofi = true,
+  quien = "Lucía",
+) {
+  const pago = p.pagos.find((x) => x.estado === "por_confirmar")
+  if (!pago) return
+  const k = cuentas(p)
+  const queda = Math.max(0, k.total - k.confirmado - n)
+  const nombre = p.clienta.split(" ")[0]!
+  mover(
+    rubro,
+    p.id,
+    (x) => {
+      const g = x.pagos.find((y) => y.id === pago.id)!
+      g.estado = "confirmado"
+      g.monto = n
+      g.quien = quien
+      x.toca = undefined
+      x.paso = trasPagar(x)
+      if (sofi && cuentas(x).falta <= 0)
+        avisar(x, "pagado", `¡Pago recibido, ${nombre}! Ya lo estamos preparando.`)
+    },
+    {
+      actor: "persona",
+      quien,
+      texto: `Confirmó el ${MEDIOCORTO[pago.medio]} de ${money(n)}: lo que llegó.`,
+      paso: "pagado",
+    },
+  )
+  if (queda > 0)
+    mover(
+      rubro,
+      p.id,
+      (x) => {
+        x.cobro = "link"
+        if (sofi)
+          avisar(x, "link", textoFalta(nombre, n, queda, RUBROS[rubro].store.slug))
+      },
+      {
+        actor: "sofi",
+        quien: "Sofi",
+        texto: sofi
+          ? `Le escribió sola a ${nombre} para cobrar los ${money(queda)} que faltan, con su link. Quedan en el saldo; sin pago confirmado no se entrega.`
+          : `Los ${money(queda)} que faltan quedan en el saldo. A ${nombre} no le llegó nada.`,
+      },
+    )
+  // Si sale hoy, gestorIA le asigna al repartidor de siempre.
+  mover(rubro, p.id, (x) => {
+    if (x.paso !== "preparando") return
+    const a = asignarSolo(x)
+    if (a)
+      x.eventos.push({
+        id: nuevoId("e"),
+        cuando: "Hoy · ahora",
+        actor: "gestoria",
+        quien: "gestorIA",
+        texto: `Sale hoy: pasó a Preparando. ${a}`,
+        paso: "preparando",
+      })
+  })
+  toast.success(
+    queda > 0
+      ? `Confirmado. Sofi le cobra los ${money(queda)} que faltan.`
+      : "Pago confirmado. El pedido sigue solo.",
+  )
 }
 
 /* ---------- Ver y confirmar un pago (Yape o Plin al número de la tienda) ---------- */
@@ -128,7 +224,7 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const queda = Math.max(0, k.total - k.confirmado - n)
   const nombre = p.clienta.split(" ")[0]
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={modo === "no" ? "No coincide" : "Ver y confirmar el pago"}
@@ -171,95 +267,51 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
           return onClose()
         }
         if (n <= 0) return setErr("Escribe cuánto llegó.")
-        mover(
-          rubro,
-          p.id,
-          (x) => {
-            const g = x.pagos.find((y) => y.id === pago.id)!
-            g.estado = "confirmado"
-            g.monto = n
-            g.quien = "Lucía"
-            x.toca = undefined
-            x.paso = trasPagar(x)
-            if (sofi && cuentas(x).falta <= 0)
-              avisar(x, "pagado", `¡Pago recibido, ${nombre}! Ya lo estamos preparando.`)
-          },
-          {
-            actor: "persona",
-            quien: "Lucía",
-            texto: `Confirmó el ${MEDIOCORTO[pago.medio]} de ${money(n)}: lo que llegó.`,
-            paso: "pagado",
-          },
-        )
-        if (queda > 0)
-          mover(
-            rubro,
-            p.id,
-            (x) => {
-              x.cobro = "link"
-              if (sofi)
-                avisar(x, "link", textoFalta(nombre, n, queda, RUBROS[rubro].store.slug))
-            },
-            {
-              actor: "sofi",
-              quien: "Sofi",
-              texto: sofi
-                ? `Le escribió sola a ${nombre} para cobrar los ${money(queda)} que faltan, con su link. Quedan en el saldo; sin pago confirmado no se entrega.`
-                : `Los ${money(queda)} que faltan quedan en el saldo. A ${nombre} no le llegó nada.`,
-            },
-          )
-        // Si sale hoy, gestorIA le asigna al repartidor de siempre.
-        mover(rubro, p.id, (x) => {
-          if (x.paso !== "preparando") return
-          const a = asignarSolo(x)
-          if (a)
-            x.eventos.push({
-              id: nuevoId("e"),
-              cuando: "Hoy · ahora",
-              actor: "gestoria",
-              quien: "gestorIA",
-              texto: `Sale hoy: pasó a Preparando. ${a}`,
-              paso: "preparando",
-            })
-        })
-        toast.success(
-          queda > 0
-            ? `Confirmado. Sofi le cobra los ${money(queda)} que faltan.`
-            : "Pago confirmado. El pedido sigue solo.",
-        )
+        confirmarPago(rubro, p, n, sofi)
         onClose()
       }}
     >
-      <div className="flex flex-col gap-4 sm:flex-row">
-        <div
-          className="flex w-full sm:w-36 shrink-0 flex-col gap-1.5 rounded-xl border bg-muted/50 p-3 text-center"
-          aria-label="La captura que mandó la clienta"
-        >
-          <span className="text-[11px] font-medium text-muted-foreground">
-            Captura de {MEDIOCORTO[pago.medio]}
+      <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-start gap-3">
+        <Ampliable titulo={`Captura de ${MEDIOCORTO[pago.medio]} · ${p.id}`}>
+          <ImagenPago p={p} g={pago} tienda={RUBROS[rubro].store.name} />
+        </Ampliable>
+        <div className="flex min-w-0 flex-col gap-2 text-sm" aria-label="La comparación">
+          <span className="text-xs font-medium text-muted-foreground">
+            Captura de {MEDIOCORTO[pago.medio]} · la leyó Sofi
           </span>
-          <span className="font-heading text-2xl font-bold tabular-nums">{money(leido)}</span>
-          <span className="text-xs">{pago.captura?.nombre}</span>
-          <span className="text-[11px] text-muted-foreground">{pago.captura?.hora}</span>
-          {pago.captura?.numero ? (
-            <span className="text-[11px] text-muted-foreground">{pago.captura.numero}</span>
-          ) : null}
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm">
-          <Resumen
-            rows={[
-              ["Total del pedido", money(k.total)],
-              ...(k.confirmado ? ([["Ya pagado", money(k.confirmado)]] as [string, string][]) : []),
-              ["Dice la captura", money(leido), distinto ? "falta" : "ok"],
-            ]}
-          />
+          <dl className="flex flex-col divide-y rounded-xl border">
+            <div className="flex flex-col px-3 py-2">
+              <dt className="text-xs text-muted-foreground">La captura dice</dt>
+              <dd className="font-heading text-xl font-bold tabular-nums">{money(leido)}</dd>
+            </div>
+            <div className="flex flex-col px-3 py-2">
+              <dt className="text-xs text-muted-foreground">
+                {k.confirmado ? `El pedido es ${money(k.total)}; ya pagó` : "El pedido es"}
+              </dt>
+              <dd className="font-semibold tabular-nums">
+                {money(k.confirmado ? k.confirmado : k.total)}
+              </dd>
+            </div>
+            <div className="flex flex-col px-3 py-2">
+              <dt className="text-xs text-muted-foreground">
+                {Math.max(0, k.total - k.confirmado - leido) > 0 ? "Faltarían" : "Coincide"}
+              </dt>
+              <dd
+                className={cn(
+                  "font-semibold tabular-nums",
+                  Math.max(0, k.total - k.confirmado - leido) > 0 ? "text-warning" : "text-success",
+                )}
+              >
+                {Math.max(0, k.total - k.confirmado - leido) > 0
+                  ? money(k.total - k.confirmado - leido)
+                  : "Paga todo"}
+              </dd>
+            </div>
+          </dl>
           {distinto ? (
             <p className="flex items-start gap-1.5 text-warning">
               <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <span>
-                La captura dice {money(leido)} y el pedido pide {money(pago.monto)}. Lo leyó Sofi;
-                revísalo tú.
-              </span>
+              <span>No coincide con lo que pide el pedido: revísalo tú.</span>
             </p>
           ) : null}
         </div>
@@ -327,7 +379,7 @@ function ConfirmarPago({ p, onClose }: { p: Pedido; onClose: () => void }) {
           </p>
         </>
       )}
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -371,7 +423,7 @@ function PasarA({ p, onClose, asignar }: { p: Pedido; onClose: () => void; asign
   const nombre = p.clienta.split(" ")[0]
   const texto = `«${nombre}, tu pedido llega ${dia === "Hoy" ? "hoy" : `el ${dia?.toLowerCase()}`} entre ${franja}${rep && rep !== "Lo recoge en tienda" ? ` con ${rep}` : ""}.»`
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={sinLibre ? "No hay repartidor libre" : asignar ? "Cambiar repartidor" : "Pasar a…"}
@@ -445,7 +497,7 @@ function PasarA({ p, onClose, asignar }: { p: Pedido; onClose: () => void; asign
         )}
       </Campo>
       <SofiAvisa on={sofi} set={setSofi} texto={texto} />
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -465,7 +517,7 @@ function Cambiar({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const nuevo = k.productos + envio
   const dif = nuevo - k.confirmado - k.porConfirmar
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={`Cambiar el pedido ${p.id}`}
@@ -555,7 +607,7 @@ function Cambiar({ p, onClose }: { p: Pedido; onClose: () => void }) {
         set={setSofi}
         texto={`«Listo, ${p.clienta.split(" ")[0]}: cambiamos tu pedido. ${dif > 0 ? `Faltan ${money(dif)}, al recibir.` : "No pagas nada más."}»`}
       />
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -567,7 +619,7 @@ function NoEntregado({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const [que, setQue] = useState<string | null>("Sofi le escribe para elegir otro día")
   const nombre = p.clienta.split(" ")[0]
   return (
-    <FormDrawer
+    <Hoja
       open
       dock={false}
       onClose={onClose}
@@ -630,7 +682,7 @@ function NoEntregado({ p, onClose }: { p: Pedido; onClose: () => void }) {
         El pedido vuelve a «Por salir». Lo pagado sigue pagado y lo que vuelve no se suma al stock:
         sigue separado para {nombre}.
       </p>
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -662,7 +714,7 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
     "0",
   )
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={`Cambio o devolución · ${p.id}`}
@@ -859,7 +911,7 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
           anota lo que devolviste, con su medio y quién lo hizo.
         </p>
       )}
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -872,7 +924,7 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const [monto, setMonto] = useState(String(k.falta))
   const necesitaFoto = medio === "pos"
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={k.falta > 0 ? "Entregado y cobrado" : "Entregado"}
@@ -951,7 +1003,7 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
       ) : (
         <p className="text-sm">Está pagado: queda «Entregado» y, si no estaba, también «Salió».</p>
       )}
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -970,7 +1022,7 @@ export function Anotar({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState<string | null>(null)
   const prod = P.find((x) => x.id === pid)
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title="Anotar un pedido"
@@ -1137,7 +1189,7 @@ export function Anotar({ onClose }: { onClose: () => void }) {
         <Link2 className="size-3.5" aria-hidden />
         Lo vendió tu equipo: no cuenta para el 1 % de gestorIA.
       </p>
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -1158,7 +1210,7 @@ export function Deshacer({
   const g = p.pagos.find((x) => x.id === pagoId)
   if (!g) return null
   return (
-    <FormDrawer
+    <Hoja
       open
       dock={false}
       onClose={onClose}
@@ -1207,7 +1259,7 @@ export function Deshacer({
       <p className="text-sm text-muted-foreground">
         El pago vuelve a «por confirmar». No se borra nada: queda en la historia con tu motivo.
       </p>
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -1216,7 +1268,7 @@ function Anular({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const [m, setM] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   return (
-    <FormDrawer
+    <Hoja
       open
       dock={false}
       onClose={onClose}
@@ -1250,7 +1302,7 @@ function Anular({ p, onClose }: { p: Pedido; onClose: () => void }) {
           />
         )}
       </Campo>
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -1259,7 +1311,7 @@ function MandarLink({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const { rubro } = useRuta()
   const R = RUBROS[rubro]
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title="Recordarle el link"
@@ -1293,7 +1345,7 @@ function MandarLink({ p, onClose }: { p: Pedido; onClose: () => void }) {
       <p className="text-sm text-muted-foreground">
         Sofi ya se lo recuerda sola una vez, 3 horas antes de que venza. Este es uno más.
       </p>
-    </FormDrawer>
+    </Hoja>
   )
 }
 

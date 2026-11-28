@@ -2,7 +2,6 @@ import { Badge, Button, cn, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import { Textarea } from "@odentia/ui/components/textarea"
 import {
-  FormDrawer,
   FormPanel,
   PageHeader,
   PageShell,
@@ -10,19 +9,18 @@ import {
   useAppForm,
   useFormSurface,
 } from "@odentia/ui-patterns"
+import { Hoja } from "./hoja"
 import { ArrowLeft, Check, Clock3, RotateCcw, ScrollText, Sparkles } from "lucide-react"
 import { useState } from "react"
-import { foto, RUBROS, type RubroId } from "../datos"
+import { foto, RUBROS } from "../datos"
 import { href, ir, useRuta } from "../ruta"
-import { empacar } from "./acciones"
-import { type Accion, money, type Pedido, pedidosDe, usePedidos } from "./modelo"
+import { money, type Pedido, pedidosDe, usePedidos } from "./modelo"
 import {
   aprobar,
   armar,
   CUANDO,
   cambiarCasilla,
   DINERO,
-  devolver,
   ENVIO,
   guardarPolitica,
   lineasPolitica,
@@ -42,25 +40,6 @@ import {
 } from "./vuelta"
 
 const nom = (p: Pedido) => p.clienta.split(" ")[0]!
-
-/** Lo que se hace con un toque, sin cajón. Devuelve si lo hizo. */
-export function unToque(rubro: RubroId, p: Pedido, a: Accion): boolean {
-  if (a === "empacar") {
-    empacar(rubro, p)
-    return true
-  }
-  if (a === "aprobar_vuelta") {
-    aprobar(rubro, p, "Rosa")
-    toast.success(`Aprobado. Sofi ya le avisó a ${nom(p)} y sigue solo.`)
-    return true
-  }
-  if (a === "devolver") {
-    devolver(rubro, p, "Rosa")
-    toast.success(`Devuelto. Sofi le avisó a ${nom(p)}.`)
-    return true
-  }
-  return false
-}
 
 /** La casilla de Configuración › Sofi, tal como está. En el prototipo se puede probar aquí. */
 export function CasillaSofi({ compacta }: { compacta?: boolean }) {
@@ -305,7 +284,7 @@ export function RevisarDrawer({ p, onClose }: { p: Pedido; onClose: () => void }
           : `Después le devuelves ${money(a.monto)} por ${v.medio === "plin" ? "Plin" : "Yape"} desde tu app y tocas «Ya lo devolví».`
         : "Se cierra. Sofi le avisa."
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={`Revisar lo que volvió · ${p.id}`}
@@ -358,7 +337,7 @@ export function RevisarDrawer({ p, onClose }: { p: Pedido; onClose: () => void }
         </div>
       ) : null}
       <p className="rounded-xl bg-muted px-3 py-2 text-sm">{sigue}</p>
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -368,7 +347,7 @@ export function ExcepcionDrawer({ p, onClose }: { p: Pedido; onClose: () => void
   const [que, setQue] = useState<"si" | "no" | null>(null)
   const [motivo, setMotivo] = useState("")
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={`Fuera de tu política · ${p.id}`}
@@ -417,7 +396,7 @@ export function ExcepcionDrawer({ p, onClose }: { p: Pedido; onClose: () => void
           Queda anotado en el pedido. Sofi le comunica a {nom(p)} lo que decidas, con amabilidad.
         </p>
       </div>
-    </FormDrawer>
+    </Hoja>
   )
 }
 

@@ -1,14 +1,11 @@
 import { Badge, cn, useIsMobile } from "@odentia/ui"
 import { KpiCard, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { BellRing, Bike, CreditCard, Megaphone, PackageCheck, Smartphone } from "lucide-react"
-import { useState } from "react"
 import { RUBROS } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { useTienda } from "../tienda"
-import { AccionDrawer } from "./acciones"
-import { unToque } from "./vuelta-ui"
-import { TeTocaPedidos } from "./lista"
-import { type Accion, cuentas, money, type Pedido, teToca, usePedidos } from "./modelo"
+import { TeTocaLista } from "./tarjeta"
+import { cuentas, money, type Pedido, teToca, usePedidos } from "./modelo"
 import { ConRouter } from "./router"
 
 /** Los avisos que llegan al celular de quien atiende: pocos, y solo los que sirven. */
@@ -90,7 +87,6 @@ function Inicio() {
   const all = usePedidos(rubro)
   const owner = useTienda((s) => s.rol === "dueno")
   const isMobile = useIsMobile()
-  const [accion, setAccion] = useState<{ p: Pedido; a: Accion } | null>(null)
   const R = RUBROS[rubro]
   const vendido = all
     .filter((p) => p.paso !== "anulado" && p.creado.startsWith("Jue 27"))
@@ -120,13 +116,13 @@ function Inicio() {
           "Nada te espera. Todo avanza solo."
         )}
       </p>
-      <TeTocaPedidos
-        list={all}
-        onAbrir={(id) => ir(`/pedidos/${id}`)}
-        onAccion={(p, a) => {
-          if (!unToque(rubro, p, a)) setAccion({ p, a })
-        }}
-      />
+      <section aria-labelledby="toca-h" className="flex flex-col gap-3">
+        <h2 id="toca-h" className="flex items-center gap-2 text-sm font-semibold">
+          Te toca
+          {toca ? <Badge variant="warning">{toca}</Badge> : null}
+        </h2>
+        <TeTocaLista list={all} className="md:grid-cols-2 xl:grid-cols-3" />
+      </section>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {owner ? (
           <KpiCard
@@ -188,13 +184,6 @@ function Inicio() {
           </section>
         ) : null}
       </div>
-      {accion ? (
-        <AccionDrawer
-          p={all.find((x) => x.id === accion.p.id) ?? accion.p}
-          accion={accion.a}
-          onClose={() => setAccion(null)}
-        />
-      ) : null}
     </PageShell>
   )
 }

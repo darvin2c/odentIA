@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react"
 import { RadioChips } from "@odentia/ui-patterns"
-import { useState } from "react"
+import { createContext, type ReactNode, useContext, useState } from "react"
 import { foto, RUBROS } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { PhoneFrame } from "../vitrina/marcos"
@@ -32,9 +32,71 @@ import { recogido } from "./vuelta"
 
 type Forma = "link" | "efectivo" | "yape" | "pos"
 
+/**
+ * Ningún botón del repartidor actúa en un toque: «Salí», «Cobrar», «Entregado», «Recogí» y «No
+ * estaba» abren una hoja que dice a quién, qué y cuánto, y ahí se confirma. Así no hay toques por
+ * error con el celular en la mano.
+ */
+interface Conf {
+  titulo: string
+  filas: [string, ReactNode][]
+  boton: string
+  hacer: () => void
+  peligro?: boolean
+}
+const Confirma = createContext<(c: Conf) => void>(() => {})
+
+function HojaConfirmar({ c, onClose }: { c: Conf; onClose: () => void }) {
+  return (
+    <div className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40" role="presentation" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={c.titulo}
+        className="flex flex-col gap-3 rounded-t-2xl bg-background p-4 pb-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="mx-auto h-1.5 w-10 rounded-full bg-muted" aria-hidden />
+        <b className="text-[17px]">{c.titulo}</b>
+        <dl className="flex flex-col divide-y rounded-xl border text-sm">
+          {c.filas.map(([k, v]) => (
+            <div key={k} className="flex items-start justify-between gap-3 px-3 py-2.5">
+              <dt className="shrink-0 text-muted-foreground">{k}</dt>
+              <dd className="min-w-0 text-right font-medium">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="flex gap-2">
+          <Button variant="outline" className="h-12 flex-1" onClick={onClose}>
+            Volver
+          </Button>
+          <Button
+            variant={c.peligro ? "destructive" : "default"}
+            className="h-12 flex-[2] whitespace-nowrap"
+            onClick={() => {
+              c.hacer()
+              onClose()
+            }}
+          >
+            {c.boton}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const nombreCorto = (p: Pedido) => `${p.clienta.split(" ")[0]} ${p.clienta.split(" ")[1]?.[0] ?? ""}.`
+const loQueLleva = (p: Pedido) =>
+  p.lineas
+    .filter((l) => !l.vuelve)
+    .map((l) => `${l.nombre} · ${l.variante}`)
+    .join(", ")
+
 /** Cobrar en la puerta: cada forma con quien la confirma. «Entregué» solo con el pago confirmado. */
 function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const { rubro } = useRuta()
+  const confirmar = useContext(Confirma)
   const k = cuentas(p)
   const [forma, setForma] = useState<Forma | null>(null)
   const [recibi, setRecibi] = useState("")
@@ -210,11 +272,20 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
             </label>
             <Button
               onClick={() =>
-                cobrar(
-                  "efectivo",
-                  "Kevin",
-                  `Cobró ${money(k.falta)} en efectivo. Lo entrega en Caja.`,
-                )
+                confirmar({
+                  titulo: "¿Recibiste el efectivo?",
+                  filas: [
+                    ["A quién", `${nombreCorto(p)} · ${p.id}`],
+                    ["Qué", "Efectivo, en la puerta"],
+                    ["Cuánto", money(k.falta)],
+                    ...(Number(recibi) > k.falta
+                      ? ([["Vuelto", money(Number(recibi) - k.falta)]] as [string, string][])
+                      : []),
+                  ],
+                  boton: `Sí, recibí ${money(k.falta)}`,
+                  hacer: () =>
+                    cobrar("efectivo", "Kevin", `Cobró ${money(k.falta)} en efectivo. Lo entrega en Caja.`),
+                })
               }
             >
               Recibí {money(k.falta)}
@@ -236,7 +307,16 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
             )}
             <Button
               disabled={!foto}
-              onClick={() => {
+              onClick={() =>
+                confirmar({
+                  titulo: forma === "pos" ? "¿El voucher dice aprobado?" : "¿Mandas la captura a la tienda?",
+                  filas: [
+                    ["A quién", `${nombreCorto(p)} · ${p.id}`],
+                    ["Qué", forma === "pos" ? "Tarjeta, con el POS · foto del voucher" : "Yape o Plin · foto de la captura"],
+                    ["Cuánto", money(k.falta)],
+                  ],
+                  boton: forma === "pos" ? `Sí, cobré ${money(k.falta)}` : "Mandar a la tienda",
+                  hacer: () => {
                 if (forma === "pos")
                   cobrar(
                     "pos",
@@ -273,7 +353,9 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
                       texto: `Subió la foto del Yape de ${n} en la puerta. Espera que la tienda lo confirme.`,
                     },
                   )
-              }}
+                  },
+                })
+              }
             >
               {forma === "pos" ? "Voucher aprobado" : "Mandar a la tienda"}
             </Button>
@@ -284,7 +366,17 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
         <Button
           className="h-12 w-full text-[15px]"
           disabled={!confirmado}
-          onClick={() => {
+          onClick={() =>
+            confirmar({
+              titulo: "¿Lo entregaste?",
+              filas: [
+                ["A quién", `${nombreCorto(p)} · ${p.id}`],
+                ["Dónde", p.entrega.direccion],
+                ["Qué", loQueLleva(p)],
+                ["Cuánto", k.confirmado ? `${money(k.confirmado)} · pagado` : "Pagado"],
+              ],
+              boton: "Sí, entregado",
+              hacer: () => {
             mover(
               rubro,
               p.id,
@@ -301,7 +393,9 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
             )
             toast.success(`${p.id} entregado.`)
             onClose()
-          }}
+              },
+            })
+          }
         >
           {confirmado ? (
             k.confirmado ? (
@@ -323,6 +417,7 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
 
 function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
   const { rubro } = useRuta()
+  const confirmar = useContext(Confirma)
   const k = cuentas(p)
   const pagado = k.falta === 0 && k.porConfirmar === 0
   const n = `${p.clienta.split(" ")[0]} ${p.clienta.split(" ")[1]?.[0] ?? ""}.`
@@ -369,6 +464,16 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
             size="sm"
             variant="outline"
             onClick={() =>
+              confirmar({
+                titulo: "¿No estaba?",
+                filas: [
+                  ["A quién", `${nombreCorto(p)} · ${p.id}`],
+                  ["Dónde", p.entrega.direccion],
+                  ["Qué pasa", "Vuelve contigo. Sofi le escribe para llevárselo mañana."],
+                ],
+                boton: "Sí, no estaba",
+                peligro: true,
+                hacer: () =>
               mover(
                 rubro,
                 p.id,
@@ -388,7 +493,8 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
                   texto: "«No estaba»: nadie abrió. Sofi le escribió para otro día.",
                   paso: "por_salir",
                 },
-              )
+              ),
+              })
             }
           >
             No estaba
@@ -404,6 +510,7 @@ const ESTADOS = ["Sin uso, con su caja", "Con uso", "Con falla"] as const
 /** La tarea «Recoger»: la foto de cómo está el producto y «Recogí». Lo deja en la tienda. */
 function Recoger({ p }: { p: Pedido }) {
   const { rubro } = useRuta()
+  const confirmar = useContext(Confirma)
   const v = p.vuelta!
   const [abierto, setAbierto] = useState(false)
   const [foto1, setFoto] = useState(false)
@@ -458,10 +565,22 @@ function Recoger({ p }: { p: Pedido }) {
           <Button
             size="sm"
             disabled={!foto1 || !estado}
-            onClick={() => {
-              recogido(rubro, p, "Kevin", estado!.toLowerCase())
-              toast.success("Recogido. Lo dejas en la tienda al cerrar tu ruta.")
-            }}
+            onClick={() =>
+              confirmar({
+                titulo: "¿Lo recogiste?",
+                filas: [
+                  ["A quién", `${n} · ${p.id}`],
+                  ["Qué", `${l.nombre} · ${l.variante}`],
+                  ["Cómo está", estado!],
+                  ["Cuánto", "No cobras nada"],
+                ],
+                boton: "Sí, lo recogí",
+                hacer: () => {
+                  recogido(rubro, p, "Kevin", estado!.toLowerCase())
+                  toast.success("Recogido. Lo dejas en la tienda al cerrar tu ruta.")
+                },
+              })
+            }
           >
             <Check aria-hidden />
             Recogí
@@ -481,6 +600,7 @@ function App() {
   const R = RUBROS[rubro]
   const all = usePedidos(rubro)
   const [cobrando, setCobrando] = useState<string | null>(null)
+  const [conf, setConf] = useState<Conf | null>(null)
   const mias = all.filter(
     (p) =>
       p.entrega.repartidor === "Kevin" &&
@@ -501,6 +621,7 @@ function App() {
     .reduce((a, g) => a + g.monto, 0)
   const p = cobrando ? all.find((x) => x.id === cobrando) : undefined
   return (
+    <Confirma.Provider value={setConf}>
     <div className="relative flex h-full flex-col bg-muted/40" data-brand="gestoria">
       <div className="flex items-center gap-2 border-b bg-card px-4 py-3">
         <span className="flex-1">
@@ -520,7 +641,15 @@ function App() {
           </span>
           {porSalir.length ? (
             <Button
-              onClick={() => {
+              onClick={() =>
+                setConf({
+                  titulo: `¿Sales con ${porSalir.length === 1 ? "este pedido" : `estos ${porSalir.length}`}?`,
+                  filas: porSalir.map((x) => [
+                    `${x.id} · ${nombreCorto(x)}`,
+                    `${x.entrega.zona.split(",")[0]} · ${cuentas(x).falta ? `cobra ${money(cuentas(x).falta)}` : "pagado"}`,
+                  ]),
+                  boton: "Sí, salí",
+                  hacer: () => {
                 for (const x of porSalir)
                   mover(
                     rubro,
@@ -541,7 +670,9 @@ function App() {
                     },
                   )
                 toast.success(`Salió con ${porSalir.length}. Sofi les avisó.`)
-              }}
+                  },
+                })
+              }
             >
               Salí con {porSalir.length === 1 ? "el" : `los ${porSalir.length}`}
             </Button>
@@ -585,7 +716,9 @@ function App() {
         <b className="tabular-nums">{money(efectivo)}</b>
       </div>
       {p ? <Cobrar p={p} onClose={() => setCobrando(null)} /> : null}
+      {conf ? <HojaConfirmar c={conf} onClose={() => setConf(null)} /> : null}
     </div>
+    </Confirma.Provider>
   )
 }
 

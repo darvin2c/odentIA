@@ -1,5 +1,6 @@
 import { addDays, formatDateLong, formatDayShort, weekDates } from "@odentia/ui-patterns"
 import { foto as _foto, RUBROS, type RubroId } from "../datos"
+import { vueltaToca } from "../pedidos/vuelta"
 import {
   cuentas,
   type Linea,
@@ -278,16 +279,19 @@ function semana(rubro: RubroId): Pedido[] {
 }
 MAS_PEDIDOS.push(semana)
 
-/* ---------- Los recojos: cambios y devoluciones que ya aprobó una persona ---------- */
+/* ---------- Los recojos: salen de los cambios y devoluciones de Pedidos ---------- */
 
 /**
- * Lo que hay que recoger en la casa de la clienta. Lo arma Sofi según la política de la tienda y lo
- * aprueba una persona (o lo hace Sofi sola, si la tienda lo deja); en Despachos es una parada más
- * del día. Es un pedido enlazado al original («cambio de 0141»), como en Pedidos.
+ * Lo que hay que recoger en la casa de la clienta. No es un dato aparte: sale del cambio o la
+ * devolución del pedido (`p.vuelta`, en `pedidos/vuelta.ts`), que arma Sofi según la política de
+ * la tienda. En Despachos es una parada más del día, con la etapa «Por recoger»:
+ * - en el mismo viaje (`recojo_mismo`), la parada es el pedido de cambio enlazado («lleva una y
+ *   recoge otra»), o el caso mismo mientras falta aprobarlo;
+ * - en un viaje solo para recoger (`recojo_solo`), la parada es el caso, en su día y su franja.
  */
 export interface Recojo {
   tipo: "cambio" | "devolucion"
-  /** El pedido original. */
+  /** El pedido original, el entregado. */
   de: string
   /** Por qué, en palabras de la clienta. */
   motivo: string
@@ -297,115 +301,31 @@ export interface Recojo {
   lleva?: string
   /** Qué hace el repartidor en la puerta. */
   puerta: string
-  /** Cuánto se le devuelve, si es devolución. */
+  /** Cuánto se le devuelve por su medio, si es devolución. */
   devuelve?: number
-  aprobo: string
+  aprobo?: string
 }
 
-export const RECOJOS: Record<string, Recojo> = {}
+const talla = (variante: string) => variante.split(" · ").at(-1) ?? variante
 
-function recojos(rubro: RubroId): Pedido[] {
-  const a = lineaDe(rubro, 1)
-  const talla = (l: Linea, t: string): Linea => ({
-    ...l,
-    id: nuevoId("l"),
-    variante: `${l.variante.split(" · ")[0]} · ${t}`,
-  })
-  const b = lineaDe(rubro, 3)
-  const base = (id: string, clienta: string, zona: string, franja: string, rep: string) => ({
-    id,
-    clienta,
-    telefono: `9** *** 2${id.slice(-2)}`,
-    canal: "whatsapp" as const,
-    origen: { k: "sofi" as const },
-    creado: "Ayer",
-    cobro: "link" as const,
-    pagos: [],
-    avisos: [],
-    chat: [],
-    unoPorCiento: false,
-    entrega: {
-      tipo: "moto" as const,
-      zona,
-      envio: 0,
-      dia: "Hoy",
-      franja,
-      repartidor: rep,
-      direccion: DIRECCION(zona, Number(id.slice(-2))),
-    },
-  })
-  const nueva = talla(a, "38")
-  const cambio: Pedido = {
-    ...base("0190", "Nadia Ruiz", "Lince", "2 a 6 p. m.", "Kevin"),
-    paso: "preparando",
-    cambioDe: "0141",
-    lineas: [{ ...talla(a, "37"), vuelve: true }, nueva],
-    eventos: [
-      {
-        id: nuevoId("e"),
-        cuando: "Ayer · 6:10 p. m.",
-        actor: "sofi",
-        quien: "Sofi",
-        texto: "Armó el cambio de talla según la política: primer cambio, sin costo de envío.",
-        paso: "por_pagar",
-      },
-      {
-        id: nuevoId("e"),
-        cuando: "Ayer · 6:32 p. m.",
-        actor: "persona",
-        quien: "Rosa",
-        texto: "Aprobó el cambio.",
-        paso: "pagado",
-      },
-    ],
+function recojoDe(orig: Pedido, cambio?: Pedido): Recojo | undefined {
+  const v = orig.vuelta
+  if (!v || !v.como.startsWith("recojo")) return undefined
+  const va = cambio?.lineas.find((l) => !l.vuelve) ?? (v.como === "recojo_mismo" ? v.sale : undefined)
+  const ap = v.hechos.aprobado
+  return {
+    tipo: v.tipo,
+    de: orig.id,
+    motivo: v.dice,
+    recoge: v.vuelven.map((l) => `${l.nombre} · ${l.variante}`).join(", "),
+    lleva: va ? `${va.nombre} · ${va.variante}` : undefined,
+    puerta: va
+      ? `Le da la ${talla(va.variante)} para que se la pruebe. Si le queda, recoge la otra en su caja y le toma una foto.`
+      : "Revisa cómo está, le toma una foto y lo trae a la tienda. «Recogí» se activa con la foto.",
+    devuelve: v.arm.dinero === "medio" && v.arm.monto ? v.arm.monto : undefined,
+    aprobo: ap ? `${ap.quien}, ${ap.cuando.toLowerCase()}` : undefined,
   }
-  RECOJOS["0190"] = {
-    tipo: "cambio",
-    de: "0141",
-    motivo: "Le quedó chica: pide una talla más.",
-    recoge: `${a.nombre} · ${a.variante.split(" · ")[0]} · 37, en su caja`,
-    lleva: `${nueva.nombre} · ${nueva.variante}`,
-    puerta:
-      "Le da la 38 para que se la pruebe. Si le queda, recoge la 37 en su caja y le toma una foto.",
-    aprobo: "Rosa, ayer a las 6:32 p. m.",
-  }
-  const devolucion: Pedido = {
-    ...base("0191", "Sandra Vega", "Callao", "9 a 1 p. m.", "Jhon"),
-    paso: "por_salir",
-    cambioDe: "0136",
-    lineas: [{ ...b, id: nuevoId("l"), vuelve: true }],
-    eventos: [
-      {
-        id: nuevoId("e"),
-        cuando: "Ayer · 4:05 p. m.",
-        actor: "sofi",
-        quien: "Sofi",
-        texto: "Armó la devolución: dentro de los 7 días y sin usar, como pide la política.",
-        paso: "por_pagar",
-      },
-      {
-        id: nuevoId("e"),
-        cuando: "Ayer · 4:20 p. m.",
-        actor: "persona",
-        quien: "Rosa",
-        texto: "Aprobó la devolución.",
-        paso: "pagado",
-      },
-    ],
-  }
-  RECOJOS["0191"] = {
-    tipo: "devolucion",
-    de: "0136",
-    motivo: "El color no es como en la foto.",
-    recoge: `${b.nombre} · ${b.variante}, sin usar y en su caja`,
-    puerta:
-      "Revisa que esté sin usar y con su caja, y le toma una foto. Si está usado, no lo recoge y avisa a la tienda.",
-    devuelve: b.precio,
-    aprobo: "Rosa, ayer a las 4:20 p. m.",
-  }
-  return [cambio, devolucion]
 }
-MAS_PEDIDOS.push(recojos)
 
 /* ---------- Las entregas, como las ve Despachos ---------- */
 
@@ -481,9 +401,11 @@ export const PUNTO: Record<Tono, string> = {
   default: "bg-primary ring-2 ring-primary/30",
 }
 
-export type Boton = "listo" | "confirmar" | "asignar" | "numero" | "pasar"
+export type Boton = "listo" | "confirmar" | "asignar" | "numero" | "pasar" | "vuelta"
 
 export interface Ent {
+  /** El del pedido; la parada de un recojo lleva «-r», porque su pedido también tiene su entrega. */
+  id: string
   p: Pedido
   fecha: string
   estado: Estado
@@ -571,11 +493,10 @@ function tocaDe(p: Pedido, estado: Estado, fecha: string, recojo?: Recojo): Ent[
   }
 }
 
-export function entregaDe(p: Pedido): Ent | null {
+export function entregaDe(p: Pedido, recojo?: Recojo): Ent | null {
   const fecha = fechaDe(p.entrega.dia)
   if (!fecha || p.paso === "anulado" || p.entrega.tipo === "recojo") return null
   const k = cuentas(p)
-  const recojo = RECOJOS[p.id]
   let estado: Estado
   let boton: Ent["boton"]
   if (p.paso === "por_confirmar") {
@@ -620,6 +541,7 @@ export function entregaDe(p: Pedido): Ent | null {
       ? "no_entregado"
       : p.paso
   return {
+    id: p.id,
     p,
     fecha,
     estado,
@@ -635,7 +557,64 @@ export function entregaDe(p: Pedido): Ent | null {
 }
 
 export function entregasDe(list: Pedido[]): Ent[] {
-  return list.map(entregaDe).filter((x): x is Ent => !!x)
+  const porId = new Map(list.map((p) => [p.id, p]))
+  const out: Ent[] = []
+  for (const p of list) {
+    const orig = p.cambioDe && p.lineas.some((l) => l.vuelve) ? porId.get(p.cambioDe) : undefined
+    const e = entregaDe(p, orig ? recojoDe(orig, p) : undefined)
+    if (e) out.push(e)
+    const r = paradaDeVuelta(p)
+    if (r) out.push(r)
+  }
+  return out
+}
+
+/**
+ * La parada de un caso de vuelta: mientras falta aprobarlo (con el botón de Pedidos: «Aprobar»,
+ * «Decidir») o, si es un viaje solo para recoger, hasta que se recoge. Lo aprobado en el mismo
+ * viaje ya va en el pedido de cambio enlazado.
+ */
+export function paradaDeVuelta(p: Pedido): Ent | null {
+  const v = p.vuelta
+  if (!v || !v.como.startsWith("recojo") || p.paso !== "entregado") return null
+  const t = vueltaToca(p)
+  const porAprobar = v.estado === "solicitado" && t
+  const solo = v.como === "recojo_solo" && v.estado !== "solicitado" && v.estado !== "rechazado"
+  if (!porAprobar && !solo) return null
+  const hecho = ["recibido", "revisado", "cerrado"].includes(v.estado)
+  const rep = v.repartidor ?? p.entrega.repartidor ?? "Kevin"
+  const q: Pedido = {
+    ...p,
+    paso: hecho ? "entregado" : "por_salir",
+    entrega: {
+      ...p.entrega,
+      tipo: "moto",
+      dia: v.dia ?? "Vie 28",
+      franja: v.franja ?? "2 a 6 p. m.",
+      repartidor: rep,
+    },
+  }
+  const fecha = fechaDe(q.entrega.dia)
+  if (!fecha) return null
+  const recojo = recojoDe(p)!
+  return {
+    id: `${p.id}-r`,
+    p: q,
+    fecha,
+    estado: hecho ? "entregado" : "por_salir",
+    etapa: hecho ? "recogido" : "por_recoger",
+    boton: porAprobar ? { texto: t.boton, tipo: "vuelta" } : undefined,
+    toca: porAprobar
+      ? { texto: t.texto, persona: true }
+      : hecho
+        ? { texto: `${rep} lo recogió y trajo la foto.`, persona: false }
+        : { texto: `Sigue solo: ${rep} lo recoge ${deFranja(q.entrega.franja)} y toma la foto.`, persona: false },
+    cobro: recojo.devuelve
+      ? { texto: `Devolver ${money(recojo.devuelve)}`, tono: "espera" }
+      : { texto: "Sin cobro", tono: "ok" },
+    falta: 0,
+    recojo,
+  }
 }
 
 /** Primero lo que no se entregó, después el orden del reparto: franja, zona y número. */

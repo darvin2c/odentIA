@@ -1,4 +1,4 @@
-import { Badge, Button, cn, useIsMobile } from "@odentia/ui"
+import { Button, cn, useIsMobile } from "@odentia/ui"
 import {
   DataTable,
   FilterBar,
@@ -27,16 +27,16 @@ import { useEffect, useMemo, useState } from "react"
 import { foto } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { useTienda } from "../tienda"
-import { AccionDrawer, Anotar } from "./acciones"
-import { LoQueAprende, unToque } from "./vuelta-ui"
+import { Anotar } from "./acciones"
+import { abrirCajon } from "./cajon"
+import { EtapaBadge, TeTocaPanel } from "./tarjeta"
+import { LoQueAprende } from "./vuelta-ui"
 import {
-  type Accion,
   CANAL,
   cuentas,
   entregaTexto,
   money,
   ORIGEN_LABEL,
-  PASO,
   type Paso,
   type Pedido,
   teToca,
@@ -77,60 +77,6 @@ const diaDe = (p: Pedido) =>
         ? "antes"
         : "sin"
 
-/** «Te toca» de pedidos: lo que necesita a una persona, cada uno con su único botón. */
-export function TeTocaPedidos({
-  list,
-  onAbrir,
-  onAccion,
-  max,
-}: {
-  list: Pedido[]
-  onAbrir: (id: string) => void
-  onAccion: (p: Pedido, a: Accion) => void
-  max?: number
-}) {
-  const toca = teToca(list).slice(0, max)
-  const t = (p: Pedido) => tocaDe(p)!
-  if (!toca.length) return null
-  return (
-    <section aria-labelledby="toca-h" className="flex flex-col gap-3">
-      <h2 id="toca-h" className="flex items-center gap-2 text-sm font-semibold">
-        Te toca
-        <Badge variant="warning">{toca.length}</Badge>
-        <span className="font-normal text-muted-foreground">Lo demás avanza solo.</span>
-      </h2>
-      <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {toca.map((p) => (
-          <li key={p.id} className="elevated flex flex-col gap-3 rounded-xl border bg-card p-3.5">
-            <button
-              type="button"
-              className="flex items-start gap-3 text-left"
-              onClick={() => onAbrir(p.id)}
-            >
-              {p.lineas[0]?.foto ? (
-                <img
-                  src={foto(p.lineas[0].foto)}
-                  alt=""
-                  className="size-10 shrink-0 rounded-lg bg-muted object-cover"
-                />
-              ) : null}
-              <span className="flex min-w-0 flex-col gap-0.5 text-sm">
-                <span className="text-xs text-muted-foreground">
-                  {p.id} · {p.clienta}
-                </span>
-                <span className="font-medium leading-snug">{t(p).texto}</span>
-              </span>
-            </button>
-            <Button size="sm" className="self-start" onClick={() => onAccion(p, t(p).accion)}>
-              {t(p).boton}
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
 function Foto({ p }: { p: Pedido }) {
   return p.lineas[0]?.foto ? (
     <img
@@ -143,24 +89,28 @@ function Foto({ p }: { p: Pedido }) {
   )
 }
 
-/** El estado del pedido y, si algo vuelve, el de su cambio o devolución. */
-function EstadoBadge({ p }: { p: Pedido }) {
-  const v = p.vuelta
-  if (!v || v.estado === "cerrado" || v.estado === "rechazado")
-    return <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
-  const t = v.tipo === "cambio" ? "Cambio" : "Devolución"
-  const e =
-    v.estado === "solicitado"
-      ? "por aprobar"
-      : v.estado === "recibido"
-        ? "por revisar"
-        : v.estado === "revisado"
-          ? "por devolver"
-          : "en vuelta"
+/** El botón de lo que toca en una fila: abre el cajón del pedido, no la página. */
+function BotonToca({ p, fila }: { p: Pedido; fila?: boolean }) {
+  const t = tocaDe(p)!
   return (
-    <Badge variant="warning">
-      {t} {e}
-    </Badge>
+    <span
+      className={cn(
+        "flex items-center gap-2",
+        fila && "mt-1 -mx-1 rounded-lg bg-warning-soft/60 px-2 py-1.5 text-xs font-normal",
+      )}
+    >
+      {fila ? <span className="min-w-0 flex-1 leading-snug">{t.texto}</span> : null}
+      <Button
+        size={fila ? "default" : "sm"}
+        className={cn("shrink-0 whitespace-nowrap", fila && "h-11")}
+        onClick={(ev) => {
+          ev.stopPropagation()
+          abrirCajon(p.id)
+        }}
+      >
+        {t.boton}
+      </Button>
+    </span>
   )
 }
 
@@ -214,11 +164,9 @@ function Lista() {
     setVistaS(v)
   }
   const [anotar, setAnotar] = useState(false)
-  const [accion, setAccion] = useState<{ p: Pedido; a: Accion } | null>(null)
+  const [teTocaAbierto, setTeToca] = useState(false)
   const abrir = (id: string) => ir(`/pedidos/${id}`)
-  const hacer = (p: Pedido, a: Accion) => {
-    if (!unToque(rubro, p, a)) setAccion({ p, a })
-  }
+  const nToca = teToca(all).length
 
   const busca = (get("q") ?? "").toLowerCase()
   const fDia = get("dia")
@@ -320,8 +268,7 @@ function Lista() {
                   </span>
                   <span className="truncate text-xs font-normal text-muted-foreground">{lleva}</span>
                   <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <EstadoBadge p={p} />
-                    {tocaDe(p) ? <Badge variant="warning">Te toca</Badge> : null}
+                    <EtapaBadge p={p} />
                     <span className="text-sm font-normal">
                       <Cobro p={p} />
                     </span>
@@ -331,6 +278,7 @@ function Lista() {
                       {entregaTexto(p.entrega)}
                     </span>
                   ) : null}
+                  {tocaDe(p) ? <BotonToca p={p} fila /> : null}
                 </span>
               </span>
             )
@@ -352,11 +300,16 @@ function Lista() {
           const p = row.original
           return (
             <span className="flex flex-wrap items-center gap-1.5">
-              <EstadoBadge p={p} />
-              {tocaDe(p) ? <Badge variant="warning">Te toca</Badge> : null}
+              <EtapaBadge p={p} />
             </span>
           )
         },
+      },
+      {
+        id: "toca",
+        header: "Te toca",
+        meta: { view: { tableOnly: true } },
+        cell: ({ row }) => (tocaDe(row.original) ? <BotonToca p={row.original} /> : null),
       },
       {
         id: "cobro",
@@ -413,18 +366,37 @@ function Lista() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Pedidos"
-        subtitle={`${abiertos.length} abiertos · ${salenHoy} salen hoy`}
+        subtitle={
+          isMobile && nToca ? (
+            <span className="flex items-center justify-between gap-3">
+              <span>
+                {abiertos.length} abiertos · {salenHoy} salen hoy
+              </span>
+              <Button className="h-11 shrink-0 px-4" onClick={() => setTeToca(true)}>
+                <UserRound aria-hidden />
+                Te toca · {nToca}
+              </Button>
+            </span>
+          ) : (
+            `${abiertos.length} abiertos · ${salenHoy} salen hoy`
+          )
+        }
         primary={{
           label: "Anotar pedido",
           icon: <Plus aria-hidden />,
           onClick: () => setAnotar(true),
         }}
-        secondary={{
-          label: "Cómo avanza",
-          icon: <Workflow aria-hidden />,
-          onClick: () => ir("/pedidos/como-avanza"),
-        }}
+        secondary={
+          nToca && !isMobile
+            ? { label: `Te toca · ${nToca}`, icon: <UserRound aria-hidden />, onClick: () => setTeToca(true) }
+            : undefined
+        }
         menu={[
+          {
+            label: "Cómo avanza",
+            icon: <Workflow aria-hidden />,
+            onSelect: () => ir("/pedidos/como-avanza"),
+          },
           {
             label: "Política de cambios y devoluciones",
             icon: <ScrollText aria-hidden />,
@@ -442,7 +414,6 @@ function Lista() {
           },
         ]}
       />
-      <TeTocaPedidos list={all} onAbrir={abrir} onAccion={hacer} />
       {!isMobile ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <KpiCard
@@ -506,13 +477,7 @@ function Lista() {
         ) : null}
       </div>
       {anotar ? <Anotar onClose={() => setAnotar(false)} /> : null}
-      {accion ? (
-        <AccionDrawer
-          p={all.find((x) => x.id === accion.p.id) ?? accion.p}
-          accion={accion.a}
-          onClose={() => setAccion(null)}
-        />
-      ) : null}
+      <TeTocaPanel list={all} open={teTocaAbierto} setOpen={setTeToca} />
     </PageShell>
   )
 }

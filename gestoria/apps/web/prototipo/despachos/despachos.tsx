@@ -35,7 +35,8 @@ import {
   useArrastre,
 } from "./gestos"
 import { ScheduleSnapPager as Pager } from "@odentia/ui-patterns"
-import { PedidoCajon } from "./cajon"
+import { AccionCajon } from "../pedidos/cajon"
+import { Hoja } from "../pedidos/hoja"
 import { Cobro, FaltaHoja, Foto, mostrarCobro } from "./hojas"
 import {
   CUPO,
@@ -205,10 +206,10 @@ export function DespachosPage() {
   const semana = ancho && ver === "semana"
   const lunes = semanaDe(fecha)[0]!
   const delDia = (f: string) => ents.filter((e) => e.fecha === f)
-  const porId = (id: string) => ents.find((e) => e.p.id === id)
+  const porId = (id: string) => ents.find((e) => e.id === id)
 
   // Tocar la tarjeta o su botón: siempre el cajón del pedido, con lo que toca al pie.
-  const abrir = (e: Ent) => setHoja({ k: "pedido", id: e.p.id })
+  const abrir = (e: Ent) => setHoja({ k: "pedido", id: e.id })
   const soltar = (id: string, d: Destino) => {
     const e = porId(id)
     if (!e) return
@@ -379,8 +380,9 @@ export function DespachosPage() {
       </PageShell>
 
       {hoja?.k === "pedido" && h ? (
-        <PedidoCajon
+        <AccionCajon
           key={JSON.stringify(hoja)}
+          p={h.p}
           e={h}
           pasarA={hoja.pasar}
           dock={!semana}
@@ -485,7 +487,7 @@ function DiaPane({
             </h3>
             <ul className="flex flex-col gap-2">
               {toca.map((e) => (
-                <Tarjeta key={e.p.id} e={e} abrir={abrir} />
+                <Tarjeta key={e.id} e={e} abrir={abrir} />
               ))}
             </ul>
           </section>
@@ -498,7 +500,7 @@ function DiaPane({
         {vista === "franja" && noEntrego.length ? (
           <Seccion titulo="No se entregó" aviso n={noEntrego.length}>
             {noEntrego.map((e) => (
-              <Tarjeta key={e.p.id} e={e} abrir={abrir} />
+              <Tarjeta key={e.id} e={e} abrir={abrir} />
             ))}
           </Seccion>
         ) : null}
@@ -640,7 +642,7 @@ function Tarjeta({
       </span>
     </span>
   )
-  const { props, arrastrando, levantando } = useArrastrable(e.p.id, fantasma)
+  const { props, arrastrando, levantando } = useArrastrable(e.id, fantasma)
   const nombre = `${e.p.clienta}, pedido ${e.p.id}: ${et.label}, ${e.cobro.texto}, ${donde(e)}`
   if (compacta)
     return (
@@ -813,7 +815,7 @@ function PorFranja({
               {g.lista.length ? (
                 <ul className="flex flex-col gap-2">
                   {g.lista.map((e) => (
-                    <Tarjeta key={e.p.id} e={e} abrir={abrir} />
+                    <Tarjeta key={e.id} e={e} abrir={abrir} />
                   ))}
                 </ul>
               ) : (
@@ -849,6 +851,8 @@ function PorRepartidor({
   setCaja: (c: Record<string, number>) => void
 }) {
   const hoy = fecha === HOY
+  // «Recibí» también se confirma: a quién, cuánto y de cuántas entregas.
+  const [recibir, setRecibir] = useState<{ rep: string; monto: number; pendientes: number } | null>(null)
   const grupos = [
     ...REPARTIDORES.map((r) => ({
       rep: r as string | null,
@@ -931,14 +935,7 @@ function PorRepartidor({
                       variant={pendientes ? "outline" : "default"}
                       className="h-11"
                       disabled={plata.cobrado === 0}
-                      onClick={() => {
-                        setCaja({ ...caja, [g.rep!]: plata.cobrado })
-                        toast.success(`Quedó en Caja: ${money(plata.cobrado)} de ${g.rep}.`, {
-                          description: pendientes
-                            ? `Le quedan ${pendientes} por entregar; lo que cobre después se suma aparte.`
-                            : "Cerró su día.",
-                        })
-                      }}
+                      onClick={() => setRecibir({ rep: g.rep!, monto: plata.cobrado, pendientes })}
                     >
                       Recibí {money(plata.cobrado)} de {g.rep}
                     </Button>
@@ -954,7 +951,7 @@ function PorRepartidor({
             ) : g.lista.length ? (
               <ol className="flex flex-col gap-2">
                 {g.lista.map((e, i) => (
-                  <Tarjeta key={e.p.id} e={e} abrir={abrir} orden={g.rep ? i + 1 : undefined} />
+                  <Tarjeta key={e.id} e={e} abrir={abrir} orden={g.rep ? i + 1 : undefined} />
                 ))}
               </ol>
             ) : (
@@ -965,6 +962,42 @@ function PorRepartidor({
           </Seccion>
         )
       })}
+      {recibir ? (
+        <Hoja
+          open
+          dock={false}
+          onClose={() => setRecibir(null)}
+          title={`Recibir la plata de ${recibir.rep}`}
+          description="Lo que cobró en efectivo hoy. Queda en Caja a su nombre."
+          submitLabel={`Recibí ${money(recibir.monto)}`}
+          onSubmit={(ev) => {
+            ev.preventDefault()
+            setCaja({ ...caja, [recibir.rep]: recibir.monto })
+            toast.success(`Quedó en Caja: ${money(recibir.monto)} de ${recibir.rep}.`, {
+              description: recibir.pendientes
+                ? `Le quedan ${recibir.pendientes} por entregar; lo que cobre después se suma aparte.`
+                : "Cerró su día.",
+            })
+            setRecibir(null)
+          }}
+        >
+          <dl className="flex flex-col divide-y rounded-xl border text-sm">
+            <div className="flex justify-between gap-3 px-3 py-2.5">
+              <dt className="text-muted-foreground">De quién</dt>
+              <dd className="font-medium">{recibir.rep}</dd>
+            </div>
+            <div className="flex justify-between gap-3 px-3 py-2.5">
+              <dt className="text-muted-foreground">Cuánto</dt>
+              <dd className="font-heading text-lg font-bold tabular-nums">{money(recibir.monto)}</dd>
+            </div>
+            <div className="flex justify-between gap-3 px-3 py-2.5">
+              <dt className="text-muted-foreground">Le quedan</dt>
+              <dd>{recibir.pendientes ? `${recibir.pendientes} por entregar` : "Nada: cerró su día"}</dd>
+            </div>
+          </dl>
+          <p className="text-sm text-muted-foreground">Cuéntalo antes de confirmar.</p>
+        </Hoja>
+      ) : null}
     </div>
   )
 }
@@ -1081,7 +1114,7 @@ function SemanaTablero({
           <h3 className="px-1 text-sm font-semibold">Te toca esta semana · {toca.length}</h3>
           <ul className="grid grid-cols-[repeat(auto-fill,minmax(22rem,1fr))] gap-2">
             {toca.map((e) => (
-              <Tarjeta key={e.p.id} e={e} abrir={abrir} />
+              <Tarjeta key={e.id} e={e} abrir={abrir} />
             ))}
           </ul>
         </section>
@@ -1140,7 +1173,7 @@ function FilaSemana({
               </Badge>
             ) : null}
             {lista.map((e) => (
-              <Tarjeta key={e.p.id} e={e} abrir={abrir} compacta />
+              <Tarjeta key={e.id} e={e} abrir={abrir} compacta />
             ))}
           </div>
         )

@@ -37,6 +37,7 @@ import { reiniciar, useTienda } from "./tienda"
 import { DespachosPage } from "./despachos/despachos"
 import { ClientaPage } from "./pedidos/clienta"
 import { ComoAvanzaPage } from "./pedidos/como-avanza"
+import { CajonGlobal } from "./pedidos/cajon"
 import { PedidoPage } from "./pedidos/detalle"
 import { InicioPage } from "./pedidos/inicio"
 import { PedidosPage } from "./pedidos/lista"
@@ -304,6 +305,8 @@ export function App() {
         onSignOut={() => ir("/catalogo")}
       >
         <div className={cn("min-w-0")}>{page}</div>
+        {/* El cajón «pedido + lo que toca» de toda la app (Despachos monta el suyo). */}
+        {p === "/despachos" ? null : <CajonGlobal />}
       </AppShell>
     </>
   )

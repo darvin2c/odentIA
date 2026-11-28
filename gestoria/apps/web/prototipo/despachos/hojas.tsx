@@ -1,5 +1,7 @@
 import { Checkbox, cn, Input, toast } from "@odentia/ui"
-import { FormDrawer, RadioChips } from "@odentia/ui-patterns"
+import { RadioChips } from "@odentia/ui-patterns"
+import { empacar } from "../pedidos/acciones"
+import { Hoja } from "../pedidos/hoja"
 import { ChevronLeft, ChevronRight, CircleAlert, MessageCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { avisar, money, mover, type Pedido, pedidosDe } from "../pedidos/modelo"
@@ -57,6 +59,32 @@ export function pasar(
   quien = "Rosa",
 ) {
   const texto = textoAviso(p, fecha, franja, rep)
+  // La parada de un recojo: se mueve el día del caso (el pedido ya se entregó).
+  const real = pedidosDe(rubro).find((x) => x.id === p.id)
+  if (real?.vuelta && real.paso === "entregado") {
+    const n = p.clienta.split(" ")[0]
+    mover(
+      rubro,
+      p.id,
+      (x) => {
+        x.vuelta!.dia = etiqueta(fecha)
+        x.vuelta!.franja = franja ?? undefined
+        x.vuelta!.repartidor = rep ?? undefined
+        if (sofi)
+          avisar(
+            x,
+            "cambio",
+            `${n}, pasamos a recoger tu ${x.vuelta!.tipo === "cambio" ? "cambio" : "devolución"} ${fecha === HOY ? "hoy" : `el ${largo(fecha)}`}${franja ? ` entre ${franja.replace(" a ", " y ")}` : ""}${rep ? ` con ${rep}` : ""}.`,
+          )
+      },
+      {
+        actor: quien === "gestorIA" ? "gestoria" : "persona",
+        quien,
+        texto: `Pasó el recojo al ${largo(fecha)}${rep ? `, con ${rep}` : ""}.${sofi ? " Sofi le avisó." : " Sin aviso a la clienta."}`,
+      },
+    )
+    return
+  }
   mover(
     rubro,
     p.id,
@@ -78,37 +106,9 @@ export function pasar(
   )
 }
 
+/** «Listo»: la misma operación de Pedidos (`empacar`), con «Deshacer» en el aviso. */
 export function listo(rubro: Parameters<typeof mover>[0], e: Ent) {
-  const rep = e.p.entrega.repartidor ?? e.p.entrega.agencia ?? "el repartidor"
-  const agencia = e.p.entrega.tipo === "agencia"
-  mover(
-    rubro,
-    e.p.id,
-    (x) => {
-      x.paso = agencia ? "en_camino" : "por_salir"
-    },
-    {
-      actor: "persona",
-      quien: "Rosa",
-      texto: agencia ? `Lo dejó en ${rep}.` : `Lo empacó y se lo dio a ${rep}.`,
-      paso: agencia ? "en_camino" : "por_salir",
-    },
-  )
-  toast.success(agencia ? `${e.p.clienta.split(" ")[0]}: en ${rep}.` : `Listo: lo lleva ${rep}.`, {
-    description: agencia ? undefined : `Sale cuando ${rep} toque «Salí» en su app.`,
-    action: {
-      label: "Deshacer",
-      onClick: () =>
-        mover(
-          rubro,
-          e.p.id,
-          (x) => {
-            x.paso = "preparando"
-          },
-          { actor: "persona", quien: "Rosa", texto: "Deshizo «Listo»: todavía no salió." },
-        ),
-    },
-  })
+  empacar(rubro, e.p)
 }
 
 /* ---------- Piezas ---------- */
@@ -233,7 +233,7 @@ export function PasarHoja({
   const texto = textoAviso(e.p, fecha, franja, quien)
   const dias = semanaDe(semana)
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title="Pasar a…"
@@ -342,7 +342,7 @@ export function PasarHoja({
         </p>
       ) : null}
       <SofiAvisa on={sofi} set={setSofi} texto={texto} />
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -357,7 +357,7 @@ export function NumeroHoja({ e, onClose }: { e: Ent; onClose: () => void }) {
   const texto = `${n}, tu pedido ${e.p.id} va por ${ag}, número de envío ${num || "…"}. Lo recoges en su agencia de ${e.p.entrega.zona.split(",")[0]}.`
   const id = useId()
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={`Lo dejé en ${ag}`}
@@ -401,7 +401,7 @@ export function NumeroHoja({ e, onClose }: { e: Ent; onClose: () => void }) {
         />
       </div>
       <SofiAvisa on={sofi} set={setSofi} texto={texto} />
-    </FormDrawer>
+    </Hoja>
   )
 }
 
@@ -441,7 +441,7 @@ export function FaltaHoja({
   const otroDia = plan.filter((x) => x.fecha !== HOY)
   const ej = otroDia[0] ?? plan[0]
   return (
-    <FormDrawer
+    <Hoja
       open
       onClose={onClose}
       title={`${rep} no viene hoy`}
@@ -465,7 +465,7 @@ export function FaltaHoja({
       ) : (
         <ul className="flex flex-col divide-y rounded-xl border">
           {plan.map((x) => (
-            <li key={x.e.p.id} className="flex items-center gap-3 p-3">
+            <li key={x.e.id} className="flex items-center gap-3 p-3">
               <Foto e={x.e} className="size-10" />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate font-medium">{x.e.p.clienta}</span>
@@ -495,7 +495,7 @@ export function FaltaHoja({
           texto={textoAviso(ej.e.p, ej.fecha, ej.e.p.entrega.franja, ej.rep)}
         />
       ) : null}
-    </FormDrawer>
+    </Hoja>
   )
 }
 

@@ -6,9 +6,7 @@ import {
   Bike,
   Bot,
   CalendarClock,
-  Camera,
   Check,
-  CircleAlert,
   Clock3,
   CreditCard,
   ExternalLink,
@@ -25,10 +23,11 @@ import {
   Truck,
   UserRound,
 } from "lucide-react"
-import { Fragment, useState } from "react"
-import { foto } from "../datos"
+import { useState } from "react"
+import { foto, RUBROS } from "../datos"
 import { href, ir, useRuta } from "../ruta"
-import { AccionDrawer } from "./acciones"
+import { abrirCajon } from "./cajon"
+import { Ampliable, FotoMarcada, ImagenPago } from "./ejemplos"
 import {
   type Accion,
   type Actor,
@@ -55,7 +54,7 @@ import {
   usePedidos,
 } from "./modelo"
 import { saldoAFavor, vueltaSigue } from "./vuelta"
-import { SimularVuelta, unToque, VueltaBloque } from "./vuelta-ui"
+import { SimularVuelta, VueltaBloque } from "./vuelta-ui"
 
 export const ACTOR: Record<Actor, { label: string; Icon: typeof Bot; tono: string }> = {
   sofi: { label: "Sofi", Icon: Sparkles, tono: "bg-primary-soft text-primary-soft-foreground" },
@@ -593,40 +592,28 @@ function Punto({ actor, futuro, Icon }: { actor: Actor; futuro?: boolean; Icon?:
 }
 
 /** La foto que acompaña al paso: la captura del Yape o el voucher del POS. */
+/** La foto del paso: la captura, el voucher, la falla o el recojo. Se amplía al tocarla. */
 function Adjunto({ k, p }: { k: "captura" | "voucher" | "recojo" | "falla"; p: Pedido }) {
-  if (k === "recojo" || k === "falla")
+  const { rubro } = useRuta()
+  if (k === "recojo" || k === "falla") {
+    const l = p.vuelta?.vuelven[0]
+    if (!l) return null
+    const pie = k === "recojo" ? "Foto al recoger: cómo estaba" : "Foto de la falla: la mandó por WhatsApp"
     return (
-      <span className="mt-1 flex w-52 items-center gap-2.5 rounded-xl border bg-muted/40 p-2">
-        {p.vuelta?.vuelven[0]?.foto ? (
-          <img src={foto(p.vuelta.vuelven[0].foto)} alt="" className="size-10 shrink-0 rounded-lg object-cover" />
-        ) : (
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card">
-            <Camera className="size-4 text-muted-foreground" aria-hidden />
-          </span>
-        )}
-        <span className="flex min-w-0 flex-col text-xs">
-          <b className="font-medium">{k === "recojo" ? "Foto al recoger" : "Foto de la falla"}</b>
-          <span className="text-muted-foreground">{k === "recojo" ? "Cómo estaba el producto" : "La mandó por WhatsApp"}</span>
-        </span>
-      </span>
+      <Ampliable titulo={pie} className="mt-1 w-52">
+        <FotoMarcada src={l.foto} tipo={k} pie={pie} />
+      </Ampliable>
     )
+  }
   const g =
     k === "captura"
       ? p.pagos.find((x) => x.captura)
       : [...p.pagos].reverse().find((x) => x.medio === "pos")
+  if (!g) return null
   return (
-    <span className="mt-1 flex w-44 items-center gap-2.5 rounded-xl border bg-muted/40 p-2">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card">
-        <Camera className="size-4 text-muted-foreground" aria-hidden />
-      </span>
-      <span className="flex min-w-0 flex-col text-xs">
-        <b className="font-medium">{k === "captura" ? "Captura del Yape" : "Voucher del POS"}</b>
-        <span className="text-muted-foreground tabular-nums">
-          {money(g?.captura?.monto ?? g?.monto ?? 0)}
-          {g?.captura?.hora ? ` · ${g.captura.hora}` : ""}
-        </span>
-      </span>
-    </span>
+    <Ampliable titulo={k === "captura" ? "La captura" : "El voucher del POS"} className="mt-1 w-32">
+      <ImagenPago p={p} g={g} tienda={RUBROS[rubro].store.name} />
+    </Ampliable>
   )
 }
 
@@ -994,7 +981,6 @@ export function PedidoPage({ pid }: { pid: string }) {
   const { rubro } = useRuta()
   const p = usePedido(rubro, pid)
   const isMobile = useIsMobile()
-  const [accion, setAccion] = useState<{ a: Accion | "deshacer"; pago?: string } | null>(null)
   const [chat, setChat] = useState(false)
   const volver = (
     <a
@@ -1014,9 +1000,8 @@ export function PedidoPage({ pid }: { pid: string }) {
     )
   const k = cuentas(p)
   const { otras } = acciones(p)
-  const hacer = (a: Accion) => {
-    if (!unToque(rubro, p, a)) setAccion({ a })
-  }
+  // Todo lo que cambia algo se confirma en el cajón «pedido + lo que toca».
+  const hacer = (a: Accion) => abrirCajon(p.id, a)
   const ICON: Partial<Record<Accion, typeof Bot>> = {
     cambiar: PencilLine,
     pasar: CalendarClock,
@@ -1032,7 +1017,7 @@ export function PedidoPage({ pid }: { pid: string }) {
       <VueltaBloque p={p} />
       <Carrito p={p} />
       {p.paso !== "anulado" ? (
-        <Saldo p={p} onAccion={(a, pago) => setAccion({ a, pago })} />
+        <Saldo p={p} onAccion={(a, pago) => abrirCajon(p.id, a, { pago })} />
       ) : null}
       <EntregaB p={p} />
     </>
@@ -1071,7 +1056,7 @@ export function PedidoPage({ pid }: { pid: string }) {
           menu={[
             ...otras.map(([a, l]) => {
               const I = ICON[a] ?? PencilLine
-              return { label: l, icon: <I aria-hidden />, onSelect: () => setAccion({ a }) }
+              return { label: l, icon: <I aria-hidden />, onSelect: () => hacer(a) }
             }),
             {
               label: "Ver lo que ve la clienta",
@@ -1120,14 +1105,6 @@ export function PedidoPage({ pid }: { pid: string }) {
           </div>
         </div>
       )}
-      {accion ? (
-        <AccionDrawer
-          p={p}
-          accion={accion.a}
-          pagoId={accion.pago}
-          onClose={() => setAccion(null)}
-        />
-      ) : null}
     </PageShell>
   )
 }
