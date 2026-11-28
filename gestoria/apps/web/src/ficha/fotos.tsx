@@ -856,7 +856,7 @@ function VideoTile({
         </span>
       </span>
       {video.label ? (
-        <span className="pointer-events-none absolute top-2 left-2 max-w-[calc(100%-3rem)] truncate rounded-full bg-background/90 px-2 py-0.5 text-xs font-medium backdrop-blur">
+        <span className="pointer-events-none absolute top-2 left-2 max-w-[calc(100%-3rem)] truncate rounded-full max-sm:hidden bg-background/90 px-2 py-0.5 text-xs font-medium backdrop-blur">
           {video.label}
         </span>
       ) : null}

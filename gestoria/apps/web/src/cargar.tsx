@@ -282,7 +282,9 @@ function DropZone({
       <div
         className={cn(
           "flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-card p-6 text-center transition-colors",
-          big ? "min-h-64" : "min-h-28 md:flex-row md:justify-between md:text-left",
+          big
+            ? "min-h-64"
+            : "min-h-28 max-md:gap-2 max-md:p-4 md:flex-row md:justify-between md:text-left",
           over ? "border-primary bg-primary-soft/40" : "border-input-border",
         )}
         onDragOver={(e) => {
@@ -304,14 +306,26 @@ function DropZone({
         }}
       >
         <span className={cn("flex flex-col items-center gap-2", !big && "md:flex-row md:gap-4")}>
-          <span className="flex size-12 items-center justify-center rounded-2xl bg-muted">
+          <span
+            className={cn(
+              "flex size-12 items-center justify-center rounded-2xl bg-muted",
+              !big && "max-md:hidden",
+            )}
+          >
             <Upload className="size-6 text-muted-foreground" aria-hidden />
           </span>
           <span className="flex flex-col gap-1">
             <span className={cn("font-semibold", big && "text-lg")}>
-              {big ? "Suelta aquí todas tus fotos" : "Suelta más fotos o tu hoja"}
+              {big ? (
+                "Suelta aquí todas tus fotos"
+              ) : (
+                <>
+                  <span className="md:hidden">Agrega más fotos o tu hoja</span>
+                  <span className="max-md:hidden">Suelta más fotos o tu hoja</span>
+                </>
+              )}
             </span>
-            <span className="max-w-md text-sm text-muted-foreground">
+            <span className={cn("max-w-md text-sm text-muted-foreground", !big && "max-md:hidden")}>
               Como salen del celular, sin ordenarlas. También con Ctrl+V. Tu hoja de Excel o CSV,
               con las tallas en filas o en columnas.
             </span>
@@ -1017,7 +1031,7 @@ function PhotoStack({
           <span className="sr-only">Sin fotos</span>
         </span>
       ) : null}
-      {photos.slice(0, spread ? 50 : 4).map((photo) => (
+      {photos.slice(0, spread ? 50 : 4).map((photo, index) => (
         <DropdownMenu key={photo.id}>
           <DropdownMenuTrigger
             render={
@@ -1027,7 +1041,11 @@ function PhotoStack({
                 onDragStart={(e) => e.dataTransfer.setData("text/x-foto-carga", photo.id)}
                 onClick={(e) => e.stopPropagation()}
                 aria-label={`${photo.fileName || "Foto"}: mover a…`}
-                className="size-11 shrink-0 cursor-grab overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+                className={cn(
+                  "size-11 shrink-0 cursor-grab overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/40",
+                  // En el celular la fila lleva la primera y cuántas más.
+                  !spread && index > 0 && "max-md:hidden",
+                )}
               />
             }
           >
@@ -1064,7 +1082,10 @@ function PhotoStack({
         </DropdownMenu>
       ))}
       {!spread && photos.length > 4 ? (
-        <span className="text-xs text-muted-foreground">+{photos.length - 4}</span>
+        <span className="text-xs text-muted-foreground max-md:hidden">+{photos.length - 4}</span>
+      ) : null}
+      {!spread && photos.length > 1 ? (
+        <span className="text-xs text-muted-foreground md:hidden">+{photos.length - 1}</span>
       ) : null}
     </div>
   )
