@@ -153,6 +153,12 @@ test("Mercado Pago entrando a la cuenta: modo prueba con S/ 1, cobrar de verdad 
 
   // El link de S/ 1 se abre aparte; se paga con la tarjeta de prueba y queda pagado solo.
   await page.getByRole("button", { name: /Probar con S\/\s1/ }).click()
+  // Cierra el link sin pagar y recarga: el link sigue esperando el pago, a la vista.
+  const unpaid = page.waitForEvent("popup")
+  await page.getByRole("link", { name: "Abrir el link de prueba" }).click()
+  await (await unpaid).close()
+  await page.reload()
+  await expect(page.getByText("Esperando el pago", { exact: true })).toBeVisible()
   const popup = page.waitForEvent("popup")
   await page.getByRole("link", { name: "Abrir el link de prueba" }).click()
   const pay = await popup
