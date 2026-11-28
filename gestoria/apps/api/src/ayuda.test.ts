@@ -122,7 +122,8 @@ describe("la pantalla donde está", () => {
     expect(helpScreenOf("/configuracion")).toBe("configuracion")
     expect(helpScreenOf("/configuracion/datos")).toBe("datos")
     expect(helpScreenOf("/configuracion/marca")).toBe("marca")
-    expect(helpScreenOf("/clientes")).toBeNull()
+    expect(helpScreenOf("/clientes/cl-1")).toBe("clientes")
+    expect(helpScreenOf("/no-existe")).toBeNull()
   })
 
   it("sugiere hasta tres preguntas de esa pantalla que su rol puede hacer", () => {
@@ -137,7 +138,8 @@ describe("la pantalla donde está", () => {
     })
     // Soporte solo mira: nada de pedidos que hacer.
     expect(helpScreenView("support", "/pedidos").suggestions).toEqual([])
-    expect(helpScreenView("owner", "/clientes")).toEqual({ title: null, suggestions: [] })
+    expect(helpScreenView("owner", "/clientes").title).toBe("Clientes")
+    expect(helpScreenView("owner", "/no-existe")).toEqual({ title: null, suggestions: [] })
   })
 
   it("a quien no configura la tienda le explica por qué en Configuración solo ve sus avisos", () => {
@@ -201,7 +203,7 @@ describe("cada respuesta para el rol de quien pregunta", () => {
 
   it("lo que no es de la guía no se responde", () => {
     expect(helpAnswerFor("owner", STORE, "faq:no-existe")).toBeNull()
-    expect(helpAnswerFor("owner", STORE, "tema:clientes")).toBeNull()
+    expect(helpAnswerFor("owner", STORE, "tema:no-existe")).toBeNull()
     expect(helpAnswerFor("owner", STORE, "tema:toString")).toBeNull()
   })
 })
