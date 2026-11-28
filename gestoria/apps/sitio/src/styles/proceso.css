@@ -1,0 +1,258 @@
+/* Quién hace qué (web v5): el pedido por sus estados, en tres carriles (components/escenas/Proceso).
+   Sin movimiento todo está encendido; con movimiento (`.proceso--vivo`, scripts/agentes.ts) cada
+   estado se enciende al llegar y Sofi va de uno a otro. */
+.proceso {
+  background: var(--papel-2);
+}
+.proceso__pin {
+  padding-block: clamp(64px, 8vw, 110px);
+}
+.proceso__pedido {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 8px 8px 8px 16px;
+  border-radius: 999px;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra-1);
+  font-size: 15px;
+}
+.proceso__pedido span {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--texto-3);
+}
+.proceso__pedido b {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--degradado);
+  color: #fff;
+  font-weight: 500;
+}
+.proceso__tabla {
+  position: relative;
+  margin-top: 24px;
+  display: grid;
+  gap: 10px;
+}
+.proceso__fila {
+  position: relative;
+  display: grid;
+  grid-template-columns: 96px repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+.proceso__carril {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+.proceso__fila--sofi .proceso__carril {
+  color: var(--naranja);
+}
+.proceso__estado {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+.proceso__estado i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--degradado);
+  color: #fff;
+  font-size: 12px;
+  font-style: normal;
+}
+.proceso__celda {
+  display: flex;
+  align-items: center;
+  min-height: 74px;
+}
+.proceso__fila--sofi .proceso__celda {
+  min-height: 132px;
+  align-items: flex-end;
+}
+.tarea {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.tarea--sofi {
+  background: var(--durazno);
+  border: 1px solid var(--durazno-2);
+}
+/* Lo de tu equipo: chiquito y en el centro del carril. */
+.tarea--tu {
+  width: auto;
+  margin-inline: auto;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--tinta);
+  color: #fff;
+  text-align: center;
+}
+.tarea--argos {
+  background: var(--papel);
+  border: 1px dashed var(--linea-2);
+  color: var(--texto-2);
+}
+.tarea--argos::before {
+  content: "◉ ";
+  color: var(--naranja);
+}
+.proceso__sofi {
+  position: absolute;
+  left: calc(96px + 8px);
+  top: 0;
+  width: 72px;
+  height: 72px;
+  display: none;
+  pointer-events: none;
+}
+.proceso__sofi img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.proceso__sofi img.es-cara {
+  opacity: 1;
+}
+.proceso__avance {
+  display: none;
+}
+.proceso__cuenta {
+  margin-top: 24px;
+  font-size: 17px;
+  color: var(--texto-2);
+}
+.proceso__cuenta b {
+  color: var(--texto);
+}
+
+/* Con movimiento: lo que no llegó está apagado; Sofi salta de estado en estado. */
+.proceso--vivo .proceso__sofi {
+  display: block;
+}
+.proceso--vivo [data-col] {
+  opacity: 0.25;
+  transition:
+    opacity 0.4s,
+    transform 0.4s;
+}
+.proceso--vivo [data-col].es-llego {
+  opacity: 1;
+}
+.proceso--vivo .proceso__estado[data-col].es-ahora {
+  border-color: var(--naranja-vivo);
+  box-shadow: 0 10px 30px -14px rgba(254, 79, 2, 0.7);
+  transform: translateY(-3px);
+}
+.proceso--vivo .proceso__celda.es-ahora .tarea--tu {
+  animation: tuyo 1s ease-in-out infinite;
+}
+@keyframes tuyo {
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 6px rgba(17, 17, 19, 0.12);
+  }
+}
+.proceso--vivo .proceso__avance {
+  display: block;
+  margin-left: 104px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--linea);
+}
+.proceso__avance span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--degradado);
+  transform-origin: left;
+}
+
+/* En el celular: una línea de tiempo, un estado debajo del otro, con lo que hace cada uno. */
+@media (max-width: 860px) {
+  .proceso__fila {
+    display: contents;
+  }
+  .proceso__fila > .proceso__carril {
+    display: none;
+  }
+  .proceso__tabla {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .proceso__estado {
+    margin-top: 12px;
+  }
+  .proceso__celda {
+    min-height: 0;
+  }
+  .proceso__celda:empty {
+    display: none;
+  }
+  .proceso__fila--sofi .proceso__celda {
+    min-height: 0;
+  }
+  .tarea--tu {
+    margin-inline: 0;
+  }
+  .tarea--sofi::before {
+    content: "Sofi · ";
+    font-weight: 600;
+    color: var(--naranja);
+  }
+  .tarea--tu::before {
+    content: "Tú · ";
+    font-weight: 600;
+  }
+  .tarea--argos::before {
+    content: "Argos · ";
+    font-weight: 600;
+  }
+  /* El orden de lectura: cada estado con sus tareas. */
+  [data-col="0"] {
+    order: 0;
+  }
+  [data-col="1"] {
+    order: 1;
+  }
+  [data-col="2"] {
+    order: 2;
+  }
+  [data-col="3"] {
+    order: 3;
+  }
+  [data-col="4"] {
+    order: 4;
+  }
+  [data-col="5"] {
+    order: 5;
+  }
+  [data-col="6"] {
+    order: 6;
+  }
+}

@@ -392,6 +392,68 @@ function viajeCel() {
 }
 
 /**
+ * Quién hace qué: en computadora la escena se fija y el pedido avanza de estado en estado con el
+ * scroll. Cada estado se enciende al llegar, el rótulo del pedido cambia, Sofi salta al último estado
+ * suyo con su cara, y lo de tu equipo late cuando le toca.
+ */
+function proceso() {
+  const p = document.querySelector<HTMLElement>("[data-proceso]")
+  const pin = p?.querySelector<HTMLElement>("[data-proceso-pin]")
+  if (!p || !pin || !window.matchMedia("(min-width: 1024px)").matches) return
+  p.classList.add("proceso--vivo")
+  const estados = [...p.querySelectorAll<HTMLElement>(".proceso__estado")]
+  const celdasSofi = [...p.querySelectorAll<HTMLElement>(".proceso__fila--sofi .proceso__celda")]
+  const sofi = p.querySelector<HTMLElement>("[data-proceso-sofi]")
+  const rotulo = p.querySelector<HTMLElement>("[data-proceso-estado]")
+  const avance = p.querySelector<HTMLElement>("[data-proceso-avance]")
+  const caras = sofi ? [...sofi.querySelectorAll<HTMLElement>("[data-cara]")] : []
+  const total = estados.length
+  let actual = -1
+  const ir = (n: number) => {
+    if (n === actual) return
+    actual = n
+    for (const el of p.querySelectorAll<HTMLElement>("[data-col]")) {
+      const c = Number(el.dataset.col)
+      el.classList.toggle("es-llego", c <= n)
+      el.classList.toggle("es-ahora", c === n)
+    }
+    const estado = estados[n]
+    if (rotulo && estado) {
+      rotulo.textContent = estado.dataset.nombre ?? ""
+      gsap.fromTo(rotulo, { scale: 0.8 }, { scale: 1, duration: 0.4, ease: "back.out(3)" })
+    }
+    // Sofi va al último estado suyo que ya pasó, con la cara de ese estado.
+    let k = n
+    while (k > 0 && !estados[k]?.dataset.cara) k--
+    const celda = celdasSofi[k]
+    const cara = estados[k]?.dataset.cara
+    if (sofi && celda) {
+      const x = celda.offsetLeft + celda.offsetWidth / 2 - sofi.offsetWidth / 2 - sofi.offsetLeft
+      gsap.to(sofi, { x, duration: 0.6, ease: "power3.out" })
+      gsap.fromTo(
+        sofi,
+        { y: 0 },
+        { y: -18, duration: 0.25, yoyo: true, repeat: 1, ease: "sine.out" },
+      )
+    }
+    for (const img of caras) img.classList.toggle("es-cara", img.dataset.cara === cara)
+  }
+  ir(0)
+  ScrollTrigger.create({
+    trigger: pin,
+    start: "top top",
+    end: () => `+=${total * 0.5 * window.innerHeight}`,
+    pin: true,
+    scrub: true,
+    invalidateOnRefresh: true,
+    onUpdate: (st) => {
+      ir(Math.min(total - 1, Math.floor(st.progress * total)))
+      if (avance) gsap.set(avance, { scaleX: st.progress })
+    },
+  })
+}
+
+/**
  * Cómo funciona: la venta por capítulos en el teléfono, con Sofi, como en el Inicio; el teléfono del
  * héroe baja hasta ella.
  */
@@ -402,5 +464,6 @@ export function iniciarComoFunciona() {
   prepararScroll()
   venta(sofi)
   viajeCel()
+  proceso()
   cierre()
 }
