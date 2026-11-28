@@ -7,6 +7,7 @@ import {
   SideDockPortal,
   useDockedColumnHandle,
   sidePanelWidthKey,
+  OverlayOpenedHereProvider,
   useDraftKeptInPage,
   useSideColumnWidth,
   useSideDock,
@@ -237,6 +238,23 @@ function DockedColumn({
   const [armed, setArmed] = React.useState(true)
   const content = React.useRef<HTMLDivElement | null>(null)
   const submitted = React.useRef(false)
+  // Cajones abiertos desde aquí (regla 2): lo que pasa en ellos es suyo, no de la columna.
+  const overlays = React.useRef(0)
+  const overlayOpened = React.useCallback(() => {
+    overlays.current += 1
+    return () => {
+      overlays.current -= 1
+    }
+  }, [])
+  /** Un toque o una tecla cuenta como cambio de la columna, salvo que sea de un cajón abierto desde ella. */
+  const touch = (target: EventTarget | null) => {
+    const ownDom = target instanceof Node && content.current?.contains(target)
+    // Fuera de su DOM puede ser una lista de la columna (vive en un portal) o algo del cajón
+    // de encima; con un cajón abierto, que es modal, es del cajón.
+    if (!ownDom && overlays.current > 0) return
+    setArmed(true)
+    setTouched(true)
+  }
   React.useEffect(() => {
     const element = content.current
     if (!element) return
@@ -306,21 +324,18 @@ function DockedColumn({
         }}
         onInputCapture={(event) => {
           if (event.target instanceof Element && event.target.closest("[data-draft-ignore]")) return
-          setArmed(true)
-          setTouched(true)
+          touch(event.target)
         }}
         onClickCapture={(event) => {
-          if (!isChoice(event.target)) return
-          setArmed(true)
-          setTouched(true)
+          if (isChoice(event.target)) touch(event.target)
         }}
         onKeyDownCapture={(event) => {
-          if ((event.key !== "Enter" && event.key !== " ") || !isChoice(event.target)) return
-          setArmed(true)
-          setTouched(true)
+          if ((event.key === "Enter" || event.key === " ") && isChoice(event.target)) touch(event.target)
         }}
       >
-        <DraftSavedContext.Provider value={draft.channel}>{children}</DraftSavedContext.Provider>
+        <OverlayOpenedHereProvider value={overlayOpened}>
+          <DraftSavedContext.Provider value={draft.channel}>{children}</DraftSavedContext.Provider>
+        </OverlayOpenedHereProvider>
       </div>
       {DraftGuard ? (
         <DraftGuard

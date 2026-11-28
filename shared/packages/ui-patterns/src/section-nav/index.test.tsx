@@ -275,3 +275,74 @@ describe("SectionNav", () => {
     ).toBe("linea")
   })
 })
+describe("SectionNav · portada, sueltas primero, buscador y contador pendiente", () => {
+  const groups: SectionNavGroup[] = [
+    { label: "Tu tienda", items: [{ label: "Datos de la tienda", to: "/configuracion/datos" }] },
+    { label: "Vender", items: [{ label: "Cobros", to: "/configuracion/cobros" }] },
+  ]
+  const loose: SectionNavItem[] = [
+    { label: "Lo que falta", to: "/configuracion/falta", badge: 3, badgeTone: "pending" },
+  ]
+  const renderConfig = (props: Partial<SectionNavProps> = {}) =>
+    renderNav({ label: "Configuración", groups, items: loose, pathname: "/configuracion/cobros", ...props })
+
+  it("con `itemsPosition=\"start\"` las sueltas van antes del primer grupo, sin título ni separador propio", () => {
+    renderConfig({ itemsPosition: "start" })
+    const looseLink = screen.getByRole("link", { name: "Lo que falta" })
+    const firstGroup = screen.getByRole("group", { name: "Tu tienda" })
+    expect(looseLink.closest("[role=group]")).toBeNull()
+    expect(looseLink.compareDocumentPosition(firstGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Solo la línea visual del riel, ya dentro del primer grupo.
+    expect(screen.queryByRole("separator")).toBeNull()
+    expect(firstGroup.querySelector("[aria-hidden]")).not.toBeNull()
+  })
+
+  it("el contador de algo por hacer sale en ámbar; sin tono, gris como siempre", () => {
+    renderConfig({ items: [...loose, { label: "Avisos", to: "/configuracion/avisos", badge: 2 }] })
+    expect(screen.getByText("3").className).toContain("bg-warning-soft")
+    expect(screen.getByText("2").className).not.toContain("bg-warning-soft")
+  })
+
+  it("con `badgeLabel` el enlace dice qué cuenta el número, y el número no se lee dos veces", () => {
+    renderConfig({ items: [{ ...loose[0], badgeLabel: "3 por hacer" }] })
+    expect(screen.getByRole("link", { name: /^Lo que falta\s*, 3 por hacer$/ })).toBeTruthy()
+    expect(screen.getByText("3").getAttribute("aria-hidden")).toBe("true")
+  })
+
+  it("con portada, en ella la lista es la página: sin barra ni «Cambiar sección», debajo del contenido", () => {
+    const { container } = renderConfig({ mobileIndex: "/configuracion", pathname: "/configuracion/" })
+    const nav = navOf(container)
+    expect(screen.queryByRole("button", { name: /Cambiar sección/ })).toBeNull()
+    expect(nav.className).toContain("max-lg:order-last")
+    expect(nav.className).not.toContain("max-lg:hidden")
+    expect(nav.className).not.toContain("bottom-0")
+    // La lista se ve entera, sin plegar.
+    expect(screen.getByRole("group", { name: "Tu tienda" }).parentElement?.className.split(" ")).not.toContain("hidden")
+    expect(screen.queryByRole("link", { name: "Configuración" })).toBeNull()
+    // Sigue siendo un solo árbol: el nav antes del contenido en el DOM (el riel de web).
+    expect(nav.nextElementSibling?.contains(screen.getByText("contenido de la sección"))).toBe(true)
+  })
+
+  it("con portada, cada parte va en su pantalla con «‹ Configuración» para volver", () => {
+    const { container } = renderConfig({ mobileIndex: "/configuracion" })
+    expect(navOf(container).className).toContain("max-lg:hidden")
+    const back = screen.getByRole("link", { name: "Configuración" })
+    expect(back.getAttribute("href")).toBe("/configuracion")
+    expect(back.parentElement?.className).toContain("lg:hidden")
+    // En web sigue el riel con el activo marcado.
+    expect(screen.getByRole("link", { name: "Cobros" }).getAttribute("aria-current")).toBe("page")
+  })
+
+  it("el buscador va sobre la lista, dentro del riel; en la barra del teléfono no se ve", () => {
+    const search = <input aria-label="Buscar en Configuración" />
+    const { container, unmount } = renderConfig({ header: search })
+    const input = screen.getByRole("textbox", { name: "Buscar en Configuración" })
+    expect(navOf(container).contains(input)).toBe(true)
+    expect(input.compareDocumentPosition(screen.getByRole("link", { name: "Cobros" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(input.parentElement?.className).toContain("hidden lg:block")
+    unmount()
+    // En la portada se ve también en el teléfono.
+    renderConfig({ header: search, mobileIndex: "/configuracion", pathname: "/configuracion" })
+    expect(screen.getByRole("textbox", { name: "Buscar en Configuración" }).parentElement?.className).not.toContain("hidden")
+  })
+})

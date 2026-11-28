@@ -103,6 +103,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   datos de los primeros pasos (`setupFactsIn`), nunca marcas a mano. Lo que todavía no existe no
   viene ni se dibuja. Soporte lo mira sin Sofi ni el plan; a nadie le llegan llaves, costos ni
   datos de cobro. Una parte nueva suma su línea ahí y en `configLines`.
+- Inicio y «Lo que falta» cuentan con la misma función (`setupProgress` de
+  `apps/web/src/lib/configuracion.ts`), sobre los pasos del servidor y su `sells`: lo que no frena
+  la venta (invitar al equipo, Tu marca, el link de pago) se muestra, pero nunca se cuenta como
+  falta ni deja abierta la lista. Un link de pago sin pasarela no es una forma de cobrar
+  (`chargingPaymentsIn`).
 - El buscador de Configuración no es el de Ctrl+K: es el `Combobox` común sobre `SEARCH_INDEX`
   (lo que hay dentro de cada parte, con las palabras de quien vende) y los nombres que guardó la
   tienda (`namesIndex`). Una pantalla que suma algo que se busca suma su entrada, solo de lo que
@@ -200,8 +205,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   marcar «Entregado» el cambio (`recordReturn` de `stock.ts`); nunca antes. No vuelve dos veces lo
   mismo, salvo que el cambio se anule. Un cambio no se «Cambia».
 - El dinero devuelto se anota en `order_refund` (medio y quién, `pagos.confirmar`) y el saldo único
-  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto; lo que
-  vuelve de un pedido de Sofi queda para el cobro del 1 % (`agentReturnsIn`).
+  lo resta de lo pagado: lo que sobra es lo que falta devolver. Reportes resta lo devuelto, y el cobro
+  del 1 % también lo descuenta. `agentReturnsIn` solo mide lo que volvió de lo que vendió Sofi.
 
 ## Las clientas (entrega 4)
 
@@ -326,7 +331,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
 - Solo dice lo que gestorIA hace; lo que todavía no existe va como «pronto» y nunca se muestra como
   pantalla. El precio es el que definió el usuario: USD 19 al mes, que vuelven como saldo, más el
-  1 % de cada pedido que gestorIA genera sola. Términos y
+  1 % del total (con el envío) de cada venta completada: pagada y entregada, o despachada por
+  agencia, venga de donde venga; lo devuelto se descuenta. Términos y
   Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
   del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
