@@ -94,8 +94,13 @@ import { inStore, StoreError } from "./tiendas.js"
  */
 
 export const pad = (number: number) => String(number).padStart(4, "0")
-/** La referencia del pedido en el kardex: «Pedido 0142» (y cada cambio, «Pedido 0142 · cambio 1»). */
-export const stockReference = (number: number) => `Pedido ${pad(number)}`
+/**
+ * La referencia del pedido en el kardex: «Pedido 0142» (y cada cambio, «Pedido 0142 · cambio 1»).
+ * Un pedido de prueba lleva su propia numeración y su propia referencia, «Prueba 0005»: aunque un
+ * camino olvide que es de prueba, nunca toca lo de la venta con el mismo número.
+ */
+export const stockReference = (order: { number: number; test: boolean }) =>
+  `${order.test ? "Prueba" : "Pedido"} ${pad(order.number)}`
 
 /**
  * Si un pedido (`o`, el alias de `sale_order` en la consulta) no tiene fuera del stock lo que dicen
@@ -111,8 +116,10 @@ export function stockShortSql(o: string) {
       union all
       select m.variant_id, sum(m.quantity)::int from stock_movement m
         where m.store_id = ${a}.store_id and m.kind in ('venta', 'anulacion')
-          and (m.reference = 'Pedido ' || lpad(${a}.number::text, 4, '0')
-            or m.reference like 'Pedido ' || lpad(${a}.number::text, 4, '0') || ' · %')
+          and (m.reference = (case when ${a}.test then 'Prueba ' else 'Pedido ' end)
+              || lpad(${a}.number::text, 4, '0')
+            or m.reference like (case when ${a}.test then 'Prueba ' else 'Pedido ' end)
+              || lpad(${a}.number::text, 4, '0') || ' · %')
         group by m.variant_id
     ) d group by d.variant_id having sum(d.q) <> 0)`
 }
@@ -1459,7 +1466,7 @@ export async function trySale(tx: Db, order: OrderRow, actor: string): Promise<b
   const lines = await saleLines(tx, order.id)
   try {
     await tx.transaction((sp) =>
-      recordSale(sp as unknown as Db, order.storeId, actor, stockReference(order.number), lines),
+      recordSale(sp as unknown as Db, order.storeId, actor, stockReference(order), lines),
     )
     return true
   } catch (error) {
@@ -1477,7 +1484,7 @@ async function mustSale(tx: Db, order: OrderRow, actor: string) {
   if (order.test) return
   const lines = await saleLines(tx, order.id)
   try {
-    await recordSale(tx, order.storeId, actor, stockReference(order.number), lines)
+    await recordSale(tx, order.storeId, actor, stockReference(order), lines)
   } catch (error) {
     if (error instanceof StoreError && error.code === "NOT_ENOUGH_STOCK")
       throw new StoreError(
@@ -1787,8 +1794,7 @@ export async function undoPayment(
       order.paymentCollection !== "al_recibir" &&
       (await balanceIn(tx, order)).confirmedCents === 0
     ) {
-      if (!order.test)
-        back = await cancelSale(tx, storeId, person.userId, stockReference(order.number))
+      if (!order.test) back = await cancelSale(tx, storeId, person.userId, stockReference(order))
       state = "por_confirmar"
       await setState(tx, order, state)
     }
@@ -1869,7 +1875,7 @@ async function takeBack(tx: Db, order: OrderRow, actor: string): Promise<string[
       tx,
       order.storeId,
       actor,
-      stockReference(order.number),
+      stockReference(order),
       back.map((r) => ({ variantId: r.variantId, quantity: r.quantity, reason: r.reason })),
     )
   await tx
@@ -2231,7 +2237,7 @@ export async function changeOrderIn(
 
   // El stock: solo si el pedido ya lo tenía fuera (se pagó); si no, baja al pagar o al salir.
   let stockPending = false
-  const reference = stockReference(order.number)
+  const reference = stockReference(order)
   if (!order.test && (await heldBy(tx, storeId, reference)).size > 0) {
     const wanted = input.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity }))
     try {
@@ -2612,7 +2618,7 @@ export async function cancelOrderIn(
   // kardex es el de una venta, que no se toca.
   const returned = order.test
     ? 0
-    : await cancelSale(tx, storeId, actorUserId, stockReference(order.number))
+    : await cancelSale(tx, storeId, actorUserId, stockReference(order))
   await setState(tx, order, "anulado", { cancelReason: reason })
   const { currency } = await storeRow(tx, storeId)
   await logEvent(tx, storeId, orderId, actorUserId, "anulado", {

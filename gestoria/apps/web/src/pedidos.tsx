@@ -302,7 +302,12 @@ export function OrderSheet({ orderId, onClose }: { orderId: string; onClose: () 
     <DetailDrawer
       open
       size="xl"
-      title={order ? `Pedido ${order.number} · ${order.customerName}` : "Pedido"}
+      // Un pedido de prueba lleva su numeración: se dice «Prueba», nunca como una venta.
+      title={
+        order
+          ? `${order.test ? "Prueba" : "Pedido"} ${order.number} · ${order.customerName}`
+          : "Pedido"
+      }
       headerContent={
         order ? (
           <span className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">

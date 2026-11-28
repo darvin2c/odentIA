@@ -15,6 +15,7 @@ import {
   productPhoto,
   productQuestion,
   saleOrder,
+  stockMovement,
   store,
   storeAgent,
   storeEvent,
@@ -29,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { withAgent } from "../agente.js"
 import { createApp } from "../app.js"
 import { defaultLinkAdapters } from "../link-de-pago.js"
+import { stockReference } from "../pedidos.js"
 import { runArgos } from "./argos.js"
 import { tellAnswer } from "./conversaciones.js"
 import type { ChatModel, ChatRequest, ModelReply } from "./modelo.js"
@@ -1824,6 +1826,78 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
       .from(orderEvent)
       .where(and(eq(orderEvent.orderId, orderId), eq(orderEvent.action, "aviso")))
     expect(notices).toEqual([])
+  })
+
+  it("una venta y una prueba con el mismo número no se mezclan en el kardex ni al anular", async () => {
+    // Una venta de verdad, pagada: su stock sale con la referencia «Pedido NNNN».
+    const sale = await call("rosa", "POST", `${base}/pedidos`, {
+      customerName: "Carla Mendoza",
+      customerPhone: "+51 987 654 321",
+      channel: "whatsapp",
+      address: "Av. Primavera 123, Surco",
+      lines: [{ variantId: ids.medias, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+      paymentMethodId: ids.yape,
+    })
+    expect(sale.status).toBe(201)
+    const saleId = sale.json.order.id as string
+    const number = Number(sale.json.order.number)
+    const form = new FormData()
+    form.set("amountCents", String(sale.json.order.totalCents))
+    const sent = await app.request(`${SERVER}${base}/pedidos/${saleId}/comprobante`, {
+      method: "POST",
+      headers: { origin: WEB, authorization: `Bearer ${await tokenFor("rosa")}` },
+      body: form,
+    })
+    expect(sent.status).toBe(200)
+    const payment = ((await sent.json()) as Json).order.payments[0]
+    const confirmed = await call(
+      "rosa",
+      "POST",
+      `${base}/pedidos/${saleId}/pagos/${payment.id}/revision`,
+      { decision: "confirmar" },
+    )
+    expect(confirmed.json.order).toMatchObject({ state: "por_salir", paid: true })
+    const stock = async () =>
+      (await call("rosa", "GET", `${base}/variantes/${ids.medias}/kardex`)).json.stock as number
+    const afterSale = await stock()
+
+    // Una prueba con el mismo número (su numeración es aparte): su referencia es «Prueba NNNN».
+    const id = await newTest()
+    const placed = await call("rosa", "POST", `${base}/conversaciones/${id}/carrito`, {
+      lines: [{ variantId: ids.medias, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+    })
+    expect(placed.status).toBe(201)
+    const testId = placed.json.cart.id as string
+    // La prueba que ya tenía ese número de prueba se corre: así esta toma el de la venta.
+    await db.ownerDb
+      .update(saleOrder)
+      .set({ number: 9000 + number })
+      .where(
+        and(eq(saleOrder.storeId, storeId), eq(saleOrder.test, true), eq(saleOrder.number, number)),
+      )
+    await db.ownerDb.update(saleOrder).set({ number }).where(eq(saleOrder.id, testId))
+
+    // Anular la prueba no devuelve lo de la venta.
+    const cancelled = await call("rosa", "POST", `${base}/pedidos/${testId}/anular`, {
+      reason: "Era una prueba",
+    })
+    expect(cancelled.status).toBe(200)
+    expect(await stock()).toBe(afterSale)
+    const reference = `Pedido ${String(number).padStart(4, "0")}`
+    const moves = await db.ownerDb
+      .select({ kind: stockMovement.kind, reference: stockMovement.reference })
+      .from(stockMovement)
+      .where(and(eq(stockMovement.storeId, storeId), eq(stockMovement.variantId, ids.medias)))
+    expect(moves.filter((m) => m.reference === reference)).toEqual([{ kind: "venta", reference }])
+    expect(moves.some((m) => m.reference?.startsWith("Prueba "))).toBe(false)
+    // La venta sigue igual: pagada, sin «falta stock».
+    const detail = await call("rosa", "GET", `${base}/pedidos/${saleId}`)
+    expect(detail.json.order).toMatchObject({ state: "por_salir", stockPending: false })
+    // Y la referencia de una prueba nunca es la de una venta.
+    expect(stockReference({ number, test: true })).toBe(`Prueba ${String(number).padStart(4, "0")}`)
+    expect(stockReference({ number, test: false })).toBe(reference)
   })
 
   it("en una conversación de verdad no se paga de prueba", async () => {
