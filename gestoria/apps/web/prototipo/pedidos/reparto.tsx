@@ -106,7 +106,7 @@ function Pantalla({
             <span className="px-1">
               <b className="block text-lg leading-tight">{p.clienta}</b>
               <span className="text-sm text-muted-foreground">
-                {p.id} · {p.entrega.direccion}, {p.entrega.zona.split(",")[0]}
+                {p.id} · {conDistrito(p.entrega.direccion, p.entrega.zona)}
               </span>
             </span>
             <span className="flex gap-2">
@@ -1109,6 +1109,23 @@ function App() {
       {pantalla?.t === "agencia" && p ? <Agencia key={p.id} p={p} onVolver={volver} hacer={hacer} /> : null}
     </div>
   )
+}
+
+/** La dirección con su distrito, sin repetirlo si ya viene en la dirección («…, Ate» no suma «Ate» otra vez). */
+function conDistrito(direccion: string, zona: string): string {
+  const distrito = zona.split(",")[0].trim()
+  const sinTildes = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+  const dir = sinTildes(direccion)
+  const corto: Record<string, string> = {
+    "san juan de lurigancho": "sjl",
+    "san juan de miraflores": "sjm",
+    "villa el salvador": "ves",
+  }
+  const d = sinTildes(distrito)
+  const sigla = corto[d]
+  const palabras = dir.split(/[^a-z0-9]+/)
+  if (dir.includes(d) || (sigla && palabras.includes(sigla))) return direccion
+  return `${direccion}, ${distrito}`
 }
 
 export function RepartoPage() {
