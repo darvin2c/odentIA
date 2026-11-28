@@ -195,6 +195,7 @@ export {
 export { PageShell, type PageShellProps, useInsidePageShell } from "./page-shell.js"
 export * from "./phone/index.js"
 export { RadioChips, type RadioChipsProps } from "./radio-chips.js"
+export { TaskCard, type TaskCardOwner, type TaskCardProps } from "./task-card.js"
 export {
   type RowActionItem,
   RowActions,
