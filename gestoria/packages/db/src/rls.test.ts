@@ -249,6 +249,18 @@ describe("las reglas de cada tienda", () => {
       }
     })
     expect(fromOther).toEqual({ images: [], links: [] })
+    // Lo único que sabe la otra tienda: cuáles de los nombres que pregunta ya tiene alguien.
+    const taken = async (personFor: typeof mario, storeId: string) =>
+      withPerson(db.appDb, personFor, async (tx) => {
+        await enterStore(tx, storeId)
+        const [row] = (await tx.execute(
+          sql`select store_link_taken(array['calzadosrosa', 'calzadosrosa-lima']) as taken`,
+        )) as unknown as Array<{ taken: string[] }>
+        return row?.taken
+      })
+    expect(await taken(mario, otra)).toEqual(["calzadosrosa"])
+    // Los suyos no cuentan como tomados por otra.
+    expect(await taken(rosa, calzados)).toEqual([])
     await expect(
       withPerson(db.appDb, mario, async (tx) => {
         await enterStore(tx, otra)

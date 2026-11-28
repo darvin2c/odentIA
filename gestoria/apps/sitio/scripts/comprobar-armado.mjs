@@ -25,6 +25,9 @@ const PAGINAS = [
   "terminos.html",
   "privacidad.html",
   "contacto.html",
+  "arm.html",
+  "arm-vs-crm.html",
+  "arm-vs-chatbot.html",
   "404.html",
 ]
 for (const file of [
