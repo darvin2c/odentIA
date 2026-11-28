@@ -266,6 +266,8 @@ const OBJECTIONS = [
   // «¿me lo bajas?», «bájale»; no «caña baja».
   /\bbaj(as|ar|arme|ame|amelo|amela|ale|arias)\b/,
   /mas barat|mas economic|ultimo precio|precio final|mejor precio|buen precio|cuanto menos/,
+  // «¿Me haces precio?» es pedir rebaja (la sugerencia de «Probar como clienta»), no preguntarlo.
+  /\b(me|nos) (haces|harias|hace|haria) (un )?precio\b|\bhazme (un )?precio\b/,
   /\b(dejas|deja|dejarias|das|darias|pones) (en|a) \d/,
   /\b(un poco|algo|un toque) menos\b/,
   // Pedir el envío gratis, no preguntar si lo es («¿el envío es gratis?»).

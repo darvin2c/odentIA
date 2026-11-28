@@ -78,13 +78,9 @@ test("Sofi no supo: «Te toca» en una línea, se responde una vez y queda en la
     rubro: "calzado",
     rubroData: { horma: "Normal", material: "Sintético" },
   })
-  // Sofi atiende los chats de verdad mientras dura este recorrido.
+  // Sofi atiende los chats de verdad mientras dura este recorrido: encender va aparte (ADR 0234).
   const { settings } = await json("GET", `${STORE}/sofi`)
-  await json("PATCH", `${STORE}/sofi`, {
-    ...settings,
-    enabled: true,
-    displayName: settings.displayName ?? "",
-  })
+  await json("PATCH", `${STORE}/sofi/estado`, { enabled: true })
   try {
     const carla = await customerWrites("Carla", "¿Destiñe al lavarla?", productId)
     const valeria = await customerWrites("Valeria", "¿Destiñe al lavarla?", productId)
@@ -135,6 +131,6 @@ test("Sofi no supo: «Te toca» en una línea, se responde una vez y queda en la
     await page.goto(BASE)
     await noSideScroll(page)
   } finally {
-    await json("PATCH", `${STORE}/sofi`, { ...settings, displayName: settings.displayName ?? "" })
+    await json("PATCH", `${STORE}/sofi/estado`, { enabled: settings.enabled })
   }
 })

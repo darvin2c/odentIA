@@ -74,7 +74,8 @@ test("Sofi se elige con ejemplos y la prueba dice por qué respondió así", asy
     .getByRole("textbox", { name: "Tu mensaje, como cliente" })
     .fill("hola, ¿tienen zapatillas?")
   await chat.getByRole("button", { name: "Enviar" }).click()
-  await expect(chat.getByText("Por qué:")).toBeVisible()
+  // La demo ya trae una prueba con sus respuestas: se mira la última.
+  await expect(chat.getByText("Por qué:").last()).toBeVisible()
   await expect(
     chat.getByText("Habló directa, de usted, con pocos emojis, como elegiste."),
   ).toBeVisible()
