@@ -32,7 +32,8 @@ export interface ConversationMessage {
   needsTemplate: boolean
   followUp: "pago" | "gracias" | "volvio" | "volver" | null
   byArgos: boolean
-  basis?: { tools: string[]; stopped: string[]; handoff: string | null; costMicros: number | null }
+  /** `costMicros` llega solo a quien ve Reportes. */
+  basis?: { tools: string[]; stopped: string[]; handoff: string | null; costMicros?: number | null }
 }
 
 export interface ConversationView {
@@ -41,7 +42,8 @@ export interface ConversationView {
   customerName: string | null
   handler: "sofi" | "persona"
   waitingReason: string | null
-  costMicros: number
+  /** Lo que costó el modelo: solo para quien ve Reportes. */
+  costMicros?: number
   messages: ConversationMessage[]
   orders: {
     id: string

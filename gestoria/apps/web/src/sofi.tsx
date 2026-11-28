@@ -394,7 +394,7 @@ function TestChat({ overview }: { overview: SofiOverview }) {
         </Button>
       </form>
       <FormAlert error={send.error ?? start.error ?? giveBack.error} />
-      {view && view.costMicros > 0 ? (
+      {view?.costMicros ? (
         <p className="text-xs text-muted-foreground">Esta prueba costó {usd(view.costMicros)}.</p>
       ) : null}
     </section>
