@@ -4,7 +4,14 @@
  * con su kardex, el aviso del costo, la hoja y lo que puede cada rol.
  */
 import { randomUUID } from "node:crypto"
-import { enterStore, productVariant, store, storeMember, withPerson } from "@gestoria/db"
+import {
+  enterStore,
+  productVariant,
+  store,
+  storeMember,
+  storePaymentMethod,
+  withPerson,
+} from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
@@ -180,6 +187,167 @@ describe("medios de pago (tablero 6)", () => {
       isActive: false,
       details: "987 654 321 · Rosa Díaz",
     })
+  })
+})
+
+describe("cada forma de cobro con sus datos (Cobros, tablero 6)", () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  )
+  let yape = ""
+
+  it("Yape pide un celular del Perú en E.164 y su titular; Sofi envía lo que arma el servidor", async () => {
+    const bad = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      kind: "yape",
+      phone: "+5198765432",
+      holder: "",
+    })
+    expect(bad.status).toBe(400)
+    expect(bad.json.error.fields).toHaveProperty("phone")
+    expect(bad.json.error.fields).toHaveProperty("holder")
+    const ok = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      kind: "yape",
+      phone: "+51987654321",
+      holder: "Rosa Quispe M.",
+      // Lo que no es de Yape no se guarda: el tipo y cómo se confirma son los suyos.
+      typeCode: "48",
+      collection: "link",
+    })
+    expect(ok.status).toBe(201)
+    expect(ok.json.method).toMatchObject({
+      kind: "yape",
+      name: "Yape",
+      typeCode: "68",
+      collection: "comprobante",
+      phone: "+51987654321",
+      details: "Yape al 987 654 321 a nombre de Rosa Quispe M.",
+    })
+    yape = ok.json.method.id
+  })
+
+  it("la transferencia: banco de la lista, cuenta y CCI con sus dígitos de control y de ese banco", async () => {
+    const transfer = (cci: string) =>
+      call("rosa", "POST", `${base}/medios-de-pago`, {
+        kind: "transferencia",
+        bankCode: "002",
+        accountNumber: "191-2345678-0-12",
+        cci,
+        holder: "Rosa Quispe Mamani",
+      })
+    const wrongDigit = await transfer("002 191 002345678012 55")
+    expect(wrongDigit.status).toBe(400)
+    expect(wrongDigit.json.error.fields.cci).toContain("dígitos de control")
+    const short = await transfer("0021910023456780125")
+    expect(short.json.error.fields.cci).toContain("20 números")
+    // El CCI publicado por la Cámara de Comercio de Lima es del BCP: con Interbank, no.
+    const otherBank = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      kind: "transferencia",
+      bankCode: "003",
+      accountNumber: "200-300-400",
+      cci: "00219310305421606614",
+      holder: "Rosa",
+    })
+    expect(otherBank.json.error.fields.cci).toBe("Ese CCI es de BCP, no de Interbank")
+    const noBank = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      kind: "transferencia",
+      bankCode: "999",
+      accountNumber: "200-300-400",
+      holder: "Rosa",
+    })
+    expect(noBank.json.error.fields).toHaveProperty("bankCode")
+    const ok = await transfer("002-191-002345678012-53")
+    expect(ok.status).toBe(201)
+    expect(ok.json.method).toMatchObject({
+      name: "Transferencia BCP",
+      typeCode: "30",
+      cci: "00219100234567801253",
+      details:
+        "BCP · cuenta 191-2345678-0-12 · CCI 002 191 002345678012 53 · a nombre de Rosa Quispe Mamani",
+    })
+  })
+
+  it("el POS se cobra al recibir con tarjeta (48), con su nota", async () => {
+    const pos = await call("mario", "POST", `${base}/medios-de-pago`, {
+      kind: "pos",
+      details: "Kevin lleva el POS",
+    })
+    expect(pos.json.method).toMatchObject({
+      name: "Tarjeta con tu POS",
+      typeCode: "48",
+      collection: "al_recibir",
+      details: "Kevin lleva el POS",
+    })
+  })
+
+  it("el QR de Yape se sube por su contenido, solo a Yape o Plin, y Ventas lo ve sin cambiarlo", async () => {
+    const qr = `${base}/medios-de-pago/${yape}/qr`
+    const fake = await call("rosa", "POST", qr, undefined, {
+      type: "image/png",
+      data: Buffer.from("<svg onload=alert(1)>"),
+    })
+    expect(fake.status).toBe(400)
+    expect(
+      (await call("lucia", "POST", qr, undefined, { type: "image/png", data: png })).status,
+    ).toBe(403)
+    const up = await call("rosa", "POST", qr, undefined, { type: "image/png", data: png })
+    expect(up.status).toBe(200)
+    expect(up.json.qrAt).toBeTruthy()
+    const seen = await call("lucia", "GET", qr)
+    expect(seen.response.headers.get("content-type")).toBe("image/png")
+    expect(seen.response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(Buffer.from(await seen.response.arrayBuffer())).toEqual(png)
+    expect((await call("ajena", "GET", qr)).status).toBe(404)
+    const list = await call("lucia", "GET", `${base}/pagos-y-entregas`)
+    const listed = list.json.payments.find((m: { id: string }) => m.id === yape)
+    expect(listed.qrAt).toBeTruthy()
+    expect(JSON.stringify(list.json)).not.toContain(png.toString("base64"))
+    // Al efectivo no se le sube un QR.
+    const cash = list.json.payments.find((m: { kind: string }) => m.kind === "pos")
+    const notWallet = await call(
+      "rosa",
+      "POST",
+      `${base}/medios-de-pago/${cash.id}/qr`,
+      undefined,
+      { type: "image/png", data: png },
+    )
+    expect(notWallet.json.error.code).toBe("NOT_A_WALLET")
+    // Si Yape pasa a ser otra cosa, su QR se va.
+    await call("rosa", "PATCH", `${base}/medios-de-pago/${yape}`, {
+      kind: "otro",
+      name: "Yape",
+      typeCode: "68",
+      collection: "comprobante",
+      details: "Al 987 654 321",
+    })
+    expect((await call("rosa", "GET", qr)).status).toBe(404)
+  })
+
+  it("la base guarda la forma con su tipo de 4461, aunque alguien se salte la API", async () => {
+    await expect(
+      db.ownerDb.insert(storePaymentMethod).values({
+        storeId,
+        kind: "yape",
+        name: "Yape",
+        typeCode: "30",
+        collection: "comprobante",
+        phone: "+51987654321",
+        holder: "Rosa",
+      }),
+    ).rejects.toThrow()
+    await expect(
+      db.ownerDb.insert(storePaymentMethod).values({
+        storeId,
+        kind: "transferencia",
+        name: "Transferencia",
+        typeCode: "30",
+        collection: "comprobante",
+        bankCode: "002",
+        accountNumber: "191-2",
+        holder: "Rosa",
+        cci: "0021",
+      }),
+    ).rejects.toThrow()
   })
 })
 

@@ -264,29 +264,43 @@
     {
       "idx": 53,
       "version": "7",
-      "when": 1795847069835,
-      "tag": "0053_la_ficha_del_producto",
+      "when": 1795845272533,
+      "tag": "0053_los_cobros",
       "breakpoints": true
     },
     {
       "idx": 54,
       "version": "7",
-      "when": 1795847070835,
-      "tag": "0054_reglas_la_ficha_del_producto",
+      "when": 1795845285532,
+      "tag": "0054_reglas_cobros",
       "breakpoints": true
     },
     {
       "idx": 55,
       "version": "7",
-      "when": 1795847071835,
-      "tag": "0055_el_precio_de_la_ficha",
+      "when": 1795847288953,
+      "tag": "0055_la_ficha_del_producto",
       "breakpoints": true
     },
     {
       "idx": 56,
       "version": "7",
-      "when": 1795847072835,
-      "tag": "0056_reglas_precio_de_la_ficha",
+      "when": 1795847289953,
+      "tag": "0056_reglas_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795847290953,
+      "tag": "0057_el_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795847291953,
+      "tag": "0058_reglas_precio_de_la_ficha",
       "breakpoints": true
     }
   ]

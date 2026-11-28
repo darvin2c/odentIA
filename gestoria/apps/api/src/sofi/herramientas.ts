@@ -11,8 +11,8 @@ import {
   productLink,
   productVariant,
   saleOrder,
+  saleOrderLine,
   stockRequest,
-  storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
 import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
@@ -23,6 +23,7 @@ import { conversationFichasIn, shownCustomerId } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
 import { momentWords } from "../hora.js"
+import { chargesOrders, linkStateIn } from "../pasarela.js"
 import {
   addReceiptIn,
   cancelOrderIn,
@@ -36,7 +37,7 @@ import {
   variantPrices,
 } from "../pedidos.js"
 import { familyIn, lastConsentIn } from "../perfil.js"
-import { autoUnitCents, floorOf } from "../precio.js"
+import { autoUnitCents, floorOf, type Quote } from "../precio.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
@@ -360,13 +361,11 @@ async function paymentMethodFor(tx: Db, storeId: string, wanted: string | undefi
     .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
     .orderBy(asc(storePaymentMethod.createdAt))
   if (wanted) return methods.find((m) => m.id === wanted)?.id ?? wanted
-  const [linked] = await tx
-    .select({ provider: storePaymentLink.provider })
-    .from(storePaymentLink)
-    .where(eq(storePaymentLink.storeId, storeId))
+  // Se ofrece el link solo si la pasarela cobra de verdad (no en modo prueba ni sin permiso).
+  const linked = chargesOrders(await linkStateIn(tx, storeId))
   // En el orden de cobro de la tienda; un link sin cuenta conectada no se ofrece.
   const first = methods
-    .filter((m) => m.collection !== "link" || Boolean(linked))
+    .filter((m) => m.collection !== "link" || linked)
     .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])[0]
   if (!first)
     throw new ToolProblem("La tienda no tiene medios de pago encendidos: pásalo a una persona")
@@ -423,6 +422,61 @@ async function conversationOrders(tx: Db, ctx: SofiToolContext) {
       and(eq(saleOrder.storeId, ctx.storeId), eq(saleOrder.conversationId, ctx.conversationId)),
     )
     .orderBy(asc(saleOrder.number))
+}
+
+/**
+ * El pedido de Sofi que sigue en pie y es igual al que quiere anotar: las mismas líneas a los
+ * mismos precios, la misma entrega, el mismo medio de pago, la misma dirección y el mismo total.
+ * Compara con lo que ya calculó la cotización: no vuelve a calcular nada.
+ */
+async function sameOrderIn(
+  tx: Db,
+  orders: (typeof saleOrder.$inferSelect)[],
+  input: OrderInput,
+  quote: Quote,
+) {
+  const alive = orders.filter(
+    (o) =>
+      (o.state === "por_pagar" ||
+        (o.state === "por_salir" && o.paymentCollection === "al_recibir")) &&
+      o.totalCents === quote.totalCents &&
+      o.deliveryCents === quote.deliveryCents &&
+      o.deliveryMethodId === input.deliveryMethodId &&
+      (o.deliveryZone ?? null) === (input.zone ?? null) &&
+      o.paymentMethodId === input.paymentMethodId &&
+      o.address.trim() === input.address.trim(),
+  )
+  if (alive.length === 0) return null
+  const lines = Map.groupBy(
+    await tx
+      .select()
+      .from(saleOrderLine)
+      .where(
+        inArray(
+          saleOrderLine.orderId,
+          alive.map((o) => o.id),
+        ),
+      )
+      .orderBy(asc(saleOrderLine.position)),
+    (l) => l.orderId,
+  )
+  return (
+    alive.find((o) => {
+      const own = lines.get(o.id) ?? []
+      return (
+        own.length === quote.lines.length &&
+        own.every((l, i) => {
+          const q = quote.lines[i]!
+          return (
+            l.variantId === input.lines[i]!.variantId &&
+            l.quantity === q.quantity &&
+            l.gift === q.gift &&
+            l.unitCents === (q.gift ? 0 : q.unitCents)
+          )
+        })
+      )
+    }) ?? null
+  )
 }
 
 async function orderOf(tx: Db, ctx: SofiToolContext, pedido: string) {
@@ -672,9 +726,21 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
     // Si ya hay un pedido suyo sin pagar en esta conversación (cambió lo que lleva, o paga al
     // recibir), se anula y se anota el nuevo: lo acordado no se cambia (ADR 0207). Uno con un
     // link de pago ya enviado no: el cliente podría pagarlo después.
-    const open = (await conversationOrders(tx, ctx)).filter(
-      (o) => o.state === "por_pagar" && o.createdBy === SOFI_ACTOR,
-    )
+    const mine = (await conversationOrders(tx, ctx)).filter((o) => o.createdBy === SOFI_ACTOR)
+    // El mismo pedido otra vez (la clienta preguntó por tarjeta o por el link y el modelo lo
+    // volvió a armar): sigue el que ya está, con su número; no se anula ni se anota otro.
+    const same = await sameOrderIn(tx, mine, input, priced.quote)
+    if (same) {
+      ctx.trace.amounts.add(same.totalCents)
+      return {
+        ok: true,
+        pedido: pad(same.number),
+        estado: stateWords(same, await balanceIn(tx, same)),
+        total: formatMoney(same.totalCents, ctx.currency),
+        nota: "Ya estaba anotado así: es el mismo pedido, con su número. No lo vuelvas a armar.",
+      }
+    }
+    const open = mine.filter((o) => o.state === "por_pagar")
     if (open.some((o) => o.linkUrl && (!o.linkExpiresAt || o.linkExpiresAt.getTime() > Date.now())))
       throw new ToolProblem(
         "Ese pedido ya tiene un link de pago enviado: no lo rehagas. Si prefiere Yape o transferencia, anota su captura en el mismo pedido (anotar_pago); si quiere cambiarlo, pásalo a una persona",
@@ -755,11 +821,16 @@ async function paymentLink(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.li
       total: formatMoney(order.totalCents, ctx.currency),
     }
   } catch (error) {
+    // Sin link (no conectado, en modo prueba o en «Probar a Sofi»), el pedido sigue en pie: que
+    // no lo vuelva a armar para cobrarlo de otra forma.
+    const keep = `El pedido ${pad(order.number)} ya está anotado: no lo vuelvas a armar. Ofrece la siguiente forma de cobro de la tienda en ese mismo pedido`
     if (error instanceof StoreError && error.code === "LINK_NOT_CONNECTED")
-      throw new ToolProblem(
-        "La tienda no tiene link de pago: ofrece la siguiente forma de cobro (captura de Yape o transferencia)",
-        "SIN_LINK",
-      )
+      throw new ToolProblem(`La tienda no tiene link de pago. ${keep}`, "SIN_LINK")
+    if (
+      error instanceof StoreError &&
+      (error.code === "TEST_ORDER" || error.code === "LINK_TEST_MODE")
+    )
+      throw new ToolProblem(`${error.message} ${keep}`, error.code)
     throw error
   }
 }

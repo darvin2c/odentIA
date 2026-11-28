@@ -1,6 +1,6 @@
 {
-  "id": "fd73d2ef-7b12-4c13-82c0-0e421d761dd0",
-  "prevId": "75392042-ad00-4373-9141-23a60bc9bd43",
+  "id": "03166da9-9d49-41cf-a012-e0b0f12f13f5",
+  "prevId": "66614e8b-e4a3-4fb4-81b9-625c685ba534",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2030,51 +2030,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "wholesale_min_quantity": {
-          "name": "wholesale_min_quantity",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "wholesale_price_cents": {
-          "name": "wholesale_price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "combo_percent_off": {
-          "name": "combo_percent_off",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "offer_delivery": {
-          "name": "offer_delivery",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "offer_discount": {
-          "name": "offer_discount",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "offer_second_unit": {
-          "name": "offer_second_unit",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "offer_gift": {
-          "name": "offer_gift",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2185,14 +2140,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "product_wholesale_check": {
-          "name": "product_wholesale_check",
-          "value": "(\"product\".\"wholesale_min_quantity\" is null) = (\"product\".\"wholesale_price_cents\" is null) and (\"product\".\"wholesale_min_quantity\" is null or (\"product\".\"wholesale_min_quantity\" between 2 and 10000 and \"product\".\"wholesale_price_cents\" > 0 and \"product\".\"wholesale_price_cents\" < \"product\".\"list_price_cents\"))"
-        },
-        "product_offers_check": {
-          "name": "product_offers_check",
-          "value": "(\"product\".\"combo_percent_off\" is null or \"product\".\"combo_percent_off\" between 1 and 90) and (\"product\".\"offer_gift\" is null or char_length(btrim(\"product\".\"offer_gift\")) between 1 and 80)"
-        },
         "product_color_option_check": {
           "name": "product_color_option_check",
           "value": "\"product\".\"color_option\" is null or \"product\".\"color_option\" between 0 and 2"
@@ -2794,18 +2741,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "option_index": {
-          "name": "option_index",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "option_value": {
-          "name": "option_value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2869,10 +2804,6 @@
         "product_promotion_dates_check": {
           "name": "product_promotion_dates_check",
           "value": "\"product_promotion\".\"ends_on\" >= \"product_promotion\".\"starts_on\""
-        },
-        "product_promotion_scope_check": {
-          "name": "product_promotion_scope_check",
-          "value": "(\"product_promotion\".\"option_index\" is null) = (\"product_promotion\".\"option_value\" is null) and (\"product_promotion\".\"option_index\" is null or (\"product_promotion\".\"option_index\" between 0 and 2 and char_length(btrim(\"product_promotion\".\"option_value\")) between 1 and 30))"
         }
       },
       "isRLSEnabled": false
@@ -5843,6 +5774,43 @@
           "primaryKey": false,
           "notNull": false
         },
+        "refresh_token_enc": {
+          "name": "refresh_token_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'real'"
+        },
+        "provider_user_id": {
+          "name": "provider_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_label": {
+          "name": "account_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "hint": {
           "name": "hint",
           "type": "text",
@@ -5863,7 +5831,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "store_payment_link_user_idx": {
+          "name": "store_payment_link_user_idx",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "store_payment_link_store_id_fkey": {
           "name": "store_payment_link_store_id_fkey",
@@ -5887,9 +5877,17 @@
           "name": "store_payment_link_provider_check",
           "value": "provider IN ('mercadopago')"
         },
+        "store_payment_link_mode_check": {
+          "name": "store_payment_link_mode_check",
+          "value": "mode IN ('prueba','real')"
+        },
         "store_payment_link_hint_check": {
           "name": "store_payment_link_hint_check",
           "value": "char_length(\"store_payment_link\".\"hint\") between 1 and 8"
+        },
+        "store_payment_link_label_check": {
+          "name": "store_payment_link_label_check",
+          "value": "char_length(\"store_payment_link\".\"account_label\") between 1 and 120"
         }
       },
       "isRLSEnabled": false
@@ -5929,12 +5927,49 @@
           "primaryKey": false,
           "notNull": true
         },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'otro'"
+        },
         "details": {
           "name": "details",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "holder": {
+          "name": "holder",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bank_code": {
+          "name": "bank_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_number": {
+          "name": "account_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cci": {
+          "name": "cci",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "is_active": {
           "name": "is_active",
@@ -5991,7 +6026,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "store_payment_method_store_id_key": {
+          "name": "store_payment_method_store_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "store_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "store_payment_method_name_check": {
@@ -6013,6 +6057,38 @@
         "store_payment_method_details_check": {
           "name": "store_payment_method_details_check",
           "value": "char_length(\"store_payment_method\".\"details\") <= 500"
+        },
+        "store_payment_method_kind_check": {
+          "name": "store_payment_method_kind_check",
+          "value": "kind IN ('yape','plin','transferencia','efectivo','pos','link','otro')"
+        },
+        "store_payment_method_kind_type_check": {
+          "name": "store_payment_method_kind_type_check",
+          "value": "case \"store_payment_method\".\"kind\"\n        when 'yape' then \"store_payment_method\".\"type_code\" = '68' and \"store_payment_method\".\"collection\" = 'comprobante'\n        when 'plin' then \"store_payment_method\".\"type_code\" = '68' and \"store_payment_method\".\"collection\" = 'comprobante'\n        when 'transferencia' then \"store_payment_method\".\"type_code\" = '30' and \"store_payment_method\".\"collection\" = 'comprobante'\n        when 'efectivo' then \"store_payment_method\".\"type_code\" = '10' and \"store_payment_method\".\"collection\" = 'al_recibir'\n        when 'pos' then \"store_payment_method\".\"type_code\" = '48' and \"store_payment_method\".\"collection\" = 'al_recibir'\n        when 'link' then \"store_payment_method\".\"collection\" = 'link'\n        else \"store_payment_method\".\"collection\" <> 'link' end"
+        },
+        "store_payment_method_kind_data_check": {
+          "name": "store_payment_method_kind_data_check",
+          "value": "(\"store_payment_method\".\"kind\" not in ('yape', 'plin') or (\"store_payment_method\".\"phone\" is not null and \"store_payment_method\".\"holder\" is not null))\n        and (\"store_payment_method\".\"kind\" <> 'transferencia' or (\"store_payment_method\".\"bank_code\" is not null and \"store_payment_method\".\"account_number\" is not null and \"store_payment_method\".\"holder\" is not null))"
+        },
+        "store_payment_method_phone_check": {
+          "name": "store_payment_method_phone_check",
+          "value": "\"store_payment_method\".\"phone\" ~ '^[+][1-9][0-9]{7,14}$'"
+        },
+        "store_payment_method_holder_check": {
+          "name": "store_payment_method_holder_check",
+          "value": "char_length(btrim(\"store_payment_method\".\"holder\")) between 1 and 80"
+        },
+        "store_payment_method_bank_check": {
+          "name": "store_payment_method_bank_check",
+          "value": "\"store_payment_method\".\"bank_code\" ~ '^[0-9]{3}$'"
+        },
+        "store_payment_method_account_check": {
+          "name": "store_payment_method_account_check",
+          "value": "\"store_payment_method\".\"account_number\" ~ '^[0-9][0-9 -]{4,28}[0-9]$'"
+        },
+        "store_payment_method_cci_check": {
+          "name": "store_payment_method_cci_check",
+          "value": "\"store_payment_method\".\"cci\" ~ '^[0-9]{20}$'"
         }
       },
       "isRLSEnabled": false
@@ -6429,17 +6505,17 @@
         "argos_reading_conversation_fkey": {
           "name": "argos_reading_conversation_fkey",
           "tableFrom": "argos_reading",
+          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
-          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -6547,9 +6623,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "customer_consent_conversation_idx": {
           "name": "customer_consent_conversation_idx",
@@ -6574,41 +6650,41 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "customer_consent_customer_fkey": {
           "name": "customer_consent_customer_fkey",
           "tableFrom": "customer_consent",
+          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "customer_id"
           ],
-          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "customer_consent_conversation_fkey": {
           "name": "customer_consent_conversation_fkey",
           "tableFrom": "customer_consent",
+          "tableTo": "conversation",
           "columnsFrom": [
             "store_id",
             "conversation_id"
           ],
-          "tableTo": "conversation",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6740,26 +6816,26 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "customer_fact_customer_fkey": {
           "name": "customer_fact_customer_fkey",
           "tableFrom": "customer_fact",
+          "tableTo": "customer",
           "columnsFrom": [
             "store_id",
             "customer_id"
           ],
-          "tableTo": "customer",
           "columnsTo": [
             "store_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6785,6 +6861,335 @@
         "customer_fact_birthday_check": {
           "name": "customer_fact_birthday_check",
           "value": "\"customer_fact\".\"key\" <> 'cumpleanos' or \"customer_fact\".\"value\" ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_payment_link_attempt": {
+      "name": "store_payment_link_attempt",
+      "schema": "",
+      "columns": {
+        "state_hash": {
+          "name": "state_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verifier": {
+          "name": "verifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "store_payment_link_attempt_store_idx": {
+          "name": "store_payment_link_attempt_store_idx",
+          "columns": [
+            {
+              "expression": "store_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "store_payment_link_attempt_store_id_fkey": {
+          "name": "store_payment_link_attempt_store_id_fkey",
+          "tableFrom": "store_payment_link_attempt",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "store_payment_link_attempt_provider_check": {
+          "name": "store_payment_link_attempt_provider_check",
+          "value": "provider IN ('mercadopago')"
+        },
+        "store_payment_link_attempt_mode_check": {
+          "name": "store_payment_link_attempt_mode_check",
+          "value": "mode IN ('prueba','real')"
+        },
+        "store_payment_link_attempt_hash_check": {
+          "name": "store_payment_link_attempt_hash_check",
+          "value": "\"store_payment_link_attempt\".\"state_hash\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_payment_link_trial": {
+      "name": "store_payment_link_trial",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ref": {
+          "name": "ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paid_cents": {
+          "name": "paid_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_ref": {
+          "name": "payment_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "store_payment_link_trial_store_idx": {
+          "name": "store_payment_link_trial_store_idx",
+          "columns": [
+            {
+              "expression": "store_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "store_payment_link_trial_store_id_fkey": {
+          "name": "store_payment_link_trial_store_id_fkey",
+          "tableFrom": "store_payment_link_trial",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "store_payment_link_trial_provider_check": {
+          "name": "store_payment_link_trial_provider_check",
+          "value": "provider IN ('mercadopago')"
+        },
+        "store_payment_link_trial_amount_check": {
+          "name": "store_payment_link_trial_amount_check",
+          "value": "\"store_payment_link_trial\".\"amount_cents\" > 0"
+        },
+        "store_payment_link_trial_url_check": {
+          "name": "store_payment_link_trial_url_check",
+          "value": "\"store_payment_link_trial\".\"url\" ~ '^https://'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.store_payment_qr": {
+      "name": "store_payment_qr",
+      "schema": "",
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method_id": {
+          "name": "method_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "store_payment_qr_method_fkey": {
+          "name": "store_payment_qr_method_fkey",
+          "tableFrom": "store_payment_qr",
+          "tableTo": "store_payment_method",
+          "columnsFrom": [
+            "store_id",
+            "method_id"
+          ],
+          "columnsTo": [
+            "store_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "store_payment_qr_pkey": {
+          "name": "store_payment_qr_pkey",
+          "columns": [
+            "method_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "store_payment_qr_type_check": {
+          "name": "store_payment_qr_type_check",
+          "value": "content_type IN ('image/jpeg','image/png','image/webp')"
+        },
+        "store_payment_qr_size_check": {
+          "name": "store_payment_qr_size_check",
+          "value": "octet_length(\"store_payment_qr\".\"content\") between 1 and 1500000"
         }
       },
       "isRLSEnabled": false

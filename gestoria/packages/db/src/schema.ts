@@ -316,6 +316,24 @@ export type PaymentTypeCode = (typeof PAYMENT_TYPE_CODES)[number]
 export const PAYMENT_COLLECTIONS = ["link", "comprobante", "al_recibir"] as const
 export type PaymentCollection = (typeof PAYMENT_COLLECTIONS)[number]
 
+/**
+ * Qué forma de cobro es, para pedir sus datos (lienzo «gestorIA · Configuración, de nuevo»,
+ * tablero 6): Yape y Plin con su celular, su titular y su QR; la transferencia con su banco, su
+ * cuenta y su CCI; el efectivo y el POS al recibir; el link (la pasarela) y «otro», con texto
+ * libre. El tipo de UN/CEFACT 4461 (`type_code`) sigue diciendo con qué se paga: cada forma lleva
+ * el suyo fijo, menos «otro».
+ */
+export const PAYMENT_KINDS = [
+  "yape",
+  "plin",
+  "transferencia",
+  "efectivo",
+  "pos",
+  "link",
+  "otro",
+] as const
+export type PaymentKind = (typeof PAYMENT_KINDS)[number]
+
 export const storePaymentMethod = pgTable(
   "store_payment_method",
   {
@@ -325,8 +343,21 @@ export const storePaymentMethod = pgTable(
     name: text("name").notNull(),
     typeCode: text("type_code").$type<PaymentTypeCode>().notNull(),
     collection: text("collection").$type<PaymentCollection>().notNull(),
-    /** Lo que Sofi le envía al cliente para pagar: el número, la cuenta, a nombre de quién. */
+    kind: text("kind").$type<PaymentKind>().notNull().default("otro"),
+    /**
+     * Lo que Sofi le envía al cliente para pagar: el número, la cuenta, a nombre de quién. En Yape,
+     * Plin y la transferencia lo arma el servidor con sus datos; en lo demás, lo escribe la tienda.
+     */
     details: text("details").notNull().default(""),
+    /** El celular de Yape o Plin, en E.164 (`+51987654321`). */
+    phone: text("phone"),
+    /** A nombre de quién está: la clienta lo compara antes de pagar. */
+    holder: text("holder"),
+    /** El banco de la transferencia: su código de entidad, los tres primeros números del CCI. */
+    bankCode: text("bank_code"),
+    accountNumber: text("account_number"),
+    /** El Código de Cuenta Interbancario: 20 números, con sus dígitos de control revisados. */
+    cci: text("cci"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -344,6 +375,37 @@ export const storePaymentMethod = pgTable(
       sql`${table.typeCode} <> '10' or ${table.collection} = 'al_recibir'`,
     ),
     check("store_payment_method_details_check", sql`char_length(${table.details}) <= 500`),
+    check("store_payment_method_kind_check", inList("kind", PAYMENT_KINDS)),
+    // Cada forma con su tipo de 4461 y su manera de confirmarse; «otro» elige los suyos.
+    check(
+      "store_payment_method_kind_type_check",
+      sql`case ${table.kind}
+        when 'yape' then ${table.typeCode} = '68' and ${table.collection} = 'comprobante'
+        when 'plin' then ${table.typeCode} = '68' and ${table.collection} = 'comprobante'
+        when 'transferencia' then ${table.typeCode} = '30' and ${table.collection} = 'comprobante'
+        when 'efectivo' then ${table.typeCode} = '10' and ${table.collection} = 'al_recibir'
+        when 'pos' then ${table.typeCode} = '48' and ${table.collection} = 'al_recibir'
+        when 'link' then ${table.collection} = 'link'
+        else ${table.collection} <> 'link' end`,
+    ),
+    // Yape y Plin, con su celular y su titular; la transferencia, con su banco, cuenta y titular.
+    check(
+      "store_payment_method_kind_data_check",
+      sql`(${table.kind} not in ('yape', 'plin') or (${table.phone} is not null and ${table.holder} is not null))
+        and (${table.kind} <> 'transferencia' or (${table.bankCode} is not null and ${table.accountNumber} is not null and ${table.holder} is not null))`,
+    ),
+    check("store_payment_method_phone_check", sql`${table.phone} ~ '^[+][1-9][0-9]{7,14}$'`),
+    check(
+      "store_payment_method_holder_check",
+      sql`char_length(btrim(${table.holder})) between 1 and 80`,
+    ),
+    check("store_payment_method_bank_check", sql`${table.bankCode} ~ '^[0-9]{3}$'`),
+    check(
+      "store_payment_method_account_check",
+      sql`${table.accountNumber} ~ '^[0-9][0-9 -]{4,28}[0-9]$'`,
+    ),
+    check("store_payment_method_cci_check", sql`${table.cci} ~ '^[0-9]{20}$'`),
+    unique("store_payment_method_store_id_key").on(table.storeId, table.id),
     foreignKey({
       name: "store_payment_method_store_id_fkey",
       columns: [table.storeId],
@@ -655,6 +717,35 @@ export const storeImage = pgTable(
       name: "store_image_store_id_fkey",
       columns: [table.storeId],
       foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * El QR de Yape o Plin de un medio de pago (tablero 6): la imagen tal como la baja la tienda de
+ * su app, en la base y mirada por su contenido (JPEG, PNG o WebP), una por medio. Se borra con él.
+ */
+export const storePaymentQr = pgTable(
+  "store_payment_qr",
+  {
+    storeId: uuid("store_id").notNull(),
+    methodId: uuid("method_id").notNull(),
+    contentType: text("content_type").$type<PhotoType>().notNull(),
+    content: bytea("content").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: "store_payment_qr_pkey", columns: [table.methodId] }),
+    check("store_payment_qr_type_check", inList("content_type", PHOTO_TYPES)),
+    check(
+      "store_payment_qr_size_check",
+      sql`octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+    ),
+    foreignKey({
+      name: "store_payment_qr_method_fkey",
+      columns: [table.storeId, table.methodId],
+      foreignColumns: [storePaymentMethod.storeId, storePaymentMethod.id],
     }).onDelete("cascade"),
   ],
 )
@@ -1062,7 +1153,7 @@ export const storeTemplateField = pgTable(
 
 /**
  * Lo que Sofi no supo de un producto (decisión 11): la pregunta de la clienta y su conversación, y
- * la respuesta de la tienda. Sofi solo la anota (`0054_reglas_la_ficha_del_producto.sql`). Ventas
+ * la respuesta de la tienda. Sofi solo la anota (`0056_reglas_la_ficha_del_producto.sql`). Ventas
  * responde y puede pedir que se guarde en la ficha (`save_requested`); el Dueño o el Administrador
  * la guardan (`saved_at`), y desde ahí Sofi la usa. Una persona también anota en la ficha una
  * pregunta ya respondida, sin conversación.
@@ -1752,8 +1843,20 @@ export const PAYMENT_LINK_PROVIDERS = ["mercadopago"] as const
 export type PaymentLinkProvider = (typeof PAYMENT_LINK_PROVIDERS)[number]
 
 /**
+ * El modo de la pasarela (tablero 6): «prueba» cobra con dinero de prueba (las credenciales de
+ * prueba del proveedor) y solo el link de S/ 1 de la tienda; «real» cobra los pedidos.
+ */
+export const PAYMENT_LINK_MODES = ["prueba", "real"] as const
+export type PaymentLinkMode = (typeof PAYMENT_LINK_MODES)[number]
+
+/**
  * La cuenta del proveedor del link de pago de la tienda, con sus credenciales cifradas
- * (`secretos.ts` de la API). Nunca vuelven al navegador: la pantalla solo sabe si está conectada.
+ * (`secretos.ts` de la API). Nunca vuelven al navegador: la pantalla solo sabe si está conectada,
+ * en qué modo y con qué cuenta (su correo a medias).
+ *
+ * Se conecta entrando a la cuenta del proveedor (OAuth): el token dura lo que dice el proveedor
+ * (`expires_at`; Mercado Pago, 180 días) y se renueva antes con el `refresh_token`. Si el
+ * proveedor avisa que la tienda quitó el permiso (y se comprueba), queda `revoked_at`.
  */
 export const storePaymentLink = pgTable(
   "store_payment_link",
@@ -1762,6 +1865,14 @@ export const storePaymentLink = pgTable(
     provider: text("provider").$type<PaymentLinkProvider>().notNull(),
     accessTokenEnc: text("access_token_enc").notNull(),
     webhookSecretEnc: text("webhook_secret_enc"),
+    refreshTokenEnc: text("refresh_token_enc"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    mode: text("mode").$type<PaymentLinkMode>().notNull().default("real"),
+    /** La cuenta en el proveedor (su número), para reconocer el aviso de que se desvinculó. */
+    providerUserId: text("provider_user_id"),
+    /** Cómo se reconoce la cuenta sin mostrarla entera: «ro…@gmail.com». */
+    accountLabel: text("account_label"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     /** Los últimos caracteres del token, para reconocer la cuenta sin mostrarla. */
     hint: text("hint").notNull(),
     connectedBy: text("connected_by").notNull(),
@@ -1769,12 +1880,83 @@ export const storePaymentLink = pgTable(
   },
   (table) => [
     check("store_payment_link_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_mode_check", inList("mode", PAYMENT_LINK_MODES)),
     check("store_payment_link_hint_check", sql`char_length(${table.hint}) between 1 and 8`),
+    check(
+      "store_payment_link_label_check",
+      sql`char_length(${table.accountLabel}) between 1 and 120`,
+    ),
+    index("store_payment_link_user_idx").on(table.provider, table.providerUserId),
     foreignKey({
       name: "store_payment_link_store_id_fkey",
       columns: [table.storeId],
       foreignColumns: [store.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * Un intento de conectar la pasarela entrando a la cuenta (OAuth): el `state` que viaja al
+ * proveedor (aquí solo su resumen SHA-256), quién lo empezó, en qué modo y el `code_verifier` de
+ * PKCE (RFC 7636). Vale 10 minutos, lo que vale el código del proveedor, y se usa una sola vez.
+ */
+export const storePaymentLinkAttempt = pgTable(
+  "store_payment_link_attempt",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    storeId: uuid("store_id").notNull(),
+    provider: text("provider").$type<PaymentLinkProvider>().notNull(),
+    mode: text("mode").$type<PaymentLinkMode>().notNull(),
+    verifier: text("verifier").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("store_payment_link_attempt_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_attempt_mode_check", inList("mode", PAYMENT_LINK_MODES)),
+    check("store_payment_link_attempt_hash_check", sql`${table.stateHash} ~ '^[0-9a-f]{64}$'`),
+    foreignKey({
+      name: "store_payment_link_attempt_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_payment_link_attempt_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/**
+ * El link de prueba de S/ 1 (tablero 6): se paga con la tarjeta de prueba del proveedor y, como un
+ * pedido, se da por pagado solo cuando el proveedor avisa y se le pregunta. No es un pedido: no
+ * mueve stock ni cuenta en Reportes.
+ */
+export const storePaymentLinkTrial = pgTable(
+  "store_payment_link_trial",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    provider: text("provider").$type<PaymentLinkProvider>().notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    url: text("url").notNull(),
+    ref: text("ref").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Lo que el proveedor dijo al preguntarle: cuándo entró, cuánto y con qué pago. */
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    paidCents: integer("paid_cents"),
+    paymentRef: text("payment_ref"),
+  },
+  (table) => [
+    check("store_payment_link_trial_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_trial_amount_check", sql`${table.amountCents} > 0`),
+    check("store_payment_link_trial_url_check", sql`${table.url} ~ '^https://'`),
+    foreignKey({
+      name: "store_payment_link_trial_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_payment_link_trial_store_idx").on(table.storeId, table.createdAt),
   ],
 )
 

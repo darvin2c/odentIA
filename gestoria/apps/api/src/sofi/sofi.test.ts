@@ -591,6 +591,51 @@ describe("Sofi vende con las reglas de la tienda", () => {
     expect(order).toMatchObject({ marginUsedCents: 1000, state: "por_pagar" })
     expect(order!.priceExpiresAt?.toISOString()).toBe(offer.vence)
   })
+
+  it("si la clienta pregunta por tarjeta o link, el mismo pedido no se anota otra vez", async () => {
+    const id = await newTest()
+    const args = {
+      lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+      entrega_id: ids.reparto,
+    }
+    const order = { ...args, nombre: "Eva", direccion: "Av. Larco 100" }
+    await write(
+      id,
+      "Dame el link para pagar con tarjeta",
+      use("cotizar", () => args),
+      (r) => ({ content: `Te queda en ${lastTool(r).total}. ¿Lo confirmo?` }),
+    )
+    let number = ""
+    await write(
+      id,
+      "Sí, confirmo. Soy Eva, Av. Larco 100",
+      use("armar_pedido", () => order),
+      (r) => {
+        number = lastTool(r).pedido
+        return { toolCalls: [toolCall("link_de_pago", { pedido: number })] }
+      },
+      (r) => {
+        // En la prueba no hay link: le dice que el pedido ya está anotado, para no rehacerlo.
+        expect(lastTool(r).problema).toContain(`${number} ya está anotado`)
+        return { content: `Tu pedido ${number} queda anotado. Puedes pagar por Yape.` }
+      },
+    )
+    // La clienta vuelve a preguntar y el modelo intenta anotarlo igual otra vez.
+    const again = await write(
+      id,
+      "¿Puedo pagar con tarjeta?",
+      use("armar_pedido", () => order),
+      (r) => {
+        const result = lastTool(r)
+        expect(result).toMatchObject({ ok: true, pedido: number })
+        expect(result).not.toHaveProperty("reemplaza")
+        return { content: `Tu pedido ${number} sigue en pie. Puedes pagar por Yape.` }
+      },
+    )
+    expect(again.conversation.orders).toEqual([
+      expect.objectContaining({ number, state: "por_pagar" }),
+    ])
+  })
 })
 
 describe("lo que escribe el cliente mientras Sofi responde", () => {

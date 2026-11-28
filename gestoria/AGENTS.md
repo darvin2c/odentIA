@@ -44,7 +44,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 ## La configuración de la tienda (B3)
 
 - Medios de pago con los tipos de UN/CEFACT 4461 y cómo se confirma el pago, en el orden en que
-  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Formas de entrega con la
+  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Cada forma lleva sus datos
+  (ADR 0232, `apps/api/src/cobros.ts`): Yape y Plin con su celular en E.164, su titular y su QR (en
+  la base, por su contenido); la transferencia con su banco de la lista y su CCI, revisado con sus
+  dígitos de control (`cci.ts`) y del mismo banco. Lo que Sofi envía (`details`) lo arma el
+  servidor con esos datos; nunca se pide un texto libre para lo que tiene campos. Formas de entrega con la
   lista `DeliveryMethod` de Schema.org, su costo y lo que Sofi puede negociar del envío.
 - El catálogo: un producto agrupa hasta tres opciones (Schema.org `ProductGroup`); cada
   combinación es una variante con su código, su stock y, si quiere, su precio y su foto. Sin precio
@@ -167,6 +171,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
+- La pasarela se conecta entrando a la cuenta (OAuth con PKCE, `pasarela.ts`; ADR 0232): nunca se
+  pide copiar llaves. El intento vale 10 minutos, una vez y para quien lo empezó; el token se renueva
+  solo antes de vencer. En modo prueba (`store_payment_link.mode`) solo se paga el link de S/ 1 de la
+  tienda: ningún pedido se cobra por link, Sofi no lo ofrece (`chargesOrders`) y un pago de prueba
+  nunca paga un pedido. El aviso `mp-connect` se comprueba con el proveedor antes de creerlo.
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 

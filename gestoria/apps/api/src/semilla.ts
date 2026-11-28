@@ -16,6 +16,7 @@ import { seedDemoPushChoices } from "./semilla-avisos.js"
 import { seedDemoExchanges } from "./semilla-cambios.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
+import { seedDemoPayments } from "./semilla-cobros.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
 import { seedDemoSheet } from "./semilla-ficha.js"
 import { seedDemoBrand } from "./semilla-marca.js"
@@ -106,6 +107,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
       })
     }
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoPayments(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoBrand(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPartPayment(tx as unknown as Db, DEMO_STORE_ID)
