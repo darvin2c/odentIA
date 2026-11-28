@@ -347,8 +347,8 @@ describe("Sofi vende con las reglas de la tienda", () => {
     // Con una persona atendiendo, Sofi no escribe.
     const quiet = await write(id, "¿Hola?")
     expect(quiet.result.status).toBe("persona")
-    // «Devolver a Sofi» y sigue.
-    const back = await call("lucia", "POST", `${base}/conversaciones/${id}/devolver`)
+    // «Devolver a Sofi» y sigue. Es una prueba: la devuelve quien prueba a Sofi (Configuración).
+    const back = await call("rosa", "POST", `${base}/conversaciones/${id}/devolver`)
     expect(back.json.conversation.handler).toBe("sofi")
   })
 
@@ -635,11 +635,18 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
   it("Sofi, sus opciones y «Probar a Sofi» son de quien cambia la configuración", async () => {
     const id = await newTest()
     await write(id, "Hola", say("¡Hola! ¿En qué te ayudo?"))
-    // Ventas atiende y soporte solo mira: ninguno ve Configuración ni lo que Sofi tiene puesto.
+    // Ventas atiende y soporte solo mira: los dos entran a la tienda, pero ninguno ve
+    // Configuración ni lo que Sofi tiene puesto.
     for (const who of ["lucia", "soporte"] as const) {
-      expect((await call(who, "GET", `${base}/sofi`)).status).toBe(403)
-      expect((await call(who, "GET", `${base}/conversaciones/${id}`)).status).toBe(403)
-      expect((await call(who, "POST", `${base}/conversaciones/${id}/devolver`)).status).toBe(403)
+      expect((await call(who, "GET", `${base}/catalogo`)).status).toBe(200)
+      for (const [method, path] of [
+        ["GET", `${base}/sofi`],
+        ["GET", `${base}/conversaciones/${id}`],
+        ["POST", `${base}/conversaciones/${id}/devolver`],
+      ] as const) {
+        const refused = await call(who, method, path)
+        expect([refused.status, refused.json.error?.code]).toEqual([403, "FORBIDDEN"])
+      }
     }
     for (const who of ["rosa", "mario"] as const) {
       const sofi = await call(who, "GET", `${base}/sofi`)
@@ -652,11 +659,18 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
     }
   })
 
-  it("Ventas atiende un chat sin ver lo que costó el modelo", async () => {
+  it("Ventas atiende un chat sin ver lo que costó el modelo", async ({ onTestFinished }) => {
     const [chat] = await db.ownerDb
       .insert(conversation)
       .values({ storeId, channel: "whatsapp", customerName: "Carla", createdBy: "canal" })
       .returning({ id: conversation.id })
+    // Fuera al terminar, también si falla: no cuenta en los Reportes que se prueban después.
+    onTestFinished(async () => {
+      await db.ownerDb
+        .delete(conversationMessage)
+        .where(eq(conversationMessage.conversationId, chat!.id))
+      await db.ownerDb.delete(conversation).where(eq(conversation.id, chat!.id))
+    })
     await db.ownerDb.insert(conversationMessage).values([
       { storeId, conversationId: chat!.id, author: "cliente", text: "Hola", actorUserId: "canal" },
       {
@@ -665,7 +679,7 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
         author: "sofi",
         text: "¡Hola!",
         delivery: "sin_enviar",
-        detail: { tools: [], costo: 1234 },
+        detail: { tools: [], costo: 987_654_321 },
         actorUserId: "agente:sofi",
       },
     ])
@@ -673,14 +687,9 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
     expect(seen.status).toBe(200)
     expect(seen.json.conversation).not.toHaveProperty("costMicros")
     expect(JSON.stringify(seen.json)).not.toContain("costMicros")
-    expect(JSON.stringify(seen.json)).not.toContain("1234")
+    expect(JSON.stringify(seen.json)).not.toContain("987654321")
     const owner = await call("rosa", "GET", `${base}/conversaciones/${chat!.id}`)
-    expect(owner.json.conversation.costMicros).toBe(1234)
-    // Fuera, para que no cuente en los Reportes que se prueban después.
-    await db.ownerDb
-      .delete(conversationMessage)
-      .where(eq(conversationMessage.conversationId, chat!.id))
-    await db.ownerDb.delete(conversation).where(eq(conversation.id, chat!.id))
+    expect(owner.json.conversation.costMicros).toBe(987_654_321)
   })
 
   it("Ventas no prueba a Sofi, no la configura ni ve Reportes", async () => {
