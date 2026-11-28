@@ -602,7 +602,7 @@ export function configLines(
       summary: [
         plan.name ? `Plan ${plan.name}` : "Sin plan todavía",
         plan.creditLeftCents !== null && plan.currency
-          ? `te quedan ${money(plan.creditLeftCents, plan.currency)} de crédito`
+          ? `te quedan ${money(plan.creditLeftCents, plan.currency)} de saldo`
           : null,
       ]
         .filter(Boolean)
@@ -765,7 +765,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     section: "entregas",
     terms: ["franja", "horario", "hora de entrega", "turno"],
   },
-  { text: "Invitar a tu equipo", section: "equipo", terms: ["invitar", "invitación", "correo"] },
+  {
+    text: "Invitar a tu equipo",
+    section: "equipo",
+    terms: ["invitar", "invitación", "correo", "celular"],
+  },
   {
     text: "Roles y permisos",
     section: "equipo",
@@ -774,7 +778,7 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   {
     text: "Repartidores",
     section: "equipo",
-    terms: ["repartidor", "reparte", "motorizado", "delivery"],
+    terms: ["repartidor", "reparte", "motorizado", "delivery", "pago por entrega", "pagarle"],
   },
   {
     text: "Soporte de gestorIA",
@@ -792,7 +796,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     section: "plan",
     terms: ["cobro", "factura", "comprobante", "pagar", "recibo"],
   },
-  { text: "Gasto de este periodo", section: "plan", terms: ["saldo", "tope", "gasto", "crédito"] },
+  {
+    text: "Tu saldo y tu tope del mes",
+    section: "plan",
+    terms: ["saldo", "tope", "gasto", "crédito", "cuánto pago"],
+  },
 ]
 
 /** Los nombres que guardó la tienda, para encontrarlos también (sus medios, su equipo…). */

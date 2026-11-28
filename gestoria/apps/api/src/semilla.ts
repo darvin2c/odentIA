@@ -18,6 +18,7 @@ import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoPayments } from "./semilla-cobros.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
+import { seedDemoTeam } from "./semilla-equipo.js"
 import { seedDemoSheet } from "./semilla-ficha.js"
 import { seedDemoProposals } from "./semilla-ia.js"
 import { seedDemoBrand } from "./semilla-marca.js"
@@ -123,6 +124,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSheet(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoProposals(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoTeam(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSetupDone(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoNewStore(tx as unknown as Db)
     // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta).
@@ -192,7 +194,7 @@ async function inviteGuest(
 /**
  * «Plan y pagos» de ejemplo (B7): lo que respondería la administración, como si ya hubiera
  * preguntado (en desarrollo, sin `GESTORIA_CONTRACT_SECRET`, no se pregunta y queda esto). Un mes
- * pagado, el actual por pagar, un aviso del tope y preguntas respondidas. Quien usa la demo
+ * pagado, el anterior por pagar, el saldo de este mes y preguntas respondidas. Quien usa la demo
  * (`guestId`, de `GESTORIA_SEMILLA_CORREO`) ve una suya en la Ayuda: la Ayuda muestra a cada
  * persona solo las suyas. Sin su copia de la cuenta (nunca entró) no se sabe quién es: sembrar
  * otra vez después de entrar la suma.
@@ -213,64 +215,66 @@ async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<
       trialEndsAt: null,
     },
     agents: { trialExhausted: false, capReached: false },
+    // El plan decidido: la cuota de USD 19 vuelve como saldo y de ahí sale el 1 % del total, con
+    // el envío, de cada venta completada (pagada y entregada, o despachada por agencia con su
+    // número), venga de donde venga; lo devuelto se descuenta. Este mes va dentro del saldo; el
+    // anterior lo pasó un poco y ese cobro está por pagar.
     budget: {
       currency: "USD",
-      creditCents: 500,
-      creditUsedCents: 500,
-      capCents: 3000,
-      spentCents: 2460,
-      periodStart: at(-20),
-      periodEnd: at(10),
+      creditCents: 1900,
+      creditUsedCents: 865,
+      capCents: 4000,
+      spentCents: 0,
+      periodStart: at(-5),
+      periodEnd: at(25),
     },
     plan: {
       code: "gestoria-tienda",
       name: "Tienda",
       currency: "USD",
       priceCents: 1900,
-      creditCents: 500,
+      creditCents: 1900,
     },
     charges: [
       {
         id: "semilla-cargo-2",
-        periodStart: at(-50),
-        periodEnd: at(-20),
-        amountCents: 3140,
+        periodStart: at(-35),
+        periodEnd: at(-5),
+        amountCents: 2140,
         paidCents: 0,
         currency: "USD",
         status: "pendiente",
         dueAt: at(5),
         lines: [
-          { kind: "plan", description: "Plan Tienda", quantity: 1, amountCents: 1900 },
           {
-            kind: "conversacion",
-            description: "Informa: atendió una conversación",
-            quantity: 62,
-            amountCents: 620,
+            kind: "plan",
+            description: "Plan Tienda · vuelve como saldo",
+            quantity: 1,
+            amountCents: 1900,
           },
           {
-            kind: "conversacion",
-            description: "Gestiona: atendió una conversación y tomó un pedido",
-            quantity: 31,
-            amountCents: 620,
+            kind: "pedido",
+            description: "1 % de las ventas completadas que pasaron tu saldo",
+            quantity: 18,
+            amountCents: 240,
           },
         ],
       },
       {
         id: "semilla-cargo-1",
-        periodStart: at(-80),
-        periodEnd: at(-50),
-        amountCents: 2380,
-        paidCents: 2380,
+        periodStart: at(-65),
+        periodEnd: at(-35),
+        amountCents: 1900,
+        paidCents: 1900,
         currency: "USD",
         status: "pagada",
-        dueAt: at(-45),
+        dueAt: at(-25),
         lines: [
-          { kind: "plan", description: "Plan Tienda", quantity: 1, amountCents: 1900 },
           {
-            kind: "conversacion",
-            description: "Informa: atendió una conversación",
-            quantity: 48,
-            amountCents: 480,
+            kind: "plan",
+            description: "Plan Tienda · vuelve como saldo",
+            quantity: 1,
+            amountCents: 1900,
           },
         ],
       },
@@ -279,13 +283,13 @@ async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<
       {
         id: "semilla-pago-1",
         chargeId: "semilla-cargo-1",
-        amountCents: 2380,
+        amountCents: 1900,
         currency: "USD",
         status: "confirmado",
-        at: at(-46),
+        at: at(-27),
       },
     ],
-    notices: [{ key: "tope:aviso:demo", family: "tope", level: "aviso", action: "cambiar_tope" }],
+    notices: [],
     paymentMethods: [
       {
         code: "yape",
