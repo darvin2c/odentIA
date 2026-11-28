@@ -9,6 +9,8 @@ import {
   dayName,
   itemText,
   missedReason,
+  missedTrips,
+  missedTripsText,
   nextDay,
   type OrderEvent,
   stateName,
@@ -91,6 +93,17 @@ describe("volvió sin entregar (tablero 6)", () => {
     expect(missedReason({ state: "por_salir", events: back })).toBe("No contestó")
     expect(missedReason({ state: "en_camino", events: [...back, event("salio")] })).toBeNull()
     expect(missedReason({ state: "por_salir", events: [event("salio")] })).toBeNull()
+  })
+
+  it("«No se entregó» dice si es la primera vez en ese pedido o cuántas ya hubo", () => {
+    expect(missedTripsText(missedTrips({ events: [event("salio")] }))).toBe(
+      "Es la primera vez que este pedido no se entrega.",
+    )
+    const twice = [event("salio"), event("no_entregado"), event("salio"), event("no_entregado")]
+    expect(missedTripsText(missedTrips({ events: twice.slice(0, 3) }))).toContain("1 vez")
+    expect(missedTripsText(missedTrips({ events: [...twice, event("salio")] }))).toBe(
+      "Este pedido ya no se entregó 2 veces: este es el viaje 3.",
+    )
   })
 
   it("«Mañana» es el día siguiente en el calendario, también a fin de mes", () => {

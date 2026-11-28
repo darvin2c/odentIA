@@ -745,6 +745,7 @@ describe("el precio de la ficha (dinero)", () => {
       lines: [{ variantId: variant("blanca,38"), quantity: 1, unitCents: 11000, gift: false }],
       deliveryMethodId: deliveryId,
       zone: null,
+      district: null,
       deliveryListCents: null,
       deliveryCents: null,
       paymentMethodId: paymentId,

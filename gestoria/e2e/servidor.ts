@@ -15,6 +15,7 @@ import { createECDH, randomBytes, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
 import {
   accountCopy,
+  agentGap,
   conversation,
   conversationMessage,
   storeMember,
@@ -38,6 +39,7 @@ import { createApp } from "../apps/api/src/app.js"
 import { createS3Storage } from "../apps/api/src/archivos.js"
 import { fakePhotosModel } from "../apps/api/src/ia-fotos.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
+import { fakeModel } from "../apps/api/src/sofi/modelo.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
 import {
   ACCOUNT_PORT,
@@ -175,6 +177,9 @@ const app = createApp({
     },
   },
   contract,
+  // «Probar a Sofi» con el modelo de desarrollo: responde por reglas, sin la red (ADR 0234: la
+  // prueba muestra «Por qué»). No mide nada de cómo vende.
+  model: fakeModel(),
   // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
@@ -254,6 +259,14 @@ const sofi = await answer(
   conv!.id,
 )
 if (sofi.status !== "apagada") throw new Error(`Sofi debía estar apagada: ${sofi.status}`)
+// Lo que Sofi no supo responder en ese chat, como lo anota al pasarlo a una persona (ADR 0234).
+await db.ownerDb.insert(agentGap).values({
+  storeId: STORE_ID,
+  conversationId: conv!.id,
+  question: "¿Tienen sandalias talla 38?",
+  questionKey: "tienen sandalias talla 38",
+  createdBy: "agente:sofi",
+})
 
 // Con `E2E_DEMO=1`, también la demo de Calzados Rosa (sus fotos reales en este RustFS) con Rosa de
 // Dueño: para mirar la pantalla con la demo y sacar capturas. Sin el pedido de soporte de la demo,

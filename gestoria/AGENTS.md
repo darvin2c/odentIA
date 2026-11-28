@@ -92,7 +92,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   anota lo que costó) y sus propuestas, `ai_proposal` (campo, valor, por qué, estado propuesta /
   usada / cambiada / descartada, quién y cuándo). Pedir, usar, cambiar, descartar y «Aplicar
   todos» es `configuracion`; ver, `catalogo.ver` (las de una carga, `configuracion`). Sofi y
-  Argos no las ven (`0062_reglas_ia_de_fotos.sql`).
+  Argos no las ven (`0066_reglas_ia_de_fotos.sql`).
 - Usar una propuesta pasa por la operación de siempre (`updateProductIn`, `saveGridIn`,
   `updatePhotoIn`; en la carga, `applyItem` y `joinPhotosIn`), con «Propuesta de la IA» en el
   historial. En un producto de una carga solo se usan el nombre, la categoría, la descripción y
@@ -196,6 +196,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   imagen con `renderAdjustedImage`: un SVG se pasa a imagen en el navegador, nunca se guarda como
   SVG (el servidor mira el contenido). La vista previa de la clienta dice que el catálogo con link
   aún no se publica.
+
+## Entregas por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7; ADR 0233)
+
+- Los distritos son códigos UBIGEO del INEI (`apps/api/src/distritos.ts`: los 43 de Lima y los 7
+  del Callao), nunca texto: la pantalla los elige del mapa esquemático o de la lista de cada zona.
+  Un distrito está en una sola zona en toda la tienda (`checkZonesIn`).
+- El precio de un envío sale solo de `deliveryPriceOf` (`apps/api/src/entregas.ts`), con el pago
+  al recibir y el envío gratis por zona (`payOnDeliveryOf`, `freeFromOf`): pedidos, «Cambiar»,
+  cambios y Sofi la usan; nadie más calcula el envío. Cuándo llega se cuenta en la hora de la tienda.
+- Las franjas de una zona son de las de la tienda (`store.delivery_slots`): no hay otra lista.
+- Quién paga el viaje fallido es `store.failed_trip`: se informa (Sofi, «No se entregó»); cobrar
+  otro viaje no está hecho.
 
 ## Inicio y los primeros pasos (entregas 3 y 6 del lienzo «gestorIA como odentIA»; ADR 0227)
 
@@ -317,8 +329,22 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- A Sofi se la configura eligiendo (ADR 0234): cada opción de `store_agent` (tono, trato, emojis,
+  lo que ofrece, cuándo pasa el chat, el horario) tiene su frase fija en `sofi/opciones.ts`; nada
+  que escriba la tienda va como instrucción. Lo que puede ofrecer lo frenan también cotizar y
+  armar_pedido. «Lo que sabe» llega por `leer_lo_que_sabe` (las preguntas, como JSON en los datos);
+  «Lo que aprendió» lo anota solo Sofi, en chats de verdad, y lo cierra solo una persona: nada se
+  agrega solo. «Por qué» en la prueba sale solo de lo anotado en su respuesta (`whyOf`).
+- Guardar opciones de Sofi manda solo lo que cambió y la versión que se vio (`version`); sobre una
+  versión vieja la API responde 409. Encender o pausar es su propia operación
+  (`PATCH …/sofi/estado`, `setAgentEnabled`), que no cambia esa versión: guardar opciones nunca
+  enciende ni pausa a Sofi.
 - Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
-  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (ADR 0224). Lo frena la herramienta, no solo el prompt (`bargainProblem` de
+  `sofi/herramientas.ts`, en cotizar y armar_pedido): nada se cede antes de que Sofi haya dicho el
+  precio completo de lo que lleva, ni sin una duda de la clienta después de oírlo (`isObjection`;
+  preguntar el precio no es una duda), y la primera oferta cede como mucho la mitad del margen
+  sobre los mínimos. «Por qué» dice la duda que abrió la oferta o por qué no ofreció. Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
