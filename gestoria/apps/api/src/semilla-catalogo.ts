@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { crc32, deflateSync } from "node:zlib"
 import {
   type Db,
@@ -24,7 +25,8 @@ const SHIP_FROM = "150115"
  * La configuración de Calzados Rosa (paso B3, tableros 6, 7 y 14): sus medios de pago, sus
  * formas de entrega y un catálogo de calzado con variantes, stock, kardex, un precio mínimo,
  * un precio por cantidad y una promoción. Solo para desarrollo y demostraciones, como el resto
- * de `semilla.ts`. Se agrega una vez: si la tienda ya tiene algo de esto, no lo toca.
+ * de `semilla.ts`. Se agrega una vez: si la tienda ya tiene algo de esto, no lo toca. Las fotos de
+ * la zapatilla, la sandalia, el botín y el mocasín son las del prototipo (`semilla-fotos/`).
  */
 
 const OWNER = "semilla-rosa"
@@ -88,6 +90,16 @@ interface SeedProduct {
   stock: (values: string[]) => number
   costCents: (values: string[]) => number
   colors: [number, number, number][]
+  /**
+   * Sus fotos de verdad, en orden (las del prototipo, en `semilla-fotos/`, con sus créditos en
+   * `CREDITOS.txt`); sin ellas, una de un color por cada uno de `colors`.
+   */
+  photos?: string[]
+}
+
+/** Una foto de la demo, guardada en la base como cualquier otra (bytea, JPEG). */
+function demoPhoto(name: string): Buffer {
+  return readFileSync(new URL(`./semilla-fotos/${name}.jpg`, import.meta.url))
 }
 
 const CATALOG: SeedProduct[] = [
@@ -106,9 +118,12 @@ const CATALOG: SeedProduct[] = [
       color === "blanca" ? (size === "42" ? 0 : 3) : size === "35" ? 0 : 2,
     costCents: ([color]) => (color === "blanca" ? 6800 : 5500),
     colors: [
-      [254, 215, 170],
-      [251, 146, 60],
+      [242, 240, 234],
+      [31, 31, 31],
+      [226, 223, 215],
     ],
+    // La blanca, la negra (las de su muestra) y otra de la blanca.
+    photos: ["blanca1", "negra1", "blanca2"],
   },
   {
     name: "Sandalia",
@@ -121,7 +136,12 @@ const CATALOG: SeedProduct[] = [
     ],
     stock: ([color]) => (color === "negra" ? 2 : 2),
     costCents: () => 4200,
-    colors: [[231, 229, 228]],
+    colors: [
+      [28, 28, 28],
+      [231, 216, 195],
+    ],
+    // La negra y la beige, en ese orden (las de su muestra).
+    photos: ["dorada1", "plataforma1"],
   },
   {
     name: "Botín de cuero marrón",
@@ -133,6 +153,7 @@ const CATALOG: SeedProduct[] = [
     stock: ([size]) => (size === "43" ? 0 : size === "39" ? 3 : 1),
     costCents: () => 13500,
     colors: [[180, 120, 80]],
+    photos: ["botin1", "botin2"],
   },
   {
     name: "Mocasín azul",
@@ -143,6 +164,7 @@ const CATALOG: SeedProduct[] = [
     stock: () => 1,
     costCents: () => 7900,
     colors: [[147, 197, 253]],
+    photos: ["mocasin2"],
   },
 ]
 
@@ -284,14 +306,23 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
     const photos = await tx
       .insert(productPhoto)
       .values(
-        seed.colors.map((rgb, position) => ({
-          storeId,
-          productId,
-          position,
-          contentType: "image/png" as const,
-          content: solidPng(rgb),
-          createdBy: OWNER,
-        })),
+        seed.photos
+          ? seed.photos.map((name, position) => ({
+              storeId,
+              productId,
+              position,
+              contentType: "image/jpeg" as const,
+              content: demoPhoto(name),
+              createdBy: OWNER,
+            }))
+          : seed.colors.map((rgb, position) => ({
+              storeId,
+              productId,
+              position,
+              contentType: "image/png" as const,
+              content: solidPng(rgb),
+              createdBy: OWNER,
+            })),
       )
       .returning({ id: productPhoto.id })
     for (const values of combinations(seed.options)) {

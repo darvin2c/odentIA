@@ -338,7 +338,36 @@ export interface SellableVariant {
   autoUnitCents: number
   floorUnitCents: number
   promotion: string | null
+  /** Por encargo, con cupo o en preventa: se vende sin stock y el pedido espera a que entre. */
+  sellsWithoutStock: boolean
+  status: "encargo" | "cupo" | "preventa" | "liquidacion" | "no_se_vende" | null
 }
+
+const WITHOUT_STOCK: Record<string, string> = {
+  encargo: "por encargo",
+  cupo: "con cupo",
+  preventa: "preventa",
+}
+
+/**
+ * Cómo se lee una variante en la lista para anotar o cambiar un pedido: su precio de hoy y lo que
+ * queda. Sin stock, «agotado», salvo lo que se vende sin stock (por encargo, con cupo o en
+ * preventa), que dice eso y se puede elegir.
+ */
+export function sellableLabel(v: SellableVariant, price: string): string {
+  const name = `${v.productName}${v.variantName === "Única" ? "" : ` · ${v.variantName}`}`
+  return `${name} — ${price} · ${stockWord(v)}`
+}
+
+/** Lo que queda, en palabras: «quedan 3», «por encargo» o «agotado». */
+export function stockWord(v: Pick<SellableVariant, "stock" | "sellsWithoutStock" | "status">) {
+  if (v.stock > 0) return `quedan ${v.stock}`
+  if (v.sellsWithoutStock) return WITHOUT_STOCK[v.status ?? ""] ?? "se vende sin stock"
+  return "agotado"
+}
+
+/** Si se puede elegir para un pedido nuevo: hay stock o se vende sin él. */
+export const canPick = (v: SellableVariant) => v.stock > 0 || v.sellsWithoutStock
 
 /**
  * El nombre de cada estado. «Pago por confirmar» nunca se dice como pagado, y «Pagado» solo si no

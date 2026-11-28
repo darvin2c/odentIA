@@ -630,8 +630,8 @@ export function useStoreContext() {
 /**
  * El menú del día (lienzo «gestorIA como odentIA», tablero 4): arriba lo diario, con Inicio
  * primero y Despachos antes de Pedidos, y en «Gestión» lo que se mira de la tienda, con Caja. Solo
- * lo que ya existe: la Bandeja se suma cuando llegue su pantalla, en su lugar. Configuración y
- * Ayuda van al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no
+ * lo que ya existe: la Bandeja se suma cuando llegue su pantalla, en su lugar. Configuración va
+ * al pie (`storeFooter`). El número de Despachos es lo que no se entregó y todavía no
  * sale.
  */
 function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
