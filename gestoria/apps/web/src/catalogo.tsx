@@ -1,4 +1,13 @@
-import { Badge, Button, Field, FieldGroup, FieldLabel, Input, toast } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Field,
+  FieldGroup,
+  FieldLabel,
+  Input,
+  toast,
+  useIsMobile,
+} from "@odentia/ui"
 import {
   DataTable,
   DataTableSkeleton,
@@ -13,9 +22,10 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Download, Images, Package, Plus, Trash2, Upload } from "lucide-react"
+import { Camera, Download, Images, Package, Plus, Sparkles, Trash2, Upload } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
+import { AddFromPhotos } from "./agregar"
 import { MoneyInput } from "./campos"
 import { useTemplates } from "./ficha/datos"
 import { StateBadge } from "./ficha/lateral"
@@ -75,6 +85,9 @@ export function CatalogPage() {
   const navigate = useNavigate()
   const templates = useTemplates(store.id)
   const [adding, setAdding] = useState(false)
+  const [fromPhotos, setFromPhotos] = useState<File[] | null>(null)
+  const camera = useRef<HTMLInputElement>(null)
+  const isMobile = useIsMobile()
   const [uploading, setUploading] = useState(false)
   const products = catalog.data?.products ?? []
   const variants = products.reduce((n, p) => n + p.variantCount, 0)
@@ -214,11 +227,18 @@ export function CatalogPage() {
         }
         primary={
           canEdit
-            ? {
-                label: "Agregar producto",
-                icon: <Plus aria-hidden />,
-                onClick: () => setAdding(true),
-              }
+            ? isMobile
+              ? {
+                  // En el celular, la cámara primero (prototipo `camara.tsx`).
+                  label: "Tomar fotos",
+                  icon: <Camera aria-hidden />,
+                  onClick: () => camera.current?.click(),
+                }
+              : {
+                  label: "Agregar desde fotos",
+                  icon: <Sparkles aria-hidden />,
+                  onClick: () => setFromPhotos([]),
+                }
             : undefined
         }
         secondary={
@@ -234,6 +254,20 @@ export function CatalogPage() {
         menu={
           canEdit
             ? [
+                ...(isMobile
+                  ? [
+                      {
+                        label: "Agregar desde fotos",
+                        icon: <Sparkles aria-hidden />,
+                        onSelect: () => setFromPhotos([]),
+                      },
+                    ]
+                  : []),
+                {
+                  label: "Agregar sin fotos",
+                  icon: <Plus aria-hidden />,
+                  onSelect: () => setAdding(true),
+                },
                 {
                   label: "Subir una hoja",
                   icon: <Upload aria-hidden />,
@@ -260,8 +294,8 @@ export function CatalogPage() {
               : "Cuando el dueño o un administrador agregue productos, aparecen aquí."
           }
           // En el celular la cabecera deja solo íconos: las dos formas de empezar, aquí con su nombre.
-          actionLabel={canEdit ? "Agregar producto" : undefined}
-          onAction={canEdit ? () => setAdding(true) : undefined}
+          actionLabel={canEdit ? "Agregar desde fotos" : undefined}
+          onAction={canEdit ? () => setFromPhotos([]) : undefined}
           secondaryActionLabel={canEdit ? "Subir una hoja" : undefined}
           onSecondaryAction={canEdit ? () => setUploading(true) : undefined}
         />
@@ -279,6 +313,29 @@ export function CatalogPage() {
         />
       ) : null}
       {adding ? <NewProduct onClose={() => setAdding(false)} /> : null}
+      {fromPhotos ? (
+        <AddFromPhotos
+          initial={fromPhotos}
+          templates={templates.data?.rubros ?? []}
+          onClose={() => setFromPhotos(null)}
+        />
+      ) : null}
+      {canEdit && isMobile ? (
+        <input
+          ref={camera}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="sr-only"
+          aria-label="Tomar una foto del producto"
+          tabIndex={-1}
+          onChange={(e) => {
+            const files = e.target.files ? [...e.target.files] : []
+            e.target.value = ""
+            if (files.length) setFromPhotos(files)
+          }}
+        />
+      ) : null}
       {uploading ? <SheetUpload onClose={() => setUploading(false)} /> : null}
     </>
   )

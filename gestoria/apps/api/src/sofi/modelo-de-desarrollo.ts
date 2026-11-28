@@ -57,13 +57,21 @@ const ASKS: [RegExp, string][] = [
 ]
 
 function dev(messages: ChatMessage[]): Partial<ModelReply> {
-  const facts = messages.find((m, i) => i > 0 && m.role === "system")?.content ?? ""
+  const system = messages.find((m, i) => i > 0 && m.role === "system")
+  const facts = system?.role === "system" ? system.content : ""
   // Lo que pide respuesta: el último mensaje de la clienta o el aviso de la tienda.
   const at = messages.findLastIndex(
     (m) => m.role === "user" || (m.role === "system" && m.content.startsWith("AVISO DE LA TIENDA")),
   )
   const trigger = messages[at]
-  const text = trigger && "content" in trigger && trigger.content ? trigger.content : ""
+  // Lo que escribió, en texto (un mensaje con imágenes trae sus partes: se lee la de texto).
+  const raw = trigger && "content" in trigger ? trigger.content : ""
+  const text =
+    typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+        ? raw.map((part) => ("text" in part ? String(part.text) : "")).join(" ")
+        : ""
   const t = plain(text)
   const after = messages.slice(at + 1)
   const results = new Map<string, Record<string, unknown>>()

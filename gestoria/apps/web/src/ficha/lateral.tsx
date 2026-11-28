@@ -34,6 +34,7 @@ import { when } from "../lib/pedidos"
 import { money } from "../lib/tienda"
 import { Photo } from "../piezas"
 import { useFichaContext } from "./contexto"
+import { KeywordProposals, TextProposal } from "./ia"
 import { FieldProblem, Section, useTyped } from "./piezas"
 import { Count, todayIn } from "./precio"
 
@@ -331,6 +332,7 @@ export function OrganizationCard() {
           }}
         />
         <CategoryOptions id={listId} storeId={store.id} />
+        <TextProposal field="categoria" />
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-muted-foreground" id="palabras">
@@ -369,6 +371,12 @@ export function OrganizationCard() {
             Las palabras con que te piden este producto.
           </p>
         )}
+        <KeywordProposals
+          onAdd={(w) => {
+            if (!draft.keywords.some((k) => k.toLowerCase() === w.toLowerCase()))
+              change(`Agregaste «${w}»`, (d) => d.keywords.push(w))
+          }}
+        />
         {edit ? (
           <form
             onSubmit={(e) => {

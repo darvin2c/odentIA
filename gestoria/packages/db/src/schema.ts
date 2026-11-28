@@ -981,6 +981,138 @@ export const mediaTrash = pgTable("media_trash", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
+/*
+ * Lo que propone la IA de fotos (lienzo «La ficha del producto», decisiones 3, 7, 9 y 10): mira
+ * las fotos y propone; nunca guarda sola. Cada vez que mira es un `ai_look` (cuenta para el tope
+ * del día y anota lo que costó) y deja sus propuestas en `ai_proposal`, que una persona usa, cambia
+ * o descarta. Usar una pasa por la operación de siempre de la ficha o de la carga.
+ */
+
+/** Qué miró: las fotos de un producto, las de un producto de una carga, las fotos sueltas de una carga (para juntarlas) o un texto que la persona escribió (solo para reescribirlo). */
+export const AI_LOOK_KINDS = ["producto", "carga_producto", "carga", "texto"] as const
+export type AiLookKind = (typeof AI_LOOK_KINDS)[number]
+/** Mirando (esperando al modelo), lista o falló (con su motivo). */
+export const AI_LOOK_STATES = ["mirando", "lista", "fallo"] as const
+export type AiLookState = (typeof AI_LOOK_STATES)[number]
+
+/** Cada vez que la IA mira: a pedido de quién, cuántas fotos (lo que cuenta para el tope) y lo que costó. */
+export const aiLook = pgTable(
+  "ai_look",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    kind: text("kind").$type<AiLookKind>().notNull(),
+    productId: uuid("product_id"),
+    loadId: uuid("load_id"),
+    /** El producto de la carga que miró (sin llave: la carga puede juntarlo o quitarlo después). */
+    itemId: uuid("item_id"),
+    /** Cuántas fotos miró; un texto cuenta como una. Es lo que suma para el tope del día. */
+    photos: integer("photos").notNull(),
+    state: text("state").$type<AiLookState>().notNull().default("mirando"),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens"),
+    cachedTokens: integer("cached_tokens"),
+    outputTokens: integer("output_tokens"),
+    /** Lo que costó, en millonésimas de USD, con el precio de lista; nulo si no se sabe. */
+    costMicros: integer("cost_micros"),
+    /** Por qué falló, en palabras para la persona. */
+    failure: text("failure"),
+    /** Lo que avisa de las fotos («La foto 3 parece de otro producto»). */
+    notice: text("notice"),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "ai_look_check",
+      sql`${inList("kind", AI_LOOK_KINDS)} and ${inList("state", AI_LOOK_STATES)} and ${table.photos} between 1 and 100 and (${table.state} = 'mirando') = (${table.finishedAt} is null) and (${table.failure} is null or char_length(${table.failure}) <= 300) and (${table.notice} is null or char_length(${table.notice}) <= 300) and (${table.kind} <> 'producto' or ${table.productId} is not null) and (${table.kind} not in ('carga', 'carga_producto') or ${table.loadId} is not null) and (${table.kind} <> 'carga_producto' or ${table.itemId} is not null)`,
+    ),
+    foreignKey({
+      name: "ai_look_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_look_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_look_store_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("ai_look_store_id_key").on(table.storeId, table.id),
+    index("ai_look_store_idx").on(table.storeId, table.requestedAt),
+  ],
+)
+
+/** El estado de una propuesta: propuesta (espera a una persona), usada, cambiada (usada con otro valor) o descartada. */
+export const AI_PROPOSAL_STATES = ["propuesta", "usada", "cambiada", "descartada"] as const
+export type AiProposalState = (typeof AI_PROPOSAL_STATES)[number]
+
+/**
+ * Una propuesta de la IA para un campo: el nombre, la categoría, el rubro, un color con sus fotos,
+ * un dato del rubro que se ve, las palabras de búsqueda, la descripción, la pregunta por lo que no
+ * se ve o juntar fotos sueltas de una carga. Es de un producto, de un producto de una carga o de la
+ * carga; al crear el producto desde la carga, las abiertas pasan al producto. Nunca el precio ni el
+ * paquete (decisión 10).
+ */
+export const aiProposal = pgTable(
+  "ai_proposal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    lookId: uuid("look_id").notNull(),
+    productId: uuid("product_id"),
+    loadId: uuid("load_id"),
+    itemId: uuid("item_id"),
+    /** `nombre`, `categoria`, `rubro`, `descripcion`, `palabras`, `color`, `dato:<clave>`, `pregunta:<clave>` o `juntar`. */
+    field: text("field").notNull(),
+    /** Lo que propone, con la forma de su campo; nulo en una pregunta. */
+    value: jsonb("value").$type<unknown>(),
+    /** Por qué lo propone, en palabras («Se lee en la etiqueta»), o la pregunta. */
+    reason: text("reason").notNull(),
+    state: text("state").$type<AiProposalState>().notNull().default("propuesta"),
+    /** Lo que quedó al cambiarla («Cambiar»). */
+    appliedValue: jsonb("applied_value").$type<unknown>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "ai_proposal_check",
+      sql`${inList("state", AI_PROPOSAL_STATES)} and ${table.field} ~ '^(nombre|categoria|rubro|descripcion|palabras|color|juntar|(dato|pregunta):[a-z][a-z0-9_]{0,39})$' and char_length(${table.reason}) between 1 and 300 and (${table.value} is null or octet_length(${table.value}::text) <= 8000) and (${table.appliedValue} is null or octet_length(${table.appliedValue}::text) <= 8000) and (${table.state} = 'propuesta') = (${table.decidedAt} is null) and (${table.decidedAt} is null) = (${table.decidedBy} is null) and (${table.productId} is not null or ${table.itemId} is not null or ${table.loadId} is not null)`,
+    ),
+    foreignKey({
+      name: "ai_proposal_look_fkey",
+      columns: [table.storeId, table.lookId],
+      foreignColumns: [aiLook.storeId, aiLook.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_proposal_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_proposal_item_fkey",
+      columns: [table.storeId, table.itemId],
+      foreignColumns: [bulkLoadItem.storeId, bulkLoadItem.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ai_proposal_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    index("ai_proposal_product_idx").on(table.productId, table.createdAt),
+    index("ai_proposal_item_idx").on(table.itemId),
+    index("ai_proposal_load_idx").on(table.loadId),
+  ],
+)
+
 /**
  * Una variante: una combinación de las opciones del producto, con su código, su stock y, si
  * quiere, su propio precio y su foto (si no, los del producto). El stock no se escribe: solo

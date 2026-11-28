@@ -242,6 +242,14 @@ async function applyUsage(
   event: Extract<AppEvent, { type: "uso.contado" }>,
 ): Promise<string> {
   const { data } = event
+  // Lo que miró la IA de fotos de gestorIA todavía no se cobra aquí: se rechaza sin guardar la
+  // clave y la app lo vuelve a enviar, así no se pierde ni se cuenta dos veces cuando se cobre.
+  if (data.kind !== "conversacion")
+    throw new ServiceError(
+      "UNAVAILABLE",
+      503,
+      "Ese uso todavía no se cobra: la app lo vuelve a enviar más tarde",
+    )
   const account = await requireAccount(tx, app, data.account)
   const occurredAt = new Date(data.occurredAt)
   const tier = TIER_OF_OUTCOME[data.outcome]

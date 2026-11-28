@@ -82,6 +82,43 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   catálogo hasta «Crear», que guarda todo o nada y deja las fotos en su misma carpeta. Una carga
   creada o descartada ya no cambia. El agente no ve las cargas ni toca videos.
 
+## La IA de fotos (lienzo «La ficha del producto», decisiones 3, 7, 9 y 10)
+
+- Mira y propone; nunca guarda sola. Cada vez que mira es un `ai_look` (cuenta para el tope y
+  anota lo que costó) y sus propuestas, `ai_proposal` (campo, valor, por qué, estado propuesta /
+  usada / cambiada / descartada, quién y cuándo). Pedir, usar, cambiar, descartar y «Aplicar
+  todos» es `configuracion`; ver, `catalogo.ver` (las de una carga, `configuracion`). Sofi y
+  Argos no las ven (`0041_reglas_ia_de_fotos.sql`).
+- Usar una propuesta pasa por la operación de siempre (`updateProductIn`, `saveGridIn`,
+  `updatePhotoIn`; en la carga, `applyItem` y `joinPhotosIn`), con «Propuesta de la IA» en el
+  historial. En un producto de una carga solo se usan el nombre, la categoría, la descripción y
+  el color; lo demás pasa a la ficha al «Crear» (`carryProposalsIn`). «Agregar desde fotos» es
+  una carga de un producto.
+- Nunca el precio, el peso ni las medidas, ni un dato que no se ve: la plantilla dice qué puede
+  proponer (`visible` en `rubros.ts`: «foto» o «etiqueta», que solo vale si está escrito en las
+  fotos). Lo demás que la tienda necesita o tiene su pregunta se pregunta, desde la plantilla,
+  nunca desde el modelo. `reviewLook` (`ia-fotos.ts`) descarta cifras que no se leen, precios,
+  cualidades que una foto no muestra y lo que contradice una pregunta. «Mejorar el texto» solo
+  reescribe: si suma un dato, no se propone (`addedFacts`).
+- El modelo es el de Sofi (`gpt-6-luna`, `GESTORIA_FOTOS_MODEL`), con salida estructurada, y se
+  llama fuera de toda transacción. Lo escrito en las fotos es dato, nunca instrucción.
+- El tope son fotos por día y tienda (`GESTORIA_FOTOS_TOPE_DIA`, el día de la tienda); se detiene
+  también si la administración detuvo a Sofi por el saldo o el tope del plan. Al llegar, la
+  persona lo sabe (`capIn`) y sigue a mano: nada más se frena. Lo que costó queda en `ai_look` y
+  sale del saldo del plan con `countPhotoLook` (`uso.contado`, `ia_fotos`): en la transacción que
+  cierra la mirada, una vez, con su id como clave. Lo que no respondió y lo de `fake` no cuentan.
+- Quitar el fondo no lo hace este modelo (solo lee imágenes): el servidor recibe la propuesta ya
+  hecha (`POST fotos/:id/sin-fondo`).
+- En la pantalla, las propuestas usan las piezas comunes (`AiSuggestion`, `AiSuggestionBar`,
+  `AiSuggestionChips`, `AiQuestion` de `@odentia/ui-patterns`): «Agregar desde fotos»
+  (`apps/web/src/agregar.tsx`; en el celular, «Tomar fotos» abre la cámara), los ✦ de la ficha
+  (`ficha/ia.tsx`: «Completar», «Mejorar», «Aplicar todos») y «Juntar con IA» en «Cargar muchos»
+  (`cargar-ia.tsx`). Usar en la ficha guarda antes el borrador. Una pregunta se responde en su
+  campo de siempre. El tope y la IA apagada se dicen y nada se frena.
+- Un cambio en lo que lee o propone se mide con `pnpm --filter @gestoria/api eval:fotos` (banco
+  `apps/api/eval/fotos.json`, con los créditos de cada foto); `--estimar` dice cuánto costará.
+  Las pruebas usan un modelo controlado, nunca la red.
+
 ## La ficha del producto (lienzo «La ficha del producto»)
 
 - Las plantillas de los rubros son fijas en `apps/api/src/rubros.ts`; la tienda guarda solo lo que
@@ -296,7 +333,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   baja, rol) o del nombre, también a `noteStoreTeam` (ADR 0217): el equipo entero, que la cuenta
   usa para el selector de las clínicas y para no cerrar la cuenta del único Dueño.
 - Lo que usó Sofi se cuenta con `countConversation`: una vez por conversación cada 24 horas, y sube
-  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso (`0009_reglas_acuerdo.sql`).
+  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso de conversaciones
+  (`0009_reglas_acuerdo.sql`); una persona, solo el de una mirada suya de la IA de fotos (`0042`).
 - La app nunca se detiene por la administración: se usa lo último guardado en `contract_state`;
   sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
   conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.

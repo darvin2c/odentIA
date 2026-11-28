@@ -7,9 +7,7 @@
  *
  * Sofi responde con el modelo de desarrollo (`fakeModel`: reglas fijas, sin red), por su misma
  * tubería. `POST /__clienta` hace escribir a una clienta en un chat de verdad (de WhatsApp) desde
- * un producto, como llegará por el canal, y Sofi le responde. Con `GESTORIA_E2E_DEMO=1` suma la
- * demo de Calzados Rosa (sus fotos y su video en el RustFS propio) con Rosa de Dueña, para mirar
- * las pantallas con la demo.
+ * un producto, como llegará por el canal, y Sofi le responde.
  *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
  * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
@@ -27,6 +25,7 @@ import {
   storeSupportAccess,
 } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
+import { eq } from "drizzle-orm"
 import { serve } from "@hono/node-server"
 import {
   type AccountState,
@@ -37,14 +36,12 @@ import {
   type HelpAskQuestion,
 } from "@odentia/contract"
 import { signMessage } from "@odentia/contract/signing"
-import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { GenericContainer, Wait } from "testcontainers"
 import { createApp } from "../apps/api/src/app.js"
 import { createS3Storage } from "../apps/api/src/archivos.js"
+import { fakePhotosModel } from "../apps/api/src/ia-fotos.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
-import { DEMO_STORE_ID, seedDemoStore } from "../apps/api/src/semilla.js"
-import { seedDemoMedia } from "../apps/api/src/semilla-medios.js"
 import { fakeModel } from "../apps/api/src/sofi/modelo.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
 import {
@@ -172,6 +169,9 @@ const app = createApp({
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
   storage,
   model,
+  // La IA de fotos, con el modelo de desarrollo: sin red, responde lo grabado para las fotos de la
+  // demo y del banco (`ia-fotos-muestra.ts`). Nunca un proveedor real.
+  photosModel: fakePhotosModel(),
 })
 const sofiDeps = {
   appDb: db.appDb,
@@ -252,22 +252,25 @@ const sofi = await answer(
 )
 if (sofi.status !== "apagada") throw new Error(`Sofi debía estar apagada: ${sofi.status}`)
 
-// La demo de Calzados Rosa, para mirar las pantallas con ella (no la usan los recorridos).
-if (process.env.GESTORIA_E2E_DEMO === "1") {
+// Con `E2E_DEMO=1`, también la demo de Calzados Rosa (sus fotos reales en este RustFS) con Rosa de
+// Dueño: para mirar la pantalla con la demo y sacar capturas. Sin el pedido de soporte de la demo,
+// que dejaría su franja arriba. Los recorridos no la usan.
+if (process.env.E2E_DEMO === "1") {
+  const { DEMO_STORE_ID, seedDemoStore } = await import("../apps/api/src/semilla.js")
+  const { seedDemoMedia } = await import("../apps/api/src/semilla-medios.js")
   await seedDemoStore(db.ownerDb)
+  await db.ownerDb
+    .insert(storeMember)
+    .values({ storeId: DEMO_STORE_ID, userId: rosa.id, role: "owner", addedBy: "semilla-rosa" })
+  await db.ownerDb.delete(storeSupportAccess).where(eq(storeSupportAccess.storeId, DEMO_STORE_ID))
   Object.assign(process.env, {
     GESTORIA_S3_ENDPOINT: `http://127.0.0.1:${rustfs.getMappedPort(9000)}`,
+    GESTORIA_S3_REGION: "us-east-1",
     GESTORIA_S3_ACCESS_KEY: "gestoria",
     GESTORIA_S3_SECRET_KEY: "gestoria-e2e",
     GESTORIA_S3_BUCKET: "gestoria-medios-e2e",
   })
-  console.log(`gestoria-e2e: ${await seedDemoMedia(db.ownerDb, DEMO_STORE_ID)}`)
-  await db.ownerDb
-    .insert(storeMember)
-    .values({ storeId: DEMO_STORE_ID, userId: rosa.id, role: "owner" })
-    .onConflictDoNothing()
-  // Sin la franja de soporte encima: la demo deja un pedido de soporte por responder.
-  await db.ownerDb.delete(storeSupportAccess).where(eq(storeSupportAccess.storeId, DEMO_STORE_ID))
+  console.log(`e2e: demo, ${await seedDemoMedia(db.ownerDb, DEMO_STORE_ID)}`)
 }
 
 serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })

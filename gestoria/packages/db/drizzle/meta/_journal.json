@@ -285,15 +285,36 @@
     {
       "idx": 40,
       "version": "7",
-      "when": 1795827483052,
-      "tag": "0040_lo_que_sofi_no_supo_avisa",
+      "when": 1795820316334,
+      "tag": "0040_la_ia_de_fotos",
       "breakpoints": true
     },
     {
       "idx": 41,
       "version": "7",
-      "when": 1795827486971,
-      "tag": "0041_reglas_lo_que_sofi_no_supo",
+      "when": 1795820318006,
+      "tag": "0041_reglas_ia_de_fotos",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795825138546,
+      "tag": "0042_reglas_uso_ia_de_fotos",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795840792481,
+      "tag": "0043_lo_que_sofi_no_supo_avisa",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795840793639,
+      "tag": "0044_reglas_lo_que_sofi_no_supo",
       "breakpoints": true
     }
   ]

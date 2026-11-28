@@ -6,7 +6,7 @@ import { ACCOUNT, API_PORT, WEB } from "./entorno"
 /**
  * Las capturas de «Probar como clienta», la vista previa y «Sofi no supo» con la demo de Calzados
  * Rosa (sus fotos y su video en el RustFS propio), a 1440 y 390, claro y oscuro: las mismas vistas
- * del prototipo aprobado (d1–d12, m1–m4). No es un recorrido: corre solo con `GESTORIA_E2E_DEMO=1`
+ * del prototipo aprobado (d1–d12, m1–m4). No es un recorrido: corre solo con `E2E_DEMO=1`
  * (el servidor siembra la demo) y deja las imágenes en `CAPTURAS_DIR` o `gestoria/e2e/capturas/`.
  */
 
@@ -14,7 +14,7 @@ const DEMO = "6a1d6b52-6f73-4a5c-9b3a-5c0a1d0e2401"
 const SHOTS = resolve(process.env.CAPTURAS_DIR ?? "capturas")
 const API = `http://127.0.0.1:${API_PORT}`
 
-test.skip(process.env.GESTORIA_E2E_DEMO !== "1", "Solo con la demo sembrada")
+test.skip(process.env.E2E_DEMO !== "1", "Solo con la demo sembrada")
 test.describe.configure({ mode: "serial" })
 test.setTimeout(240_000)
 
@@ -34,6 +34,27 @@ async function zapatilla() {
   ).json()) as { products: { id: string; name: string }[] }
   return catalog.products.find((p) => p.name === "Zapatilla urbana")!.id
 }
+
+// La ficha con las dos cosas juntas: las propuestas ✦ de la IA (#757) y la prueba de Sofi.
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844],
+] as const)
+  test(`la ficha con la IA y la prueba juntas, ${width}`, async ({ page }) => {
+    const id = await zapatilla()
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await page.setViewportSize({ width, height })
+    await page.goto(`/tiendas/${DEMO}/catalogo/${id}`)
+    await expect(page.getByRole("button", { name: "Probar como clienta" })).toBeVisible()
+    if (width > 600) {
+      await page.getByRole("button", { name: "Probar como clienta" }).click()
+      await expect(page.getByRole("heading", { name: "Probar como clienta" })).toBeVisible()
+    } else {
+      // En el celular, la ficha arriba: la línea de Sofi con «Probar como clienta» y lo de la IA.
+      await page.waitForTimeout(800)
+    }
+    await shot(page, `juntas-${width}`)
+  })
 
 for (const scheme of ["light", "dark"] as const) {
   const tag = scheme === "light" ? "claro" : "oscuro"

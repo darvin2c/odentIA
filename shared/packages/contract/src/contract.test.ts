@@ -88,6 +88,19 @@ describe("los mensajes del acuerdo", () => {
           channel: "whatsapp",
         },
       },
+      // Lo que miró la IA de fotos de gestorIA: la mirada, sus fotos y lo que costó.
+      {
+        type: "uso.contado",
+        timestamp: at,
+        data: {
+          account: "tienda-1",
+          kind: "ia_fotos",
+          look: "l-1",
+          photos: 3,
+          costMicros: 350,
+          occurredAt: at,
+        },
+      },
       {
         type: "soporte.pedido",
         timestamp: at,
@@ -122,6 +135,17 @@ describe("los mensajes del acuerdo", () => {
         type: "cuenta.abierta",
         timestamp: "ayer",
         data: { account: "t", name: "x", country: null, ownerUserId: "u" },
+      },
+      // La mirada sin fotos, o con un tipo que el acuerdo no conoce.
+      {
+        type: "uso.contado",
+        timestamp: at,
+        data: { account: "t", kind: "ia_fotos", look: "l", photos: 0, costMicros: null, occurredAt: at },
+      },
+      {
+        type: "uso.contado",
+        timestamp: at,
+        data: { account: "t", kind: "ia_video", look: "l", photos: 1, costMicros: null, occurredAt: at },
       },
       // El precio nunca lo dice la app.
       {

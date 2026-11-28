@@ -199,12 +199,14 @@ export async function saveGrid(
   })
 }
 
-async function saveGridIn(
+/** «Tallas y stock» dentro de una transacción (la de una persona con `configuracion`). */
+export async function saveGridIn(
   tx: Db,
   person: Person,
   storeId: string,
   productId: string,
   grid: GridInput,
+  note: string | null = null,
 ) {
   const current = await productRow(tx, storeId, productId)
   if (current.options.length > 2)
@@ -568,7 +570,7 @@ async function saveGridIn(
     person.userId,
     "cuadricula",
     changes,
-    lowered ? reason : null,
+    lowered ? reason : note,
   )
   const detail = await detailIn(tx, storeId, productId)
   return {

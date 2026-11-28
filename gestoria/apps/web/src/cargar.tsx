@@ -35,10 +35,12 @@ import {
   Images,
   Merge,
   MoreHorizontal,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react"
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { LoadIaPanel, useLoadIa } from "./cargar-ia"
 import { CATALOG_KEY } from "./catalogo"
 import { ApiError, api } from "./lib/api"
 import { isImageFile, MEDIA_OFF, preparePhoto } from "./lib/medios"
@@ -536,6 +538,9 @@ function LoadView({
   const [reset, setReset] = useState(0)
   const refresh = () => queryClient.invalidateQueries({ queryKey: LOAD_KEY(store.id, loadId) })
   const base = `/api/tiendas/${store.id}/cargas/${loadId}`
+  const ia = useLoadIa(loadId, refresh)
+  const iaRef = useRef(ia)
+  iaRef.current = ia
 
   const call = useMutation({
     mutationFn: (input: { path: string; method: string; body?: unknown }) =>
@@ -761,6 +766,10 @@ function LoadView({
               <MoreHorizontal aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => iaRef.current.complete.mutate(row.original.id)}>
+                <Sparkles aria-hidden />
+                Completar con IA
+              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => save(row.original.id, { state: "quitado" })}
@@ -805,6 +814,12 @@ function LoadView({
           onClick: () => create.mutate(),
           disabled: create.isPending || items.length === 0,
         }}
+        secondary={{
+          label: ia.group.isPending ? "Mirando las fotos…" : "Juntar con IA",
+          icon: <Sparkles aria-hidden />,
+          onClick: () => ia.group.mutate(),
+          disabled: ia.group.isPending || allPhotos < 2,
+        }}
         menu={[
           {
             label: "Descartar la carga",
@@ -846,6 +861,12 @@ function LoadView({
           <PhotoStack photos={loose} items={items} itemId={null} onMove={moveTo} spread />
         </section>
       ) : null}
+      <LoadIaPanel
+        loadId={loadId}
+        items={items}
+        photos={[...items.flatMap((i) => i.photos), ...loose]}
+        ia={ia}
+      />
       {chosen.length ? (
         <BulkBar
           count={chosen.length}

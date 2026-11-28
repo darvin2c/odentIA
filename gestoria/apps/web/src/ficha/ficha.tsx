@@ -33,6 +33,7 @@ import {
   Redo2,
   RotateCcw,
   Search,
+  Sparkles,
   Trash2,
   Undo2,
 } from "lucide-react"
@@ -48,6 +49,7 @@ import { HistoryDrawer, KardexDrawer, SearchDialog, ShortcutsDialog } from "./ca
 import { type Ficha, FichaContext } from "./contexto"
 import { DataCard, PRODUCT_KEY, useTemplates } from "./datos"
 import { PhotoCarousel, PhotosCard } from "./fotos"
+import { FichaIaProvider, IaBar, useFichaIa } from "./ia"
 import {
   ActivityCard,
   CrossSellCard,
@@ -351,6 +353,7 @@ function ProductSheet({
   const [deleting, setDeleting] = useState(false)
   const [trying, setTrying] = useState(false)
   const [previewing, setPreviewing] = useState(false)
+  const [asking, setAsking] = useState(false)
   const pending = fichaStore.pendingCount()
   const rubro = templates.find((t) => t.id === draft.rubro) ?? null
   const unit = rubro?.unit ?? "unidades"
@@ -472,6 +475,15 @@ function ProductSheet({
   }
 
   const menu = [
+    ...(edit
+      ? [
+          {
+            label: "Completar con la IA",
+            icon: <Sparkles aria-hidden />,
+            onSelect: () => setAsking(true),
+          },
+        ]
+      : []),
     {
       label: "Buscar en la ficha",
       icon: <Search aria-hidden />,
@@ -567,168 +579,184 @@ function ProductSheet({
 
   return (
     <FichaContext.Provider value={ficha}>
-      <div className={cn("flex min-w-0 flex-col gap-4", isMobile && edit && "pb-20")}>
-        {back}
-        <div className="flex min-w-0 items-center gap-3">
-          {!isMobile && sheet.photos[0] ? (
-            <Photo
-              storeId={store.id}
-              photoId={sheet.photos[0].id}
-              alt=""
-              className="size-10 border"
-            />
-          ) : null}
-          <div className="flex min-w-0 flex-1 flex-col">
-            <StoreHeader
-              title={draft.name || sheet.name}
-              secondary={{
-                label: "Vista previa",
-                icon: <Eye aria-hidden />,
-                onClick: () => setPreviewing(true),
-              }}
-              menu={menu}
-            />
+      <FichaIaProvider storeId={store.id} productId={sheet.id} edit={edit} store={fichaStore}>
+        {asking ? <AskNow onDone={() => setAsking(false)} /> : null}
+        <div className={cn("flex min-w-0 flex-col gap-4", isMobile && edit && "pb-20")}>
+          {back}
+          <div className="flex min-w-0 items-center gap-3">
+            {!isMobile && sheet.photos[0] ? (
+              <Photo
+                storeId={store.id}
+                photoId={sheet.photos[0].id}
+                alt=""
+                className="size-10 border"
+              />
+            ) : null}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <StoreHeader
+                title={draft.name || sheet.name}
+                secondary={{
+                  label: "Vista previa",
+                  icon: <Eye aria-hidden />,
+                  onClick: () => setPreviewing(true),
+                }}
+                menu={menu}
+              />
+            </div>
           </div>
-        </div>
 
-        {isMobile ? (
-          <>
-            <PhotoCarousel />
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xl font-semibold tabular-nums">{priceSpan}</span>
-                <button
-                  type="button"
-                  className="rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
-                  aria-label={`Estado: ${state0}. Cambiarlo`}
-                  onClick={() => goTo("estado")}
-                >
-                  <StateBadge state={state0} className="h-6 px-2.5 text-[13px]" />
-                </button>
+          {isMobile ? (
+            <>
+              <PhotoCarousel />
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xl font-semibold tabular-nums">{priceSpan}</span>
+                  <button
+                    type="button"
+                    className="rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+                    aria-label={`Estado: ${state0}. Cambiarlo`}
+                    onClick={() => goTo("estado")}
+                  >
+                    <StateBadge state={state0} className="h-6 px-2.5 text-[13px]" />
+                  </button>
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  {[draft.category, `${stock} ${unit}`, out ? `${out} sin stock` : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </div>
-              <span className="text-sm text-muted-foreground">
-                {[draft.category, `${stock} ${unit}`, out ? `${out} sin stock` : null]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
+              <SofiLine
+                readiness={sheet.readiness}
+                onTry={edit ? () => setTrying(true) : undefined}
+              />
+            </>
+          ) : (
+            <>
+              <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
+                <StateBadge state={state0} className="h-6 px-2.5 text-[13px]" />
+                {draft.category ? (
+                  <>
+                    <span>{draft.category}</span>
+                    <span aria-hidden>·</span>
+                  </>
+                ) : null}
+                <span className="tabular-nums">{priceSpan}</span>
+                <span aria-hidden>·</span>
+                <span className="tabular-nums">
+                  {stock} {unit}
+                  {out ? ` · ${out} sin stock` : ""}
+                </span>
+                <span className="ml-auto flex min-w-0 items-center gap-1">
+                  {edit ? <SaveState status={status} pending={pending} /> : null}
+                  {undoRedo}
+                </span>
+              </div>
+              <SofiLine
+                readiness={sheet.readiness}
+                onTry={edit ? () => setTrying(true) : undefined}
+              />
+            </>
+          )}
+
+          <IaBar />
+
+          {!edit ? (
+            <PageNotice tone="aviso" label="Solo lectura">
+              Lo ves como {store.role === "support" ? "soporte" : "Ventas"}: el precio, el stock y
+              los datos los cambian el Dueño o un Administrador.
+            </PageNotice>
+          ) : null}
+          {status.kind === "rejected" && edit ? (
+            <PageNotice tone="aviso" label="No se guardó todo">
+              {status.message} Lo demás sí se guardó. Corrígelo o deshazlo.
+            </PageNotice>
+          ) : null}
+
+          {isMobile ? (
+            <div className="flex flex-col gap-3">
+              <PhotosCard />
+              {main}
+              {side}
             </div>
-            <SofiLine
-              readiness={sheet.readiness}
-              onTry={edit ? () => setTrying(true) : undefined}
-            />
-          </>
-        ) : (
-          <>
-            <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
-              <StateBadge state={state0} className="h-6 px-2.5 text-[13px]" />
-              {draft.category ? (
-                <>
-                  <span>{draft.category}</span>
-                  <span aria-hidden>·</span>
-                </>
-              ) : null}
-              <span className="tabular-nums">{priceSpan}</span>
-              <span aria-hidden>·</span>
-              <span className="tabular-nums">
-                {stock} {unit}
-                {out ? ` · ${out} sin stock` : ""}
-              </span>
-              <span className="ml-auto flex min-w-0 items-center gap-1">
-                {edit ? <SaveState status={status} pending={pending} /> : null}
-                {undoRedo}
-              </span>
+          ) : (
+            <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className="flex min-w-0 flex-col gap-5">{main}</div>
+              <div className="flex min-w-0 flex-col gap-4">{side}</div>
             </div>
-            <SofiLine
-              readiness={sheet.readiness}
-              onTry={edit ? () => setTrying(true) : undefined}
-            />
-          </>
-        )}
-
-        {!edit ? (
-          <PageNotice tone="aviso" label="Solo lectura">
-            Lo ves como {store.role === "support" ? "soporte" : "Ventas"}: el precio, el stock y los
-            datos los cambian el Dueño o un Administrador.
-          </PageNotice>
-        ) : null}
-        {status.kind === "rejected" && edit ? (
-          <PageNotice tone="aviso" label="No se guardó todo">
-            {status.message} Lo demás sí se guardó. Corrígelo o deshazlo.
-          </PageNotice>
-        ) : null}
-
-        {isMobile ? (
-          <div className="flex flex-col gap-3">
-            <PhotosCard />
-            {main}
-            {side}
-          </div>
-        ) : (
-          <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="flex min-w-0 flex-col gap-5">{main}</div>
-            <div className="flex min-w-0 flex-col gap-4">{side}</div>
-          </div>
-        )}
-      </div>
-
-      {isMobile && edit && (pending > 0 || status.kind !== "saved" || history.undo.length > 0) ? (
-        <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t bg-card/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.18)] backdrop-blur">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Deshacer"
-            disabled={!history.undo.length}
-            onClick={undo}
-          >
-            <Undo2 aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Rehacer"
-            disabled={!history.redo.length}
-            onClick={redo}
-          >
-            <Redo2 aria-hidden />
-          </Button>
-          <span className="min-w-0 flex-1">
-            <SaveState status={status} pending={pending} />
-          </span>
+          )}
         </div>
-      ) : null}
 
-      {searching ? (
-        <SearchDialog templates={templates} onClose={() => setSearching(false)} />
-      ) : null}
-      {kardex ? <KardexDrawer onClose={() => setKardex(false)} /> : null}
-      {showHistory ? (
-        <HistoryDrawer pending={pending} onClose={() => setShowHistory(false)} />
-      ) : null}
-      {shortcuts ? <ShortcutsDialog onClose={() => setShortcuts(false)} /> : null}
-      {deleting ? <DeleteProduct onClose={() => setDeleting(false)} /> : null}
-      {trying ? <ProbarPanel onClose={() => setTrying(false)} /> : null}
-      {previewing ? <PreviewDrawer onClose={() => setPreviewing(false)} /> : null}
-      <UnsavedDialog
-        open={blocked}
-        lost={
-          status.kind === "reason"
-            ? "Bajaste el stock y falta el motivo: sin él, ese cambio no se guarda."
-            : status.kind === "offline"
-              ? "No hay conexión y hay cambios que todavía no se guardaron."
-              : "Hay cambios que no se guardaron."
-        }
-        onStay={() => {
-          if (blocked) blocker.reset()
-        }}
-        onDiscard={() => {
-          if (blocked) {
-            fichaStore.discard()
-            blocker.proceed()
+        {isMobile && edit && (pending > 0 || status.kind !== "saved" || history.undo.length > 0) ? (
+          <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t bg-card/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.18)] backdrop-blur">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Deshacer"
+              disabled={!history.undo.length}
+              onClick={undo}
+            >
+              <Undo2 aria-hidden />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Rehacer"
+              disabled={!history.redo.length}
+              onClick={redo}
+            >
+              <Redo2 aria-hidden />
+            </Button>
+            <span className="min-w-0 flex-1">
+              <SaveState status={status} pending={pending} />
+            </span>
+          </div>
+        ) : null}
+
+        {searching ? (
+          <SearchDialog templates={templates} onClose={() => setSearching(false)} />
+        ) : null}
+        {kardex ? <KardexDrawer onClose={() => setKardex(false)} /> : null}
+        {showHistory ? (
+          <HistoryDrawer pending={pending} onClose={() => setShowHistory(false)} />
+        ) : null}
+        {shortcuts ? <ShortcutsDialog onClose={() => setShortcuts(false)} /> : null}
+        {deleting ? <DeleteProduct onClose={() => setDeleting(false)} /> : null}
+        {trying ? <ProbarPanel onClose={() => setTrying(false)} /> : null}
+        {previewing ? <PreviewDrawer onClose={() => setPreviewing(false)} /> : null}
+        <UnsavedDialog
+          open={blocked}
+          lost={
+            status.kind === "reason"
+              ? "Bajaste el stock y falta el motivo: sin él, ese cambio no se guarda."
+              : status.kind === "offline"
+                ? "No hay conexión y hay cambios que todavía no se guardaron."
+                : "Hay cambios que no se guardaron."
           }
-        }}
-      />
+          onStay={() => {
+            if (blocked) blocker.reset()
+          }}
+          onDiscard={() => {
+            if (blocked) {
+              fichaStore.discard()
+              blocker.proceed()
+            }
+          }}
+        />
+      </FichaIaProvider>
     </FichaContext.Provider>
   )
+}
+
+/** «Completar con la IA» desde el menú: pide una vez y se va. */
+function AskNow({ onDone }: { onDone: () => void }) {
+  const ia = useFichaIa()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: una sola vez al abrir
+  useEffect(() => {
+    ia.ask()
+    onDone()
+  }, [])
+  return null
 }
 
 function DeleteProduct({ onClose }: { onClose: () => void }) {
