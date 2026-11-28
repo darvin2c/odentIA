@@ -47,6 +47,22 @@ export type ToDoItem =
       payments: number
     }
   | { kind: "stock"; when: "hoy"; orderId: string; number: string; customer: string }
+  /**
+   * Lo que Sofi no supo de un producto (tablero 12): «Responder». Varias iguales son una línea
+   * («3 clientas»). Lo que Ventas propuso guardar, para quien cambia la ficha: «Revisar y guardar».
+   */
+  | {
+      kind: "pregunta"
+      when: "hoy"
+      productId: string
+      product: string
+      question: string
+      ids: string[]
+      people: number
+      customer: string | null
+      askedAt: string
+      proposed: { id: string; answer: string } | null
+    }
   | {
       kind: "reponer"
       when: "sin_apuro"

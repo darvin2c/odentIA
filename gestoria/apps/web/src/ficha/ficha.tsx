@@ -26,6 +26,7 @@ import {
   Check,
   CircleAlert,
   CloudOff,
+  Eye,
   History,
   Keyboard,
   Loader2,
@@ -60,8 +61,10 @@ import {
 } from "./lateral"
 import { goTo, SofiDot } from "./piezas"
 import { PriceCard } from "./precio"
+import { ProbarPanel } from "./probar"
 import { TextCard } from "./texto"
 import { VariantsCard } from "./variantes"
+import { PreviewDrawer } from "./vista-previa"
 
 /**
  * La ficha del producto en página completa (lienzo «La ficha del producto»; prototipo aprobado
@@ -110,116 +113,127 @@ function SaveState({ status, pending }: { status: SaveStatus; pending: number })
   )
 }
 
-/** La línea de Sofi: lo vende sola o no, y qué le falta, con lo que mira cada cosa. */
-function SofiLine({ readiness }: { readiness: Readiness }) {
+/**
+ * La línea de Sofi: lo vende sola o no, y qué le falta, con lo que mira cada cosa; y «Probar como
+ * clienta», que abre la prueba con este producto (para quien cambia la ficha, como la prueba).
+ */
+function SofiLine({ readiness, onTry }: { readiness: Readiness; onTry?: () => void }) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const neededMissing = readiness.items.filter((i) => i.needed && !i.ok)
   const extraMissing = readiness.items.filter((i) => !i.needed && !i.ok)
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            className="group inline-flex min-h-9 max-w-full items-center gap-2.5 self-start rounded-full border bg-card py-1 pr-3.5 pl-1.5 text-left text-sm shadow-xs outline-none transition-colors hover:border-primary/40 focus-visible:ring-3 focus-visible:ring-ring/40"
-            aria-label="Lo que sabe Sofi de este producto"
-          />
-        }
-      >
-        <SofiDot
-          done={readiness.done}
-          total={readiness.total}
-          sellsAlone={readiness.sellsAlone}
-          size={22}
-        />
-        <span className="min-w-0 truncate">
-          {readiness.complete ? (
-            <span className="font-medium">Sofi responde todo sobre este producto</span>
-          ) : readiness.sellsAlone ? (
-            <>
-              <span className="font-medium">Sofi lo vende sola</span>
-              <span className="text-muted-foreground">
-                {" "}
-                · {extraMissing.length}{" "}
-                {isMobile
-                  ? "para responder todo"
-                  : extraMissing.length === 1
-                    ? "cosa para que responda todo"
-                    : "cosas para que responda todo"}
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-warning">
-                Sofi necesita {neededMissing.length} {neededMissing.length === 1 ? "dato" : "datos"}
-              </span>
-              <span className="text-muted-foreground"> para venderlo sola</span>
-            </>
-          )}
-        </span>
-        <span className="shrink-0 font-semibold text-primary group-hover:underline">Ver</span>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        sideOffset={8}
-        className="w-[22rem] max-w-[calc(100vw-2rem)] gap-3 rounded-2xl p-4"
-      >
-        <div className="flex items-center gap-3">
+    <div className="flex max-w-full flex-wrap items-center gap-x-1 gap-y-1 self-start rounded-full border bg-card py-0.5 pr-1 pl-0.5 shadow-xs max-sm:rounded-2xl">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              className="group inline-flex min-h-8 min-w-0 max-w-full items-center gap-2.5 rounded-full py-0.5 pr-2.5 pl-1 text-left text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/40"
+              aria-label="Lo que sabe Sofi de este producto"
+            />
+          }
+        >
           <SofiDot
             done={readiness.done}
             total={readiness.total}
             sellsAlone={readiness.sellsAlone}
-            size={30}
+            size={22}
           />
-          <div className="flex flex-col">
-            <span className="font-semibold">
-              {readiness.sellsAlone ? "Lo vende sola" : "Le falta para venderlo sola"}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Sabe {readiness.done} de {readiness.total}. Nada de esto frena una venta.
-            </span>
-          </div>
-        </div>
-        <ul className="flex flex-col gap-1.5 text-sm">
-          {[...neededMissing, ...extraMissing, ...readiness.items.filter((i) => i.ok)].map(
-            (item) => (
-              <li key={item.id} className="flex min-h-8 items-center gap-2">
-                {item.ok ? (
-                  <Check className="size-4 shrink-0 text-success" aria-hidden />
-                ) : (
-                  <span
-                    className={cn(
-                      "mx-1 size-2 shrink-0 rounded-full",
-                      item.needed ? "bg-warning" : "bg-muted-foreground/50",
-                    )}
-                    aria-hidden
-                  />
-                )}
-                <span className={cn("min-w-0 flex-1", item.ok && "text-muted-foreground")}>
-                  {item.label}
-                  {!item.ok ? (
-                    <span className="sr-only">{item.needed ? ", lo necesita" : ", suma"}</span>
-                  ) : null}
+          <span className="min-w-0 truncate">
+            {readiness.complete ? (
+              <span className="font-medium">Sofi responde todo sobre este producto</span>
+            ) : readiness.sellsAlone ? (
+              <>
+                <span className="font-medium">Sofi lo vende sola</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {extraMissing.length}{" "}
+                  {isMobile
+                    ? "para responder todo"
+                    : extraMissing.length === 1
+                      ? "cosa para que responda todo"
+                      : "cosas para que responda todo"}
                 </span>
-                {!item.ok ? (
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    onClick={() => {
-                      setOpen(false)
-                      goTo(anchorOf(item.id))
-                    }}
-                  >
-                    Completar
-                  </Button>
-                ) : null}
-              </li>
-            ),
-          )}
-        </ul>
-      </PopoverContent>
-    </Popover>
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-warning">
+                  Sofi necesita {neededMissing.length}{" "}
+                  {neededMissing.length === 1 ? "dato" : "datos"}
+                </span>
+                <span className="text-muted-foreground"> para venderlo sola</span>
+              </>
+            )}
+          </span>
+          <span className="shrink-0 font-semibold text-primary group-hover:underline">Ver</span>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          sideOffset={8}
+          className="w-[22rem] max-w-[calc(100vw-2rem)] gap-3 rounded-2xl p-4"
+        >
+          <div className="flex items-center gap-3">
+            <SofiDot
+              done={readiness.done}
+              total={readiness.total}
+              sellsAlone={readiness.sellsAlone}
+              size={30}
+            />
+            <div className="flex flex-col">
+              <span className="font-semibold">
+                {readiness.sellsAlone ? "Lo vende sola" : "Le falta para venderlo sola"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Sabe {readiness.done} de {readiness.total}. Nada de esto frena una venta.
+              </span>
+            </div>
+          </div>
+          <ul className="flex flex-col gap-1.5 text-sm">
+            {[...neededMissing, ...extraMissing, ...readiness.items.filter((i) => i.ok)].map(
+              (item) => (
+                <li key={item.id} className="flex min-h-8 items-center gap-2">
+                  {item.ok ? (
+                    <Check className="size-4 shrink-0 text-success" aria-hidden />
+                  ) : (
+                    <span
+                      className={cn(
+                        "mx-1 size-2 shrink-0 rounded-full",
+                        item.needed ? "bg-warning" : "bg-muted-foreground/50",
+                      )}
+                      aria-hidden
+                    />
+                  )}
+                  <span className={cn("min-w-0 flex-1", item.ok && "text-muted-foreground")}>
+                    {item.label}
+                    {!item.ok ? (
+                      <span className="sr-only">{item.needed ? ", lo necesita" : ", suma"}</span>
+                    ) : null}
+                  </span>
+                  {!item.ok ? (
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      onClick={() => {
+                        setOpen(false)
+                        goTo(anchorOf(item.id))
+                      }}
+                    >
+                      Completar
+                    </Button>
+                  ) : null}
+                </li>
+              ),
+            )}
+          </ul>
+        </PopoverContent>
+      </Popover>
+      {onTry ? (
+        <Button variant="ghost" size="sm" className="rounded-full text-primary" onClick={onTry}>
+          Probar como clienta
+        </Button>
+      ) : null}
+    </div>
   )
 }
 
@@ -339,6 +353,8 @@ function ProductSheet({
   const [showHistory, setShowHistory] = useState(false)
   const [shortcuts, setShortcuts] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [trying, setTrying] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
   const pending = fichaStore.pendingCount()
   const rubro = templates.find((t) => t.id === draft.rubro) ?? null
   const unit = rubro?.unit ?? "unidades"
@@ -561,7 +577,15 @@ function ProductSheet({
             />
           ) : null}
           <div className="flex min-w-0 flex-1 flex-col">
-            <StoreHeader title={draft.name || sheet.name} menu={menu} />
+            <StoreHeader
+              title={draft.name || sheet.name}
+              secondary={{
+                label: "Vista previa",
+                icon: <Eye aria-hidden />,
+                onClick: () => setPreviewing(true),
+              }}
+              menu={menu}
+            />
           </div>
         </div>
 
@@ -586,7 +610,10 @@ function ProductSheet({
                   .join(" · ")}
               </span>
             </div>
-            <SofiLine readiness={sheet.readiness} />
+            <SofiLine
+              readiness={sheet.readiness}
+              onTry={edit ? () => setTrying(true) : undefined}
+            />
           </>
         ) : (
           <>
@@ -609,7 +636,10 @@ function ProductSheet({
                 {undoRedo}
               </span>
             </div>
-            <SofiLine readiness={sheet.readiness} />
+            <SofiLine
+              readiness={sheet.readiness}
+              onTry={edit ? () => setTrying(true) : undefined}
+            />
           </>
         )}
 
@@ -674,6 +704,8 @@ function ProductSheet({
       ) : null}
       {shortcuts ? <ShortcutsDialog onClose={() => setShortcuts(false)} /> : null}
       {deleting ? <DeleteProduct onClose={() => setDeleting(false)} /> : null}
+      {trying ? <ProbarPanel onClose={() => setTrying(false)} /> : null}
+      {previewing ? <PreviewDrawer onClose={() => setPreviewing(false)} /> : null}
       <UnsavedDialog
         open={blocked}
         lost={

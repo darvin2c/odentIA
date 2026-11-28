@@ -5,6 +5,12 @@
  * una tienda abierta por la administración, con Lucía en Ventas, un pedido de soporte por aceptar
  * y una conversación que espera a una persona porque Sofi está apagada. Solo pruebas: nunca corre en producción.
  *
+ * Sofi responde con el modelo de desarrollo (`fakeModel`: reglas fijas, sin red), por su misma
+ * tubería. `POST /__clienta` hace escribir a una clienta en un chat de verdad (de WhatsApp) desde
+ * un producto, como llegará por el canal, y Sofi le responde. Con `GESTORIA_E2E_DEMO=1` suma la
+ * demo de Calzados Rosa (sus fotos y su video en el RustFS propio) con Rosa de Dueña, para mirar
+ * las pantallas con la demo.
+ *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
  * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
  * También lo de Mi perfil que usa el recorrido de la cuenta (ADR 0218): cambiar la contraseña
@@ -13,7 +19,13 @@
  */
 import { createECDH, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
-import { accountCopy, conversation, conversationMessage, storeMember } from "@gestoria/db"
+import {
+  accountCopy,
+  conversation,
+  conversationMessage,
+  storeMember,
+  storeSupportAccess,
+} from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
 import { serve } from "@hono/node-server"
 import {
@@ -25,11 +37,15 @@ import {
   type HelpAskQuestion,
 } from "@odentia/contract"
 import { signMessage } from "@odentia/contract/signing"
+import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { GenericContainer, Wait } from "testcontainers"
 import { createApp } from "../apps/api/src/app.js"
 import { createS3Storage } from "../apps/api/src/archivos.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
+import { DEMO_STORE_ID, seedDemoStore } from "../apps/api/src/semilla.js"
+import { seedDemoMedia } from "../apps/api/src/semilla-medios.js"
+import { fakeModel } from "../apps/api/src/sofi/modelo.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
 import {
   ACCOUNT_PORT,
@@ -139,6 +155,7 @@ const adminFetch: typeof fetch = async (input, init) => {
 }
 
 const contract = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
+const model = fakeModel()
 const app = createApp({
   appDb: db.appDb,
   ownerDb: db.ownerDb,
@@ -154,7 +171,15 @@ const app = createApp({
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
   storage,
+  model,
 })
+const sofiDeps = {
+  appDb: db.appDb,
+  lockDb: db.ownerDb,
+  model,
+  link: { adapters: defaultLinkAdapters(), secretsKey: null, apiURL: WEB },
+  storage,
+}
 
 /** Un pedido de la administración, firmado como lo firmaría ella. */
 async function ask(request: AdminRequest) {
@@ -227,6 +252,24 @@ const sofi = await answer(
 )
 if (sofi.status !== "apagada") throw new Error(`Sofi debía estar apagada: ${sofi.status}`)
 
+// La demo de Calzados Rosa, para mirar las pantallas con ella (no la usan los recorridos).
+if (process.env.GESTORIA_E2E_DEMO === "1") {
+  await seedDemoStore(db.ownerDb)
+  Object.assign(process.env, {
+    GESTORIA_S3_ENDPOINT: `http://127.0.0.1:${rustfs.getMappedPort(9000)}`,
+    GESTORIA_S3_ACCESS_KEY: "gestoria",
+    GESTORIA_S3_SECRET_KEY: "gestoria-e2e",
+    GESTORIA_S3_BUCKET: "gestoria-medios-e2e",
+  })
+  console.log(`gestoria-e2e: ${await seedDemoMedia(db.ownerDb, DEMO_STORE_ID)}`)
+  await db.ownerDb
+    .insert(storeMember)
+    .values({ storeId: DEMO_STORE_ID, userId: rosa.id, role: "owner" })
+    .onConflictDoNothing()
+  // Sin la franja de soporte encima: la demo deja un pedido de soporte por responder.
+  await db.ownerDb.delete(storeSupportAccess).where(eq(storeSupportAccess.storeId, DEMO_STORE_ID))
+}
+
 serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 
 // La cuenta de mentira, con las cabeceras que pide la pantalla (credenciales, su origen).
@@ -264,6 +307,30 @@ const account = createServer(async (request, response) => {
     return json(200, { como })
   }
   if (request.method === "GET" && url.pathname === "/__cuenta") return json(200, { asked })
+  // Una clienta escribe en un chat de verdad, desde un producto, y Sofi le responde (si está
+  // encendida): lo que llegará por el canal.
+  if (request.method === "POST" && url.pathname === "/__clienta") {
+    const body = (await readBody(request)) as { text?: string; name?: string; productId?: string }
+    const [chat] = await db.ownerDb
+      .insert(conversation)
+      .values({
+        storeId: STORE_ID,
+        channel: "whatsapp",
+        createdBy: rosa.id,
+        customerName: body.name ?? null,
+      })
+      .returning({ id: conversation.id })
+    await db.ownerDb.insert(conversationMessage).values({
+      storeId: STORE_ID,
+      conversationId: chat!.id,
+      author: "cliente",
+      text: body.text ?? "Hola",
+      actorUserId: rosa.id,
+      detail: body.productId ? { desde: body.productId } : {},
+    })
+    const result = await answer(sofiDeps, STORE_ID, chat!.id)
+    return json(200, { conversationId: chat!.id, status: result.status })
+  }
   const code = /^\/__codigo\/(si|no)$/.exec(url.pathname)?.[1]
   if (request.method === "POST" && code) {
     staffCode = code === "si"

@@ -33,6 +33,23 @@ export interface ConversationMessage {
   followUp: "pago" | "gracias" | "volvio" | "volver" | null
   byArgos: boolean
   basis?: { tools: string[]; stopped: string[]; handoff: string | null; costMicros: number | null }
+  /** Las fotos y el video que mandó Sofi con su respuesta (la foto se ve con `/fotos/:id`). */
+  media?: {
+    kind: "foto" | "video"
+    id: string
+    product: string
+    color: string | null
+    label: string | null
+    urls: { video: string; poster: string } | null
+  }[]
+  /** Los pedidos que anotó Sofi con esta respuesta: van como tarjeta del carrito. */
+  orders?: string[]
+  /** De qué dato de la ficha salió la respuesta («Qué usó Sofi»), con dónde se completa. */
+  used?: { label: string; target: string }[]
+  /** Lo que no supo y le preguntó a la tienda. */
+  missed?: { productId: string; question: string }[]
+  /** Lo escribió por un aviso de la tienda (el pago, una respuesta), sin que la clienta escribiera. */
+  notice?: boolean
 }
 
 export interface ConversationView {

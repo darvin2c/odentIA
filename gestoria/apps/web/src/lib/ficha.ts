@@ -69,6 +69,8 @@ export interface SheetQuestion {
   saveRequested: boolean
   savedBy: string | null
   savedAt: string | null
+  /** La hizo en «Probar a Sofi»: queda en la ficha, pero no va a «Te toca». */
+  test?: boolean
 }
 
 export interface SheetVariant {
@@ -675,6 +677,10 @@ export function anchorOf(itemId: string): string {
       ofertas: "ofertas",
       palabras: "organizacion",
       paquete: "paquete",
+      // Lo que usó Sofi en la prueba: el estado, las preguntas respondidas y lo que no supo.
+      estado: "estado",
+      preguntas: "preguntas",
+      "no-supo": "no-supo",
     }[itemId] ?? "datos"
   )
 }

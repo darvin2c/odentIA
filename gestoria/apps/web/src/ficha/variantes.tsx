@@ -563,8 +563,8 @@ function SizesChip({ grid }: { grid: Grid }) {
         (value) => before.find((c) => sameText(c.value, value)) ?? { id: newId("c"), value },
       )
       const cells: Grid["cells"] = {}
+      // Lo que tenía sin tallas pasa a la primera talla.
       for (const row of g.rows)
-        // Lo que tenía sin tallas pasa a la primera talla.
         for (const [i, column] of columns.entries())
           cells[cellKey(row.id, column.id)] =
             g.cells[cellKey(row.id, column.id)] ??

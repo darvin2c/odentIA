@@ -603,6 +603,7 @@ function Questions() {
                     <span className="font-medium">{q.question}</span>
                     <span className="text-xs text-muted-foreground">
                       {q.askedBy ?? "Sofi"} · {when(q.askedAt)}
+                      {q.test ? " · en una prueba" : ""}
                     </span>
                   </span>
                 </span>
