@@ -1592,13 +1592,23 @@ export const PAYMENT_LINK_MODES = ["prueba", "real"] as const
 export type PaymentLinkMode = (typeof PAYMENT_LINK_MODES)[number]
 
 /**
+ * Cómo se conectó la pasarela: «cuenta», entrando a la cuenta del proveedor con la aplicación de
+ * gestorIA (OAuth, se renueva sola); «claves», con el Access Token que la tienda copió de su propia
+ * aplicación en el proveedor (no vence ni se renueva; se revisa una vez al día que siga valiendo).
+ */
+export const PAYMENT_LINK_CONNECTIONS = ["cuenta", "claves"] as const
+export type PaymentLinkConnection = (typeof PAYMENT_LINK_CONNECTIONS)[number]
+
+/**
  * La cuenta del proveedor del link de pago de la tienda, con sus credenciales cifradas
  * (`secretos.ts` de la API). Nunca vuelven al navegador: la pantalla solo sabe si está conectada,
  * en qué modo y con qué cuenta (su correo a medias).
  *
  * Se conecta entrando a la cuenta del proveedor (OAuth): el token dura lo que dice el proveedor
  * (`expires_at`; Mercado Pago, 180 días) y se renueva antes con el `refresh_token`. Si el
- * proveedor avisa que la tienda quitó el permiso (y se comprueba), queda `revoked_at`.
+ * proveedor avisa que la tienda quitó el permiso (y se comprueba), queda `revoked_at`. O con las
+ * claves de la tienda (`connected_with`): su Access Token, que no vence; `checked_at` dice cuándo se
+ * le preguntó al proveedor por última vez si lo sigue reconociendo.
  */
 export const storePaymentLink = pgTable(
   "store_payment_link",
@@ -1615,6 +1625,11 @@ export const storePaymentLink = pgTable(
     /** Cómo se reconoce la cuenta sin mostrarla entera: «ro…@gmail.com». */
     accountLabel: text("account_label"),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    connectedWith: text("connected_with")
+      .$type<PaymentLinkConnection>()
+      .notNull()
+      .default("cuenta"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
     /** Los últimos caracteres del token, para reconocer la cuenta sin mostrarla. */
     hint: text("hint").notNull(),
     connectedBy: text("connected_by").notNull(),
@@ -1623,6 +1638,10 @@ export const storePaymentLink = pgTable(
   (table) => [
     check("store_payment_link_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
     check("store_payment_link_mode_check", inList("mode", PAYMENT_LINK_MODES)),
+    check(
+      "store_payment_link_connected_with_check",
+      inList("connected_with", PAYMENT_LINK_CONNECTIONS),
+    ),
     check("store_payment_link_hint_check", sql`char_length(${table.hint}) between 1 and 8`),
     check(
       "store_payment_link_label_check",

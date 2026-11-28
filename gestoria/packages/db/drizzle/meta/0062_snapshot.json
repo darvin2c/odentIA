@@ -1,6 +1,6 @@
 {
-  "id": "77031ed1-d085-4f29-8550-0dc70fcd05e8",
-  "prevId": "70d15cb5-d2ad-4dca-ab0a-e6af4e3b5e4d",
+  "id": "608389ea-b8f5-40ad-ba35-e10e01f78df1",
+  "prevId": "7fc2f87b-f1b9-4988-b4b3-cb1d16b0a6d1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1939,269 +1939,6 @@
         "customer_fact_birthday_check": {
           "name": "customer_fact_birthday_check",
           "value": "\"customer_fact\".\"key\" <> 'cumpleanos' or \"customer_fact\".\"value\" ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.customer_group": {
-      "name": "customer_group",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "filters": {
-          "name": "filters",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "customer_group_store_idx": {
-          "name": "customer_group_store_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "customer_group_store_fkey": {
-          "name": "customer_group_store_fkey",
-          "tableFrom": "customer_group",
-          "columnsFrom": [
-            "store_id"
-          ],
-          "tableTo": "store",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "customer_group_name_check": {
-          "name": "customer_group_name_check",
-          "value": "char_length(btrim(\"customer_group\".\"name\")) between 1 and 60"
-        },
-        "customer_group_filters_check": {
-          "name": "customer_group_filters_check",
-          "value": "jsonb_typeof(\"customer_group\".\"filters\") = 'object'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.customer_profile": {
-      "name": "customer_profile",
-      "schema": "",
-      "columns": {
-        "store_id": {
-          "name": "store_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "customer_id": {
-          "name": "customer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "segment": {
-          "name": "segment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "why": {
-          "name": "why",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "orders_count": {
-          "name": "orders_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_cents": {
-          "name": "total_cents",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_bought_on": {
-          "name": "last_bought_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "rhythm_days": {
-          "name": "rhythm_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "measures": {
-          "name": "measures",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "categories": {
-          "name": "categories",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "districts": {
-          "name": "districts",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "price_sensitivity": {
-          "name": "price_sensitivity",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "computed_for": {
-          "name": "computed_for",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "computed_at": {
-          "name": "computed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "customer_profile_segment_idx": {
-          "name": "customer_profile_segment_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "segment",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "customer_profile_customer_fkey": {
-          "name": "customer_profile_customer_fkey",
-          "tableFrom": "customer_profile",
-          "columnsFrom": [
-            "store_id",
-            "customer_id"
-          ],
-          "tableTo": "customer",
-          "columnsTo": [
-            "store_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "customer_profile_store_id_customer_id_pk": {
-          "name": "customer_profile_store_id_customer_id_pk",
-          "columns": [
-            "store_id",
-            "customer_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "customer_profile_segment_check": {
-          "name": "customer_profile_segment_check",
-          "value": "segment IN ('vip','frecuente','nueva','riesgo','dormida','perdida','sin_compras')"
-        },
-        "customer_profile_sensitivity_check": {
-          "name": "customer_profile_sensitivity_check",
-          "value": "\"customer_profile\".\"price_sensitivity\" is null or price_sensitivity IN ('rebaja','liquidacion')"
-        },
-        "customer_profile_counts_check": {
-          "name": "customer_profile_counts_check",
-          "value": "\"customer_profile\".\"orders_count\" >= 0 and (\"customer_profile\".\"rhythm_days\" is null or \"customer_profile\".\"rhythm_days\" >= 0) and char_length(\"customer_profile\".\"why\") between 1 and 200"
         }
       },
       "isRLSEnabled": false
@@ -6276,6 +6013,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "connected_with": {
+          "name": "connected_with",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'cuenta'"
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "hint": {
           "name": "hint",
           "type": "text",
@@ -6345,6 +6095,10 @@
         "store_payment_link_mode_check": {
           "name": "store_payment_link_mode_check",
           "value": "mode IN ('prueba','real')"
+        },
+        "store_payment_link_connected_with_check": {
+          "name": "store_payment_link_connected_with_check",
+          "value": "connected_with IN ('cuenta','claves')"
         },
         "store_payment_link_hint_check": {
           "name": "store_payment_link_hint_check",

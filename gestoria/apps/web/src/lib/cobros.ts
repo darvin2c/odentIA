@@ -194,10 +194,14 @@ export function netOf(cents: number): number {
 }
 
 export interface LinkStatus {
-  /** Si gestorIA puede conectar una pasarela (tiene su aplicación en Mercado Pago). */
+  /** Si se puede conectar una pasarela: con las claves de la tienda. */
   available: boolean
+  /** Si además se puede entrar a la cuenta (gestorIA tiene su aplicación en Mercado Pago). */
+  accountDoor: boolean
   connection: {
     provider: "mercadopago"
+    /** Cómo se conectó: entrando a la cuenta, o con las claves (el Access Token) de la tienda. */
+    via: "cuenta" | "claves"
     state: "conectada" | "vencida" | "sin_permiso"
     mode: "prueba" | "real"
     account: string | null

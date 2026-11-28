@@ -9,8 +9,8 @@ import { StoreError } from "./tiendas.js"
  * primero es Mercado Pago (Checkout Pro).
  *
  * La tienda conecta su cuenta entrando a ella (OAuth 2.0 con PKCE, RFC 7636; lienzo «gestorIA ·
- * Configuración, de nuevo», tablero 6): nunca copia llaves. El token se renueva con su
- * `refresh_token` antes de vencer.
+ * Configuración, de nuevo», tablero 6), y el token se renueva con su `refresh_token` antes de vencer;
+ * o pega el Access Token de su propia aplicación en el proveedor (`pasarela.ts`, ADR 0232).
  *
  * Un aviso del proveedor nunca se cree por lo que trae: solo dice qué pago mirar. El estado, el
  * monto y el pedido se leen del proveedor con las credenciales de la tienda. Si el aviso viene
@@ -74,8 +74,13 @@ export interface LinkAdapter {
   ): Promise<LinkTokens>
   /** Renueva las credenciales con el `refresh_token`. */
   refresh(app: LinkApp, refreshToken: string, test: boolean): Promise<LinkTokens>
-  /** La cuenta de esas credenciales; «sin_permiso» si el proveedor ya no las reconoce. */
-  account(accessToken: string): Promise<{ id: string; label: string | null } | "sin_permiso">
+  /**
+   * La cuenta de esas credenciales; «sin_permiso» si el proveedor ya no las reconoce. `test` dice
+   * si el proveedor la marca como cuenta de prueba.
+   */
+  account(
+    accessToken: string,
+  ): Promise<{ id: string; label: string | null; test: boolean } | "sin_permiso">
   /** Crea el link. Pedirlo otra vez para el mismo pedido no crea otro distinto. */
   create(
     accessToken: string,
@@ -98,6 +103,32 @@ const TIMEOUT_MS = 10_000
 /** Un error del proveedor, dicho a la persona. */
 function providerError(message: string): StoreError {
   return new StoreError(409, "LINK_PROVIDER", message)
+}
+
+/**
+ * El proveedor ya no reconoce el token de la tienda al usarlo (crear un link, leer un pago): quien
+ * lo llama deja la pasarela «sin permiso» (`revokeLinkIn` de `pasarela.ts`).
+ */
+export const LINK_REVOKED = "LINK_REVOKED"
+
+function revokedError(): StoreError {
+  return new StoreError(
+    409,
+    LINK_REVOKED,
+    "Mercado Pago ya no reconoce la cuenta de la tienda. Vuelve a conectarla en Configuración › Cobros.",
+  )
+}
+
+/**
+ * Mercado Pago marca sus cuentas de prueba: la etiqueta `test_user` y el correo de
+ * `@testuser.com` que da al crearlas. Si no trae ninguna, no se sabe (no se supone que sea real).
+ */
+export function isTestAccount(body: { tags?: unknown; email?: unknown }): boolean {
+  const tags = Array.isArray(body.tags) ? body.tags : []
+  return (
+    tags.includes("test_user") ||
+    (typeof body.email === "string" && /@testuser\.com$/i.test(body.email))
+  )
 }
 
 /**
@@ -207,15 +238,25 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
     },
     async account(accessToken) {
       const response = await call(accessToken, "/users/me")
-      if (response.status === 401 || response.status === 403) return "sin_permiso"
+      // Solo 401 es «no reconozco este token»: un 403 puede ser un bloqueo pasajero.
+      if (response.status === 401) return "sin_permiso"
+      if (response.status === 403)
+        throw providerError(
+          "Mercado Pago no deja usar esa cuenta ahora. Revisa en tu panel de Mercado Pago que la aplicación esté activa.",
+        )
       if (!response.ok) throw providerError("Mercado Pago no respondió. Inténtalo de nuevo.")
       const body = (await response.json().catch(() => ({}))) as {
         id?: number | string
         email?: string
         nickname?: string
+        tags?: unknown
       }
       if (body.id === undefined) throw providerError("Mercado Pago no dijo de qué cuenta es.")
-      return { id: String(body.id), label: accountLabel(body.email ?? null, body.nickname ?? null) }
+      return {
+        id: String(body.id),
+        label: accountLabel(body.email ?? null, body.nickname ?? null),
+        test: isTestAccount(body),
+      }
     },
     async create(accessToken, order, options = {}) {
       const digits = fractionDigits(order.currency)
@@ -247,9 +288,10 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
         init_point?: string
         sandbox_init_point?: string
       }
-      if (response.status === 401 || response.status === 403)
+      if (response.status === 401) throw revokedError()
+      if (response.status === 403)
         throw providerError(
-          "Mercado Pago ya no reconoce la cuenta de la tienda. Vuelve a conectarla en Cobros.",
+          "Mercado Pago no deja crear links con esa cuenta. Revisa en tu panel de Mercado Pago que la aplicación esté activa.",
         )
       // Con las credenciales de prueba, solo el link que se paga con la tarjeta de prueba: si no
       // viene, no se cae al link real (cobraría dinero de verdad en una prueba).
@@ -291,6 +333,7 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
     async payment(accessToken, ref) {
       const response = await call(accessToken, `/v1/payments/${encodeURIComponent(ref)}`)
       if (response.status === 404) return null
+      if (response.status === 401) throw revokedError()
       if (!response.ok) throw new Error(`mercadopago: el pago respondió ${response.status}`)
       const body = (await response.json()) as {
         id?: number | string

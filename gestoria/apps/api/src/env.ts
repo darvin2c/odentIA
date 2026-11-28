@@ -48,7 +48,7 @@ const schema = z.object({
     ),
   /**
    * La aplicación de gestorIA en Mercado Pago (Cobros, tablero 6): la tienda conecta su cuenta
-   * entrando a ella (OAuth). Vacías: «Conectar con Mercado Pago» no se ofrece; lo demás funciona.
+   * entrando a ella (OAuth). Vacías: «Conectar con Mercado Pago» no se ofrece y la tienda conecta con sus claves; lo demás funciona.
    */
   GESTORIA_MERCADOPAGO_CLIENT_ID: z.string().trim().default(""),
   GESTORIA_MERCADOPAGO_CLIENT_SECRET: z.string().trim().default(""),

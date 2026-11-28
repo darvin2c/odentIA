@@ -174,9 +174,13 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
-- La pasarela se conecta entrando a la cuenta (OAuth con PKCE, `pasarela.ts`; ADR 0232): nunca se
-  pide copiar llaves. El intento vale 10 minutos, una vez y para quien lo empezó; el token se renueva
-  solo antes de vencer. En modo prueba (`store_payment_link.mode`) solo se paga el link de S/ 1 de la
+- La pasarela tiene dos puertas (`pasarela.ts`; ADR 0232): entrar a la cuenta con la aplicación de
+  gestorIA (OAuth con PKCE; el intento vale 10 minutos, una vez y para quien lo empezó; el token se
+  renueva solo antes de vencer), o las claves de la tienda: el Access Token de su propia aplicación,
+  que se revisa con el proveedor antes de guardarlo (`keysProblem`, `tryKeys`), no vence y se
+  vuelve a revisar una vez al día (`checkKeyLinks`). Sin la aplicación de gestorIA, solo se ofrecen
+  las claves. Si el proveedor deja de reconocer el token al usarlo, queda «sin permiso»
+  (`revokeLinkIn`). En modo prueba (`store_payment_link.mode`) solo se paga el link de S/ 1 de la
   tienda: ningún pedido se cobra por link, Sofi no lo ofrece (`chargesOrders`) y un pago de prueba
   nunca paga un pedido. El aviso `mp-connect` se comprueba con el proveedor antes de creerlo.
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse

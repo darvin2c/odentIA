@@ -695,9 +695,10 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Cobros, «Conectar con Mercado Pago»: entras con la cuenta de la tienda y das permiso, sin copiar ninguna clave. El dinero de cada link llega directo a tu cuenta.",
-          "Empieza en modo prueba: «Probar con S/ 1» crea un link que pagas con la tarjeta de prueba de Mercado Pago, y ves cómo queda pagado solo. En modo prueba ningún pedido se cobra por link. Cuando te guste, «Cobrar de verdad» vuelve a pedir el permiso, esta vez para cobrar.",
-          "Si lo desconectas, los links ya enviados dejan de confirmarse solos: esos pagos los revisas tú.",
+          "En Configuración, en Cobros. Si ves «Conectar con Mercado Pago», entras con la cuenta de la tienda y das permiso, sin copiar ninguna clave. Si prefieres usar tus propias claves, toca «¿Prefieres usar tus propias claves?»; si ese botón no está, es «Conectar con mis claves». De las dos formas, el dinero de cada link llega directo a tu cuenta.",
+          "Con tus claves: en tu panel de Mercado Pago Developers abres «Tus integraciones», eliges tu aplicación (si no tienes, la creas con el nombre de tu tienda), en «Credenciales» eliges «Prueba» y copias el «Access Token», no la «Public Key». Lo pegas en gestorIA, tocas «Probar» para ver de qué cuenta es y después «Conectar en modo prueba». Se guarda cifrado y no se vuelve a mostrar; no configuras nada más en tu panel.",
+          "Empieza en modo prueba: «Probar con S/ 1» crea un link que pagas con la tarjeta de prueba de Mercado Pago, y ves cómo queda pagado solo. En modo prueba ningún pedido se cobra por link. Cuando te guste, «Cobrar de verdad»: entrando a tu cuenta, vuelve a pedir el permiso; con tus claves, pide el «Access Token» de «Producción» (el de prueba no sirve ahí).",
+          "Si Mercado Pago deja de reconocer la conexión (quitaste el permiso, cambiaste tus claves o borraste tu aplicación), Cobros dice «Sin permiso» y los pedidos se cobran a tu número o al recibir: toca «Volver a conectar». Si lo desconectas, los links ya enviados dejan de confirmarse solos: esos pagos los revisas tú.",
         ],
         needs: "configuracion",
         screen: "pagos",
