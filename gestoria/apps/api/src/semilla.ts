@@ -1,5 +1,6 @@
 import {
   accountCopy,
+  createAppDb,
   createOwnerDb,
   type Db,
   store,
@@ -15,11 +16,13 @@ import { seedDemoPushChoices } from "./semilla-avisos.js"
 import { seedDemoExchanges } from "./semilla-cambios.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
+import { seedDemoPayments } from "./semilla-cobros.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
 import { seedDemoSheet } from "./semilla-ficha.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoMedia } from "./semilla-medios.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
+import { seedDemoProfiles } from "./semilla-perfil.js"
 import {
   DEMO_NEW_STORE_ID,
   DEMO_NEW_STORE_OWNER,
@@ -106,6 +109,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
       })
     }
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoPayments(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoBrand(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPartPayment(tx as unknown as Db, DEMO_STORE_ID)
@@ -372,6 +376,10 @@ if (isMain) {
   await seedDemoStore(db, process.env.GESTORIA_SEMILLA_CORREO)
   // Las fotos y el video, en el almacenamiento (ADR 0236): fuera de la transacción de la tienda.
   console.log(`gestoria: ${await seedDemoMedia(db, DEMO_STORE_ID)}`)
+  // El perfil de las clientas lo anotan Sofi, Argos y Lucía con sus reglas: con la base de la app.
+  const appUrl = process.env.GESTORIA_APP_DATABASE_URL
+  if (appUrl) await seedDemoProfiles(db, createAppDb(appUrl, { max: 1 }), DEMO_STORE_ID)
+  else console.warn("gestoria: sin GESTORIA_APP_DATABASE_URL, las clientas quedan sin perfil")
   console.log("gestoria: Calzados Rosa lista")
   process.exit(0)
 }

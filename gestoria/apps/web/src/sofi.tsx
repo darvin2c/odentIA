@@ -16,6 +16,7 @@ import { z } from "zod"
 import { ToggleField } from "./campos"
 import { api } from "./lib/api"
 import { STATE_TONE, stateName } from "./lib/pedidos"
+import { threadOf } from "./lib/perfil"
 import { AGENT_STOP_WORDS } from "./lib/plan"
 import type {
   AgentSettings,
@@ -26,6 +27,7 @@ import type {
 } from "./lib/sofi"
 import { usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
+import { ConsentNoteLine } from "./perfil"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
@@ -320,7 +322,13 @@ function TestChat({ overview }: { overview: SofiOverview }) {
             Escribe como un cliente: «Hola, ¿tienen la zapatilla blanca en 38?»
           </p>
         ) : (
-          view.messages.map((message) => <Bubble key={message.id} message={message} />)
+          threadOf(view.messages, view.consentNotes).map((item) =>
+            item.kind === "nota" ? (
+              <ConsentNoteLine key={`nota-${item.note.id}`} note={item.note} />
+            ) : (
+              <Bubble key={item.message.id} message={item.message} />
+            ),
+          )
         )}
         {pendingText ? (
           <>
@@ -401,7 +409,7 @@ function TestChat({ overview }: { overview: SofiOverview }) {
           {shownError}
         </p>
       ) : null}
-      {view && view.costMicros > 0 ? (
+      {view?.costMicros ? (
         <p className="text-xs text-muted-foreground">Esta prueba costó {usd(view.costMicros)}.</p>
       ) : null}
     </section>

@@ -241,45 +241,80 @@
       "breakpoints": true
     },
     {
-      "idx": 34,
+      "idx": 50,
       "version": "7",
-      "when": 1795810587036,
-      "tag": "0034_la_ficha_del_producto",
+      "when": 1795812740399,
+      "tag": "0050_el_perfil_de_la_clienta",
       "breakpoints": true
     },
     {
-      "idx": 35,
+      "idx": 51,
       "version": "7",
-      "when": 1795810617339,
-      "tag": "0035_reglas_la_ficha_del_producto",
+      "when": 1795812754479,
+      "tag": "0051_reglas_perfil_de_la_clienta",
       "breakpoints": true
     },
     {
-      "idx": 36,
+      "idx": 52,
       "version": "7",
-      "when": 1795811411690,
-      "tag": "0036_el_precio_de_la_ficha",
+      "when": 1795844732033,
+      "tag": "0052_el_link_libre",
       "breakpoints": true
     },
     {
-      "idx": 37,
+      "idx": 53,
       "version": "7",
-      "when": 1795811414235,
-      "tag": "0037_reglas_precio_de_la_ficha",
+      "when": 1795845272533,
+      "tag": "0053_los_cobros",
       "breakpoints": true
     },
     {
-      "idx": 38,
+      "idx": 54,
       "version": "7",
-      "when": 1795818549321,
-      "tag": "0038_las_fotos_y_videos_del_producto",
+      "when": 1795845285532,
+      "tag": "0054_reglas_cobros",
       "breakpoints": true
     },
     {
-      "idx": 39,
+      "idx": 55,
       "version": "7",
-      "when": 1795818550939,
-      "tag": "0039_reglas_fotos_y_videos",
+      "when": 1795847288953,
+      "tag": "0055_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795847289953,
+      "tag": "0056_reglas_la_ficha_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795847290953,
+      "tag": "0057_el_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795847291953,
+      "tag": "0058_reglas_precio_de_la_ficha",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795847574527,
+      "tag": "0059_las_fotos_y_videos_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795847575527,
+      "tag": "0060_reglas_fotos_y_videos",
       "breakpoints": true
     }
   ]

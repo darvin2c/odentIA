@@ -591,7 +591,9 @@ function NextStep({ order }: { order: OrderDetail }) {
       ? "El precio acordado venció: si sigue en pie, usa «Cambiar» para volver a acordarlo."
       : order.linkConnected
         ? "Falta que pague. Mándale el link de pago o anota su captura cuando llegue."
-        : "Falta que pague. Anota su captura cuando llegue.",
+        : order.linkTestMode
+          ? "Falta que pague. Mercado Pago está en modo prueba: este pedido se cobra con captura o al recibir."
+          : "Falta que pague. Anota su captura cuando llegue.",
     por_confirmar: "Revisa la cuenta de la tienda y confirma el pago, o di que no coincide.",
     por_salir: order.stockPending
       ? "Ya pagó, pero no alcanza el stock de lo que lleva: registra la entrada en el catálogo antes de que salga."
@@ -906,9 +908,13 @@ function CollectActions({ order }: { order: OrderDetail }) {
       </div>
       {!order.linkConnected ? (
         <p className="text-xs text-muted-foreground">
-          {store.permissions.includes("configuracion")
-            ? "Para cobrar con link de pago, conéctalo en Pagos y entregas."
-            : "El link de pago se usa cuando el dueño lo conecte."}
+          {order.linkBroken
+            ? "Mercado Pago ya no deja cobrar con la cuenta de la tienda: hay que volver a conectarla en Configuración › Cobros."
+            : order.linkTestMode
+              ? "Mercado Pago está en modo prueba: con dinero de prueba no se cobra un pedido. Se pasa a «Cobrar de verdad» en Configuración › Cobros."
+              : store.permissions.includes("configuracion")
+                ? "Para cobrar con link de pago, conecta Mercado Pago en Configuración › Cobros."
+                : "El link de pago se usa cuando el Dueño lo conecte."}
         </p>
       ) : null}
       {link.isError ? (

@@ -21,6 +21,8 @@ import { pad, variantPrices } from "../pedidos.js"
 import { autoUnitCents } from "../precio.js"
 import { inStore } from "../tiendas.js"
 import { moneyText as formatMoney } from "./herramientas.js"
+import type { ChatModel } from "./modelo.js"
+import { profileStore } from "./perfilar.js"
 
 /**
  * Argos, el administrador de la tienda (paso B5, tablero 13): vigila los pedidos y las
@@ -221,13 +223,21 @@ async function dueIn(tx: Db, storeId: string, now: Date) {
 export interface ArgosRun {
   stores: number
   written: number
+  /** Lo que anotó del perfil de las clientas (`perfilar.ts`), con lo que costó leer. */
+  profiled: number
+  profileCostMicros: number
 }
 
 /**
  * Una vuelta de Argos por todas las tiendas con Sofi encendida. El dueño de la base solo dice
  * qué tiendas mirar; lo de cada una se hace con las reglas de la tienda (`agente:argos`).
  */
-export async function runArgos(ownerDb: Db, appDb: Db, now = new Date()): Promise<ArgosRun> {
+export async function runArgos(
+  ownerDb: Db,
+  appDb: Db,
+  now = new Date(),
+  model: ChatModel | null = null,
+): Promise<ArgosRun> {
   const stores = await ownerDb
     .select({ storeId: storeAgent.storeId })
     .from(storeAgent)
@@ -267,7 +277,20 @@ export async function runArgos(ownerDb: Db, appDb: Db, now = new Date()): Promis
       return n
     })
   }
-  return { stores: stores.length, written }
+  // El perfil de las clientas, en todas las tiendas (con Sofi o sin ella). Lo de una tienda que
+  // falla no detiene a las demás ni a los seguimientos.
+  let profiled = 0
+  let profileCostMicros = 0
+  for (const { id } of await ownerDb.select({ id: store.id }).from(store)) {
+    try {
+      const profile = await profileStore(appDb, id, now, model)
+      profiled += profile.written
+      profileCostMicros += profile.costMicros ?? 0
+    } catch (error) {
+      console.error(`gestoria-api: Argos no pudo perfilar la tienda ${id}`, error)
+    }
+  }
+  return { stores: stores.length, written, profiled, profileCostMicros }
 }
 
 /* ------------------------------------------------------------- lo que ve el equipo */

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { afterEach, beforeAll, expect, it } from "vitest"
 
 import { common } from "./common.js"
@@ -428,4 +429,120 @@ it("en el cajón del teléfono, salir de la pantalla con algo que no se guardó 
   } finally {
     window.matchMedia = wide
   }
+})
+
+/** Un detalle en la columna que abre encima un cajón con su propio formulario. */
+function DetailWithNestedForm() {
+  const [nested, setNested] = React.useState(false)
+  return (
+    <DetailDrawer open title="Ajustes" onClose={() => {}}>
+      <p>Datos de la tienda</p>
+      <button type="button" onClick={() => setNested(true)}>
+        Editar el color
+      </button>
+      <FormDrawer open={nested} title="Color" onClose={() => setNested(false)} onSubmit={() => {}}>
+        <input aria-label="Nombre del color" />
+        <div role="listbox" aria-label="Tono">
+          <div role="option" aria-selected={false} tabIndex={0}>
+            Rojo
+          </div>
+        </div>
+      </FormDrawer>
+    </DetailDrawer>
+  )
+}
+
+// Configuración de gestorIA (27 nov): un clic en la lista desplegable de un cajón abierto desde la
+// columna armaba el «¿Salir sin guardar?» de la columna, que no tenía nada escrito.
+it("lo que se toca o se escribe en un cajón abierto desde la columna no cuenta como cambio de la columna", async () => {
+  const router = appWith(
+    [
+      ["/ajustes", () => <DetailWithNestedForm />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ajustes",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("button", { name: "Editar el color" }))
+  const option = await screen.findByRole("option", { name: "Rojo" })
+  fireEvent.click(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+  fireEvent.input(screen.getByLabelText("Nombre del color"), { target: { value: "Coral" } })
+  fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+  await waitFor(() => expect(screen.queryByRole("option", { name: "Rojo" })).toBeNull())
+  void router.navigate({ href: "/agenda" })
+  await waitFor(() => expect(router.state.location.pathname).toBe("/agenda"))
+  expect(screen.queryByRole("alertdialog", { hidden: true })).toBeNull()
+})
+
+it("cerrado el cajón, lo que se toca en la lista de la columna vuelve a contar", async () => {
+  function DetailWithPortalChoice() {
+    const [nested, setNested] = React.useState(false)
+    return (
+      <DetailDrawer open title="Ajustes" onClose={() => {}}>
+        <button type="button" onClick={() => setNested(true)}>
+          Editar el color
+        </button>
+        {createPortal(
+          <div role="listbox" aria-label="Tono">
+            <div role="option" aria-selected={false} tabIndex={0}>
+              Azul
+            </div>
+          </div>,
+          document.body,
+        )}
+        <FormDrawer open={nested} title="Color" onClose={() => setNested(false)} onSubmit={() => {}}>
+          <input aria-label="Nombre del color" />
+        </FormDrawer>
+      </DetailDrawer>
+    )
+  }
+  const router = appWith(
+    [
+      ["/ajustes", () => <DetailWithPortalChoice />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ajustes",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("button", { name: "Editar el color" }))
+  await screen.findByLabelText("Nombre del color")
+  fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+  await waitFor(() => expect(screen.queryByLabelText("Nombre del color")).toBeNull())
+  fireEvent.click(screen.getByRole("option", { name: "Azul" }))
+  void router.navigate({ href: "/agenda" })
+  await screen.findByRole("alertdialog")
+})
+
+it("lo que se toca en la columna misma sigue contando, también en su lista desplegable (en un portal)", async () => {
+  function DetailWithOwnChoice() {
+    return (
+      <DetailDrawer open title="Ajustes" onClose={() => {}}>
+        {/* La lista de un desplegable vive en un portal, fuera del DOM de la columna. */}
+        {createPortal(
+          <div role="listbox" aria-label="Tono">
+            <div role="option" aria-selected={false} tabIndex={0}>
+              Azul
+            </div>
+          </div>,
+          document.body,
+        )}
+        {/* Un cajón cerrado no le quita nada a la columna. */}
+        <FormDrawer open={false} title="Color" onClose={() => {}} onSubmit={() => {}}>
+          <input aria-label="Nombre del color" />
+        </FormDrawer>
+      </DetailDrawer>
+    )
+  }
+  const router = appWith(
+    [
+      ["/ajustes", () => <DetailWithOwnChoice />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ajustes",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("option", { name: "Azul" }))
+  void router.navigate({ href: "/agenda" })
+  await screen.findByRole("alertdialog")
 })

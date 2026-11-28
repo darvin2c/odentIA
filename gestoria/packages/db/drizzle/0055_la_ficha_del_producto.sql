@@ -2,7 +2,7 @@
 -- ajusta cada tienda, los colores (su hex y su foto), a qué color pertenece cada foto, el estado que
 -- pone la tienda, el paquete para la agencia, el código del producto y el de barras de cada
 -- variante, las palabras con que lo buscan, si se ve en la web, lo que Sofi no supo y el historial
--- de cada cambio. Lo del precio va aparte (`0036_el_precio_de_la_ficha.sql`).
+-- de cada cambio. Lo del precio va aparte (`0057_el_precio_de_la_ficha.sql`).
 CREATE TABLE "product_color" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"store_id" uuid NOT NULL,

@@ -14,6 +14,13 @@ export type SectionNavItem = {
    * de lucide son de contorno. */
   iconActive?: NavIcon
   badge?: string | number
+  /** Qué cuenta el contador, en palabras («3 por hacer»): lo oye el lector de
+   * pantalla con el nombre de la entrada, así el número (y su color) no es la
+   * única señal. */
+  badgeLabel?: string
+  /** `pending`: el contador cuenta algo por hacer (lo que falta) y sale en
+   * ámbar; sin él, gris. */
+  badgeTone?: "pending"
 }
 
 /** Grupo con título: reúne entradas de una lista larga bajo un nombre de trabajo. */
@@ -24,6 +31,9 @@ export type SectionNavGroup = {
 
 /** Lado del riel respecto al contenido. */
 export type SectionNavSide = "left" | "right"
+
+/** Dónde van las entradas sueltas respecto a los grupos. */
+export type SectionNavItemsPosition = "start" | "end"
 
 /** Borde de la pantalla al que se pega la barra. */
 export type SectionNavMobilePosition = "header" | "footer"
@@ -78,3 +88,10 @@ export const GROUP_LIST_CLASSES =
 /** Contador: la pastilla de texto del `SidebarMenuBadge` (`h-5 min-w-5`). */
 export const BADGE_CLASSES =
   "flex h-5 min-w-5 shrink-0 select-none items-center justify-center rounded-xl px-1 text-xs font-medium tabular-nums"
+
+/** Contador de algo por hacer: el ámbar de los avisos, igual en reposo y activo. */
+export const BADGE_PENDING_CLASSES = "bg-warning-soft font-semibold text-warning"
+
+/** «‹ Sección» del teléfono con `mobileIndex`: vuelve a la portada, con el alto de un toque. */
+export const BACK_LINK_CLASSES =
+  "inline-flex min-h-11 w-fit items-center gap-1 rounded-md text-sm font-medium text-primary outline-hidden hover:underline focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4"

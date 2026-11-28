@@ -11,7 +11,7 @@
  * (la actual es `CLAVE`; la nueva no se guarda) y activar los dos pasos con el código
  * `CODIGO_TOTP`. `GET /__cuenta` dice lo que pidió la pantalla. Sin la red: ningún proveedor real.
  */
-import { createECDH, randomUUID } from "node:crypto"
+import { createECDH, randomBytes, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
 import { accountCopy, conversation, conversationMessage, storeMember } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
@@ -36,11 +36,13 @@ import {
   API_PORT,
   CLAVE,
   CODIGO_TOTP,
+  MP_PORT,
   PEOPLE,
   STORE_ID,
   WEB_PORT,
   type Who,
 } from "./entorno.js"
+import { fakeMercadoPago } from "./mercadopago-de-prueba.js"
 
 const ACCOUNT = `http://127.0.0.1:${ACCOUNT_PORT}`
 const WEB = `http://127.0.0.1:${WEB_PORT}`
@@ -139,15 +141,30 @@ const adminFetch: typeof fetch = async (input, init) => {
 }
 
 const contract = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
+// Cobros: un Mercado Pago de mentira (OAuth, el link y su pago) que avisa a este servidor.
+const mercadoPago = fakeMercadoPago({
+  port: MP_PORT,
+  notify: async (paymentId, notificationURL) => {
+    const url = new URL(notificationURL)
+    url.searchParams.set("data.id", paymentId)
+    url.searchParams.set("type", "payment")
+    await app.request(url.toString(), { method: "POST", body: "{}" })
+  },
+})
 const app = createApp({
   appDb: db.appDb,
   ownerDb: db.ownerDb,
   account: { url: ACCOUNT, eventsSecret: "", keys: createLocalJWKSet({ keys: [jwk] }) },
   webURL: WEB,
   link: {
-    adapters: defaultLinkAdapters(),
-    secretsKey: null,
+    adapters: { mercadopago: mercadoPago.adapter },
+    secretsKey: randomBytes(32),
     apiURL: `http://127.0.0.1:${API_PORT}`,
+    app: {
+      clientId: "app-e2e",
+      clientSecret: "secreto-e2e",
+      redirectURL: `${WEB}/mercadopago/vuelta`,
+    },
   },
   contract,
   // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
@@ -380,6 +397,7 @@ console.log(`gestoria-e2e: listo (servidor ${API_PORT}, cuenta ${ACCOUNT_PORT})`
 
 const stop = async () => {
   account.close()
+  mercadoPago.server.close()
   await rustfs.stop().catch(() => undefined)
   await db.stop()
   process.exit(0)

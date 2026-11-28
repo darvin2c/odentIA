@@ -47,6 +47,12 @@ const schema = z.object({
       "Son 32 bytes en base64 (openssl rand -base64 32)",
     ),
   /**
+   * La aplicación de gestorIA en Mercado Pago (Cobros, tablero 6): la tienda conecta su cuenta
+   * entrando a ella (OAuth). Vacías: «Conectar con Mercado Pago» no se ofrece; lo demás funciona.
+   */
+  GESTORIA_MERCADOPAGO_CLIENT_ID: z.string().trim().default(""),
+  GESTORIA_MERCADOPAGO_CLIENT_SECRET: z.string().trim().default(""),
+  /**
    * El modelo de Sofi (B5): por omisión el de las clínicas (`gpt-6-luna`); «fake» responde por
    * reglas sin red (solo en desarrollo). Sin la clave de OpenAI, Sofi no responde.
    */
