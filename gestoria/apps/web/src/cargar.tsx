@@ -1038,10 +1038,14 @@ export function discardText(otherName: string | null, photos: number, products: 
 function LoadOwner({ load, meId }: { load: LoadDetail["load"]; meId: string }) {
   const mine = load.createdBy === meId
   return (
-    <p className="text-sm text-muted-foreground">
-      {mine
-        ? `Abriste esta carga el ${when(load.createdAt)}.`
-        : `Esta carga la abrió ${load.createdByName ?? "otra persona del equipo"} el ${when(load.createdAt)}. Si la cambias, la creas o la descartas, cambia también para quien la abrió.`}
+    <p className="flex flex-col text-sm text-muted-foreground">
+      <span>
+        Carga abierta por {mine ? "ti" : (load.createdByName ?? "otra persona del equipo")} ·{" "}
+        {when(load.createdAt)}
+      </span>
+      {mine ? null : (
+        <span>Si la cambias, la creas o la descartas, cambia también para quien la abrió.</span>
+      )}
     </p>
   )
 }
