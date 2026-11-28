@@ -1,4 +1,15 @@
-import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  cn,
+  FieldGroup,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  toast,
+} from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import {
   AgentMark,
@@ -23,48 +34,17 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
-import {
-  Check,
-  Lightbulb,
-  MessageCircle,
-  MessageSquarePlus,
-  Minus,
-  Pause,
-  Play,
-  Plus,
-  SendHorizontal,
-  Trash2,
-} from "lucide-react"
-import {
-  createContext,
-  type KeyboardEvent,
-  type ReactNode,
-  useContext,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react"
+import { Link, useNavigate } from "@tanstack/react-router"
+import { Check, Lightbulb, MessageCircle, Minus, Pause, Play, Plus, Trash2 } from "lucide-react"
+import { createContext, type ReactNode, useContext, useEffect, useId, useState } from "react"
 import { z } from "zod"
 import { MoneyInput, ToggleField } from "./campos"
 import { api } from "./lib/api"
-import { STATE_TONE, stateName } from "./lib/pedidos"
-import { threadOf } from "./lib/perfil"
 import { AGENT_STOP_WORDS } from "./lib/plan"
-import {
-  type AgentSettings,
-  type AnswerStatus,
-  type ConversationMessage,
-  type ConversationView,
-  DAYS,
-  type KnowledgeView,
-  type SofiOverview,
-  TONES,
-  usd,
-} from "./lib/sofi"
+import { type AgentSettings, DAYS, type KnowledgeView, type SofiOverview, TONES } from "./lib/sofi"
 import { money, moneyInput, readMoney } from "./lib/tienda"
-import { ConsentNoteLine } from "./perfil"
+import { ClientTestPiece } from "./ficha/probar"
+import type { CatalogItem } from "./lib/tienda"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
@@ -222,7 +202,7 @@ export function SofiPage() {
                 )
               ) : null}
             </section>
-            <TestChat overview={overview.data} />
+            <TestAsClient />
           </div>
         </div>
       ) : null}
@@ -236,7 +216,9 @@ function goToTest() {
   if (!test) return
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
   test.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" })
-  test.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true })
+  test
+    .querySelector<HTMLInputElement>('input[aria-label^="Mensaje de la clienta"]')
+    ?.focus({ preventScroll: true })
 }
 
 /* ------------------------------------------------------------------ guardar */
@@ -1317,92 +1299,65 @@ function GapForm({ gap, onClose }: { gap: Gap; onClose: () => void }) {
 
 /* ------------------------------------------------------------------- probar a Sofi */
 
-const messageSchema = z.object({
-  text: z.string().trim().min(1, "Escribe el mensaje, como cliente."),
-})
-
-/** Lo que se suele probar: llena el mensaje, no lo envía. */
-const TRY = [
-  { label: "Pide rebaja", text: "¿me lo dejas más barato?" },
-  { label: "Lo va a pensar", text: "mmm lo voy a pensar" },
-  { label: "Pregunta por cambios", text: "¿hacen cambios de talla?" },
-  { label: "Quiere a una persona", text: "quiero hablar con una persona" },
-]
-
-function TestChat({ overview }: { overview: SofiOverview }) {
+/**
+ * «Probar a Sofi»: lo mismo que vive la clienta, siempre con el flujo de verdad (el chat de
+ * WhatsApp, la vitrina por link, el mismo carrito, la oferta con plazo y «Pagar ahora» de
+ * prueba), con el producto que se elige. Es la pieza de «Probar como clienta» de la ficha
+ * (`ClientTestPiece`): nunca un chat suelto de preguntas y respuestas.
+ */
+function TestAsClient() {
   const { store } = useStoreContext()
-  const queryClient = useQueryClient()
-  const [conversationId, setConversationId] = useState<string | null>(overview.tests[0]?.id ?? null)
-  const conversation = useQuery({
-    queryKey: ["conversacion", store.id, conversationId],
-    enabled: Boolean(conversationId),
-    queryFn: async () =>
-      (
-        await api<{ conversation: ConversationView }>(
-          `/api/tiendas/${store.id}/conversaciones/${conversationId}`,
-        )
-      ).conversation,
+  const navigate = useNavigate()
+  const catalog = useQuery({
+    queryKey: ["catalogo", store.id],
+    queryFn: () => api<{ products: CatalogItem[] }>(`/api/tiendas/${store.id}/catalogo`),
   })
-  const start = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>(`/api/tiendas/${store.id}/sofi/pruebas`, { method: "POST" }),
-    onSuccess: async ({ id }) => {
-      setConversationId(id)
-      await queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) })
-    },
-  })
-  const [pendingText, setPendingText] = useState<string | null>(null)
-  const send = useMutation({
-    mutationFn: async (message: string) => {
-      const id = conversationId ?? (await start.mutateAsync()).id
-      return api<{ conversation: ConversationView; result: { status: AnswerStatus } }>(
-        `/api/tiendas/${store.id}/conversaciones/${id}/cliente`,
-        { method: "POST", body: { text: message } },
-      )
-    },
-    onMutate: (message) => setPendingText(message),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["conversacion", store.id, data.conversation.id], data.conversation)
-      if (data.result.status === "sin_modelo")
-        toast.error("Sofi no pudo responder: falta configurar su modelo.")
-    },
-    onSettled: () => setPendingText(null),
-  })
-  const giveBack = useMutation({
-    mutationFn: () =>
-      api<{ conversation: ConversationView }>(
-        `/api/tiendas/${store.id}/conversaciones/${conversationId}/devolver`,
-        { method: "POST" },
-      ),
-    onSuccess: (data) =>
-      queryClient.setQueryData(["conversacion", store.id, data.conversation.id], data.conversation),
-  })
-  const view = conversation.data
-  const log = useRef<HTMLDivElement>(null)
-  const count = (view?.messages.length ?? 0) + (pendingText ? 1 : 0)
-  useEffect(() => {
-    // Baja dentro de la conversación, sin mover la página.
-    if (count > 0 && log.current) log.current.scrollTop = log.current.scrollHeight
-  }, [count])
-  const disabled = !overview.modelReady || send.isPending || view?.handler === "persona"
-  const form = useAppForm({
-    defaultValues: { text: "" },
-    validators: { onSubmit: messageSchema },
-    onSubmit: async ({ value, formApi }) => {
-      if (disabled) return
-      await send.mutateAsync(value.text.trim())
-      formApi.reset()
-    },
-  })
-  const { onSubmit, error: sendError } = useFormSurface(form)
-  const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault()
-      event.currentTarget.form?.requestSubmit()
-    }
-  }
-  const otherError = start.error ?? giveBack.error
-  const shownError = sendError ?? (otherError ? submitErrorMessage(otherError) : null)
+  // Solo lo que se vende: lo que ya no se vende no lo ofrece Sofi.
+  const products = (catalog.data?.products ?? []).filter((p) => p.state !== "no_se_vende")
+  const [picked, setPicked] = useState<string | null>(null)
+  const product =
+    products.find((p) => p.id === picked) ??
+    products.find((p) => p.readiness.sellsAlone && p.stock > 0) ??
+    products[0] ??
+    null
+  const selectId = useId()
+
+  const title = (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-0.5">
+        <h2 id="sofi-prueba" className="text-base font-semibold">
+          Probar a Sofi
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Como clienta, con un producto: el chat, la vitrina y el pago de prueba. No es una venta:
+          no se envía, no se cobra ni mueve stock.
+        </p>
+      </div>
+      {products.length > 1 && product ? (
+        <div className="flex flex-col gap-1">
+          <label htmlFor={selectId} className="text-xs font-medium text-muted-foreground">
+            Producto
+          </label>
+          <Select
+            items={Object.fromEntries(products.map((p) => [p.id, p.name]))}
+            value={product.id}
+            onValueChange={(next) => next && setPicked(String(next))}
+          >
+            <SelectTrigger id={selectId} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {products.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+    </div>
+  )
 
   return (
     <section
@@ -1410,197 +1365,48 @@ function TestChat({ overview }: { overview: SofiOverview }) {
       aria-labelledby="sofi-prueba"
       className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4 @3xl:sticky @3xl:top-4"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
-          <h2 id="sofi-prueba" className="text-base font-semibold">
-            Probar a Sofi
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Escribe como una clienta. Es una prueba: no se envía ni mueve stock.
-          </p>
-        </div>
-        {view && view.messages.length > 0 ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => start.mutate()}
-            disabled={start.isPending}
-          >
-            <MessageSquarePlus aria-hidden />
-            Empezar de nuevo
-          </Button>
-        ) : null}
-      </div>
-      {!overview.modelReady ? (
-        <PageNotice tone="limite" label="Sin modelo">
-          Sofi todavía no puede responder: falta configurar su modelo en el servidor.
-        </PageNotice>
-      ) : null}
-      {conversation.isError ? (
-        <ErrorState
-          error={conversation.error instanceof Error ? conversation.error : "No se pudo cargar"}
-          onRetry={() => void conversation.refetch()}
-        />
-      ) : null}
-      <div
-        ref={log}
-        className="flex max-h-[30rem] min-h-56 flex-col gap-3 overflow-y-auto rounded-lg border bg-surface-muted p-3"
-        role="log"
-        aria-live="polite"
-        aria-label="La conversación de prueba"
-      >
-        {!view || view.messages.length === 0 ? (
-          <p className="m-auto max-w-56 text-center text-sm text-muted-foreground">
-            Escribe como una clienta: «Hola, ¿tienen la zapatilla blanca en 38?»
-          </p>
-        ) : (
-          threadOf(view.messages, view.consentNotes).map((item) =>
-            item.kind === "nota" ? (
-              <ConsentNoteLine key={`nota-${item.note.id}`} note={item.note} />
-            ) : (
-              <Bubble key={item.message.id} message={item.message} />
-            ),
-          )
-        )}
-        {pendingText ? (
-          <>
-            <Bubble
-              message={{
-                id: "pendiente",
-                author: "cliente",
-                text: pendingText,
-                createdAt: new Date().toISOString(),
-                delivery: null,
-                needsTemplate: false,
-                followUp: null,
-                byArgos: false,
-              }}
-            />
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <AgentMark size="sm" />
-              Sofi está escribiendo…
-            </p>
-          </>
-        ) : null}
-      </div>
-      {view && view.orders.length > 0 ? (
-        <ul className="flex flex-wrap gap-2" aria-label="Pedidos de esta conversación">
-          {view.orders.map((order) => (
-            <li key={order.id}>
-              <Link
-                to="/tiendas/$id/pedidos"
-                params={{ id: store.id }}
-                search={{ pedido: order.id }}
-                className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-sm hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
-              >
-                <span className="font-mono">Pedido {order.number}</span>
-                <Badge variant={STATE_TONE[order.state]}>{stateName(order)}</Badge>
-                <span className="tabular-nums">{money(order.totalCents, store.currency)}</span>
-                {order.test ? <Badge variant="outline">Prueba</Badge> : null}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {view?.handler === "persona" ? (
-        <PageNotice
-          tone="alarma"
-          label="Espera a una persona"
-          action={
-            <Button size="sm" variant="outline" onClick={() => giveBack.mutate()}>
-              Devolver a Sofi
-            </Button>
+      {catalog.isError ? (
+        <>
+          {title}
+          <ErrorState
+            error={catalog.error instanceof Error ? catalog.error : "No se pudo cargar"}
+            onRetry={() => void catalog.refetch()}
+          />
+        </>
+      ) : catalog.isPending ? (
+        <>
+          {title}
+          <LoadingState message="Cargando tus productos" />
+        </>
+      ) : !product ? (
+        <>
+          {title}
+          <EmptyState
+            title="Agrega un producto para probar"
+            description="La prueba es la de la clienta: pregunta por un producto, lo ve en la vitrina y lo paga de prueba."
+            actionLabel="Ir al catálogo"
+            onAction={() =>
+              void navigate({ to: "/tiendas/$id/catalogo", params: { id: store.id } })
+            }
+          />
+        </>
+      ) : (
+        <ClientTestPiece
+          key={product.id}
+          storeId={store.id}
+          productId={product.id}
+          readiness={product.readiness}
+          edit={store.permissions.includes("configuracion")}
+          extraQuick={["¿Hacen cambios de talla?", "Quiero hablar con una persona"]}
+          onGo={() =>
+            void navigate({
+              to: "/tiendas/$id/catalogo/$productId",
+              params: { id: store.id, productId: product.id },
+            })
           }
-        >
-          Sofi pasó esta conversación a una persona: {view.waitingReason ?? "sin motivo"}.
-        </PageNotice>
-      ) : null}
-      <fieldset className="flex flex-wrap gap-1.5">
-        <legend className="sr-only">Ideas para probar</legend>
-        {TRY.map((idea) => (
-          <button
-            key={idea.label}
-            type="button"
-            onClick={() => form.setFieldValue("text", idea.text)}
-            className="min-h-11 rounded-full border bg-card px-3 text-xs font-medium hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:min-h-8"
-          >
-            {idea.label}
-          </button>
-        ))}
-      </fieldset>
-      <form noValidate onSubmit={onSubmit} className="flex items-end gap-2">
-        <form.AppField name="text">
-          {(field) => (
-            <field.TextareaField
-              label="Tu mensaje, como cliente"
-              hideLabel
-              className="min-w-0 flex-1"
-              onKeyDown={onKey}
-              rows={2}
-              maxLength={1000}
-              placeholder="Escribe como cliente…"
-              disabled={!overview.modelReady || view?.handler === "persona"}
-            />
-          )}
-        </form.AppField>
-        <Button type="submit" disabled={disabled} aria-label="Enviar">
-          <SendHorizontal aria-hidden />
-        </Button>
-      </form>
-      {shownError ? (
-        <p role="alert" className="text-sm text-danger">
-          {shownError}
-        </p>
-      ) : null}
-      {view?.costMicros ? (
-        <p className="text-xs text-muted-foreground">Esta prueba costó {usd(view.costMicros)}.</p>
-      ) : null}
+          title={title}
+        />
+      )}
     </section>
-  )
-}
-
-function Bubble({ message }: { message: ConversationMessage }) {
-  const mine = message.author === "cliente"
-  const basis = message.basis
-  const why = basis
-    ? [
-        ...basis.why,
-        ...basis.stopped
-          .slice(0, 1)
-          .map(() => "La comprobación frenó una respuesta y la corrigió."),
-      ]
-    : []
-  return (
-    <div className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}>
-      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {message.author === "sofi" ? (
-          <>
-            <AgentMark size="sm" />
-            Sofi{message.byArgos ? " · encargo de Argos" : ""}
-          </>
-        ) : message.author === "persona" ? (
-          "Una persona del equipo"
-        ) : (
-          "Tú, como cliente"
-        )}
-      </span>
-      <p
-        className={cn(
-          "max-w-[90%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm",
-          mine ? "bg-primary text-primary-foreground" : "border bg-card",
-        )}
-      >
-        {message.text}
-      </p>
-      {basis && (basis.tools.length > 0 || why.length > 0) ? (
-        <div className="max-w-[90%] rounded-lg border border-dashed bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
-          <p>
-            <span className="font-medium text-foreground">Por qué: </span>
-            {why.join(" ")}
-          </p>
-          {basis.tools.length > 0 ? <p>{basis.tools.join(" · ")}.</p> : null}
-        </div>
-      ) : null}
-    </div>
   )
 }

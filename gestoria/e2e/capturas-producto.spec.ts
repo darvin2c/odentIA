@@ -95,7 +95,10 @@ for (const scheme of ["light", "dark"] as const) {
     await panel.getByRole("button", { name: /Pagar ahora ·/ }).click()
     await expect(panel.getByRole("dialog", { name: "Pagar" })).toBeVisible()
     await shot(page, `d5-vitrina-pago-1440-${tag}`)
-    await panel.getByRole("button", { name: "Pagar con Yape" }).click()
+    await panel
+      .getByRole("button", { name: /^Pagar con / })
+      .first()
+      .click()
     await expect(panel.getByRole("dialog", { name: "Tu pedido" })).toBeVisible({ timeout: 30_000 })
     await shot(page, `d6-vitrina-pedido-1440-${tag}`)
     await panel.getByRole("button", { name: "Ver lo que te escribió Sofi" }).click()

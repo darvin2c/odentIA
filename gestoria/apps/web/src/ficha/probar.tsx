@@ -3,6 +3,7 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
+  cn,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -12,12 +13,14 @@ import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-grou
 import { DetailDrawer, ErrorState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, ChevronUp, CircleAlert, Info, RotateCcw, Store } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { api } from "../lib/api"
+import { helpPanel } from "../lib/ayuda"
 import { anchorOf } from "../lib/ficha"
-import type { AnswerStatus, ConversationView, SofiOverview } from "../lib/sofi"
+import { type AnswerStatus, type ConversationView, type SofiOverview, usd } from "../lib/sofi"
 import {
   type CartLine,
+  type CartQuote,
   type Choice,
   firstChoice,
   type Showcase,
@@ -32,31 +35,39 @@ import { goTo, SofiDot } from "./piezas"
 
 /**
  * «Probar como clienta» (lienzo «La ficha del producto», tablero 11; prototipo aprobado
- * `ficha/probar.tsx`): lo mismo que vive la clienta con este producto, en su celular. «WhatsApp»
+ * `ficha/probar.tsx`): lo mismo que vive la clienta con un producto, en su celular. «WhatsApp»
  * es el chat con Sofi y «Vitrina», la página del producto por link, con el mismo carrito.
  *
  * Es la conversación de prueba de siempre (canal «prueba»): pasa por la misma Sofi de un chat de
  * verdad (`apps/api/src/sofi/`), con sus herramientas, el precio de `precio.ts`, la única oferta
  * con plazo y la revisión antes de salir. No mueve stock, no cobra (el pago se simula y lo dice),
- * no avisa y no cuenta en Reportes, Argos ni en lo que se cobra: no es una venta. Nunca es un panel aparte de preguntas.
+ * no se entrega, no avisa y no cuenta en Pedidos, Reportes ni Argos: no es una venta. Nunca es un
+ * panel aparte de preguntas: la ficha la abre al lado y Configuración › Sofi la muestra con un
+ * selector de producto (`ClientTestPiece`), las dos con esta misma pieza.
  */
 
 export const VIEW_KEY = (storeId: string, id: string | null) => ["conversacion", storeId, id]
 export const SHOWCASE_KEY = (storeId: string, productId: string) => ["vitrina", storeId, productId]
 const CART_KEY = (storeId: string, id: string | null) => ["carrito-prueba", storeId, id]
 
-/** La prueba de cada producto sigue abierta al volver a la ficha (en este navegador). */
+/** La prueba de cada producto sigue abierta al volver (en este navegador), en la ficha y en Sofi. */
 function useTestId(storeId: string, productId: string) {
   const key = `gestoria.prueba.${storeId}.${productId}`
-  const [id, setId] = useState<string | null>(() => {
+  const read = () => {
     try {
       return window.sessionStorage.getItem(key)
     } catch {
       return null
     }
-  })
+  }
+  const [state, setState] = useState<{ key: string; id: string | null }>(() => ({
+    key,
+    id: read(),
+  }))
+  // Otro producto (el selector de Configuración): su propia prueba.
+  const id = state.key === key ? state.id : read()
   const save = (next: string | null) => {
-    setId(next)
+    setState({ key, id: next })
     try {
       if (next) window.sessionStorage.setItem(key, next)
       else window.sessionStorage.removeItem(key)
@@ -76,7 +87,12 @@ export function useShowcase(storeId: string, productId: string) {
 }
 
 /** Lo que podría escribir la clienta, según cómo va la conversación. */
-function suggestions(page: Showcase, view: ConversationView | null, cart: TestCart | null) {
+function suggestions(
+  page: Showcase,
+  view: ConversationView | null,
+  cart: TestCart | null,
+  extra: string[],
+) {
   const said = (view?.messages ?? []).filter((m) => m.author === "sofi")
   const last = said.at(-1)?.text.toLowerCase() ?? ""
   if (cart?.state === "por_pagar") return []
@@ -90,51 +106,93 @@ function suggestions(page: Showcase, view: ConversationView | null, cart: TestCa
       ...(page.media.videos.length ? ["¿Tienes video de cómo se ve puesta?"] : []),
       "¿Me haces precio?",
       want,
+      ...extra,
     ]
   if (last.includes("envío gratis") && last.includes("si lo pagas"))
     return ["Envío gratis", "Lo voy a pensar"]
   if (last.includes("¿lo confirmo")) return ["Sí, confirmo"]
-  return ["¿Me haces precio?", "Lo voy a pensar", want]
+  return ["¿Me haces precio?", "Lo voy a pensar", want, ...extra]
 }
 
-export function ProbarPanel({ onClose }: { onClose: () => void }) {
-  const { store, sheet: product, edit } = useFichaContext()
+/** Lo que sabe Sofi de este producto, para «Qué usó Sofi» (la ficha da también lo que falta). */
+export interface TestReadiness {
+  done: number
+  total: number
+  sellsAlone: boolean
+  /** Lo que todavía no sabe; solo dentro de la ficha. */
+  unknown?: string[]
+}
+
+export interface ClientTestProps {
+  storeId: string
+  productId: string
+  readiness: TestReadiness | null
+  /** Cambia la ficha: «Completar» lo que le faltó. */
+  edit: boolean
+  /** Lleva al dato de la ficha del que salió una respuesta (o a «Lo que Sofi no supo»). */
+  onGo: (target: string) => void
+  /** Más ideas de lo que podría escribir la clienta (Configuración: cambios, una persona). */
+  extraQuick?: string[]
+  /** El alto del celular: lo decide quien lo muestra (el cajón de la ficha o Configuración). */
+  phoneClassName: string
+}
+
+/**
+ * La pieza de «Probar como clienta»: la cabecera (WhatsApp o Vitrina, empezar de nuevo), el
+ * celular con su chat, la vitrina y sus hojas, y «Qué usó Sofi» con el «Por qué» de la última
+ * respuesta. Quien la usa decide dónde va cada parte.
+ */
+function useClientTest({
+  storeId,
+  productId,
+  readiness,
+  edit,
+  onGo,
+  extraQuick = [],
+  phoneClassName,
+}: ClientTestProps): { header: ReactNode; body: ReactNode; footer: ReactNode } {
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
-  const [conversationId, setConversationId] = useTestId(store.id, product.id)
+  const [conversationId, setConversationId] = useTestId(storeId, productId)
   const [tab, setTab] = useState<"chat" | "vitrina">("chat")
   const [sheet, setSheet] = useState<SheetKind | null>(null)
   const [lines, setLines] = useState<CartLine[]>([])
   const [deliveryId, setDeliveryId] = useState<string | null>(null)
   const [zone, setZone] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
-  const showcase = useShowcase(store.id, product.id)
-  const page = showcase.data ?? null
-  const [choice, setChoice] = useState<Choice | null>(null)
+  const showcase = useShowcase(storeId, productId)
+  const page = showcase.data?.product.id === productId ? showcase.data : null
+  const [chosen, setChoice] = useState<{ productId: string; choice: Choice } | null>(null)
+  const choice = chosen?.productId === productId ? chosen.choice : page ? firstChoice(page) : null
+  const choose = (next: Choice) => setChoice({ productId, choice: next })
+  // Otro producto: su carrito de la vitrina empieza vacío.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de producto
   useEffect(() => {
-    if (page && !choice) setChoice(firstChoice(page))
-  }, [page, choice])
+    setLines([])
+    setSheet(null)
+    setTab("chat")
+  }, [productId])
   const overview = useQuery({
-    queryKey: ["sofi", store.id],
-    queryFn: () => api<SofiOverview>(`/api/tiendas/${store.id}/sofi`),
+    queryKey: ["sofi", storeId],
+    queryFn: () => api<SofiOverview>(`/api/tiendas/${storeId}/sofi`),
   })
   const view = useQuery({
-    queryKey: VIEW_KEY(store.id, conversationId),
+    queryKey: VIEW_KEY(storeId, conversationId),
     enabled: Boolean(conversationId),
     queryFn: async () =>
       (
         await api<{ conversation: ConversationView }>(
-          `/api/tiendas/${store.id}/conversaciones/${conversationId}`,
+          `/api/tiendas/${storeId}/conversaciones/${conversationId}`,
         )
       ).conversation,
   })
   const cart = useQuery({
-    queryKey: CART_KEY(store.id, conversationId),
+    queryKey: CART_KEY(storeId, conversationId),
     enabled: Boolean(conversationId),
     queryFn: async () =>
       (
         await api<{ cart: TestCart | null }>(
-          `/api/tiendas/${store.id}/conversaciones/${conversationId}/carrito`,
+          `/api/tiendas/${storeId}/conversaciones/${conversationId}/carrito`,
         )
       ).cart,
   })
@@ -143,66 +201,87 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
     if (view.isError && (view.error as { status?: number }).status === 404) setConversationId(null)
   }, [view.isError, view.error, setConversationId])
 
+  // En la vitrina se elige lo que tiene precio: lo que «se acuerda» se ve con Sofi en el chat.
+  const delivery =
+    page?.store.deliveries.find((d) => d.id === deliveryId && d.cost !== "se_acuerda") ??
+    page?.store.deliveries.find((d) => d.cost !== "se_acuerda") ??
+    null
+  const order = cart.data ?? null
+  const openOrder = order?.state === "por_pagar" ? order : null
+  // Lo que cuesta lo elegido en la vitrina lo dice el servidor, con la misma cuenta de «Pagar
+  // ahora» (precio por cantidad, promociones, revendedora, envío gratis de su zona).
+  const quote = useQuery({
+    queryKey: ["carrito-vitrina", storeId, lines, delivery?.id ?? null, zone],
+    enabled: !openOrder && lines.length > 0 && Boolean(delivery),
+    queryFn: () =>
+      api<{ quote: CartQuote | null; problem: string | null }>(
+        `/api/tiendas/${storeId}/vitrina/carrito/calcular`,
+        { method: "POST", body: { lines, deliveryMethodId: delivery?.id, zone } },
+      ),
+  })
+  // Una cotización de otro carrito (mientras llega la nueva) no da total: no se muestra uno que cambia.
+  const quoteFresh = quote.data ?? null
+
   const begin = async () => {
     if (conversationId) return conversationId
-    const { id } = await api<{ id: string }>(`/api/tiendas/${store.id}/sofi/pruebas`, {
+    const { id } = await api<{ id: string }>(`/api/tiendas/${storeId}/sofi/pruebas`, {
       method: "POST",
     })
     setConversationId(id)
     return id
   }
   const refreshCart = (id: string) =>
-    queryClient.invalidateQueries({ queryKey: CART_KEY(store.id, id) })
+    queryClient.invalidateQueries({ queryKey: CART_KEY(storeId, id) })
 
   const send = useMutation({
     mutationFn: async (text: string) => {
       const id = await begin()
       return api<{ conversation: ConversationView; result: { status: AnswerStatus } }>(
-        `/api/tiendas/${store.id}/conversaciones/${id}/cliente`,
-        { method: "POST", body: { text, desde: product.id, carrito: lines } },
+        `/api/tiendas/${storeId}/conversaciones/${id}/cliente`,
+        { method: "POST", body: { text, desde: productId, carrito: lines } },
       )
     },
     onMutate: (text) => setPending(text),
     onSuccess: async (data) => {
-      queryClient.setQueryData(VIEW_KEY(store.id, data.conversation.id), data.conversation)
+      queryClient.setQueryData(VIEW_KEY(storeId, data.conversation.id), data.conversation)
       await refreshCart(data.conversation.id)
     },
     onSettled: () => setPending(null),
   })
   const checkout = useMutation({
     mutationFn: async () => {
-      const open = cart.data?.state === "por_pagar" ? cart.data : null
-      if (open) return open
+      if (openOrder) return openOrder
       const id = await begin()
       const placed = await api<{ cart: TestCart }>(
-        `/api/tiendas/${store.id}/conversaciones/${id}/carrito`,
-        {
-          method: "POST",
-          body: {
-            lines,
-            deliveryMethodId:
-              deliveryId ?? page?.store.deliveries.find((d) => d.cost !== "se_acuerda")?.id,
-            zone,
-          },
-        },
+        `/api/tiendas/${storeId}/conversaciones/${id}/carrito`,
+        { method: "POST", body: { lines, deliveryMethodId: delivery?.id, zone } },
       )
-      queryClient.setQueryData(CART_KEY(store.id, id), placed.cart)
+      queryClient.setQueryData(CART_KEY(storeId, id), placed.cart)
       setLines([])
       return placed.cart
     },
     onSuccess: () => setSheet("pago"),
   })
   const pay = useMutation({
-    mutationFn: (method: "Yape" | "Tarjeta") =>
+    mutationFn: (paymentMethodId: string) =>
       api<{ conversation: ConversationView; cart: TestCart | null }>(
-        `/api/tiendas/${store.id}/conversaciones/${conversationId}/pagar`,
-        { method: "POST", body: { orderId: cart.data?.id, method } },
+        `/api/tiendas/${storeId}/conversaciones/${conversationId}/pagar`,
+        { method: "POST", body: { orderId: cart.data?.id, paymentMethodId } },
       ),
     onSuccess: (data) => {
-      queryClient.setQueryData(VIEW_KEY(store.id, data.conversation.id), data.conversation)
-      queryClient.setQueryData(CART_KEY(store.id, data.conversation.id), data.cart)
+      queryClient.setQueryData(VIEW_KEY(storeId, data.conversation.id), data.conversation)
+      queryClient.setQueryData(CART_KEY(storeId, data.conversation.id), data.cart)
       setSheet("pedido")
     },
+  })
+  const giveBack = useMutation({
+    mutationFn: () =>
+      api<{ conversation: ConversationView }>(
+        `/api/tiendas/${storeId}/conversaciones/${conversationId}/devolver`,
+        { method: "POST" },
+      ),
+    onSuccess: (data) =>
+      queryClient.setQueryData(VIEW_KEY(storeId, data.conversation.id), data.conversation),
   })
 
   const restart = () => {
@@ -210,39 +289,44 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
     setLines([])
     setSheet(null)
     setTab("chat")
-    setChoice(page ? firstChoice(page) : null)
+    if (page) choose(firstChoice(page))
     send.reset()
     checkout.reset()
     pay.reset()
+    giveBack.reset()
   }
 
   const messages = view.data?.messages ?? []
   const lastSofi = [...messages].reverse().find((m) => m.author === "sofi")
   const used = lastSofi?.used ?? []
   const missed = lastSofi?.missed ?? []
-  const readiness = product.readiness
-  const unknown = readiness.items.filter((i) => !i.ok)
-  const order = cart.data ?? null
-  const openOrder = order?.state === "por_pagar" ? order : null
+  const basis = lastSofi?.basis
+  const why = basis
+    ? [
+        ...basis.why,
+        ...basis.stopped
+          .slice(0, 1)
+          .map(() => "La comprobación frenó una respuesta y la corrigió."),
+      ]
+    : []
+  const unknown = readiness?.unknown ?? []
   const count = openOrder
     ? openOrder.lines.reduce((n, l) => n + l.quantity, 0)
     : lines.reduce((n, l) => n + l.quantity, 0)
+  const handedOff = view.data?.handler === "persona"
   const blocked = !overview.data
     ? null
     : !overview.data.modelReady
       ? "Sofi todavía no puede responder: falta configurar su modelo en el servidor."
-      : view.data?.handler === "persona"
-        ? "Sofi la pasó a una persona. Empieza de nuevo para seguir probando."
+      : handedOff
+        ? "Sofi la pasó a una persona. Devuélvesela o empieza de nuevo para seguir probando."
         : null
   const quick = useMemo(
-    () => (page ? suggestions(page, view.data ?? null, order) : []),
-    [page, view.data, order],
+    () => (page ? suggestions(page, view.data ?? null, order, extraQuick) : []),
+    [page, view.data, order, extraQuick],
   )
-  const failure = send.error ?? checkout.error ?? pay.error
-  const go = (target: string) => {
-    if (isMobile) onClose()
-    setTimeout(() => goTo(anchorOf(target)), isMobile ? 280 : 0)
-  }
+  const failure = send.error ?? checkout.error ?? pay.error ?? giveBack.error
+  const cost = view.data?.costMicros
 
   const header = (
     <div className="flex flex-col gap-2">
@@ -258,10 +342,20 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
             <p className="text-muted-foreground">
               Pasa por la misma Sofi de un chat de verdad: mismas herramientas, mismas reglas de
               precio, la misma vitrina y el mismo carrito. No es una venta: no cobra ni entrega, no
-              mueve el stock, no avisa y no cuenta en Reportes.
+              mueve el stock, no avisa y no entra a Pedidos ni a Reportes.
             </p>
           </PopoverContent>
         </Popover>
+        {handedOff ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => giveBack.mutate()}
+            disabled={giveBack.isPending}
+          >
+            Devolver a Sofi
+          </Button>
+        ) : null}
         <Button variant="ghost" size="sm" onClick={restart}>
           <RotateCcw aria-hidden />
           Empezar de nuevo
@@ -293,19 +387,23 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
   const footer = (
     <Collapsible defaultOpen={!isMobile} className="-mx-1">
       <CollapsibleTrigger className="group flex w-full items-center gap-2.5 rounded-lg px-1 py-1.5 text-left outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/40">
-        <SofiDot
-          done={readiness.done}
-          total={readiness.total}
-          sellsAlone={readiness.sellsAlone}
-          size={20}
-        />
+        {readiness ? (
+          <SofiDot
+            done={readiness.done}
+            total={readiness.total}
+            sellsAlone={readiness.sellsAlone}
+            size={20}
+          />
+        ) : null}
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           Qué usó Sofi
           {missed.length ? <span className="text-warning"> · le faltó {missed.length}</span> : null}
         </span>
-        <span className="text-xs text-muted-foreground">
-          sabe {readiness.done} de {readiness.total}
-        </span>
+        {readiness ? (
+          <span className="text-xs text-muted-foreground">
+            sabe {readiness.done} de {readiness.total}
+          </span>
+        ) : null}
         <ChevronUp
           className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180"
           aria-hidden
@@ -313,9 +411,10 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="flex max-h-44 flex-col gap-2 overflow-y-auto px-1 pt-1 pb-1">
-          {!used.length && !missed.length ? (
+          {!used.length && !missed.length && !why.length ? (
             <p className="text-xs text-muted-foreground">
-              Pregunta algo como clienta y aquí ves de qué dato de la ficha salió cada respuesta.
+              Pregunta algo como clienta y aquí ves de qué dato de la ficha salió cada respuesta y
+              por qué respondió así.
             </p>
           ) : null}
           {used.length ? (
@@ -324,7 +423,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
                 <li key={u.label}>
                   <button
                     type="button"
-                    onClick={() => go(u.target)}
+                    onClick={() => onGo(u.target)}
                     className="inline-flex h-6 items-center gap-1 rounded-full border bg-card px-2 text-[11px] font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
                   >
                     <Check className="size-3 text-success" aria-hidden />
@@ -334,12 +433,24 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
               ))}
             </ul>
           ) : null}
+          {/* «Por qué» (Configuración › Sofi, #744): solo lo anotado en su última respuesta. */}
+          {why.length || basis?.tools.length ? (
+            <div className="rounded-lg border border-dashed bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
+              {why.length ? (
+                <p>
+                  <span className="font-medium text-foreground">Por qué: </span>
+                  {why.join(" ")}
+                </p>
+              ) : null}
+              {basis?.tools.length ? <p>{basis.tools.join(" · ")}.</p> : null}
+            </div>
+          ) : null}
           {missed.map((m) => (
             <div key={m.question} className="flex items-center gap-2 text-sm">
               <CircleAlert className="size-4 shrink-0 text-warning" aria-hidden />
               <span className="min-w-0 flex-1">Le faltó: «{m.question}»</span>
               {edit ? (
-                <Button size="xs" variant="outline" onClick={() => go("no-supo")}>
+                <Button size="xs" variant="outline" onClick={() => onGo("no-supo")}>
                   Completar
                 </Button>
               ) : null}
@@ -347,25 +458,20 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
           ))}
           {unknown.length ? (
             <p className="text-xs text-muted-foreground">
-              Aún no sabe: {unknown.map((i) => i.label.toLowerCase()).join(", ")}.
+              Aún no sabe: {unknown.map((label) => label.toLowerCase()).join(", ")}.
             </p>
+          ) : null}
+          {cost ? (
+            <p className="text-xs text-muted-foreground">Esta prueba costó {usd(cost)}.</p>
           ) : null}
         </div>
       </CollapsibleContent>
     </Collapsible>
   )
 
-  return (
-    <DetailDrawer
-      open
-      onClose={onClose}
-      size="md"
-      title="Probar como clienta"
-      description="Lo mismo que vive la clienta, con la ficha de ahora"
-      headerContent={header}
-      footer={footer}
-    >
-      <div className="flex h-[min(760px,calc(100dvh-27rem))] min-h-[24rem] sm:h-[min(760px,calc(100dvh-24rem))] sm:min-h-[26rem] bg-muted/40 p-1">
+  const body = (
+    <>
+      <div className={cn("flex bg-muted/40 p-1", phoneClassName)}>
         {showcase.isError ? (
           <ErrorState error={showcase.error} onRetry={() => void showcase.refetch()} />
         ) : !page || !choice ? (
@@ -374,7 +480,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
           <PhoneFrame bare className="h-full">
             {tab === "chat" ? (
               <ChatPhone
-                storeId={store.id}
+                storeId={storeId}
                 storeName={page.store.name}
                 brandColor={page.store.color}
                 view={view.data ?? null}
@@ -393,7 +499,7 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
               <ProductPhone
                 page={page}
                 choice={choice}
-                onChoose={setChoice}
+                onChoose={choose}
                 onWant={(variantId) => {
                   if (openOrder) {
                     setSheet("carrito")
@@ -411,7 +517,9 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
                 }}
                 cart={{
                   count,
-                  totalCents: openOrder ? openOrder.totalCents : null,
+                  totalCents: openOrder
+                    ? openOrder.totalCents
+                    : (quoteFresh?.quote?.totalCents ?? null),
                 }}
                 deal={
                   openOrder?.deal && !openOrder.deal.expired
@@ -429,22 +537,29 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
                 onChat={() => setTab("chat")}
                 sheets={
                   <Sheets
-                    storeId={store.id}
+                    storeId={storeId}
                     page={page}
                     sheet={sheet}
                     onSheet={setSheet}
                     order={order}
                     lines={lines}
                     onLines={setLines}
-                    deliveryId={deliveryId}
+                    deliveryId={delivery?.id ?? null}
                     onDelivery={(id) => {
                       setDeliveryId(id)
                       setZone(null)
                     }}
                     zone={zone}
                     onZone={setZone}
+                    quote={quoteFresh?.quote ?? null}
+                    quoting={quote.isFetching}
+                    quoteProblem={
+                      quote.isError
+                        ? submitErrorMessage(quote.error)
+                        : (quoteFresh?.problem ?? null)
+                    }
                     onCheckout={() => checkout.mutate()}
-                    onPay={(method) => pay.mutate(method)}
+                    onPay={(id) => pay.mutate(id)}
                     busy={checkout.isPending || pay.isPending}
                     error={
                       checkout.error || pay.error
@@ -471,6 +586,102 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
           {submitErrorMessage(failure)}
         </p>
       ) : null}
+    </>
+  )
+  return { header, body, footer }
+}
+
+/**
+ * El celular a la medida de quien lo muestra: en el teléfono, casi todo el alto para la
+ * conversación; en la computadora, lo que cabe al lado sin pasar de un celular de verdad.
+ */
+const PHONE_IN_DRAWER =
+  "h-[calc(100dvh-16rem)] min-h-[30rem] sm:h-[min(760px,calc(100dvh-24rem))] sm:min-h-[26rem]"
+
+/** «Probar como clienta» en la ficha: al lado, en la columna lateral (en el celular, un cajón). */
+export function ProbarPanel({ onClose }: { onClose: () => void }) {
+  const { store, sheet: product, edit } = useFichaContext()
+  const isMobile = useIsMobile()
+  const queryClient = useQueryClient()
+  // Mientras está abierta, la Ayuda habla de «Probar como clienta» (su pantalla en la guía).
+  useEffect(() => {
+    helpPanel.current = "probar-como-clienta"
+    void queryClient.invalidateQueries({ queryKey: ["help-screen"] })
+    return () => {
+      helpPanel.current = null
+      void queryClient.invalidateQueries({ queryKey: ["help-screen"] })
+    }
+  }, [queryClient])
+  const { header, body, footer } = useClientTest({
+    storeId: store.id,
+    productId: product.id,
+    readiness: {
+      done: product.readiness.done,
+      total: product.readiness.total,
+      sellsAlone: product.readiness.sellsAlone,
+      unknown: product.readiness.items.filter((i) => !i.ok).map((i) => i.label),
+    },
+    edit,
+    onGo: (target) => {
+      if (isMobile) onClose()
+      setTimeout(() => goTo(anchorOf(target)), isMobile ? 280 : 0)
+    },
+    phoneClassName: PHONE_IN_DRAWER,
+  })
+  return (
+    <DetailDrawer
+      open
+      onClose={onClose}
+      size="md"
+      title="Probar como clienta"
+      description="Lo mismo que vive la clienta, con la ficha de ahora"
+      // Escribir como clienta o elegir un color no es un dato que se pierda: cerrar no pregunta.
+      headerContent={<div data-draft-ignore>{header}</div>}
+      footer={<div data-draft-ignore>{footer}</div>}
+    >
+      <div data-draft-ignore>{body}</div>
     </DetailDrawer>
+  )
+}
+
+/**
+ * «Probar a Sofi» de Configuración › Sofi: la misma pieza, en la página, con el producto que se
+ * elige. Lo que usó Sofi lleva a la ficha de ese producto.
+ */
+export function ClientTestPiece({
+  storeId,
+  productId,
+  readiness,
+  extraQuick,
+  onGo,
+  edit,
+  title,
+}: {
+  storeId: string
+  productId: string
+  readiness: TestReadiness | null
+  extraQuick?: string[]
+  onGo: (target: string) => void
+  edit: boolean
+  /** El selector de producto y el título, arriba de la pieza. */
+  title: ReactNode
+}) {
+  const { header, body, footer } = useClientTest({
+    storeId,
+    productId,
+    readiness,
+    edit,
+    onGo,
+    extraQuick,
+    phoneClassName:
+      "h-[calc(100dvh-14rem)] min-h-[30rem] max-h-[46rem] @3xl:h-[min(720px,calc(100dvh-16rem))] @3xl:min-h-[28rem]",
+  })
+  return (
+    <div className="flex flex-col gap-3" data-draft-ignore>
+      {title}
+      {header}
+      {body}
+      {footer}
+    </div>
   )
 }
