@@ -125,7 +125,9 @@ export function setupFinished(steps: readonly SetupStepView[]): boolean {
 /**
  * Los medios de pago encendidos con los que se cobra, y la pasarela si está conectada (solo con
  * qué: sus llaves no salen de aquí). Un link de pago sin pasarela no cobra: no viene. Lo leen los
- * primeros pasos y «Lo que falta» de Configuración (`configOverview`), así cuentan lo mismo.
+ * primeros pasos, «Lo que falta» de Configuración (`configOverview`) y Sofi (lo que ofrece y el
+ * medio que elige), así cuentan lo mismo. Vienen enteros: quien responde al navegador elige qué
+ * manda (nunca los datos de cobro).
  */
 export async function chargingPaymentsIn(tx: Db, storeId: string) {
   const [gateway] = await tx
@@ -133,11 +135,7 @@ export async function chargingPaymentsIn(tx: Db, storeId: string) {
     .from(storePaymentLink)
     .where(eq(storePaymentLink.storeId, storeId))
   const payments = await tx
-    .select({
-      name: storePaymentMethod.name,
-      typeCode: storePaymentMethod.typeCode,
-      collection: storePaymentMethod.collection,
-    })
+    .select()
     .from(storePaymentMethod)
     .where(
       and(

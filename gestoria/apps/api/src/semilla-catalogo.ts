@@ -9,11 +9,16 @@ import {
   productQuantityPrice,
   productVariant,
   stockMovement,
+  store,
   storeDeliveryMethod,
   storePaymentMethod,
 } from "@gestoria/db"
 import { eq } from "drizzle-orm"
 import { combinations, makeSku } from "./catalogo.js"
+import { limaTemplate } from "./entregas.js"
+
+/** Calzados Rosa despacha desde Gamarra, en La Victoria (UBIGEO 150115). */
+const SHIP_FROM = "150115"
 
 /**
  * La configuración de Calzados Rosa (paso B3, tableros 6, 7 y 14): sus medios de pago, sus
@@ -222,33 +227,35 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
         name: "Reparto en Lima",
         type: "DeliveryModeOwnFleet",
         cost: "por_zona",
-        zones: [
-          { name: "Surco y Miraflores", priceCents: 1000 },
-          { name: "Callao", priceCents: 1500 },
-        ],
-        eta: "Al día siguiente",
+        // La plantilla de Lima desde La Victoria (Gamarra): seis zonas con los 50 distritos.
+        zones: limaTemplate(SHIP_FROM),
         acceptsPayOnDelivery: true,
         maxDiscountCents: 1000,
-        freeFromCents: 25000,
+        freeFromCents: 20000,
       },
       {
         storeId,
         name: "Recojo en la tienda",
         type: "OnSitePickup",
         cost: "gratis",
-        details: "Jr. Gamarra 650, La Victoria",
-        eta: "Lunes a sábado, 10 a. m. a 7 p. m.",
+        details: "Jr. Gamarra 650, La Victoria · stand 214",
+        openingHours: [{ days: [1, 2, 3, 4, 5, 6], opens: 10 * 60, closes: 19 * 60 }],
+        readyIn: "2h",
         acceptsPayOnDelivery: true,
       },
       {
         storeId,
         name: "Envío a provincia",
         type: "ParcelService",
-        cost: "se_acuerda",
-        details: "Shalom u Olva, a elección",
+        cost: "fijo",
+        priceCents: 800,
+        agencies: ["Shalom", "Olva Courier"],
+        freight: "al_recoger",
         eta: "De 2 a 4 días",
       },
     ])
+  // Desde dónde despacha: La Victoria. Las franjas de la plantilla van con las de Despachos.
+  await tx.update(store).set({ shipFrom: SHIP_FROM }).where(eq(store.id, storeId))
 
   const [anyProduct] = await tx
     .select({ id: product.id })
