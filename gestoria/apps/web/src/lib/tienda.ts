@@ -70,6 +70,8 @@ export interface DeliveryMethod {
   freight: Freight | null
   freightCents: number | null
   isActive: boolean
+  /** La versión que se tiene a la vista: guardar sobre una vieja se rechaza. */
+  updatedAt: string
 }
 
 /** Los tipos de UN/CEFACT 4461, con su nombre. */

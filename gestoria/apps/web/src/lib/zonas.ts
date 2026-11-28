@@ -110,18 +110,6 @@ export function zoneOfDistrict(zones: DeliveryZone[]): Map<string, number> {
   return map
 }
 
-/** Las zonas con un distrito movido a otra (o a ninguna, con `null`): un distrito, una zona. */
-export function moveDistrict(
-  zones: DeliveryZone[],
-  code: string,
-  to: number | null,
-): DeliveryZone[] {
-  return zones.map((zone, index) => {
-    const rest = zone.districts.filter((d) => d !== code)
-    return { ...zone, districts: index === to ? [...rest, code] : rest }
-  })
-}
-
 /** «1 p. m.», «10:30 a. m.». */
 export function clockText(minutes: number): string {
   const h = Math.floor(minutes / 60) % 24
@@ -217,9 +205,18 @@ export function districtsText(codes: string[], names: Map<string, string>, shown
 
 /**
  * El cuerpo completo de una forma de entrega para guardarla (el servidor la recibe entera): lo
- * que ya tiene, con lo que cambia.
+ * que ya tiene, con lo que cambia, y la versión que se tenía a la vista (`version`): si otra
+ * pestaña o persona la cambió después, el servidor no la pisa. Una zona sola no va por aquí: va
+ * con `zoneChange`, que toca solo esa zona.
  */
 export function methodBody(method: DeliveryMethod, change: Partial<DeliveryMethod> = {}) {
-  const { id: _, ...rest } = { ...method, ...change }
-  return rest
+  const { id: _, updatedAt, ...rest } = { ...method, ...change }
+  const { createdAt: __, ...body } = rest as typeof rest & { createdAt?: string }
+  return { ...body, version: method.updatedAt }
 }
+
+/** Un cambio a una sola zona, sobre lo guardado ahora (la API: `zoneChange`). */
+export type ZoneChange =
+  | { op: "distrito"; district: string; from: string | null; to: string | null }
+  | { op: "zona"; before: string | null; seen?: DeliveryZone; zone: DeliveryZone }
+  | { op: "quitar"; name: string; seen: DeliveryZone }

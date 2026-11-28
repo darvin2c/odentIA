@@ -18,7 +18,7 @@ import { Clock, MapPin, Package, Pencil, Plus, Search, Store, Trash2, Truck } fr
 import { type ReactNode, useId, useMemo, useState } from "react"
 import { z } from "zod"
 import { MoneyInput, ToggleField } from "./campos"
-import { api } from "./lib/api"
+import { ApiError, api } from "./lib/api"
 import {
   DELIVERY_TYPES,
   type DeliveryMethod,
@@ -41,10 +41,10 @@ import {
   hoursText,
   leadText,
   methodBody,
-  moveDistrict,
   READY_TEXT,
   rangeText,
   WEEKDAYS,
+  type ZoneChange,
   zoneOfDistrict,
   zoneTone,
 } from "./lib/zonas"
@@ -86,6 +86,22 @@ function useSaveMethod(storeId: string) {
         : api(`/api/tiendas/${storeId}/formas-de-entrega`, { method: "POST", body }),
   })
 }
+
+/** Guarda una sola zona del reparto (o mueve un distrito), sobre lo guardado ahora. */
+function useZoneChange(storeId: string, methodId: string) {
+  return useMutation({
+    mutationFn: (body: ZoneChange) =>
+      api(`/api/tiendas/${storeId}/formas-de-entrega/${methodId}/zonas`, {
+        method: "PATCH",
+        body,
+      }),
+  })
+}
+
+/** Lo que cambió en otra pestaña: se vuelve a leer y se dice, sin perder lo que se ve. */
+const isStale = (error: unknown) => error instanceof ApiError && error.code === "STALE"
+const STALE_SEEN =
+  "Esto cambió en otra pestaña o lo cambió otra persona: ya ves lo último. Vuelve a hacer tu cambio."
 
 export function DeliveriesPage() {
   const { store } = useStoreContext()
@@ -365,7 +381,7 @@ function FleetZones({
 }) {
   const { store } = useStoreContext()
   const refresh = useRefresh(store.id)
-  const save = useSaveMethod(store.id)
+  const change = useZoneChange(store.id, fleet.id)
   const [editing, setEditing] = useState<number | "new" | null>(null)
   const [shipFromOpen, setShipFromOpen] = useState(false)
   const names = useMemo(
@@ -378,12 +394,16 @@ function FleetZones({
 
   const move = async (code: string, to: number | null) => {
     // Uno a la vez: el siguiente parte de lo ya guardado.
-    if (save.isPending) return
+    if (change.isPending) return
     const name = names.get(code) ?? code
+    const from = zoneOf.get(code)
     try {
-      await save.mutateAsync({
-        id: fleet.id,
-        body: methodBody(fleet, { zones: moveDistrict(fleet.zones, code, to) }),
+      // Solo ese distrito, sobre lo guardado ahora: lo que cambió otra pestaña no se pisa.
+      await change.mutateAsync({
+        op: "distrito",
+        district: code,
+        from: from === undefined ? null : (fleet.zones[from]?.name ?? null),
+        to: to === null ? null : (fleet.zones[to]?.name ?? null),
       })
       await refresh()
       toast.success(
@@ -392,7 +412,10 @@ function FleetZones({
           : `${name}: zona ${to + 1}, ${fleet.zones[to]?.name ?? ""}`,
       )
     } catch (error) {
-      toast.error(submitErrorMessage(error))
+      if (isStale(error)) {
+        await refresh()
+        toast.error(STALE_SEEN)
+      } else toast.error(submitErrorMessage(error))
     }
   }
 
@@ -444,7 +467,7 @@ function FleetZones({
             <span className="tabular-nums">{outside.length}</span>
           </li>
         </ul>
-        <div className="hidden @2xl:block">
+        <div className="hidden @md:block">
           <LimaMap
             districts={setup.districts}
             zoneOf={zoneOf}
@@ -600,8 +623,10 @@ function ZoneForm({
 }) {
   const { store } = useStoreContext()
   const refresh = useRefresh(store.id)
-  const save = useSaveMethod(store.id)
+  const change = useZoneChange(store.id, fleet.id)
   const zone = index === null ? null : (fleet.zones[index] ?? null)
+  // La zona como estaba al abrir el cajón: si cambia en otra pestaña, guardar no la pisa.
+  const [seen] = useState(zone)
   const [search, setSearch] = useState("")
   const [asking, setAsking] = useState(false)
   const zoneOf = useMemo(() => zoneOfDistrict(fleet.zones), [fleet.zones])
@@ -678,14 +703,12 @@ function ZoneForm({
         payOnDelivery: value.payOnDelivery,
         freeShipping: value.freeShipping,
       }
-      // Los distritos de esta zona salen de las demás.
-      const mine = new Set(value.districts)
-      const rest = fleet.zones.map((z) => ({
-        ...z,
-        districts: z.districts.filter((d) => !mine.has(d)),
-      }))
-      const zones = index === null ? [...rest, next] : rest.map((z, i) => (i === index ? next : z))
-      await save.mutateAsync({ id: fleet.id, body: methodBody(fleet, { zones }) })
+      // Solo esta zona: el servidor saca sus distritos de las demás, sobre lo guardado ahora.
+      await change.mutateAsync(
+        seen
+          ? { op: "zona", before: seen.name, seen, zone: next }
+          : { op: "zona", before: null, zone: next },
+      )
       await refresh()
       toast.success(index === null ? "Zona agregada" : "Zona guardada")
       onClose()
@@ -694,10 +717,7 @@ function ZoneForm({
   const surface = useFormSurface(form)
   const remove = useMutation({
     mutationFn: () =>
-      save.mutateAsync({
-        id: fleet.id,
-        body: methodBody(fleet, { zones: fleet.zones.filter((_, i) => i !== index) }),
-      }),
+      seen ? change.mutateAsync({ op: "quitar", name: seen.name, seen }) : Promise.resolve(null),
     onSuccess: async () => {
       await refresh()
       toast.success("Zona quitada: sus distritos quedan sin entrega")
@@ -864,14 +884,15 @@ function ZoneForm({
         <form.AppField name="payOnDelivery">
           {() => (
             <ToggleField
-              label={(on) => (on ? "Acepta pago al recibir" : "Sin pago al recibir: paga antes")}
+              label="Acepta pago al recibir"
+              description="Apagado, Sofi pide el pago antes de enviarlo."
             />
           )}
         </form.AppField>
         <form.AppField name="freeShipping">
           {() => (
             <ToggleField
-              label={(on) => (on ? "Con envío gratis desde tu monto" : "Sin envío gratis")}
+              label="Envío gratis en esta zona"
               description={
                 fleet.freeFromCents
                   ? `Gratis desde ${money(fleet.freeFromCents, store.currency)}, en «Reglas».`
@@ -998,6 +1019,7 @@ function Rules({
   const { store } = useStoreContext()
   const refresh = useRefresh(store.id)
   const save = useSaveMethod(store.id)
+  const zoneChange = useZoneChange(store.id, fleet.id)
   const freeId = useId()
   const free = fleet.zones.filter((z) => z.freeShipping).map((z) => z.name)
   const notFree = fleet.zones.filter((z) => !z.freeShipping).map((z) => z.name)
@@ -1031,20 +1053,23 @@ function Rules({
   })
   const surface = useFormSurface(form, { fieldMap: { freeFromCents: "amount" } })
   const togglePay = async (index: number) => {
-    const zones = fleet.zones.map((z, i) =>
-      i === index ? { ...z, payOnDelivery: !z.payOnDelivery } : z,
-    )
+    const seen = fleet.zones[index]
+    if (!seen || zoneChange.isPending) return
+    const zone = { ...seen, payOnDelivery: !seen.payOnDelivery }
     try {
-      await save.mutateAsync({ id: fleet.id, body: methodBody(fleet, { zones }) })
+      // Solo esa zona, sobre lo guardado ahora.
+      await zoneChange.mutateAsync({ op: "zona", before: seen.name, seen, zone })
       await refresh()
-      const zone = zones[index]
       toast.success(
-        zone?.payOnDelivery
+        zone.payOnDelivery
           ? `${zone.name}: acepta pago al recibir`
-          : `${zone?.name}: Sofi pide el pago antes`,
+          : `${zone.name}: Sofi pide el pago antes`,
       )
     } catch (error) {
-      toast.error(submitErrorMessage(error))
+      if (isStale(error)) {
+        await refresh()
+        toast.error(STALE_SEEN)
+      } else toast.error(submitErrorMessage(error))
     }
   }
   return (
@@ -1130,7 +1155,7 @@ function Rules({
                 size="sm"
                 variant={zone.payOnDelivery ? "default" : "outline"}
                 aria-pressed={zone.payOnDelivery}
-                disabled={!canEdit || save.isPending}
+                disabled={!canEdit || zoneChange.isPending}
                 onClick={() => void togglePay(index)}
               >
                 {zone.name}
@@ -1490,7 +1515,8 @@ function PickupForm({ method, onClose }: { method: DeliveryMethod | null; onClos
         <form.AppField name="payOnDelivery">
           {() => (
             <ToggleField
-              label={(on) => (on ? "Acepta pago al recoger" : "Sin pago al recoger: paga antes")}
+              label="Acepta pago al recoger"
+              description="Apagado, paga antes de recoger."
             />
           )}
         </form.AppField>

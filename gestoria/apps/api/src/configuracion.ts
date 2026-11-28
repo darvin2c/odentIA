@@ -23,7 +23,7 @@ import { accountState } from "@odentia/contract"
 import { and, asc, count, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
-import { checkZonesIn, zoneInput, zonesProblem } from "./entregas.js"
+import { checkZonesIn, type ZoneSent, zoneInput, zonesProblem } from "./entregas.js"
 import { can } from "./permisos.js"
 import { setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
 import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
@@ -168,7 +168,43 @@ export const deliveryInput = z
     }
   })
 
-export const deliveryPatch = patchOf(deliveryInput)
+const deliveryChange = patchOf(deliveryInput)
+
+/**
+ * Un cambio a una forma de entrega, con la versión que se tenía a la vista (`version`, su
+ * `updatedAt`). Guardar la forma entera sobre una versión vieja pisaría lo que cambió otra
+ * pestaña u otra persona: el servidor lo rechaza (`staleProblem`). Encender o apagar no la pide.
+ */
+export const deliveryPatch = z.unknown().transform((raw, ctx) => {
+  const { version, ...rest } =
+    typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {}
+  const result = deliveryChange.safeParse(rest)
+  if (!result.success) {
+    for (const issue of result.error.issues)
+      ctx.addIssue({ code: "custom", message: issue.message, path: issue.path })
+    return z.NEVER
+  }
+  return { change: result.data, version: typeof version === "string" ? version : null }
+})
+
+/** Lo que se dice cuando lo que se tenía a la vista ya cambió. */
+export const STALE_MESSAGE =
+  "Esto cambió en otra pestaña o lo cambió otra persona. Recarga para ver lo último y vuelve a hacer tu cambio: el tuyo no se guardó."
+
+function staleProblem(): StoreError {
+  return new StoreError(409, "STALE", STALE_MESSAGE)
+}
+
+/** La forma de entrega, bloqueada hasta que termine la transacción: dos cambios van en fila. */
+async function lockedDelivery(tx: Db, storeId: string, id: string) {
+  const [row] = await tx
+    .select()
+    .from(storeDeliveryMethod)
+    .where(and(eq(storeDeliveryMethod.id, id), eq(storeDeliveryMethod.storeId, storeId)))
+    .for("update")
+  if (!row) throw new StoreError(404, "NOT_FOUND", "Esa forma de entrega ya no está")
+  return row
+}
 
 const uuid = z.uuid()
 function idOf(id: string, what: string): string {
@@ -311,12 +347,18 @@ export async function updateDelivery(
   person: Person,
   storeId: string,
   id: string,
-  patch: z.infer<typeof deliveryPatch>,
+  { change: patch, version }: z.infer<typeof deliveryPatch>,
 ) {
   idOf(id, "forma de entrega")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const before = await lockedDelivery(tx, storeId, id)
+    // La forma entera (no solo encender o apagar) se guarda solo sobre la versión que se vio.
+    if ("type" in patch && (version === null || Date.parse(version) !== before.updatedAt.getTime()))
+      throw staleProblem()
     const set =
-      "zones" in patch ? { ...patch, zones: await checkZonesIn(tx, storeId, id, patch.zones) } : patch
+      "zones" in patch
+        ? { ...patch, zones: await checkZonesIn(tx, storeId, id, patch.zones) }
+        : patch
     const [row] = await tx
       .update(storeDeliveryMethod)
       .set({ ...set, updatedAt: new Date() })
@@ -331,6 +373,126 @@ export async function updateDelivery(
       detail: { cambiado: id, ...patch },
     })
     return row
+  })
+}
+
+/**
+ * Un cambio a una sola zona del reparto, sobre lo que está guardado ahora (no sobre la copia de la
+ * pantalla): mover un distrito, guardar una zona o quitarla. Lleva lo que se tenía a la vista de
+ * esa zona (o en qué zona estaba el distrito); si ya cambió, se rechaza en lugar de pisarlo.
+ */
+export const zoneChange = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("distrito"),
+    district: z.string().regex(/^[0-9]{6}$/, "Elige el distrito"),
+    /** La zona en la que se veía el distrito; null: sin entrega. */
+    from: z.string().nullable(),
+    /** La zona a la que va; null: «No entrego ahí». */
+    to: z.string().nullable(),
+  }),
+  z.object({
+    op: z.literal("zona"),
+    /** El nombre que tenía la zona; null: una nueva. */
+    before: z.string().nullable(),
+    /** La zona como se veía al abrirla (con `before`). */
+    seen: z.unknown().optional(),
+    zone: zoneInput,
+  }),
+  z.object({ op: z.literal("quitar"), name: z.string(), seen: z.unknown() }),
+])
+
+/** Lo que cuenta para saber si una zona cambió: todo, con los distritos en orden. */
+function zoneKey(zone: unknown): string {
+  if (typeof zone !== "object" || zone === null) return ""
+  const z = zone as Record<string, unknown>
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String).sort() : [])
+  const slots = Array.isArray(z.slots)
+    ? (z.slots as { start: number; end: number }[]).map((s) => `${s.start}-${s.end}`).sort()
+    : []
+  return JSON.stringify([
+    z.name,
+    z.priceCents,
+    list(z.districts),
+    z.lead ?? "manana",
+    z.cutoff ?? null,
+    list(z.weekdays),
+    slots,
+    z.payOnDelivery ?? null,
+    z.freeShipping ?? true,
+  ])
+}
+
+export async function changeZone(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  id: string,
+  change: z.infer<typeof zoneChange>,
+) {
+  idOf(id, "forma de entrega")
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const method = await lockedDelivery(tx, storeId, id)
+    if (method.cost !== "por_zona") throw staleProblem()
+    const current = method.zones
+    const indexOf = (name: string | null) =>
+      name === null ? -1 : current.findIndex((z) => z.name === name)
+    let zones: ZoneSent[]
+    let detail: Record<string, unknown>
+    if (change.op === "distrito") {
+      const now = current.find((z) => z.districts?.includes(change.district))?.name ?? null
+      if (now !== change.from || (change.to !== null && indexOf(change.to) < 0))
+        throw staleProblem()
+      zones = current.map((z) => ({
+        ...z,
+        districts: [
+          ...(z.districts ?? []).filter((d) => d !== change.district),
+          ...(z.name === change.to ? [change.district] : []),
+        ],
+      }))
+      detail = { distrito: change.district, de: change.from, a: change.to }
+    } else if (change.op === "zona") {
+      const at = indexOf(change.before)
+      if (change.before !== null && (at < 0 || zoneKey(current[at]) !== zoneKey(change.seen)))
+        throw staleProblem()
+      const mine = new Set(change.zone.districts ?? current[at]?.districts ?? [])
+      const next: ZoneSent = {
+        ...change.zone,
+        districts: [...mine],
+        payOnDelivery: change.zone.payOnDelivery ?? current[at]?.payOnDelivery ?? true,
+      }
+      // Los distritos de esta zona salen de las demás: un distrito está en una sola zona.
+      const rest = current.map((z) => ({
+        ...z,
+        districts: (z.districts ?? []).filter((d) => !mine.has(d)),
+      }))
+      zones = at < 0 ? [...rest, next] : rest.map((z, i) => (i === at ? next : z))
+      detail = { zona: next.name, ...(change.before ? { antes: change.before } : {}) }
+    } else {
+      const at = indexOf(change.name)
+      if (at < 0 || zoneKey(current[at]) !== zoneKey(change.seen)) throw staleProblem()
+      if (current.length === 1)
+        throw new StoreError(409, "LAST_ZONE", "Es la única zona: cámbiala en vez de quitarla")
+      zones = current.filter((_, i) => i !== at)
+      detail = { quitada: change.name }
+    }
+    const checked = await checkZonesIn(tx, storeId, id, zones)
+    const [row] = await tx
+      .update(storeDeliveryMethod)
+      .set({
+        zones: checked,
+        acceptsPayOnDelivery: checked.some((z) => z.payOnDelivery),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(storeDeliveryMethod.id, id), eq(storeDeliveryMethod.storeId, storeId)))
+      .returning()
+    await tx.insert(storeEvent).values({
+      storeId,
+      actorUserId: person.userId,
+      action: "configuracion.entrega",
+      subject: method.name,
+      detail: { cambiado: id, ...detail },
+    })
+    return row!
   })
 }
 

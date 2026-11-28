@@ -69,6 +69,7 @@ import {
   updateCustomer,
 } from "./clientes.js"
 import {
+  changeZone,
   configOverview,
   createDelivery,
   createPayment,
@@ -81,6 +82,7 @@ import {
   paymentsAndDeliveries,
   updateDelivery,
   updatePayment,
+  zoneChange,
 } from "./configuracion.js"
 import {
   type AccountConfig,
@@ -536,6 +538,14 @@ export function createApp(deps: AppDeps) {
     const { id, methodId } = c.req.param()
     return c.json({
       method: await updateDelivery(deps.appDb, c.get("person"), id, methodId, patch),
+    })
+  })
+  // Una sola zona del reparto, sobre lo guardado ahora (lienzo de Configuración, tablero 7).
+  app.patch("/api/tiendas/:id/formas-de-entrega/:methodId/zonas", async (c) => {
+    const change = await bodyOf(c, zoneChange)
+    const { id, methodId } = c.req.param()
+    return c.json({
+      method: await changeZone(deps.appDb, c.get("person"), id, methodId, change),
     })
   })
   app.delete("/api/tiendas/:id/formas-de-entrega/:methodId", async (c) => {
