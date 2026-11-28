@@ -761,7 +761,14 @@ type Notice =
  */
 export async function notifyCustomer(
   tx: Db,
-  order: { id: string; storeId: string; number: number; totalCents: number; state?: OrderState },
+  order: {
+    id: string
+    storeId: string
+    number: number
+    totalCents: number
+    state?: OrderState
+    test: boolean
+  },
   actorUserId: string | null,
   currency: string,
   kind: Notice,
@@ -798,6 +805,8 @@ export async function notifyCustomer(
       : `Cambiamos tu pedido ${n}. Nuevo total: ${total}.`,
     cambio: extra.text ?? `Tu cambio quedó anotado en el pedido ${n}.`,
   }
+  // A la clienta de una prueba no se le avisa nada: no existe (la base también lo frena).
+  if (order.test) return text[kind]
   await logEvent(tx, order.storeId, order.id, actorUserId, "aviso", {
     tipo: kind,
     texto: text[kind],
@@ -810,13 +819,18 @@ export async function notifyCustomer(
 
 /* ---------------------------------------------------------------------- armar un pedido */
 
-/** El número del pedido nuevo: sigue al último de la tienda; dos pedidos a la vez esperan su turno. */
-export async function nextNumber(tx: Db, storeId: string): Promise<number> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}`}))`)
+/**
+ * El número del pedido nuevo: sigue al último de la tienda; dos pedidos a la vez esperan su turno.
+ * Los de prueba llevan su propia numeración: una prueba no gasta el número de una venta.
+ */
+export async function nextNumber(tx: Db, storeId: string, test = false): Promise<number> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`pedido:${storeId}${test ? ":prueba" : ""}`}))`,
+  )
   const [last] = await tx
     .select({ number: sql<number>`coalesce(max(${saleOrder.number}), 0)` })
     .from(saleOrder)
-    .where(eq(saleOrder.storeId, storeId))
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.test, test)))
   return Number(last?.number ?? 0) + 1
 }
 
@@ -870,7 +884,7 @@ export async function createOrderIn(
     throw new StoreError(400, "VALIDATION_ERROR", "Escribe el nombre de la clienta", {
       customerName: "Escribe el nombre de la clienta",
     })
-  const number = await nextNumber(tx, storeId)
+  const number = await nextNumber(tx, storeId, options.test ?? false)
   const [order] = await tx
     .insert(saleOrder)
     .values({
@@ -981,8 +995,10 @@ export async function listOrders(
     const dueToday = and(inArray(saleOrder.state, TO_DELIVER), lte(saleOrder.deliverOn, today))
     // Un pago que espera a una persona, en cualquier estado del pedido.
     const toConfirm = sql`exists (select 1 from ${orderPayment} where ${orderPayment.orderId} = ${saleOrder.id} and ${orderPayment.status} = 'por_confirmar')`
+    // Los pedidos de prueba no son ventas: no entran a la lista ni a sus conteos.
+    const real = and(eq(saleOrder.storeId, storeId), eq(saleOrder.test, false))
     const where = and(
-      eq(saleOrder.storeId, storeId),
+      real,
       inArray(saleOrder.state, ORDER_FILTERS[filter]),
       filter === "hoy" ? dueToday : undefined,
       filter === "por_confirmar" ? toConfirm : undefined,
@@ -1048,16 +1064,10 @@ export async function listOrders(
     const counts = await tx
       .select({ state: saleOrder.state, n: count() })
       .from(saleOrder)
-      .where(eq(saleOrder.storeId, storeId))
+      .where(real)
       .groupBy(saleOrder.state)
-    const [today_] = await tx
-      .select({ n: count() })
-      .from(saleOrder)
-      .where(and(eq(saleOrder.storeId, storeId), dueToday))
-    const [toConfirm_] = await tx
-      .select({ n: count() })
-      .from(saleOrder)
-      .where(and(eq(saleOrder.storeId, storeId), toConfirm))
+    const [today_] = await tx.select({ n: count() }).from(saleOrder).where(and(real, dueToday))
+    const [toConfirm_] = await tx.select({ n: count() }).from(saleOrder).where(and(real, toConfirm))
     const byState = Object.fromEntries(counts.map((c) => [c.state, c.n])) as Partial<
       Record<OrderState, number>
     >
@@ -1409,6 +1419,20 @@ export function stateError(order: OrderRow): StoreError {
     "ORDER_STATE",
     `El pedido ${pad(order.number)} ${now[order.state]}. Recarga para verlo.`,
   )
+}
+
+/**
+ * Un pedido de prueba («Probar a Sofi», «Probar como clienta») no es una venta: se paga de prueba,
+ * pero no sale, no se entrega, no se reparte y no avisa a nadie. La base también lo frena
+ * (`0073_reglas_pedido_de_prueba.sql`).
+ */
+export function notForTest(order: Pick<OrderRow, "test">) {
+  if (order.test)
+    throw new StoreError(
+      409,
+      "TEST_ORDER",
+      "Es un pedido de prueba: no se entrega ni se avisa. No es una venta.",
+    )
 }
 
 async function setState(tx: Db, order: OrderRow, state: OrderState, extra: Partial<OrderRow> = {}) {
@@ -1801,6 +1825,7 @@ export async function markShipped(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "por_salir") throw stateError(order)
     const shipping = shippingOf(order, input)
     await mustSale(tx, order, person.userId)
@@ -1875,6 +1900,7 @@ export async function markDelivered(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
     const { dueCents, pendingCents } = await balanceIn(tx, order)
     const { currency } = await storeRow(tx, storeId)
@@ -2361,6 +2387,7 @@ export async function markMissed(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "en_camino" && order.state !== "por_salir") throw stateError(order)
     await dayFromToday(tx, storeId, input.deliverOn)
     const move = await movedTo(tx, order, person.userId, input)
@@ -2384,6 +2411,7 @@ export async function reschedule(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
     const move = await movedTo(tx, order, person.userId, input)
     if (order.deliverOn === input.deliverOn && Object.keys(move.detail).length === 0)
@@ -2418,6 +2446,7 @@ export async function assignCourier(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (!OPEN.includes(order.state)) throw stateError(order)
     const move = await movedTo(tx, order, person.userId, { courier: input.courier })
     if (!move.detail.repartidor)
@@ -2482,6 +2511,7 @@ export async function setShipping(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
     const shipping = shippingOf(order, input)
     if (shipping.agency === order.agency && shipping.tracking === order.tracking)
@@ -2512,6 +2542,7 @@ export async function noteSentByYou(
 ) {
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
+    notForTest(order)
     if (order.state === "anulado") throw stateError(order)
     await logEvent(tx, storeId, orderId, person.userId, "aviso", {
       tipo: "despacho",
@@ -2902,7 +2933,6 @@ export async function payTestOrderIn(
       "PRICE_EXPIRED",
       "Lo acordado venció: el pedido vuelve a su precio. Pídele a Sofi que lo cotice de nuevo.",
     )
-  const { currency } = await storeRow(tx, storeId)
   // Un pago por el link solo lo anota el aviso del proveedor (0005): el de prueba lo anota quien
   // prueba, ya revisado por ella, con el tipo del medio del pedido.
   const method = await methodFor(tx, storeId, order, "comprobante")
@@ -2925,10 +2955,6 @@ export async function payTestOrderIn(
   await logEvent(tx, storeId, orderId, actorUserId, "pago_confirmado", {
     monto: order.totalCents,
     prueba: true,
-  })
-  await notifyCustomer(tx, order, actorUserId, currency, "pago_confirmado", {
-    paidCents: order.totalCents,
-    dueCents: 0,
   })
   return { number: pad(order.number), totalCents: order.totalCents }
 }

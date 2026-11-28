@@ -393,6 +393,20 @@
       "when": 1795850007954,
       "tag": "0071_reglas_lo_que_sofi_no_supo",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795852531904,
+      "tag": "0072_pedido_de_prueba_aparte",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1795852542814,
+      "tag": "0073_reglas_pedido_de_prueba",
+      "breakpoints": true
     }
   ]
 }

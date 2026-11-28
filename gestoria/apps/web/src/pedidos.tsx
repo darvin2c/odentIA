@@ -20,6 +20,7 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
+  PageNotice,
   PersonAvatar,
   RadioChips,
   SubmitButton,
@@ -354,6 +355,35 @@ export function Row({
   )
 }
 
+/** Un pedido de prueba, abierto por un enlace: lo que lleva, sin pasos de cobro ni de entrega. */
+function TestOrderBody({ order }: { order: OrderDetail }) {
+  const cur = useStoreContext().store.currency
+  return (
+    <div className="flex flex-col gap-4">
+      <PageNotice tone="aviso" label="Es una prueba">
+        Es de «Probar como clienta»: no es una venta. No se cobró, no movió el stock, no se entrega
+        ni se le avisa a nadie, y no entra a Pedidos.
+      </PageNotice>
+      <ul className="flex flex-col gap-2 text-sm">
+        {order.lines.map((line) => (
+          <li key={line.id} className="flex justify-between gap-4">
+            <span>
+              {line.quantity} × {line.productName}
+              {line.variantName === "Única" ? "" : ` · ${line.variantName}`}
+            </span>
+            <span className="tabular-nums">
+              {line.gift ? "regalo" : money(line.unitCents * line.quantity, cur)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Row label="Total" strong>
+        {money(order.totalCents, cur)}
+      </Row>
+    </div>
+  )
+}
+
 function OrderBody({ order }: { order: OrderDetail }) {
   const { store } = useStoreContext()
   const can = (p: string) => store.permissions.includes(p)
@@ -368,6 +398,10 @@ function OrderBody({ order }: { order: OrderDetail }) {
   const { balance } = order
   // Un cambio (tablero 17): lo que vuelve se descuenta; un total bajo cero es lo que se devuelve.
   const exchange = order.exchangeOf !== null
+
+  // Un pedido de prueba no es una venta: no entra a Pedidos, no sale ni se entrega (el servidor
+  // también lo frena). Si se abre por un enlace, se ve sin sus pasos.
+  if (order.test) return <TestOrderBody order={order} />
 
   return (
     <div className="flex flex-col">

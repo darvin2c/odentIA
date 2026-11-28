@@ -1906,7 +1906,13 @@ export const saleOrder = pgTable(
       foreignColumns: [store.id],
     }).onDelete("cascade"),
     unique("sale_order_store_id_key").on(table.storeId, table.id),
-    unique("sale_order_number_key").on(table.storeId, table.number),
+    // Los pedidos de prueba llevan su propia numeración: una prueba no gasta el número de una venta.
+    uniqueIndex("sale_order_number_key")
+      .on(table.storeId, table.number)
+      .where(sql`not ${table.test}`),
+    uniqueIndex("sale_order_test_number_key")
+      .on(table.storeId, table.number)
+      .where(sql`${table.test}`),
     // La conversación de la que salió, de la misma tienda (B5).
     foreignKey({
       name: "sale_order_conversation_fkey",
