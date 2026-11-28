@@ -340,7 +340,8 @@ describe("la entrada de soporte", () => {
     expect(screen.status).toBe(200)
     expect(screen.json.data).toMatchObject({
       title: "Catálogo",
-      suggestions: [],
+      // Soporte solo mira: del catálogo, lo que se mira (la vista previa).
+      suggestions: ["¿Cómo se ve mi producto en la vitrina y en la web?"],
       attached: { screen: "Catálogo", role: "Soporte de gestorIA", clinic: "Zapatos Rosa" },
     })
     expect(

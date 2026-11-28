@@ -2803,21 +2803,25 @@ export async function payTestOrderIn(
       "Lo acordado venció: el pedido vuelve a su precio. Pídele a Sofi que lo cotice de nuevo.",
     )
   const { currency } = await storeRow(tx, storeId)
-  const method = await methodFor(tx, storeId, order, "link")
+  // Un pago por el link solo lo anota el aviso del proveedor (0005): el de prueba lo anota quien
+  // prueba, ya revisado por ella, con el tipo del medio del pedido.
+  const method = await methodFor(tx, storeId, order, "comprobante")
   await tx.insert(orderPayment).values({
     storeId,
     orderId,
-    kind: "link",
+    kind: "comprobante",
     status: "confirmado",
     amountCents: order.totalCents,
     methodName: `${methodLabel} (prueba)`.slice(0, 80),
     methodType: method.methodType,
     note: "Pago de prueba: no se cobró",
+    createdBy: actorUserId,
+    reviewedBy: actorUserId,
     reviewedAt: new Date(),
   })
   await trySale(tx, order, actorUserId)
   await setState(tx, order, "por_salir")
-  await logEvent(tx, storeId, orderId, actorUserId, "pago_link", {
+  await logEvent(tx, storeId, orderId, actorUserId, "pago_confirmado", {
     monto: order.totalCents,
     prueba: true,
   })

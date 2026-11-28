@@ -1111,8 +1111,8 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
     expect(paid.status).toBe(200)
     expect(steps).toHaveLength(0)
     expect(paid.json.cart).toMatchObject({ paid: true, state: "por_salir" })
-    expect(lastSofi(paid).notice).toBe(true)
-    expect(lastSofi(paid).text).toContain("Pago recibido")
+    expect(lastSofi(paid.json).notice).toBe(true)
+    expect(lastSofi(paid.json).text).toContain("Pago recibido")
     // No mueve el stock ni cuenta en Reportes.
     expect((await call("rosa", "GET", `${base}/variantes/${lona.negra38}/kardex`)).json.stock).toBe(
       before,
@@ -1141,6 +1141,13 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
   })
 
   it("la vitrina pública da solo lo vendible, y solo si se ve en la web", async () => {
+    // Una pregunta que la tienda todavía no respondió no se muestra.
+    await db.ownerDb.insert(productQuestion).values({
+      storeId,
+      productId: lona.id,
+      question: "¿Viene en caja de regalo?",
+      askedBy: "u-rosa",
+    })
     const response = await app.request(`${SERVER}/vitrina/calzadosrosa/zapatilla-de-lona`)
     expect(response.status).toBe(200)
     const text = await response.text()
@@ -1162,7 +1169,7 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
       "Medias tobilleras",
       "lastCostCents",
       'stock"',
-      "Destiñe",
+      "¿Viene en caja de regalo?",
       "barcode",
       "u-rosa",
     ])

@@ -12,8 +12,8 @@ nuevo de la ficha (datos del rubro, estado, preguntas respondidas, la foto del c
 que puede ofrecer) sin inventar, y que lo que no sabe llegue a la tienda sin soltar la venta.
 
 Restricciones: Sofi no confirma pagos ni cambia un pedido pagado (ADR 0207, 0224 y 0226); lo que
-escribe la clienta nunca va como instrucción; nada sale sin `checkReply`; lo de prueba no mueve
-stock, no cobra y no cuenta en Reportes, Argos ni el uso; el cobro de verdad por la vitrina y el
+escribe la clienta nunca va como instrucción; nada sale sin `checkReply`; lo de prueba no es una
+venta (no cobra ni entrega): no mueve stock y no cuenta en Reportes, Argos ni en lo que se cobra; el cobro de verdad por la vitrina y el
 catálogo por link son de otra entrega.
 
 ## Decisión y motivo

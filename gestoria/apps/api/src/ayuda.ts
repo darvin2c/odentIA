@@ -630,7 +630,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         a: [
           "En la ficha, en la línea de Sofi, «Probar como clienta». Al lado (en el celular, abajo) se abre el celular de la clienta: «WhatsApp» es el chat con Sofi y «Vitrina» es la página del producto por link. Es la misma Sofi de un chat de verdad, con tu ficha de ahora: pregunta, pide la negra, «¿Me haces precio?» o «Lo voy a pensar».",
           "El carrito es el mismo en el chat y en la vitrina, con lo que acordaste con Sofi y hasta cuándo vale. «Pagar ahora» simula el pago: dice «Pago de prueba: no se cobra». Después del pago, Sofi te escribe una vez y, si algo combina, te lo ofrece aparte.",
-          "Abajo, «Qué usó Sofi» dice de qué dato de la ficha salió cada respuesta y lo que todavía no sabe, con «Completar». La prueba no mueve el stock, no cobra, no avisa y no cuenta en Reportes. Con «Empezar de nuevo» arrancas otra.",
+          "Abajo, «Qué usó Sofi» dice de qué dato de la ficha salió cada respuesta y lo que todavía no sabe, con «Completar». La prueba no es una venta: no cobra ni entrega, no mueve el stock, no avisa y no cuenta en Reportes ni en lo que se cobra. Con «Empezar de nuevo» arrancas otra.",
         ],
         needs: "configuracion",
         screen: "catalogo",

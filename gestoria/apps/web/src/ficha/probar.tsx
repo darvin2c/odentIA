@@ -38,7 +38,7 @@ import { goTo, SofiDot } from "./piezas"
  * Es la conversación de prueba de siempre (canal «prueba»): pasa por la misma Sofi de un chat de
  * verdad (`apps/api/src/sofi/`), con sus herramientas, el precio de `precio.ts`, la única oferta
  * con plazo y la revisión antes de salir. No mueve stock, no cobra (el pago se simula y lo dice),
- * no avisa y no cuenta en Reportes, Argos ni el uso. Nunca es un panel aparte de preguntas.
+ * no avisa y no cuenta en Reportes, Argos ni en lo que se cobra: no es una venta. Nunca es un panel aparte de preguntas.
  */
 
 export const VIEW_KEY = (storeId: string, id: string | null) => ["conversacion", storeId, id]
@@ -254,8 +254,8 @@ export function ProbarPanel({ onClose }: { onClose: () => void }) {
             <p className="font-semibold">Es la conversación de verdad, de prueba</p>
             <p className="text-muted-foreground">
               Pasa por la misma Sofi de un chat de verdad: mismas herramientas, mismas reglas de
-              precio, la misma vitrina y el mismo carrito. No mueve el stock, no cobra, no avisa y
-              no cuenta en Reportes.
+              precio, la misma vitrina y el mismo carrito. No es una venta: no cobra ni entrega, no
+              mueve el stock, no avisa y no cuenta en Reportes.
             </p>
           </PopoverContent>
         </Popover>

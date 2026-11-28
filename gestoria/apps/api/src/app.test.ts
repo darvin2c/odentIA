@@ -899,7 +899,7 @@ describe("la tienda de ejemplo", () => {
       catalog: { withStock: number }
     }
     expect(overview.paymentLink).toBeNull()
-    expect(overview.sofi).toEqual({ enabled: true, tried: false })
+    expect(overview.sofi).toEqual({ enabled: true, tried: true })
     expect(overview.team.supportAsks).toBe(1)
     expect(overview.catalog.withStock).toBeGreaterThan(0)
     const help = (await (
