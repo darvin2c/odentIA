@@ -446,7 +446,7 @@ describe("Configuración: lo que falta para vender", () => {
       deliveries: [],
       catalog: { withStock: 0 },
       team: { members: 3, supportAsks: 0 },
-      sofi: { enabled: false, tried: false },
+      sofi: { enabled: false, tried: false, toAnswer: 0 },
     })
     // El plan es del Dueño: al Administrador no le llega.
     const mario = await call("mario", "GET", `/api/tiendas/${storeId}/configuracion/resumen`)
@@ -961,14 +961,15 @@ describe("la tienda de ejemplo", () => {
     ).json()) as {
       paymentLink: unknown
       plan: { name: string; status: string; toPay: boolean } | null
-      sofi: { enabled: boolean; tried: boolean }
+      sofi: { enabled: boolean; tried: boolean; toAnswer: number }
       team: { supportAsks: number }
       catalog: { withStock: number }
     }
     expect(overview.paymentLink).toBeNull()
     // El cobro de la semilla espera su pago: el plan lleva su punto.
     expect(overview.plan).toMatchObject({ name: "Tienda", status: "activa", toPay: true })
-    expect(overview.sofi).toEqual({ enabled: true, tried: true })
+    // Y tres preguntas que Sofi no supo, por responder en «Lo que aprendió».
+    expect(overview.sofi).toEqual({ enabled: true, tried: true, toAnswer: 3 })
     expect(overview.team.supportAsks).toBe(1)
     expect(overview.catalog.withStock).toBeGreaterThan(0)
     const help = (await (
@@ -979,7 +980,9 @@ describe("la tienda de ejemplo", () => {
     expect(help.questions).toEqual([
       expect.objectContaining({
         question: "¿Dónde le digo a Sofi el horario de la tienda?",
-        replies: [expect.objectContaining({ body: expect.stringContaining("«Cómo vende»") })],
+        replies: [
+          expect.objectContaining({ body: expect.stringContaining("«Cuándo te pasa el chat»") }),
+        ],
       }),
     ])
   })

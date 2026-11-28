@@ -1644,3 +1644,168 @@ describe("cambiar o devolver después de entregar (Andrea, tablero 17)", () => {
     expect([403, 404]).toContain(other.status)
   })
 })
+
+describe("el envío por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7)", () => {
+  it("la plantilla de Lima la usa quien configura; el distrito dice la zona y su precio", async () => {
+    const denied = await call("lucia", "POST", `${base}/entregas/plantilla-lima`, {
+      shipFrom: "150115",
+    })
+    expect(denied.status).toBe(403)
+    const used = await call("rosa", "POST", `${base}/entregas/plantilla-lima`, {
+      shipFrom: "150115",
+    })
+    expect(used.status).toBe(200)
+    expect(used.json.method.id).toBe(ids.reparto)
+    const setup = await call("lucia", "GET", `${base}/entregas`)
+    expect(setup.json.shipFrom).toBe("150115")
+    const zones = setup.json.deliveries.find((d: Json) => d.id === ids.reparto).zones as Json[]
+    expect(zones.map((z) => z.name)).toEqual([
+      "Centro y Lima Moderna",
+      "Lima Este",
+      "Lima Norte",
+      "Lima Sur",
+      "Callao",
+      "Lejanos y playas",
+    ])
+    expect(zones.flatMap((z) => z.districts as string[])).toHaveLength(50)
+
+    // Lince (zona 1) a S/ 10; Lurín (lejanos) a S/ 18.
+    const lince = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150116",
+    })
+    expect(lince.json.quote).toMatchObject({ deliveryListCents: 1000, deliveryCents: 1000 })
+    const lurin = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150119",
+    })
+    expect(lurin.json.quote).toMatchObject({ deliveryListCents: 1800, deliveryCents: 1800 })
+    // En «Lejanos y playas» no se paga al recibir.
+    const door = await call("lucia", "POST", `${base}/pedidos/calcular`, {
+      ...order(),
+      district: "150119",
+      paymentMethodId: ids.efectivo,
+    })
+    expect(door.json.quote).toBeNull()
+    expect(door.json.fields.paymentMethodId).toBe("En «Lejanos y playas» no se paga al recibir")
+  })
+
+  it("un distrito está en una sola zona de la tienda", async () => {
+    const other = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Moto express",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      zones: [{ name: "Lince", priceCents: 1500, districts: ["150116"] }],
+    })
+    expect(other.status).toBe(409)
+    expect(JSON.stringify(other.json)).toContain("Lince ya está en «Reparto en Lima»")
+    // Dos zonas de la misma forma tampoco lo comparten.
+    const twice = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Moto express",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      zones: [
+        { name: "A", priceCents: 1500, districts: ["070101"] },
+        { name: "B", priceCents: 1500, districts: ["070101"] },
+      ],
+    })
+    expect(twice.status).toBe(400)
+  })
+
+  it("dos pestañas: guardar una zona toca solo esa, y lo visto viejo no pisa lo nuevo", async () => {
+    const path = `${base}/formas-de-entrega/${ids.reparto}`
+    const read = async () =>
+      (await call("rosa", "GET", `${base}/entregas`)).json.deliveries.find(
+        (d: Json) => d.id === ids.reparto,
+      ) as Json
+    // Las dos pestañas abren lo mismo.
+    const seen = await read()
+    const zoneOf = (method: Json, code: string) =>
+      (method.zones as Json[]).find((z) => (z.districts as string[]).includes(code))?.name ?? null
+    expect(zoneOf(seen, "150140")).toBe("Centro y Lima Moderna")
+    // La B saca Surco.
+    const b = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150140",
+      from: "Centro y Lima Moderna",
+      to: null,
+    })
+    expect(b.status).toBe(200)
+    // La A, sin recargar, saca Cieneguilla: Surco sigue fuera.
+    const a = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150109",
+      from: zoneOf(seen, "150109"),
+      to: null,
+    })
+    expect(a.status).toBe(200)
+    const after = await read()
+    expect(zoneOf(after, "150140")).toBeNull()
+    expect(zoneOf(after, "150109")).toBeNull()
+    // La A vuelve a poner Surco en la zona 1 como si siguiera ahí: se rechaza, no se adivina.
+    const stale = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150140",
+      from: "Centro y Lima Moderna",
+      to: "Lima Sur",
+    })
+    expect(stale.status).toBe(409)
+    expect(stale.json.error.code).toBe("STALE")
+    expect(stale.json.error.message).toContain("Recarga")
+    // Editar una zona con lo visto viejo (la B cambió su precio): 409, y nada cambia.
+    const centro = (seen.zones as Json[])[0]!
+    const priced = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "zona",
+      before: "Lima Este",
+      seen: (after.zones as Json[])[1],
+      zone: { ...(after.zones as Json[])[1], priceCents: 1300 },
+    })
+    expect(priced.status).toBe(200)
+    const old = await call("rosa", "PATCH", `${path}/zonas`, {
+      op: "zona",
+      before: "Centro y Lima Moderna",
+      seen: centro,
+      zone: { ...centro, priceCents: 900 },
+    })
+    expect(old.status).toBe(409)
+    // Guardar la forma entera sobre una versión vieja (o sin versión) tampoco pisa.
+    const whole = { ...seen, version: seen.updatedAt }
+    for (const body of [whole, { ...seen }]) {
+      const res = await call("rosa", "PATCH", path, body)
+      expect(res.status).toBe(409)
+    }
+    const now = await read()
+    expect(zoneOf(now, "150140")).toBeNull()
+    expect((now.zones as Json[])[1]!.priceCents).toBe(1300)
+    // Con la versión de ahora, sí; encender o apagar no la pide.
+    expect((await call("rosa", "PATCH", path, { ...now, version: now.updatedAt })).status).toBe(200)
+    expect((await call("rosa", "PATCH", path, { isActive: true })).status).toBe(200)
+    // Ventas no cambia zonas.
+    const denied = await call("lucia", "PATCH", `${path}/zonas`, {
+      op: "distrito",
+      district: "150140",
+      from: null,
+      to: "Centro y Lima Moderna",
+    })
+    expect(denied.status).toBe(403)
+    // Se deja como estaba.
+    for (const [district, to] of [
+      ["150140", "Centro y Lima Moderna"],
+      ["150109", zoneOf(seen, "150109")],
+    ] as const)
+      expect(
+        (await call("rosa", "PATCH", `${path}/zonas`, { op: "distrito", district, from: null, to }))
+          .status,
+      ).toBe(200)
+  })
+
+  it("quién paga el viaje fallido lo cambia quien configura", async () => {
+    const denied = await call("lucia", "PATCH", `${base}/entregas/reglas`, {
+      failedTrip: "clienta",
+    })
+    expect(denied.status).toBe(403)
+    const done = await call("rosa", "PATCH", `${base}/entregas/reglas`, { failedTrip: "clienta" })
+    expect(done.status).toBe(200)
+    expect((await call("lucia", "GET", `${base}/entregas`)).json.failedTrip).toBe("clienta")
+  })
+})

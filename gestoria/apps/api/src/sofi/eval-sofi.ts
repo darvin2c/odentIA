@@ -54,12 +54,14 @@ import {
   stockMovement,
   store,
   storeAgent,
+  storeAgentAnswer,
   storeDeliveryMethod,
   storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
 import { asc, desc, eq, inArray, sql } from "drizzle-orm"
+import { plainZone } from "../entregas.js"
 import type { LinkAdapter } from "../link-de-pago.js"
 import { sealSecret } from "../secretos.js"
 import { type ChatModel, costMicros, modelFromEnv, openAIModel, SOFI_MODEL } from "./modelo.js"
@@ -152,13 +154,21 @@ async function armarTienda(owner: Db, storeId: string, secretsKey: Buffer) {
   await owner
     .insert(store)
     .values({ id: storeId, name: "Calzados Rosa", currency: "PEN", createdBy: "banco" })
-  await owner.insert(storeAgent).values({
-    storeId,
-    enabled: true,
-    knowledge:
-      "Atendemos de lunes a sábado, de 9 a. m. a 7 p. m. Cambios de talla dentro de 7 días, con la caja y sin usar. Las zapatillas blancas se limpian con un paño húmedo.",
-    updatedBy: "banco",
-  })
+  await owner.insert(storeAgent).values({ storeId, enabled: true, updatedBy: "banco" })
+  // «Lo que sabe» (ADR 0234): lo mismo que antes era el texto libre, como preguntas y respuestas.
+  await owner.insert(storeAgentAnswer).values(
+    [
+      ["¿Qué horario tienen?", "Atendemos de lunes a sábado, de 9 a. m. a 7 p. m."],
+      ["¿Hacen cambios?", "Cambios de talla dentro de 7 días, con la caja y sin usar."],
+      ["¿Cómo se limpian las zapatillas blancas?", "Con un paño húmedo."],
+    ].map(([question, answer]) => ({
+      storeId,
+      question: question!,
+      answer: answer!,
+      createdBy: "banco",
+      updatedBy: "banco",
+    })),
+  )
   await owner.insert(storePaymentMethod).values([
     { storeId, name: "Tarjeta con link", typeCode: "48", collection: "link" },
     {
@@ -184,8 +194,8 @@ async function armarTienda(owner: Db, storeId: string, secretsKey: Buffer) {
       type: "DeliveryModeOwnFleet",
       cost: "por_zona",
       zones: [
-        { name: "Surco y Miraflores", priceCents: 1000 },
-        { name: "Callao", priceCents: 1500 },
+        plainZone("Surco y Miraflores", 1000, ["150140", "150122"]),
+        plainZone("Callao", 1500, ["070101"]),
       ],
       eta: "Al día siguiente",
       acceptsPayOnDelivery: true,

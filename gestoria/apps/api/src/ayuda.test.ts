@@ -119,6 +119,7 @@ describe("la pantalla donde está", () => {
     expect(storePath(`/tiendas/${STORE}`, STORE)).toBe("/")
     expect(helpScreenOf("/")).toBe("inicio")
     expect(helpScreenOf("/catalogo/prod-1")).toBe("catalogo")
+    // Configuración abre en «Lo que falta»; Datos de la tienda tiene su ruta.
     expect(helpScreenOf("/configuracion")).toBe("configuracion")
     expect(helpScreenOf("/configuracion/datos")).toBe("datos")
     expect(helpScreenOf("/configuracion/marca")).toBe("marca")

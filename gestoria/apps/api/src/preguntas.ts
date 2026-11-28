@@ -11,7 +11,7 @@ import { inStore, StoreError } from "./tiendas.js"
  * clienta queda en el producto y se responde una vez. Ventas responde (`ventas.atender`) y puede
  * proponer que la respuesta se guarde en la ficha; el Dueño o el Administrador (`configuracion`)
  * la guardan, y desde ahí Sofi la usa la próxima vez. Sofi solo anota la pregunta: la base no la
- * deja responder ni guardar (`0056_reglas_la_ficha_del_producto.sql`); la anota con su herramienta
+ * deja responder ni guardar (`0060_reglas_la_ficha_del_producto.sql`); la anota con su herramienta
  * `anotar_pregunta`. Las que esperan van a «Te toca» de Inicio (`questionLinesIn`): varias iguales
  * del mismo producto son una línea, y se responden de una vez (`answerQuestions`). Las de «Probar a
  * Sofi» quedan en la ficha, pero no van a «Te toca» ni avisan.
