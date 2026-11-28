@@ -26,9 +26,10 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BellRing, Share } from "lucide-react"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
-import { ApiError, api } from "./lib/api"
+import { ApiError, api, ROLES } from "./lib/api"
 import { device, dismissInstallCard, installCardDismissed, type PushChoices } from "./lib/avisos"
-import { StoreHeader, useStoreContext } from "./tiendas"
+import { firstName } from "./lib/inicio"
+import { StoreHeader, useMe, useStoreContext } from "./tiendas"
 
 /**
  * Los avisos al celular (lienzo «gestorIA como odentIA», tablero 15): gestorIA se instala desde el
@@ -259,21 +260,32 @@ export function DeviceNoticesPage() {
     save.mutate(next)
   }
   const { state, busy, problem, turn } = thisDevice
+  const me = useMe()
+  // De quién son estos avisos: cada persona elige los suyos.
+  const whose = [firstName(me.data?.person.name ?? ""), ROLES[store.role].name]
+    .filter(Boolean)
+    .join(" · ")
 
   return (
     <>
-      <StoreHeader title="Avisos al celular" />
+      <StoreHeader
+        title="Avisos al celular"
+        subtitle="Te avisa aunque gestorIA esté cerrada. Cada persona elige los suyos; no cuesta nada."
+      />
       <section
         aria-labelledby="este-celular"
         className="elevated flex max-w-xl flex-col gap-3 rounded-xl border bg-card p-5"
       >
-        <h2 id="este-celular" className="text-sm font-semibold">
-          {state === "activado"
-            ? "Activados en este celular"
-            : state === "cargando"
-              ? "Revisando este celular…"
-              : "Apagados en este celular"}
-        </h2>
+        <div className="flex flex-col gap-0.5">
+          <h2 id="este-celular" className="text-sm font-semibold">
+            {state === "activado"
+              ? "Activados en este celular"
+              : state === "cargando"
+                ? "Revisando este celular…"
+                : "Apagados en este celular"}
+          </h2>
+          <p className="text-sm text-muted-foreground">{whose}</p>
+        </div>
         <div aria-live="polite" className="flex flex-col gap-2 text-sm text-muted-foreground">
           {state === "instalar-en-iphone" ? <IphoneSteps /> : null}
           {state === "bloqueado" ? <p>{unblockText()}</p> : null}
