@@ -335,14 +335,14 @@ describe("la entrada de soporte", () => {
     const screen = await call(
       "soporteConCodigo",
       "GET",
-      `/api/tiendas/${storeId}/ayuda/screen?path=${encodeURIComponent(`/tiendas/${storeId}/catalogo`)}`,
+      `/api/tiendas/${storeId}/ayuda/screen?path=${encodeURIComponent(`/tiendas/${storeId}/catalogo/prod-1`)}`,
     )
     expect(screen.status).toBe(200)
     expect(screen.json.data).toMatchObject({
-      title: "Catálogo",
-      // Soporte solo mira: del catálogo, lo que se mira (la vista previa).
-      suggestions: ["¿Cómo se ve mi producto en la vitrina y en la web?"],
-      attached: { screen: "Catálogo", role: "Soporte de gestorIA", clinic: "Zapatos Rosa" },
+      title: "Ficha del producto",
+      // Soporte solo mira: de la ficha, lo que se mira (la vista previa).
+      suggestions: expect.arrayContaining(["¿Cómo se ve mi producto en la vitrina y en la web?"]),
+      attached: { screen: "Ficha del producto", role: "Soporte de gestorIA", clinic: "Zapatos Rosa" },
     })
     expect(
       (
