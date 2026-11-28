@@ -202,6 +202,11 @@ export const storeMember = pgTable(
 /**
  * Una invitación al equipo, para un correo. Se acepta entrando con la cuenta de ese correo
  * (verificado por la cuenta); el enlace no basta. Una sola pendiente por correo y tienda.
+ *
+ * El nombre y el celular son para escribirle por WhatsApp desde el celular de quien invita
+ * (lienzo «gestorIA · Configuración, de nuevo», tablero 9): lo envía la persona, así que
+ * `shared_at` dice solo que se abrió el WhatsApp con el mensaje («enviada por ti»), nunca que
+ * llegó. La invitación no cambia lo que dice: se anula y se hace otra.
  */
 export const storeInvitation = pgTable(
   "store_invitation",
@@ -218,9 +223,20 @@ export const storeInvitation = pgTable(
     acceptedBy: text("accepted_by"),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     revokedBy: text("revoked_by"),
+    /** Cómo la llama quien invita, hasta que entra con su cuenta. */
+    name: text("name"),
+    /** Su celular en E.164, para escribirle por WhatsApp. */
+    phone: text("phone"),
+    /** La última vez que se abrió el WhatsApp con la invitación, y quién. */
+    sharedAt: timestamp("shared_at", { withTimezone: true }),
+    sharedBy: text("shared_by"),
   },
   (table) => [
     check("store_invitation_role_check", inList("role", STORE_ROLES)),
+    check(
+      "store_invitation_contact_check",
+      sql`(${table.name} is null or char_length(btrim(${table.name})) between 1 and 80) and (${table.phone} is null or ${table.phone} ~ '^[+][1-9][0-9]{6,14}$') and ((${table.sharedAt} is null) = (${table.sharedBy} is null))`,
+    ),
     check(
       "store_invitation_email_check",
       sql`${table.email} = lower(${table.email}) and position('@' in ${table.email}) > 1`,
@@ -252,6 +268,8 @@ export const STORE_EVENT_ACTIONS = [
   "invitacion.creada",
   "invitacion.anulada",
   "invitacion.aceptada",
+  // Se abrió el WhatsApp con la invitación: lo envía la persona (tablero 9).
+  "invitacion.enviada",
   "equipo.rol",
   "equipo.quitado",
   "cuenta.cerrada",
@@ -276,6 +294,10 @@ export const STORE_EVENT_ACTIONS = [
   "catalogo.plantilla",
   // «Cargar muchos»: lo que pasó al catálogo con «Crear» (ADR 0236).
   "catalogo.carga",
+  // Los repartidores de la tienda y su pago por entrega (tablero 9).
+  "repartidor.agregado",
+  "repartidor.cambiado",
+  "repartidor.quitado",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 
@@ -1569,7 +1591,7 @@ export const storeTemplateField = pgTable(
 
 /**
  * Lo que Sofi no supo de un producto (decisión 11): la pregunta de la clienta y su conversación, y
- * la respuesta de la tienda. Sofi solo la anota (`0060_reglas_la_ficha_del_producto.sql`). Ventas
+ * la respuesta de la tienda. Sofi solo la anota (`0062_reglas_la_ficha_del_producto.sql`). Ventas
  * responde y puede pedir que se guarde en la ficha (`save_requested`); el Dueño o el Administrador
  * la guardan (`saved_at`), y desde ahí Sofi la usa. Una persona también anota en la ficha una
  * pregunta ya respondida, sin conversación.
@@ -1688,11 +1710,25 @@ export const storeCourier = pgTable(
     /** Su cuenta: la de una persona del equipo y, más adelante, la del repartidor que se unió. */
     userId: text("user_id"),
     isActive: boolean("is_active").notNull().default(true),
+    /** Su celular en E.164, para escribirle por WhatsApp (el de fuera; el del equipo tiene su cuenta). */
+    phone: text("phone"),
+    /**
+     * Lo que la tienda le paga por cada entrega, en la unidad menor de la moneda de la tienda.
+     * Null: sin pago por entrega (alguien del equipo, o aún no se acordó). Lo anota la tienda para
+     * saber cuánto le debe; gestorIA no le paga ni lo descuenta de nada.
+     */
+    payCents: integer("pay_cents"),
+    /** Si la clienta no estaba, el viaje se le paga igual. */
+    failedTripPaid: boolean("failed_trip_paid").notNull().default(true),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("store_courier_name_check", sql`char_length(btrim(${table.name})) between 1 and 80`),
+    check(
+      "store_courier_pay_check",
+      sql`(${table.payCents} is null or ${table.payCents} between 0 and 100000000) and (${table.phone} is null or ${table.phone} ~ '^[+][1-9][0-9]{6,14}$')`,
+    ),
     foreignKey({
       name: "store_courier_store_id_fkey",
       columns: [table.storeId],
@@ -2902,7 +2938,10 @@ export const customerConsent = pgTable(
   (table) => [
     check("customer_consent_state_check", inList("state", CONSENT_STATES)),
     check("customer_consent_channel_check", inList("channel", CONVERSATION_CHANNELS)),
-    check("customer_consent_quote_check", sql`char_length(btrim(${table.quote})) between 1 and 300`),
+    check(
+      "customer_consent_quote_check",
+      sql`char_length(btrim(${table.quote})) between 1 and 300`,
+    ),
     foreignKey({
       name: "customer_consent_customer_fkey",
       columns: [table.storeId, table.customerId],

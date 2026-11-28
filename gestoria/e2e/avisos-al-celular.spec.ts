@@ -6,7 +6,7 @@ import { ACCOUNT, STORE_ID, type Who } from "./entorno"
 /**
  * Los avisos al celular en un navegador (lienzo «gestorIA como odentIA», tablero 15), contra su
  * servidor y su base de verdad:
- * - En Pedidos, la tarjeta «Recibe los avisos en este celular», con «Ahora no» que se recuerda.
+ * - En Inicio, la tarjeta «Recibe los avisos en este celular», con «Ahora no» que se recuerda.
  * - Configuración › Avisos al celular: Ventas elige entre lo que su rol resuelve (sin «Lo de
  *   dinero»), con el teclado, y lo elegido queda guardado; el Dueño ve además «Lo de dinero».
  * - «Activar en este celular» y «Apagar en este celular» llegan al servidor.
@@ -74,14 +74,14 @@ async function fakePush(context: BrowserContext, who: Who) {
 
 test.describe.configure({ mode: "serial" })
 
-test("en Pedidos, la tarjeta para recibir los avisos; «Ahora no» se recuerda", async ({
+test("en Inicio, la tarjeta para recibir los avisos; «Ahora no» se recuerda", async ({
   page,
   context,
 }) => {
   await as("lucia")
   await fakePush(context, "lucia")
   await page.setViewportSize(DESKTOP)
-  await page.goto(`${BASE}/pedidos`)
+  await page.goto(BASE)
   const card = page.getByRole("region", { name: "Recibe los avisos en este celular" })
   await expect(card).toBeVisible()
   await expect(
@@ -95,7 +95,7 @@ test("en Pedidos, la tarjeta para recibir los avisos; «Ahora no» se recuerda",
   await card.getByRole("button", { name: "Ahora no" }).click()
   await expect(card).toHaveCount(0)
   await page.reload()
-  await expect(page.getByRole("heading", { name: "Pedidos" }).first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: /Lucía/, level: 1 })).toBeVisible()
   await expect(page.getByRole("region", { name: "Recibe los avisos en este celular" })).toHaveCount(
     0,
   )
@@ -136,9 +136,9 @@ test("Ventas elige qué le llega, con el teclado, y lo activa y apaga en este ce
   await page.setViewportSize(PHONE)
   await noSideScroll(page)
   await shot(page, "avisos-configuracion-telefono")
-  // Con los avisos activados, Pedidos ya no ofrece la tarjeta.
-  await page.goto(`${BASE}/pedidos`)
-  await expect(page.getByRole("heading", { name: "Pedidos" }).first()).toBeVisible()
+  // Con los avisos activados, Inicio ya no ofrece la tarjeta.
+  await page.goto(BASE)
+  await expect(page.getByRole("heading", { name: /Lucía/, level: 1 })).toBeVisible()
   await expect(page.getByRole("region", { name: "Recibe los avisos en este celular" })).toHaveCount(
     0,
   )

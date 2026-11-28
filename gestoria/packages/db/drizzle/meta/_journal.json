@@ -306,78 +306,92 @@
     {
       "idx": 59,
       "version": "7",
-      "when": 1795849204896,
-      "tag": "0059_la_ficha_del_producto",
+      "when": 1795849083145,
+      "tag": "0059_equipo_y_repartidores",
       "breakpoints": true
     },
     {
       "idx": 60,
       "version": "7",
-      "when": 1795849205896,
-      "tag": "0060_reglas_la_ficha_del_producto",
+      "when": 1795849090305,
+      "tag": "0060_reglas_equipo_y_repartidores",
       "breakpoints": true
     },
     {
       "idx": 61,
       "version": "7",
-      "when": 1795849206896,
-      "tag": "0061_el_precio_de_la_ficha",
+      "when": 1795849757155,
+      "tag": "0061_la_ficha_del_producto",
       "breakpoints": true
     },
     {
       "idx": 62,
       "version": "7",
-      "when": 1795849207896,
-      "tag": "0062_reglas_precio_de_la_ficha",
+      "when": 1795849758155,
+      "tag": "0062_reglas_la_ficha_del_producto",
       "breakpoints": true
     },
     {
       "idx": 63,
       "version": "7",
-      "when": 1795849434548,
-      "tag": "0063_las_fotos_y_videos_del_producto",
+      "when": 1795849759155,
+      "tag": "0063_el_precio_de_la_ficha",
       "breakpoints": true
     },
     {
       "idx": 64,
       "version": "7",
-      "when": 1795849435548,
-      "tag": "0064_reglas_fotos_y_videos",
+      "when": 1795849760155,
+      "tag": "0064_reglas_precio_de_la_ficha",
       "breakpoints": true
     },
     {
       "idx": 65,
       "version": "7",
-      "when": 1795849479627,
-      "tag": "0065_la_ia_de_fotos",
+      "when": 1795849898324,
+      "tag": "0065_las_fotos_y_videos_del_producto",
       "breakpoints": true
     },
     {
       "idx": 66,
       "version": "7",
-      "when": 1795849480627,
-      "tag": "0066_reglas_ia_de_fotos",
+      "when": 1795849899324,
+      "tag": "0066_reglas_fotos_y_videos",
       "breakpoints": true
     },
     {
       "idx": 67,
       "version": "7",
-      "when": 1795849481627,
-      "tag": "0067_reglas_uso_ia_de_fotos",
+      "when": 1795849951838,
+      "tag": "0067_la_ia_de_fotos",
       "breakpoints": true
     },
     {
       "idx": 68,
       "version": "7",
-      "when": 1795849599781,
-      "tag": "0068_lo_que_sofi_no_supo_avisa",
+      "when": 1795849952838,
+      "tag": "0068_reglas_ia_de_fotos",
       "breakpoints": true
     },
     {
       "idx": 69,
       "version": "7",
-      "when": 1795849600781,
-      "tag": "0069_reglas_lo_que_sofi_no_supo",
+      "when": 1795849953838,
+      "tag": "0069_reglas_uso_ia_de_fotos",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1795850006954,
+      "tag": "0070_lo_que_sofi_no_supo_avisa",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795850007954,
+      "tag": "0071_reglas_lo_que_sofi_no_supo",
       "breakpoints": true
     }
   ]

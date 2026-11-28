@@ -1,6 +1,6 @@
 {
-  "id": "700da59e-364e-4444-a792-cd212846566f",
-  "prevId": "a7e8d881-fc57-4cd8-93f8-178c395e6e2a",
+  "id": "54618108-5622-4fa8-aec2-50e60599a807",
+  "prevId": "28f61aad-368b-4635-8e89-4d45c6716c61",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4469,12 +4469,6 @@
           "type": "uuid[]",
           "primaryKey": false,
           "notNull": false
-        },
-        "questions_seen": {
-          "name": "questions_seen",
-          "type": "uuid[]",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -4509,7 +4503,7 @@
       "checkConstraints": {
         "push_choice_kinds_check": {
           "name": "push_choice_kinds_check",
-          "value": "\"push_choice\".\"kinds\" is null or \"push_choice\".\"kinds\" <@ array['pagos','chats','no_entregado','sofi_pedido','dinero','preguntas']::text[]"
+          "value": "\"push_choice\".\"kinds\" is null or \"push_choice\".\"kinds\" <@ array['pagos','chats','no_entregado','sofi_pedido','dinero']::text[]"
         }
       },
       "isRLSEnabled": false
@@ -6173,6 +6167,25 @@
           "notNull": true,
           "default": true
         },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pay_cents": {
+          "name": "pay_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_trip_paid": {
+          "name": "failed_trip_paid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -6277,6 +6290,10 @@
         "store_courier_name_check": {
           "name": "store_courier_name_check",
           "value": "char_length(btrim(\"store_courier\".\"name\")) between 1 and 80"
+        },
+        "store_courier_pay_check": {
+          "name": "store_courier_pay_check",
+          "value": "(\"store_courier\".\"pay_cents\" is null or \"store_courier\".\"pay_cents\" between 0 and 100000000) and (\"store_courier\".\"phone\" is null or \"store_courier\".\"phone\" ~ '^[+][1-9][0-9]{6,14}$')"
         }
       },
       "isRLSEnabled": false
@@ -6589,7 +6606,7 @@
       "checkConstraints": {
         "store_event_action_check": {
           "name": "store_event_action_check",
-          "value": "action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla','catalogo.carga')"
+          "value": "action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','invitacion.enviada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio','configuracion.tienda','configuracion.marca','catalogo.plantilla','catalogo.carga','repartidor.agregado','repartidor.cambiado','repartidor.quitado')"
         }
       },
       "isRLSEnabled": false
@@ -6750,6 +6767,30 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_at": {
+          "name": "shared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shared_by": {
+          "name": "shared_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -6826,6 +6867,10 @@
         "store_invitation_role_check": {
           "name": "store_invitation_role_check",
           "value": "role IN ('owner','admin','sales')"
+        },
+        "store_invitation_contact_check": {
+          "name": "store_invitation_contact_check",
+          "value": "(\"store_invitation\".\"name\" is null or char_length(btrim(\"store_invitation\".\"name\")) between 1 and 80) and (\"store_invitation\".\"phone\" is null or \"store_invitation\".\"phone\" ~ '^[+][1-9][0-9]{6,14}$') and ((\"store_invitation\".\"shared_at\" is null) = (\"store_invitation\".\"shared_by\" is null))"
         },
         "store_invitation_email_check": {
           "name": "store_invitation_email_check",

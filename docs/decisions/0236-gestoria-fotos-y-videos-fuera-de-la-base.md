@@ -85,6 +85,6 @@ Lo subido a Meta dura 30 días y un enlace (`link`) también vale, aunque Meta r
 
 - `gestoria/apps/api/src/archivos.ts`, `medios.ts`, `imagenes.ts`, `video.ts`, `cargas.ts`,
   `leer-hoja.ts`.
-- `gestoria/packages/db/drizzle/0063_las_fotos_y_videos_del_producto.sql` y
-  `0064_reglas_fotos_y_videos.sql`.
+- `gestoria/packages/db/drizzle/0065_las_fotos_y_videos_del_producto.sql` y
+  `0066_reglas_fotos_y_videos.sql`.
 - ADR 0203 (gestorIA es otro sistema), ADR 0206 (el stock solo con el kardex).
