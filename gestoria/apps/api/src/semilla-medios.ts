@@ -60,9 +60,9 @@ export async function seedDemoMedia(ownerDb: Db, storeId: string): Promise<strin
   )
   const checked = checkVideo(video)
   if (!checked.ok) throw new Error(`semilla: el video de ejemplo no sirve (${checked.message})`)
-  const poster = await sharp({
-    create: { width: 480, height: 480, channels: 3, background: { r: 31, g: 31, b: 31 } },
-  })
+  // El póster es la foto de la negra: lo que se ve antes de darle play.
+  const poster = await sharp(await readFile(new URL("./semilla-fotos/negra1.jpg", import.meta.url)))
+    .resize({ width: 480, height: 480, fit: "cover" })
     .jpeg({ quality: 80 })
     .toBuffer()
   const id = crypto.randomUUID()

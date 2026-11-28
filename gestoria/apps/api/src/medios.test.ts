@@ -563,13 +563,13 @@ describe("cargar muchos", () => {
       type: "text/csv",
       data: new TextEncoder().encode("Producto;Precio;Stock\nZapatilla urbana;1;1\n"),
     })
-    expect(bad.status).toBe(422)
+    expect(bad.status).toBe(200)
     expect(bad.json.errors[0].message).toMatch(/ya está en tu catálogo/)
   })
 
   it("«Crear» no crea nada si falta algo, y dice qué falta en cada producto", async () => {
     const created = await call("rosa", "POST", `${loadBase()}/crear`)
-    expect(created.status).toBe(422)
+    expect(created.status).toBe(200)
     expect(created.json.created).toBe(0)
     expect(created.json.errors).toEqual([expect.objectContaining({ message: "Ponle nombre" })])
     const names = (

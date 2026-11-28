@@ -74,6 +74,10 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   no se borra nunca. Nadie borra un
   archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
   cascada) y el servidor la borra (`emptyMediaTrash`).
+- La pantalla (`apps/web/src/ficha/fotos.tsx`, `cargar.tsx`, `lib/medios.ts`) achica la foto y
+  prepara el video en el navegador (Mediabunny) antes de subirlo; sin almacenamiento
+  (`MEDIA_OFF`) lo dice con `ErrorState` y deja seguir. Reordenar es arrastrar o «Mover»/Alt y
+  flechas; la ★ de Sofi es la foto del color en la cuadrícula.
 - «Cargar muchos» (`cargas.ts`): una carga abierta con sus productos y sus fotos; nada pasa al
   catálogo hasta «Crear», que guarda todo o nada y deja las fotos en su misma carpeta. Una carga
   creada o descartada ya no cambia. El agente no ve las cargas ni toca videos.
@@ -127,6 +131,13 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Lo que Sofi no supo (`preguntas.ts`): Sofi solo anota la pregunta; Ventas responde y propone
   guardarla; quien tiene `configuracion` la guarda en la ficha. Cada cambio de la ficha va al
   historial (`product_event`), campo por campo, con la forma de `productPatch`.
+- La pantalla de la ficha (`apps/web/src/ficha/`) es una página completa que se guarda sola: un
+  borrador (`FichaStore` de `ficha/borrador.ts`) con deshacer y rehacer, que envía solo lo que
+  cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). La
+  cuadrícula se envía sobre el stock de ahora (`rebase`): lo cambiado se suma, nunca pisa una
+  venta; si baja el stock, espera el motivo sin frenar lo demás. El margen se dibuja con el costo
+  que da el servidor solo con `costos.ver`; lo que cobraría Sofi es siempre `POST /simular`. Las
+  propuestas de la IA entran con `AiSuggestion`, nunca dibujadas a mano.
 
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 

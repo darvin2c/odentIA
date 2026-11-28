@@ -20,6 +20,7 @@ import { type ComponentType, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { DeviceNoticesPage } from "./avisos"
 import { CashPage } from "./caja"
+import { BulkLoadPage } from "./cargar"
 import { CatalogPage } from "./catalogo"
 import { CustomerPage, CustomersIndex, CustomersLayout } from "./clientes"
 import { ConfigFrame, ConfigHomePage, StoreDataPage } from "./configuracion"
@@ -32,6 +33,7 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
+import { ProductPage } from "./ficha/ficha"
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { startInstalledApp } from "./lib/avisos"
@@ -41,7 +43,6 @@ import { BrandPage } from "./marca"
 import { DeliveriesPage, PaymentMethodsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
-import { ProductPage } from "./producto"
 import { ReportsPage } from "./reportes"
 import { SofiPage } from "./sofi"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
@@ -181,6 +182,12 @@ const storeChildren = [
   ]),
   createRoute({ getParentRoute: () => storeRoute, path: "/reportes", component: ReportsPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
+  // «Cargar muchos» (ADR 0236): antes de la ficha, que toma cualquier nombre.
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/catalogo/cargar",
+    component: BulkLoadPage,
+  }),
   createRoute({
     getParentRoute: () => storeRoute,
     path: "/catalogo/$productId",

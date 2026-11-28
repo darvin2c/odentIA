@@ -40,7 +40,7 @@ Lo subido a Meta dura 30 días y un enlace (`link`) también vale, aunque Meta r
    16 MB y 30 segundos, con su póster), y recién entonces guarda. Así no hace falta CORS en el
    bucket ni quedan archivos sin revisar.
 4. **Se comprime en los dos lados.** La pantalla achica antes de subir (la foto en un lienzo; el
-   video con WebCodecs a H.264 Main sin cuadros B, AAC y `moov` al principio). El servidor guarda la
+   video con Mediabunny sobre WebCodecs, MPL-2.0, a H.264 Main sin cuadros B, AAC, hasta 720 px y `moov` al principio). El servidor guarda la
    original tal cual y arma con sharp (libvips) la miniatura (WebP, 400 px), la de la ficha y la
    vitrina (WebP, 1600 px) y la de WhatsApp (JPEG, 1600 px, sobre blanco, bajo 5 MB), sin los datos
    de la cámara. El video no se vuelve a armar en el servidor (no hay ffmpeg en la imagen ni CPU
