@@ -8,7 +8,6 @@ import {
   store,
   storeAgent,
   storeDeliveryMethod,
-  storePaymentLink,
   storePaymentMethod,
   withSessionLock,
 } from "@gestoria/db"
@@ -18,6 +17,7 @@ import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { conversationCustomerOrdersIn } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { storeClockIn } from "../hora.js"
+import { chargesOrders, linkStateIn } from "../pasarela.js"
 import { type LinkDeps, pad } from "../pedidos.js"
 import { NEGOTIATED_PRICE_MS } from "../precio.js"
 import { balancesIn } from "../saldo.js"
@@ -267,10 +267,8 @@ async function load(
       .from(storeDeliveryMethod)
       .where(and(eq(storeDeliveryMethod.storeId, storeId), eq(storeDeliveryMethod.isActive, true)))
       .orderBy(asc(storeDeliveryMethod.createdAt))
-    const [linked] = await tx
-      .select({ provider: storePaymentLink.provider })
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
+    // Se ofrece el link solo si la pasarela cobra de verdad (no en modo prueba ni sin permiso).
+    const linked = chargesOrders(await linkStateIn(tx, storeId))
     const payments = (
       await tx
         .select()
@@ -279,7 +277,7 @@ async function load(
         .orderBy(asc(storePaymentMethod.createdAt))
     )
       // Un link sin cuenta conectada no se puede cobrar: no se ofrece.
-      .filter((p) => p.collection !== "link" || Boolean(linked))
+      .filter((p) => p.collection !== "link" || linked)
       .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
     const orders = await tx
       .select()
