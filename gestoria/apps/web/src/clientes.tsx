@@ -40,6 +40,7 @@ import { HOME_KEY } from "./lib/inicio"
 import { STATE_TONE, stateName } from "./lib/pedidos"
 import { money } from "./lib/tienda"
 import { NewOrderSheet, type OrderDraft } from "./pedidos"
+import { ArgosKnows, WhenToWrite } from "./perfil"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
@@ -377,139 +378,155 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
         </PageNotice>
       ))}
 
-      <div className="flex flex-col gap-1 rounded-lg border bg-surface-muted px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Lo que sabemos
-          </h3>
-          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-            Editar
-          </Button>
-        </div>
-        {customer.note ? (
-          <>
-            <p className="whitespace-pre-line text-sm">{customer.note}</p>
-            <p className="text-xs text-muted-foreground">
-              Nota del equipo, la clienta no la ve
-              {customer.noteByName && customer.noteAt
-                ? ` · escribió ${customer.noteByName.split(" ")[0]} ${dayOf(customer.noteAt, store.timeZone)}`
-                : ""}
-            </p>
-          </>
-        ) : joinedNotes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Su talla, cómo prefiere recibir, lo que conviene recordar. Es del equipo: la clienta no
-            lo ve.
-          </p>
-        ) : null}
-        {/* Lo que se anotó en una ficha que se le unió: unir no lo mueve ni lo borra. */}
-        {joinedNotes.map((m) => (
-          <div key={m.id} className="flex flex-col gap-0.5 border-t pt-2 first:border-t-0">
-            <p className="whitespace-pre-line text-sm">{m.note}</p>
-            <p className="text-xs text-muted-foreground">
-              De la ficha que se le unió
-              {m.channels.length > 0 ? `, por ${channelsText(m.channels)}` : ""}
-            </p>
-          </div>
-        ))}
-      </div>
+      {/* En ancho, la ficha a la izquierda y «Cuándo se le puede escribir» a la derecha; en el
+          teléfono, una columna: lo que Argos sabe, cuándo escribirle y lo demás. */}
+      <div className="@container">
+        <div className="grid gap-4 @3xl:grid-cols-[minmax(0,1fr)_17rem] @3xl:items-start">
+          {customer.profile ? <ArgosKnows customer={customer} profile={customer.profile} /> : null}
+          {customer.profile ? (
+            <div className="min-w-0 @3xl:col-start-2 @3xl:row-span-2 @3xl:row-start-1">
+              <WhenToWrite profile={customer.profile} />
+            </div>
+          ) : null}
+          <div className="flex min-w-0 flex-col gap-4 @3xl:col-start-1">
+            <div className="flex flex-col gap-1 rounded-lg border bg-surface-muted px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Lo que sabemos
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+                  Editar
+                </Button>
+              </div>
+              {customer.note ? (
+                <>
+                  <p className="whitespace-pre-line text-sm">{customer.note}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Nota del equipo, la clienta no la ve
+                    {customer.noteByName && customer.noteAt
+                      ? ` · escribió ${customer.noteByName.split(" ")[0]} ${dayOf(customer.noteAt, store.timeZone)}`
+                      : ""}
+                  </p>
+                </>
+              ) : joinedNotes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Su talla, cómo prefiere recibir, lo que conviene recordar. Es del equipo: la
+                  clienta no lo ve.
+                </p>
+              ) : null}
+              {/* Lo que se anotó en una ficha que se le unió: unir no lo mueve ni lo borra. */}
+              {joinedNotes.map((m) => (
+                <div key={m.id} className="flex flex-col gap-0.5 border-t pt-2 first:border-t-0">
+                  <p className="whitespace-pre-line text-sm">{m.note}</p>
+                  <p className="text-xs text-muted-foreground">
+                    De la ficha que se le unió
+                    {m.channels.length > 0 ? `, por ${channelsText(m.channels)}` : ""}
+                  </p>
+                </div>
+              ))}
+            </div>
 
-      <Section title={customer.purchases === 1 ? "1 compra" : `${customer.purchases} compras`}>
-        {customer.orders.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no compró.</p>
-        ) : (
-          <ul className="flex flex-col divide-y">
-            {customer.orders.map((o) => (
-              <li key={o.id}>
-                <Link
-                  to="/tiendas/$id/pedidos"
-                  params={{ id: store.id }}
-                  search={{ pedido: o.id }}
-                  className="grid grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2.5 text-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset sm:grid-cols-[3rem_minmax(0,1fr)_5.5rem_auto]"
-                >
-                  <span className="font-mono tabular-nums">{o.number}</span>
-                  <span className="min-w-0">
-                    {dayOf(o.createdAt, store.timeZone)} · {o.text}
-                    {o.channel !== "otro" ? (
+            <Section
+              title={customer.purchases === 1 ? "1 compra" : `${customer.purchases} compras`}
+            >
+              {customer.orders.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Todavía no compró.</p>
+              ) : (
+                <ul className="flex flex-col divide-y">
+                  {customer.orders.map((o) => (
+                    <li key={o.id}>
+                      <Link
+                        to="/tiendas/$id/pedidos"
+                        params={{ id: store.id }}
+                        search={{ pedido: o.id }}
+                        className="grid grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2.5 text-sm transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset sm:grid-cols-[3rem_minmax(0,1fr)_5.5rem_auto]"
+                      >
+                        <span className="font-mono tabular-nums">{o.number}</span>
+                        <span className="min-w-0">
+                          {dayOf(o.createdAt, store.timeZone)} · {o.text}
+                          {o.channel !== "otro" ? (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · por {channelsText([o.channel])}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="hidden text-right tabular-nums sm:block">
+                          {money(o.totalCents, store.currency)}
+                        </span>
+                        <Badge variant={STATE_TONE[o.state]}>{stateName(o)}</Badge>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+
+            {customer.addresses.length > 0 ? (
+              <Section title="Direcciones">
+                <ul className="flex flex-col gap-1 text-sm">
+                  {customer.addresses.map((a, i) => (
+                    <li key={`${a.deliveryName}-${a.zone}-${a.address}`}>
+                      {[a.address, a.zone].filter(Boolean).join(" · ")}
                       <span className="text-muted-foreground">
                         {" "}
-                        · por {channelsText([o.channel])}
+                        · {a.deliveryName}
+                        {i === 0 ? " · la última" : ""}
                       </span>
-                    ) : null}
-                  </span>
-                  <span className="hidden text-right tabular-nums sm:block">
-                    {money(o.totalCents, store.currency)}
-                  </span>
-                  <Badge variant={STATE_TONE[o.state]}>{stateName(o)}</Badge>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            ) : null}
 
-      {customer.addresses.length > 0 ? (
-        <Section title="Direcciones">
-          <ul className="flex flex-col gap-1 text-sm">
-            {customer.addresses.map((a, i) => (
-              <li key={`${a.deliveryName}-${a.zone}-${a.address}`}>
-                {[a.address, a.zone].filter(Boolean).join(" · ")}
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {a.deliveryName}
-                  {i === 0 ? " · la última" : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
+            <Section title="Debe">
+              <p className="text-sm">
+                {customer.dueCents > 0
+                  ? `${money(customer.dueCents, store.currency)}${customer.dueOnDelivery ? " · contra entrega" : ""}`
+                  : "Nada"}
+              </p>
+            </Section>
 
-      <Section title="Debe">
-        <p className="text-sm">
-          {customer.dueCents > 0
-            ? `${money(customer.dueCents, store.currency)}${customer.dueOnDelivery ? " · contra entrega" : ""}`
-            : "Nada"}
-        </p>
-      </Section>
-
-      <Section
-        title="Historia"
-        action={
-          <Button variant="ghost" size="sm" onClick={() => setPicking(true)}>
-            Es la misma que otra ficha
-          </Button>
-        }
-      >
-        {customer.history.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Si llegó por otro canal y tiene otra ficha, únelas: lo decide una persona.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2 text-sm">
-            {customer.history.map((item) => (
-              <li key={item.id} className="flex flex-wrap items-baseline gap-x-2">
-                <span className="text-muted-foreground">
-                  {dayOf(item.createdAt, store.timeZone)} ·
-                </span>
-                <span className="min-w-0 flex-1">{historyText(item)}</span>
-                {item.separates ? (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0"
-                    onClick={() =>
-                      setSeparating({ id: item.separates as string, name: item.with.name })
-                    }
-                  >
-                    Separar
-                  </Button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+            <Section
+              title="Historia"
+              action={
+                <Button variant="ghost" size="sm" onClick={() => setPicking(true)}>
+                  Es la misma que otra ficha
+                </Button>
+              }
+            >
+              {customer.history.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Si llegó por otro canal y tiene otra ficha, únelas: lo decide una persona.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2 text-sm">
+                  {customer.history.map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="text-muted-foreground">
+                        {dayOf(item.createdAt, store.timeZone)} ·
+                      </span>
+                      <span className="min-w-0 flex-1">{historyText(item)}</span>
+                      {item.separates ? (
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0"
+                          onClick={() =>
+                            setSeparating({ id: item.separates as string, name: item.with.name })
+                          }
+                        >
+                          Separar
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+          </div>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={separating !== null}

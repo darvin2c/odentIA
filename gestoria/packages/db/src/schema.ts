@@ -1892,6 +1892,159 @@ export const stockRequest = pgTable(
 )
 
 /*
+ * El perfil de la clienta (lienzo «Clientas bien perfiladas y Argos que hace el marketing solo»,
+ * decisiones 1 a 3). Argos anota solo lo que sabe de cada clienta, de sus chats, sus pedidos y cómo
+ * responde, y cada dato dice de dónde salió y cuándo. Lo que corrige la tienda queda «Lo puso la
+ * tienda» y Argos no lo vuelve a pisar: la base se lo niega. Nada se edita ni se borra: el
+ * historial de un dato son sus filas, y el valor de hoy es la última (o la última de la tienda).
+ */
+
+/**
+ * Lo que se sabe de ella. «medida» es la talla o el tono, según cómo llame la tienda a la primera
+ * opción de su catálogo (Talla, Tono, Medida): no hay columnas por rubro. «cumpleanos» es día y
+ * mes en ISO 8601 sin año (`--MM-DD`): el año no se pide.
+ */
+export const CUSTOMER_FACT_KEYS = [
+  "medida",
+  "distrito",
+  "cumpleanos",
+  "canal",
+  "instagram",
+  "gustos",
+] as const
+export type CustomerFactKey = (typeof CUSTOMER_FACT_KEYS)[number]
+
+/** De dónde salió: lo que dijo en un chat, sus pedidos, cómo responde o la tienda que lo corrigió. */
+export const CUSTOMER_FACT_SOURCES = ["chat", "pedido", "respuesta", "tienda"] as const
+export type CustomerFactSource = (typeof CUSTOMER_FACT_SOURCES)[number]
+
+export const customerFact = pgTable(
+  "customer_fact",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    customerId: uuid("customer_id").notNull(),
+    key: text("key").$type<CustomerFactKey>().notNull(),
+    value: text("value").notNull(),
+    source: text("source").$type<CustomerFactSource>().notNull(),
+    /** El mensaje de ella de donde salió (chat): su cita está en `quote`, tal cual. */
+    messageId: uuid("message_id"),
+    /** El pedido de donde salió (pedido): la talla que lleva, la dirección de la entrega. */
+    orderId: uuid("order_id"),
+    /** Lo que dijo, tal cual (chat) o el texto del pedido de donde salió (la dirección). */
+    quote: text("quote"),
+    /**
+     * Lo que Argos no tiene claro: usa `value` y estas son las otras posibilidades («Por
+     * confirmar»). No frena nada; se resuelve cuando la tienda elige una o ella lo dice.
+     */
+    alternatives: text("alternatives").array().notNull().default(sql`'{}'::text[]`),
+    /** Quien lo anotó: `agente:argos`, o la persona del equipo que lo corrigió. */
+    actorUserId: text("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("customer_fact_key_check", inList("key", CUSTOMER_FACT_KEYS)),
+    check("customer_fact_source_check", inList("source", CUSTOMER_FACT_SOURCES)),
+    check(
+      "customer_fact_value_check",
+      sql`char_length(btrim(${table.value})) between 1 and 120 and (${table.quote} is null or char_length(${table.quote}) between 1 and 300) and cardinality(${table.alternatives}) <= 4`,
+    ),
+    // Del chat, siempre con su mensaje y su cita; de un pedido, con su pedido.
+    check(
+      "customer_fact_origin_check",
+      sql`(${table.source} <> 'chat' or (${table.messageId} is not null and ${table.quote} is not null)) and (${table.source} <> 'pedido' or ${table.orderId} is not null)`,
+    ),
+    check(
+      "customer_fact_birthday_check",
+      sql`${table.key} <> 'cumpleanos' or ${table.value} ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'`,
+    ),
+    foreignKey({
+      name: "customer_fact_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    index("customer_fact_customer_idx").on(
+      table.storeId,
+      table.customerId,
+      table.key,
+      table.createdAt,
+    ),
+  ],
+)
+
+/**
+ * Si se le pueden escribir promociones (decisión del dueño: nunca a quien no aceptó o pidió la
+ * baja). Solo se agrega; el estado vigente es la última fila. Cada fila sale de un mensaje de
+ * ella, con su cita: Sofi pide el permiso en la primera compra («si» o «no») y anota la baja
+ * cuando dice «ya no me mandes». Una baja solo la deshace otro mensaje de ella.
+ */
+export const CONSENT_STATES = ["si", "no", "baja"] as const
+export type ConsentState = (typeof CONSENT_STATES)[number]
+
+export const customerConsent = pgTable(
+  "customer_consent",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** Nula si todavía no tiene ficha (escribió, pero no compró): vale para su conversación. */
+    customerId: uuid("customer_id"),
+    conversationId: uuid("conversation_id").notNull(),
+    /** Por dónde se le pueden escribir promociones: WhatsApp (Meta no deja escribir primero por otro). */
+    channel: text("channel").$type<ConversationChannel>().notNull(),
+    state: text("state").$type<ConsentState>().notNull(),
+    /** El mensaje de ella y lo que dijo, tal cual. */
+    messageId: uuid("message_id").notNull(),
+    quote: text("quote").notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("customer_consent_state_check", inList("state", CONSENT_STATES)),
+    check("customer_consent_channel_check", inList("channel", CONVERSATION_CHANNELS)),
+    check("customer_consent_quote_check", sql`char_length(btrim(${table.quote})) between 1 and 300`),
+    foreignKey({
+      name: "customer_consent_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "customer_consent_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+    index("customer_consent_customer_idx").on(table.storeId, table.customerId, table.createdAt),
+    index("customer_consent_conversation_idx").on(
+      table.storeId,
+      table.conversationId,
+      table.createdAt,
+    ),
+  ],
+)
+
+/**
+ * Hasta dónde leyó Argos cada conversación para anotar lo que dijo la clienta: así no vuelve a
+ * leer (ni a pagar) lo mismo. Lo escribe solo Argos.
+ */
+export const argosReading = pgTable(
+  "argos_reading",
+  {
+    storeId: uuid("store_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    /** El último mensaje leído (`conversation_message.seq`). */
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.conversationId] }),
+    foreignKey({
+      name: "argos_reading_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/*
  * El acuerdo con la administración (paso B7 del lienzo B; ADR 0211 y 0212): gestorIA le avisa
  * lo que pasó y le pregunta el estado de cada tienda, firmando con su secreto.
  */
