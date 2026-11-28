@@ -36,12 +36,13 @@ import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
 import { deliveryPriceOf, freeFromOf, payOnDeliveryOf } from "./entregas.js"
 import { storeClockIn } from "./hora.js"
-import type { LinkAdapters, LinkApp } from "./link-de-pago.js"
+import { LINK_REVOKED, type LinkAdapters, type LinkApp } from "./link-de-pago.js"
 import {
   chargesOrders,
   linkStateIn,
   linkTokenIn,
   receiveTrialPayment,
+  revokeLinkIn,
   trialOf,
 } from "./pasarela.js"
 import { can } from "./permisos.js"
@@ -2501,9 +2502,34 @@ export interface LinkDeps {
   apiURL: string
   /**
    * La aplicación de gestorIA en Mercado Pago (su id y su secreto, `GESTORIA_MERCADOPAGO_*`) y
-   * adónde vuelve la persona al dar permiso. Sin ella no se conecta una cuenta nueva.
+   * adónde vuelve la persona al dar permiso. Sin ella no se entra a la cuenta: se conecta con las
+   * claves de la tienda.
    */
   app?: LinkApp | null
+  /**
+   * Deja la pasarela «sin permiso» cuando el proveedor ya no reconoce su token al usarlo (lo hace
+   * el sistema: `revokeLinkIn` con el dueño de la base; lo pone `createApp`).
+   */
+  revoke?: (storeId: string, accessTokenEnc: string) => Promise<void>
+}
+
+/**
+ * Llama al proveedor con el token de la tienda: si ya no lo reconoce, la pasarela queda «sin
+ * permiso» (`deps.revoke`) antes de decirlo, y la pantalla de Cobros dice cómo arreglarlo.
+ */
+export async function withLinkToken<T>(
+  deps: LinkDeps,
+  storeId: string,
+  accessTokenEnc: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn()
+  } catch (error) {
+    if (error instanceof StoreError && error.code === LINK_REVOKED)
+      await deps.revoke?.(storeId, accessTokenEnc)
+    throw error
+  }
 }
 
 export function linkNotificationURL(deps: LinkDeps, storeId: string): string {
@@ -2590,25 +2616,29 @@ export async function createPaymentLinkWith(
       )
     const connection = link.row
     const { name, currency } = await storeRow(tx, storeId)
+    const sealed = await linkTokenIn(tx, storeId)
     return {
       order,
       connection,
       name,
       currency,
-      token: openSecret(deps.secretsKey, storeId, await linkTokenIn(tx, storeId)),
+      sealed,
+      token: openSecret(deps.secretsKey, storeId, sealed),
     }
   })
   if ("url" in prepared) return { url: prepared.url }
-  const { order, connection, name, currency, token } = prepared
-  const link = await deps.adapters[connection.provider].create(token, {
-    id: order.id,
-    number: pad(order.number),
-    storeName: name,
-    totalCents: order.totalCents,
-    currency,
-    expiresAt: order.priceExpiresAt,
-    notificationURL: linkNotificationURL(deps, storeId),
-  })
+  const { order, connection, name, currency, sealed, token } = prepared
+  const link = await withLinkToken(deps, storeId, sealed, () =>
+    deps.adapters[connection.provider].create(token, {
+      id: order.id,
+      number: pad(order.number),
+      storeName: name,
+      totalCents: order.totalCents,
+      currency,
+      expiresAt: order.priceExpiresAt,
+      notificationURL: linkNotificationURL(deps, storeId),
+    }),
+  )
   return run(async (tx) => {
     const current = await lockOrder(tx, storeId, orderId)
     if (current.state !== "por_pagar") throw stateError(current)
@@ -2662,10 +2692,15 @@ export async function receiveLinkNotice(
   if (notice.kind === "ignorar") return done
   // Si el proveedor no responde, el error sube y el aviso vuelve a llegar (leer es seguro). Un
   // pago que su cuenta no conoce (de otra cuenta, o inventado) no se puede leer: no se anota.
-  const payment = await adapter.payment(
-    openSecret(deps.secretsKey, storeId, connection.accessTokenEnc),
-    notice.ref,
-  )
+  const payment = await adapter
+    .payment(openSecret(deps.secretsKey, storeId, connection.accessTokenEnc), notice.ref)
+    .catch(async (error: unknown) => {
+      // Ya no reconoce el token: «sin permiso», y el aviso no vuelve sin fin.
+      if (!(error instanceof StoreError && error.code === LINK_REVOKED)) throw error
+      await revokeLinkIn(ownerDb, deps, storeId, connection.accessTokenEnc)
+      return "sin_permiso" as const
+    })
+  if (payment === "sin_permiso") return done
   // El link de prueba de S/ 1 de la tienda (Cobros): no es un pedido.
   const trialId = trialOf(payment?.orderId ?? null)
   if (payment && trialId) {

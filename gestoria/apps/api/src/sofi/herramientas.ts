@@ -34,6 +34,7 @@ import {
   slotWords,
 } from "../entregas.js"
 import { momentWords } from "../hora.js"
+import { LINK_REVOKED } from "../link-de-pago.js"
 import { chargesOrders, linkStateIn } from "../pasarela.js"
 import {
   addReceiptIn,
@@ -1203,7 +1204,10 @@ async function paymentLink(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.li
     // Sin link (no conectado, en modo prueba o en «Probar a Sofi»), el pedido sigue en pie: que
     // no lo vuelva a armar para cobrarlo de otra forma.
     const keep = `El pedido ${pad(order.number)} ya está anotado: no lo vuelvas a armar. Ofrece la siguiente forma de cobro de la tienda en ese mismo pedido`
-    if (error instanceof StoreError && error.code === "LINK_NOT_CONNECTED")
+    if (
+      error instanceof StoreError &&
+      (error.code === "LINK_NOT_CONNECTED" || error.code === LINK_REVOKED)
+    )
       throw new ToolProblem(`La tienda no tiene link de pago. ${keep}`, "SIN_LINK")
     if (
       error instanceof StoreError &&

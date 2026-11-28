@@ -22,13 +22,14 @@ import {
   CreditCard,
   ExternalLink,
   ImageUp,
+  KeyRound,
   Plus,
   Trash2,
 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ToggleField } from "./campos"
-import { api } from "./lib/api"
+import { ApiError, api } from "./lib/api"
 import {
   type Bank,
   cciCheck,
@@ -54,8 +55,8 @@ import { StoreHeader, useStoreContext } from "./tiendas"
 /**
  * Configuración › Cobros (lienzo «gestorIA · Configuración, de nuevo», tablero 6): las dos formas
  * de cobrar, una debajo de la otra. Arriba, el link que la clienta paga con Yape o tarjeta y que la
- * pasarela confirma sola (Mercado Pago, conectado entrando a la cuenta, con su modo prueba de
- * S/ 1). Abajo, lo que confirma una persona: Yape y Plin con su celular, su titular y su QR, la
+ * pasarela confirma sola (Mercado Pago, conectado entrando a la cuenta o con las claves de la
+ * tienda, con su modo prueba de S/ 1). Abajo, lo que confirma una persona: Yape y Plin con su celular, su titular y su QR, la
  * transferencia con su banco y su CCI, y lo que se cobra al recibir. Al pie, la regla de siempre:
  * quién confirma cada pago y cuándo se entrega. Lo cambia quien tiene `configuracion`; soporte lo
  * mira sin cambiarlo.
@@ -372,9 +373,15 @@ function LinkCard({
     trial.mutate()
   }
   const [removing, setRemoving] = useState(false)
+  // El cajón de las claves: para conectar en prueba o para «Cobrar de verdad».
+  const [keys, setKeys] = useState<"prueba" | "real" | null>(null)
   const data = status.data
   const connection = data?.connection ?? null
   const fee = feeText(currency)
+  // Entrar a la cuenta necesita la aplicación de gestorIA en Mercado Pago; si no está, o si la
+  // tienda se conectó con sus claves, todo sigue por las claves.
+  const byKeys = !data?.accountDoor || connection?.via === "claves"
+  const reconnect = (mode: "prueba" | "real") => (byKeys ? setKeys(mode) : connect.mutate(mode))
 
   let body: ReactNode
   if (status.isPending) body = <LoadingState message="Mirando cómo está tu Mercado Pago…" />
@@ -402,30 +409,47 @@ function LinkCard({
           </div>
         </div>
         {canEdit ? (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Button
-              className="bg-[#00b1ea] text-white hover:bg-[#009fd3]"
-              disabled={connect.isPending}
-              onClick={() => connect.mutate("prueba")}
-            >
-              {connect.isPending ? "Abriendo Mercado Pago…" : "Conectar con Mercado Pago"}
-            </Button>
-            <a
-              href="https://www.mercadopago.com.pe"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary hover:underline"
-            >
-              ¿No tienes cuenta? Créala gratis en Mercado Pago, con tu DNI.
-            </a>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Button
+                className="bg-[#00b1ea] text-white hover:bg-[#009fd3]"
+                disabled={connect.isPending}
+                onClick={() => reconnect("prueba")}
+              >
+                {byKeys ? <KeyRound aria-hidden /> : null}
+                {byKeys
+                  ? "Conectar con mis claves"
+                  : connect.isPending
+                    ? "Abriendo Mercado Pago…"
+                    : "Conectar con Mercado Pago"}
+              </Button>
+              <a
+                href="https://www.mercadopago.com.pe"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary hover:underline"
+              >
+                ¿No tienes cuenta? Créala gratis en Mercado Pago, con tu DNI.
+              </a>
+            </div>
+            {data?.accountDoor ? (
+              <button
+                type="button"
+                className="w-fit text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                onClick={() => setKeys("prueba")}
+              >
+                ¿Prefieres usar tus propias claves?
+              </button>
+            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">Lo conecta el Dueño o un Administrador.</p>
         )}
         <p className="text-xs text-muted-foreground">
-          Entras con tu cuenta y das permiso para crear links de pago y ver si se pagaron. No copias
-          ninguna clave. Empieza en modo prueba, con un link de{" "}
-          {money(trialCents(currency), currency)}.
+          {data?.accountDoor
+            ? "Entras con tu cuenta y das permiso para crear links de pago y ver si se pagaron. No copias ninguna clave."
+            : "Copias una clave de tu panel de Mercado Pago y la pegas aquí: te guiamos paso a paso, sin saber programar."}{" "}
+          Empieza en modo prueba, con un link de {money(trialCents(currency), currency)}.
         </p>
       </div>
     )
@@ -451,6 +475,9 @@ function LinkCard({
             </span>
             <span className="text-sm text-muted-foreground">
               {[
+                connection.via === "claves"
+                  ? "Conectada con tus claves"
+                  : "Conectada entrando a tu cuenta",
                 connection.account ? `Cuenta ${connection.account}` : null,
                 "Yape y tarjeta en el link",
               ]
@@ -462,10 +489,7 @@ function LinkCard({
           {canEdit ? (
             <div className="flex flex-wrap gap-2">
               {broken ? (
-                <Button
-                  disabled={connect.isPending}
-                  onClick={() => connect.mutate(connection.mode)}
-                >
+                <Button disabled={connect.isPending} onClick={() => reconnect(connection.mode)}>
                   Volver a conectar
                 </Button>
               ) : test ? (
@@ -480,7 +504,7 @@ function LinkCard({
                       ? "Creando el link…"
                       : `Probar con ${money(trialCents(currency), currency)}`}
                   </Button>
-                  <Button disabled={connect.isPending} onClick={() => connect.mutate("real")}>
+                  <Button disabled={connect.isPending} onClick={() => reconnect("real")}>
                     Cobrar de verdad
                   </Button>
                 </>
@@ -492,7 +516,9 @@ function LinkCard({
           <p role="status" className="rounded-lg bg-danger-soft px-3 py-2 text-sm">
             {connection.state === "vencida"
               ? "Mercado Pago ya no deja usar la conexión: venció su permiso. Vuelve a conectar para seguir cobrando con link; mientras tanto, los pedidos se cobran a tu número o al recibir."
-              : "Quitaste el permiso de gestorIA en Mercado Pago. Los links ya no se confirman solos: vuelve a conectar o cobra a tu número."}
+              : connection.via === "claves"
+                ? "Mercado Pago ya no reconoce tus claves: pudiste cambiarlas o borrar tu aplicación en su panel. Toca «Volver a conectar» y pega el Access Token de nuevo; mientras tanto, cobra a tu número o al recibir."
+                : "Quitaste el permiso de gestorIA en Mercado Pago. Los links ya no se confirman solos: vuelve a conectar o cobra a tu número."}
           </p>
         ) : test ? (
           <TrialPanel trial={data?.trial ?? null} currency={currency} />
@@ -544,7 +570,176 @@ function LinkCard({
           onClose={() => setRemoving(false)}
         />
       ) : null}
+      {keys ? (
+        <KeysDrawer
+          storeId={storeId}
+          currency={currency}
+          mode={keys}
+          onClose={() => setKeys(null)}
+        />
+      ) : null}
     </section>
+  )
+}
+
+/** El panel de Mercado Pago Developers, donde la tienda tiene su aplicación y sus credenciales. */
+const MP_PANEL = "https://www.mercadopago.com.pe/developers/panel/app"
+
+const keysShape = z.object({ accessToken: z.string() })
+
+/**
+ * «Usar mis propias claves»: la tienda copia el Access Token de su aplicación en Mercado Pago
+ * Developers y lo pega. Los pasos usan los nombres que ve en su panel. «Probar» pregunta a Mercado
+ * Pago de qué cuenta es, sin guardar; conectar lo vuelve a revisar. Lo pegado nunca vuelve: el
+ * servidor lo guarda cifrado.
+ */
+function KeysDrawer({
+  storeId,
+  currency,
+  mode,
+  onClose,
+}: {
+  storeId: string
+  currency: string
+  mode: "prueba" | "real"
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const real = mode === "real"
+  // «Probar» y conectar mandan lo mismo; solo cambia si se guarda.
+  const sendKeys = (path: string) => (accessToken: string) =>
+    api<{ account: string | null }>(`/api/tiendas/${storeId}/link-de-pago/${path}`, {
+      method: "POST",
+      body: { mode, accessToken },
+    })
+  const save = useMutation({ mutationFn: sendKeys("claves") })
+  // Lo que dijo «Probar», para el token que se probó: si cambia lo pegado, ya no vale.
+  const [tried, setTried] = useState<{ token: string; account: string | null } | null>(null)
+  const form = useAppForm({
+    defaultValues: { accessToken: "" },
+    validators: { onSubmit: keysShape },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value.accessToken)
+      await queryClient.invalidateQueries({ queryKey: LINK_KEY(storeId) })
+      toast.success(
+        real
+          ? "Listo: ya cobras de verdad con Mercado Pago"
+          : "Mercado Pago conectado en modo prueba",
+      )
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form)
+  const token = useStore(form.store, (s) => s.values.accessToken).trim()
+  const probe = useMutation({
+    mutationFn: sendKeys("claves/probar"),
+    onSuccess: ({ account }, accessToken) => {
+      clearSubmitErrors(form, (name) => name === "accessToken")
+      setTried({ token: accessToken, account })
+    },
+    onError: (error) => {
+      setTried(null)
+      const fields = error instanceof ApiError ? error.shape.fields : {}
+      if (fields.accessToken) addSubmitErrors(form, { accessToken: fields.accessToken })
+      else toast.error(submitErrorMessage(error))
+    },
+  })
+  const proven = tried && tried.token === token ? tried : null
+  const where = real ? "Producción" : "Prueba"
+
+  return (
+    <FormDrawer
+      {...surface}
+      open
+      title={real ? "Cobrar de verdad con tus claves" : "Conectar con tus claves"}
+      description={
+        real
+          ? "Con el Access Token de producción, Sofi ofrece el link y cada pedido pagado queda pagado solo."
+          : `Con el Access Token de prueba nada se cobra de verdad: pruebas con un link de ${money(trialCents(currency), currency)}.`
+      }
+      onClose={onClose}
+      submitLabel={real ? "Cobrar de verdad" : "Conectar en modo prueba"}
+    >
+      <FieldGroup className="gap-5">
+        <ol className="flex flex-col gap-3 text-sm">
+          <KeysStep n={1}>
+            Entra a tu panel de Mercado Pago Developers con tu cuenta de Mercado Pago y abre{" "}
+            {"«Tus integraciones»"}.{" "}
+            <a
+              href={MP_PANEL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              Abrir mi panel
+              <ExternalLink aria-hidden className="size-3.5" />
+            </a>
+          </KeysStep>
+          <KeysStep n={2}>
+            Elige tu aplicación. Si todavía no tienes una, créala con el nombre de tu tienda y elige
+            Checkout Pro.
+          </KeysStep>
+          <KeysStep n={3}>
+            En el menú de la izquierda abre «Credenciales» y, arriba, elige «{where}».
+            {real
+              ? " Si te pide «Activar ambiente de producción», complétalo con el rubro y la web de tu tienda."
+              : null}
+          </KeysStep>
+          <KeysStep n={4}>Copia el «Access Token» (no la «Public Key») y pégalo aquí.</KeysStep>
+        </ol>
+        <form.AppField name="accessToken">
+          {(field) => (
+            <field.TextField
+              label={real ? "Access Token de producción" : "Access Token de prueba"}
+              placeholder="APP_USR-…"
+              autoComplete="off"
+              spellCheck={false}
+              inputClassName="font-mono text-xs"
+              description="Lo guardamos cifrado y no se vuelve a mostrar. gestorIA lo usa solo para crear tus links de pago y ver si se pagaron."
+            />
+          )}
+        </form.AppField>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!token || probe.isPending}
+            aria-busy={probe.isPending || undefined}
+            onClick={() => probe.mutate(token)}
+          >
+            {probe.isPending ? "Preguntando a Mercado Pago…" : "Probar"}
+          </Button>
+          <span role="status" className="text-sm">
+            {proven ? (
+              <span className="inline-flex items-center gap-1.5 text-success">
+                <Check aria-hidden className="size-4 shrink-0" />
+                {proven.account
+                  ? `Sirve: es la cuenta ${proven.account}`
+                  : "Sirve: Mercado Pago la reconoce"}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                Pregunta a Mercado Pago si sirve y de qué cuenta es, sin guardar.
+              </span>
+            )}
+          </span>
+        </div>
+      </FieldGroup>
+    </FormDrawer>
+  )
+}
+
+function KeysStep({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span
+        aria-hidden
+        className="flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold"
+      >
+        {n}
+      </span>
+      <span className="min-w-0 pt-0.5">{children}</span>
+    </li>
   )
 }
 

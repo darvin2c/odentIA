@@ -316,6 +316,20 @@
       "when": 1795849090305,
       "tag": "0060_reglas_equipo_y_repartidores",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795867224886,
+      "tag": "0061_pasarela_con_claves",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795867234127,
+      "tag": "0062_reglas_pasarela_con_claves",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { crc32, deflateSync } from "node:zlib"
 import { type Db, storePaymentLink, storePaymentMethod, storePaymentQr } from "@gestoria/db"
 import { and, eq, inArray } from "drizzle-orm"
+import { DEMO_PROVIDER_USER } from "./pasarela.js"
 import { readSecretsKey, sealSecret } from "./secretos.js"
 
 /**
@@ -101,6 +102,9 @@ export async function seedDemoPayments(
       })
       .onConflictDoNothing()
   if (!secretsKey) return
+  // Conectada con sus claves (el Access Token de prueba de su propia aplicación), como se conecta
+  // hoy sin la aplicación de gestorIA en Mercado Pago. El token es inventado: con la cuenta de la
+  // demo (`DEMO_PROVIDER_USER`) nunca se revisa ni queda «sin permiso».
   const token = "TEST-0000000000000000-semilla-calzados-rosa"
   await tx
     .insert(storePaymentLink)
@@ -108,10 +112,9 @@ export async function seedDemoPayments(
       storeId,
       provider: "mercadopago",
       accessTokenEnc: sealSecret(secretsKey, storeId, token),
-      refreshTokenEnc: sealSecret(secretsKey, storeId, "TG-semilla-calzados-rosa"),
-      expiresAt: new Date(Date.now() + 180 * 86_400_000),
+      connectedWith: "claves",
       mode: "prueba",
-      providerUserId: "0",
+      providerUserId: DEMO_PROVIDER_USER,
       accountLabel: "rosa.quispe@…",
       hint: token.slice(-4),
       connectedBy: OWNER,
