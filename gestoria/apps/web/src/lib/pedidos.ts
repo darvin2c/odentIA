@@ -313,6 +313,17 @@ export function missedReason(order: Pick<OrderDetail, "state" | "events">): stri
   return last?.action === "no_entregado" ? String(last.detail.motivo ?? "") : null
 }
 
+/** Cuántas veces ya volvió sin entregar (cada «No se entregó» de su historia). */
+export function missedTrips(order: Pick<OrderDetail, "events">): number {
+  return order.events.filter((e) => e.action === "no_entregado").length
+}
+
+/** Lo que se dice al anotar otro «No se entregó»: si es la primera vez en este pedido. */
+export function missedTripsText(before: number): string {
+  if (before === 0) return "Es la primera vez que este pedido no se entrega."
+  return `Este pedido ya no se entregó ${before === 1 ? "1 vez" : `${before} veces`}: este es el viaje ${before + 1}.`
+}
+
 export interface SellableVariant {
   id: string
   productName: string

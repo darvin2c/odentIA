@@ -439,7 +439,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "no-se-entrego",
         q: "¿Qué hago si un pedido volvió sin entregar?",
         a: [
-          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
+          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Arriba te recuerda la regla de la tienda si la clienta no está y si es la primera vez que ese pedido no se entrega. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
           "Hasta que vuelva a salir, aparece primero en Despachos, en «No se entregó», con su motivo y lo que hay que cobrar.",
         ],
         needs: "entregas",
@@ -577,9 +577,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Entregas: eliges desde qué distrito despachas y «Usar la plantilla de Lima» (los 50 distritos de Lima y el Callao en 6 zonas, con precios de partida que cambias) o «Prefiero armarlas yo». Los distritos se eligen en el mapa (tocas uno y eliges su zona o «No entrego ahí») o en la lista de cada zona; un distrito está en una sola zona.",
+          "En Configuración, en Entregas. Mientras no tienes zonas, eliges desde qué distrito despachas y «Usar la plantilla de Lima» (los 50 distritos de Lima y el Callao en 6 zonas, con precios de partida que cambias) o «Prefiero armarlas yo». Con las zonas ya hechas esos botones no están: los distritos se cambian en el mapa (tocas uno y eliges su zona o «No entrego ahí») o en la lista de cada zona, con «Editar», y una zona nueva (por ejemplo, solo para Lurín) con «Agregar zona». Un distrito está en una sola zona.",
           "Cada zona, con «Editar»: su precio, cuándo llega (hoy antes de una hora, al día siguiente o en días fijos), sus franjas, si acepta pago al recibir y si tiene envío gratis. En «Reglas», desde qué compra es gratis, quién paga si la clienta no está y dónde se paga al recibir. Sofi cotiza con el distrito de la clienta.",
-          "El recojo y la agencia van en sus tarjetas («Agregar recojo», «Agregar agencia»). Las franjas, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin. Son opcionales: un pedido sin franja sale igual.",
+          "El recojo y la agencia van en sus tarjetas («Agregar recojo», «Agregar agencia»). A una clienta de provincia, Sofi le nombra tus agencias, le dice lo que cobras por llevarlo y quién paga el flete, y le pide la ciudad, la agencia de destino y el nombre y DNI de quien recoge. Las franjas, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin. Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
         screen: "entregas",
