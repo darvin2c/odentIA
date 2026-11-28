@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, choose, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Cambiar o devolver después de entregar, en un navegador (lienzo «gestorIA como odentIA», tablero
@@ -150,15 +150,15 @@ test("Andrea cambia la 38 por la 39 con un pedido nuevo, sin tocar el entregado"
 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
-  const sheet = page.getByRole("dialog", { name: `Pedido ${order.number} · Andrea Castillo` })
+  const sheet = surface(page, `Pedido ${order.number} · Andrea Castillo`)
   await expect(sheet).toBeVisible()
   await sheet.getByRole("button", { name: "Cambio o devolución" }).click()
-  const form = page.getByRole("dialog", { name: `Cambio o devolución · ${order.number}` })
+  const form = surface(page, `Cambio o devolución · ${order.number}`)
   await expect(form).toBeVisible()
   // Lo único que llevó ya va marcado; falta el motivo y lo que se lleva.
   await expect(form.getByRole("checkbox", { name: /Sandalia de cambio 38/ })).toBeChecked()
-  await form.getByLabel("¿Por qué?").selectOption("Le quedó chica")
-  await form.getByLabel("Se lleva", { exact: true }).selectOption(setup.t39)
+  await form.getByRole("radio", { name: "Le quedó chica" }).click()
+  await choose(form.getByLabel("Se lleva", { exact: true }), /^Sandalia de cambio · 39 —/)
   await expect(form.getByText("De la 39 quedan 3.")).toBeVisible()
   const summary = form.locator("section[aria-live]")
   await expect(summary.getByText(/Diferencia S\/\s0/)).toBeVisible()
@@ -171,7 +171,7 @@ test("Andrea cambia la 38 por la 39 con un pedido nuevo, sin tocar el entregado"
   await expect(form).toHaveCount(0)
 
   // El cambio: un pedido nuevo, enlazado, con lo que vuelve y lo que falta cobrar.
-  const change = page.getByRole("dialog", { name: /· Andrea Castillo$/ })
+  const change = surface(page, /· Andrea Castillo$/)
   await expect(change.getByText(`Cambio del ${order.number}.`, { exact: false })).toBeVisible()
   await expect(change.getByText("Vuelve: Sandalia de cambio 38")).toBeVisible()
   await expect(change.getByText("Le quedó chica", { exact: false }).first()).toBeVisible()
@@ -180,13 +180,16 @@ test("Andrea cambia la 38 por la 39 con un pedido nuevo, sin tocar el entregado"
   if (id) made.push(id)
   await noSideScroll(page)
   await shot(page, "cambio-creado-escritorio")
+  // En el teléfono, en cajón: la columna se decide al abrir, no al achicar la ventana.
   await page.setViewportSize(PHONE)
+  await page.reload()
+  await expect(change.getByText("Vuelve: Sandalia de cambio 38")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "cambio-creado-telefono")
 
   // El entregado sigue igual, y dice en qué pedido está su cambio.
   await change.getByRole("link", { name: order.number }).click()
-  const original = page.getByRole("dialog", { name: `Pedido ${order.number} · Andrea Castillo` })
+  const original = surface(page, `Pedido ${order.number} · Andrea Castillo`)
   await expect(original.getByText(/Cambio en el \d+/)).toBeVisible()
   await expect(original.getByText("S/ 139", { exact: true }).first()).toBeVisible()
   await noSideScroll(page)
@@ -199,10 +202,10 @@ test("Fiorella devuelve la suya y la tienda anota lo que le devolvió", async ({
 
   await page.setViewportSize(PHONE)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
-  const sheet = page.getByRole("dialog", { name: `Pedido ${order.number} · Fiorella Quispe` })
+  const sheet = surface(page, `Pedido ${order.number} · Fiorella Quispe`)
   await sheet.getByRole("button", { name: "Cambio o devolución" }).click()
-  const form = page.getByRole("dialog", { name: `Cambio o devolución · ${order.number}` })
-  await form.getByLabel("¿Por qué?").selectOption("Llegó fallado")
+  const form = surface(page, `Cambio o devolución · ${order.number}`)
+  await form.getByRole("radio", { name: "Llegó fallado" }).click()
   await form.getByRole("radio", { name: "Nada: es una devolución" }).click()
   await form.getByRole("radio", { name: "Lo paga la tienda" }).click()
   const summary = form.locator("section[aria-live]")
@@ -214,13 +217,13 @@ test("Fiorella devuelve la suya y la tienda anota lo que le devolvió", async ({
   await form.getByRole("button", { name: "Crear la devolución" }).click()
   await expect(form).toHaveCount(0)
 
-  const refund = page.getByRole("dialog", { name: /· Fiorella Quispe$/ })
+  const refund = surface(page, /· Fiorella Quispe$/)
   await expect(refund.getByText("Es una devolución: no se lleva nada.")).toBeVisible()
   await expect(refund.getByText("Falta devolver S/ 129.", { exact: false }).first()).toBeVisible()
   await refund.getByRole("button", { name: "Anotar la devolución" }).click()
   const dialog = page.getByRole("alertdialog")
   await expect(dialog.getByLabel("Devolver")).toHaveValue("129")
-  await dialog.getByLabel("Medio").selectOption(setup.yape)
+  await choose(dialog.getByLabel("Medio"), /^Yape/)
   await noSideScroll(page)
   await shot(page, "devolucion-anotar-telefono")
   await dialog.getByRole("button", { name: "Anotar la devolución" }).click()

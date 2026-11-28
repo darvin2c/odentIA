@@ -1,5 +1,6 @@
 import {
   accountCopy,
+  createAppDb,
   createOwnerDb,
   type Db,
   store,
@@ -19,6 +20,7 @@ import { seedDemoDispatch } from "./semilla-despachos.js"
 import { seedDemoSheet } from "./semilla-ficha.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
+import { seedDemoProfiles } from "./semilla-perfil.js"
 import {
   DEMO_NEW_STORE_ID,
   DEMO_NEW_STORE_OWNER,
@@ -368,6 +370,10 @@ if (isMain) {
     throw new Error("GESTORIA_DATABASE_URL es obligatoria para sembrar la tienda de ejemplo")
   const db = createOwnerDb(url, { max: 1 })
   await seedDemoStore(db, process.env.GESTORIA_SEMILLA_CORREO)
+  // El perfil de las clientas lo anotan Sofi, Argos y Lucía con sus reglas: con la base de la app.
+  const appUrl = process.env.GESTORIA_APP_DATABASE_URL
+  if (appUrl) await seedDemoProfiles(db, createAppDb(appUrl, { max: 1 }), DEMO_STORE_ID)
+  else console.warn("gestoria: sin GESTORIA_APP_DATABASE_URL, las clientas quedan sin perfil")
   console.log("gestoria: Calzados Rosa lista")
   process.exit(0)
 }

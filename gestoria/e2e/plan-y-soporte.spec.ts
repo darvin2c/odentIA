@@ -1,8 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, type Who } from "./entorno"
-import { surface } from "./superficie"
+import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, surface, type Who } from "./entorno"
 
 /**
  * Lo nuevo de gestorIA en un navegador (ADR 0214), contra su servidor y su base de verdad:
@@ -73,7 +72,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   await page.keyboard.press("Escape")
   // La Ayuda de la cabecera se abre al lado; escribir a soporte dice la pantalla y el rol.
   await page.getByRole("button", { name: "Ayuda", exact: true }).click()
-  const help = surface(page, { name: "Ayuda", exact: true })
+  const help = surface(page, "Ayuda")
   await help.getByRole("button", { name: "Escribir a soporte de gestorIA" }).click()
   const asking = help.getByRole("region", { name: "Escribir a soporte de gestorIA" })
   await expect(asking.getByLabel("Tu mensaje para gestorIA")).toBeFocused()
@@ -91,7 +90,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   const upload = page.getByRole("button", { name: "Subir comprobante" })
   await upload.focus()
   await page.keyboard.press("Enter")
-  const sheet = page.getByRole("dialog", { name: "Subir comprobante" })
+  const sheet = surface(page, "Subir comprobante")
   await expect(sheet).toBeVisible()
   await expect(sheet.getByText("Yapea al 999 000 000 y sube la captura.")).toBeVisible()
   // Dice ser un PDF y no lo es: el servidor mira el contenido.
@@ -121,7 +120,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   await noSideScroll(page)
   await shot(page, "plan-telefono")
   await page.getByRole("button", { name: "Subir comprobante" }).click()
-  await expect(page.getByRole("dialog", { name: "Subir comprobante" })).toBeVisible()
+  await expect(surface(page, "Subir comprobante")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "comprobante-hoja-telefono")
 })
@@ -130,7 +129,11 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/catalogo`)
-  await expect(page.getByText("Ana de Soporte pide mirar tu tienda 30 minutos")).toBeVisible()
+  // El pedido sale una sola vez, en la franja de arriba, y se responde en Equipo y repartidores.
+  const strip = page.getByRole("region", { name: "Soporte de gestorIA" })
+  await expect(strip.getByText("Ana de Soporte pide mirar tu tienda 30 minutos")).toBeVisible()
+  await strip.getByRole("link", { name: "Revisar" }).click()
+  await expect(page).toHaveURL(/\/configuracion\/equipo$/)
   // La caja dice qué verá, desde cuándo corren los minutos y quién puede pedirlo.
   // (El mismo texto va plegado para el celular: se mira el que se ve en escritorio.)
   await expect(
@@ -190,7 +193,7 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await expect(page).toHaveURL(/\/catalogo$/)
   // Soporte pregunta a la guía, pero no se escribe a sí mismo ni tiene casos.
   await page.getByRole("button", { name: "Ayuda", exact: true }).click()
-  const help = surface(page, { name: "Ayuda", exact: true })
+  const help = surface(page, "Ayuda")
   await expect(help.getByText("Estás en Catálogo")).toBeVisible()
   await expect(help.getByRole("button", { name: /Escribir a soporte/ })).toHaveCount(0)
   await expect(help.getByRole("region", { name: "Tus casos con soporte" })).toHaveCount(0)
@@ -204,6 +207,14 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await page.setViewportSize(PHONE)
   await noSideScroll(page)
   await shot(page, "soporte-mirando-telefono")
+  // En Tu marca solo mira: no se le ofrece soltar ni pegar con Ctrl + V.
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/configuracion/marca`)
+  await expect(page.getByRole("heading", { name: "Tu marca" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Portada" })).toBeVisible()
+  await expect(page.getByText(/Ctrl \+ V/)).toHaveCount(0)
+  await expect(page.getByText(/Suelta/)).toHaveCount(0)
+  await shot(page, "soporte-marca-escritorio")
 
   await as("rosa")
   await page.setViewportSize(DESKTOP)
@@ -253,7 +264,7 @@ test("la Ayuda responde con la guía para tu rol, y lo que escribes a soporte qu
   await page.goto(`${BASE}/pedidos`)
   // En la cabecera, para todos; se abre al lado de la página y sabe dónde estás.
   await page.getByRole("button", { name: "Ayuda", exact: true }).click()
-  const help = surface(page, { name: "Ayuda", exact: true })
+  const help = surface(page, "Ayuda")
   await expect(help.getByText("Estás en Pedidos")).toBeVisible()
   await expect(
     help.getByRole("region", { name: "En esta pantalla suelen preguntar" }),
@@ -298,7 +309,7 @@ test("a Ventas la Ayuda le dice lo que su rol no hace, y solo ve sus propios cas
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos`)
   await page.getByRole("button", { name: "Ayuda", exact: true }).click()
-  const help = surface(page, { name: "Ayuda", exact: true })
+  const help = surface(page, "Ayuda")
   const plan = await askHelp(help, "¿Dónde veo mi plan y lo que se me cobró?")
   await expect(plan).toContainText(
     "Con tu rol (Ventas) no se puede: pídeselo a quien sí puede. Lo puede hacer: Dueño.",

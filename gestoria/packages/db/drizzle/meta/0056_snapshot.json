@@ -1,6 +1,6 @@
 {
-  "id": "795a274c-39eb-4b6e-b794-64ed3bedb932",
-  "prevId": "85de2dbb-8005-4f8f-9313-9d3276487069",
+  "id": "b8343afa-913a-4be6-b906-f4a325934654",
+  "prevId": "fd73d2ef-7b12-4c13-82c0-0e421d761dd0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -6390,6 +6390,401 @@
         "store_template_field_values_check": {
           "name": "store_template_field_values_check",
           "value": "(\"store_template_field\".\"options\" is null or cardinality(\"store_template_field\".\"options\") between 1 and 20) and (\"store_template_field\".\"columns\" is null or cardinality(\"store_template_field\".\"columns\") between 1 and 6) and (\"store_template_field\".\"unit\" is null or char_length(btrim(\"store_template_field\".\"unit\")) between 1 and 12)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.argos_reading": {
+      "name": "argos_reading",
+      "schema": "",
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "argos_reading_conversation_fkey": {
+          "name": "argos_reading_conversation_fkey",
+          "tableFrom": "argos_reading",
+          "columnsFrom": [
+            "store_id",
+            "conversation_id"
+          ],
+          "tableTo": "conversation",
+          "columnsTo": [
+            "store_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {
+        "argos_reading_store_id_conversation_id_pk": {
+          "name": "argos_reading_store_id_conversation_id_pk",
+          "columns": [
+            "store_id",
+            "conversation_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.customer_consent": {
+      "name": "customer_consent",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quote": {
+          "name": "quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "customer_consent_customer_idx": {
+          "name": "customer_consent_customer_idx",
+          "columns": [
+            {
+              "expression": "store_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "customer_consent_conversation_idx": {
+          "name": "customer_consent_conversation_idx",
+          "columns": [
+            {
+              "expression": "store_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "customer_consent_customer_fkey": {
+          "name": "customer_consent_customer_fkey",
+          "tableFrom": "customer_consent",
+          "columnsFrom": [
+            "store_id",
+            "customer_id"
+          ],
+          "tableTo": "customer",
+          "columnsTo": [
+            "store_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "customer_consent_conversation_fkey": {
+          "name": "customer_consent_conversation_fkey",
+          "tableFrom": "customer_consent",
+          "columnsFrom": [
+            "store_id",
+            "conversation_id"
+          ],
+          "tableTo": "conversation",
+          "columnsTo": [
+            "store_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "customer_consent_state_check": {
+          "name": "customer_consent_state_check",
+          "value": "state IN ('si','no','baja')"
+        },
+        "customer_consent_channel_check": {
+          "name": "customer_consent_channel_check",
+          "value": "channel IN ('whatsapp','instagram','messenger','prueba')"
+        },
+        "customer_consent_quote_check": {
+          "name": "customer_consent_quote_check",
+          "value": "char_length(btrim(\"customer_consent\".\"quote\")) between 1 and 300"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.customer_fact": {
+      "name": "customer_fact",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quote": {
+          "name": "quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alternatives": {
+          "name": "alternatives",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "customer_fact_customer_idx": {
+          "name": "customer_fact_customer_idx",
+          "columns": [
+            {
+              "expression": "store_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "customer_fact_customer_fkey": {
+          "name": "customer_fact_customer_fkey",
+          "tableFrom": "customer_fact",
+          "columnsFrom": [
+            "store_id",
+            "customer_id"
+          ],
+          "tableTo": "customer",
+          "columnsTo": [
+            "store_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "customer_fact_key_check": {
+          "name": "customer_fact_key_check",
+          "value": "key IN ('medida','distrito','cumpleanos','canal','instagram','gustos')"
+        },
+        "customer_fact_source_check": {
+          "name": "customer_fact_source_check",
+          "value": "source IN ('chat','pedido','respuesta','tienda')"
+        },
+        "customer_fact_value_check": {
+          "name": "customer_fact_value_check",
+          "value": "char_length(btrim(\"customer_fact\".\"value\")) between 1 and 120 and (\"customer_fact\".\"quote\" is null or char_length(\"customer_fact\".\"quote\") between 1 and 300) and cardinality(\"customer_fact\".\"alternatives\") <= 4"
+        },
+        "customer_fact_origin_check": {
+          "name": "customer_fact_origin_check",
+          "value": "(\"customer_fact\".\"source\" <> 'chat' or (\"customer_fact\".\"message_id\" is not null and \"customer_fact\".\"quote\" is not null)) and (\"customer_fact\".\"source\" <> 'pedido' or \"customer_fact\".\"order_id\" is not null)"
+        },
+        "customer_fact_birthday_check": {
+          "name": "customer_fact_birthday_check",
+          "value": "\"customer_fact\".\"key\" <> 'cumpleanos' or \"customer_fact\".\"value\" ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'"
         }
       },
       "isRLSEnabled": false

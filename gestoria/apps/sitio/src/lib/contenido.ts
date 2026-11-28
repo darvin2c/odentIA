@@ -27,7 +27,7 @@ export const PREGUNTAS: readonly Pregunta[] = [
   ],
   [
     "¿Cuánto cuesta?",
-    "USD 19 al mes, que vuelven a tu tienda como saldo. De ahí sale el 1 % de cada pedido que gestorIA genera sola. Lo que anota tu equipo no paga ese 1 %.",
+    "USD 19 al mes, que vuelven a tu tienda como saldo. Te cobramos por lo que vendes: el 1 % de cada venta que cierras (pagada y entregada, con el envío), y sale de ese saldo. Lo que te devuelven se descuenta.",
   ],
 ]
 

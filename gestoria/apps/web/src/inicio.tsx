@@ -1,5 +1,5 @@
 import { Badge, Button, cn, toast } from "@odentia/ui"
-import { KpiCard } from "@odentia/ui-patterns"
+import { ErrorState, KpiCard, LoadingState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, Circle, Clock3, MinusCircle } from "lucide-react"
@@ -7,6 +7,7 @@ import { type ReactNode, useId, useState } from "react"
 import { SimilarQueue } from "./clientes"
 import { api } from "./lib/api"
 import { fromWhom } from "./lib/caja"
+import { setupProgress } from "./lib/configuracion"
 import {
   byWhen,
   FROM_HOME,
@@ -17,7 +18,6 @@ import {
   type SetupStepState,
   type StoreHome,
   sameText,
-  setupProgress,
   stepView,
   type ToDoItem,
   WHEN_TITLES,
@@ -25,7 +25,7 @@ import {
 import { dayName, storeToday } from "./lib/pedidos"
 import { money } from "./lib/tienda"
 import { MoveToDay, OrderSheet } from "./pedidos"
-import { ErrorBlock, StoreHeader, useMe, useStoreContext } from "./tiendas"
+import { StoreHeader, useMe, useStoreContext } from "./tiendas"
 
 /**
  * Inicio (lienzo «gestorIA como odentIA», tableros 5 y 16): abro y sé qué me toca. Lo ve todo el
@@ -67,8 +67,8 @@ export function HomePage() {
         title={`${greeting(store.timeZone)}${name ? `, ${name}` : ""}`}
         subtitle={longDay(today)}
       />
-      {home.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-      {home.isError ? <ErrorBlock error={home.error} onRetry={() => void home.refetch()} /> : null}
+      {home.isPending ? <LoadingState message="Cargando lo de hoy…" /> : null}
+      {home.isError ? <ErrorState error={home.error} onRetry={() => void home.refetch()} /> : null}
       {data?.setup ? <FirstSteps setup={data.setup} /> : null}
       {/* Una tienda que recién empieza, sin nada todavía, no ve cifras en cero. */}
       {data && !quiet ? <Figures figures={data.figures} /> : null}
@@ -359,7 +359,8 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
   const queryClient = useQueryClient()
   const id = useId()
   const progress = setupProgress(setup.steps)
-  const next = setup.steps.find((s) => s.state === "falta")?.step
+  // La misma cuenta que «Lo que falta» de Configuración: lo que no frena la venta no se cuenta.
+  const next = setup.steps.find((s) => s.state === "falta" && s.sells)?.step
   const done = setup.steps.filter((s) => s.state === "hecho")
   const skip = useMutation({
     mutationFn: (step: string) =>
@@ -368,7 +369,7 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
       await queryClient.invalidateQueries({ queryKey: HOME_KEY(store.id) })
       toast.success("Listo: ese paso ya no falta")
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   return (
     <section
@@ -402,6 +403,11 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
         {setup.steps.map((s) => {
           const view = stepView(s.step, s.state, setup.facts, store)
           const isNext = s.step === next
+          // Lo que no frena la venta no es una falta: se ve como opcional.
+          const badge =
+            s.state === "falta" && !s.sells
+              ? { label: "Opcional", variant: "secondary" as const }
+              : STATE_BADGES[s.state]
           return (
             <li
               key={s.step}
@@ -415,9 +421,7 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="flex flex-wrap items-center gap-2 font-semibold">
                     {view.title}
-                    <Badge variant={STATE_BADGES[s.state].variant}>
-                      {STATE_BADGES[s.state].label}
-                    </Badge>
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
                   </span>
                   <span className={cn("text-sm text-muted-foreground", !isNext && "max-sm:hidden")}>
                     {view.detail}

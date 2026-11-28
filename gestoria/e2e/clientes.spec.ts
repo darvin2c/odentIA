@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Clientes (entrega 4 de «gestorIA como odentIA», tablero 8) en un navegador, contra su servidor
@@ -135,7 +135,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await shot(page, "clientes-lista-escritorio")
 
   await page.getByRole("button", { name: "Comparar" }).click()
-  const compare = page.getByRole("dialog", { name: "¿Es la misma clienta?" })
+  const compare = surface(page, "¿Es la misma clienta?")
   await expect(compare).toBeVisible()
   await expect(compare.getByText(/Tienen el mismo nombre\./)).toBeVisible()
   await expect(compare.getByText(/Nunca se une sola por el nombre o el teléfono/)).toBeVisible()
@@ -178,7 +178,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
 
   // «Lo que sabemos»: una nota del equipo, que la clienta no ve.
   await card.getByRole("button", { name: "Editar" }).click()
-  const edit = page.getByRole("dialog", { name: "Editar la ficha" })
+  const edit = surface(page, "Editar la ficha")
   await edit.getByLabel("Lo que sabemos").fill("Talla 38. Prefiere Shalom.")
   await edit.getByRole("button", { name: "Guardar" }).click()
   await expect(page.getByText("Ficha guardada")).toBeVisible()
@@ -198,12 +198,17 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
 
   // «Repetir pedido»: lo de su última compra, con los precios de hoy; el pedido nuevo va a su ficha.
   await card.getByRole("button", { name: "Repetir pedido" }).click()
-  const repeat = page.getByRole("dialog", { name: "Nuevo pedido para Mariela Ríos" })
+  const repeat = surface(page, "Nuevo pedido para Mariela Ríos")
   await expect(repeat).toBeVisible()
   await expect(repeat.getByText(/el pedido va a su ficha/)).toBeVisible()
   await expect(repeat.getByText(/La vez anterior: Zapatilla urbana/)).toBeVisible()
   await shot(page, "clientes-repetir-escritorio")
+  // En el teléfono se abre en cajón: la columna se decide al abrir, no al achicar la ventana.
+  await repeat.getByRole("button", { name: "Cancelar" }).click()
+  await expect(repeat).toHaveCount(0)
   await page.setViewportSize(PHONE)
+  await card.getByRole("button", { name: "Repetir pedido" }).click()
+  await expect(repeat).toBeVisible()
   await noSideScroll(page)
   await shot(page, "clientes-repetir-telefono")
   await page.setViewportSize(DESKTOP)
@@ -230,7 +235,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   // «Anotar un pedido» sugiere las fichas que coinciden con lo escrito; elegir una es de la persona.
   await page.goto(`${BASE}/pedidos`)
   await page.getByRole("button", { name: "Anotar un pedido" }).click()
-  const sheet = page.getByRole("dialog", { name: "Anotar un pedido" })
+  const sheet = surface(page, "Anotar un pedido")
   await sheet.getByLabel("Nombre").fill("mariela")
   await expect(sheet.getByText("¿Es una de ellas?")).toBeVisible()
   const options = sheet.getByRole("list", { name: "¿Es una de ellas?" }).getByRole("button")
@@ -240,7 +245,12 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await expect(sheet.getByText(/el pedido va a su ficha/)).toBeVisible()
   await sheet.getByRole("button", { name: "Cambiar" }).click()
   await expect(sheet.getByLabel("Nombre")).toHaveValue("mariela")
+  // En el teléfono, en cajón: la columna se decide al abrir, no al achicar la ventana.
   await page.setViewportSize(PHONE)
+  await page.reload()
+  await page.getByRole("button", { name: "Anotar un pedido" }).click()
+  await sheet.getByLabel("Nombre").fill("mariela")
+  await expect(sheet.getByText("¿Es una de ellas?")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "clientes-anotar-sugiere-telefono")
 })

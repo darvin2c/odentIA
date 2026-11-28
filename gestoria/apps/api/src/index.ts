@@ -71,9 +71,17 @@ setInterval(() => void review(), HOUR).unref()
 // Si hay dos servidores, corre en uno solo (candado de la base).
 async function argos() {
   try {
-    const run = await withSessionLock(ownerDb, "argos", () => runArgos(ownerDb, appDb))
+    // Con el mismo modelo de Sofi, solo para leer lo que dijo cada clienta (`sofi/perfilar.ts`).
+    const run = await withSessionLock(ownerDb, "argos", () =>
+      runArgos(ownerDb, appDb, new Date(), model),
+    )
     if (run?.written)
       console.log(`gestoria-api: Argos le encargó ${run.written} seguimiento(s) a Sofi`)
+    // Lo que cuesta leer queda aquí, en el registro de la vuelta: no se le cobra a la tienda.
+    if (run?.profiled || run?.profileCostMicros)
+      console.log(
+        `gestoria-api: Argos anotó ${run.profiled} dato(s) de clientas; leer costó USD ${(run.profileCostMicros / 1e6).toFixed(6)}`,
+      )
   } catch (error) {
     console.error("gestoria-api: Argos falló", error)
   }
