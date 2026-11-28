@@ -71,6 +71,25 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `costos.ver`: la API no se lo devuelve a Ventas.
 - Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
 
+## La ficha del producto (lienzo «La ficha del producto»)
+
+- Las plantillas de los rubros son fijas en `apps/api/src/rubros.ts`; la tienda guarda solo lo que
+  ajusta (`store_template_field`). Los datos del rubro se validan contra esa plantilla, con «No
+  aplica». Lo que falta nunca frena una venta: es el nivel de `readinessOf`, calculado en la API.
+- Qué colores hay y su orden son los valores de la opción del color (`product.color_option`);
+  `product_color` guarda solo su hex y la foto que manda Sofi. No hay dos listas de colores.
+- «Tallas y stock» (`ficha.ts`, `saveGrid`) guarda todo de una vez: cambiar un nombre no rehace
+  la variante y el stock entra al kardex (subir es entrada; bajar o quitar con stock pide motivo).
+- El estado lo pone la tienda (encargo, cupo, preventa, liquidación, ya no se vende); disponible
+  y agotado salen del stock (`saleStateOf`). Por encargo, cupo o preventa se anota sin stock; lo
+  que ya no se vende no entra a un pedido nuevo. El cupo por día todavía no se cuenta.
+- El precio de revendedora, el combo, las promociones de un color o una talla y la liquidación
+  son opciones de `autoUnit`/`floorOf` en `precio.ts`; lo que Sofi puede ofrecer de cada producto
+  solo la frena a ella (`byAgent`). El simulador es `lowestQuote`: nunca otra cuenta.
+- Lo que Sofi no supo (`preguntas.ts`): Sofi solo anota la pregunta; Ventas responde y propone
+  guardarla; quien tiene `configuracion` la guarda en la ficha. Cada cambio de la ficha va al
+  historial (`product_event`), campo por campo, con la forma de `productPatch`.
+
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 
 - El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en

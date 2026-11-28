@@ -13,6 +13,9 @@ export const SOFI_ACTOR = "agente:sofi"
 export const ARGOS_ACTOR = "agente:argos"
 export type AgentActor = typeof SOFI_ACTOR | typeof ARGOS_ACTOR
 
+/** Si quien pide es un agente (Sofi o Argos): las reglas de la base lo reconocen igual. */
+export const isAgent = (actorUserId: string) => actorUserId.startsWith("agente:")
+
 /** El nombre con que se ve en la historia de un pedido o de una conversación. */
 export function agentName(actorUserId: string | null): string | null {
   if (actorUserId === SOFI_ACTOR) return "Sofi"
