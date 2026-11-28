@@ -55,7 +55,7 @@ test("Rosa arma sus zonas con la plantilla de Lima y las ajusta en el mapa y en 
     "La Victoria",
   )
   await fleetStart.click()
-  const map = page.getByRole("group", { name: /Mapa esquemático/ })
+  const map = page.getByRole("group", { name: "Mapa de Lima y Callao por zona" })
   await expect(
     map.getByRole("button", { name: /^Lince: zona 1, Centro y Lima Moderna/ }),
   ).toBeVisible()
@@ -72,10 +72,24 @@ test("Rosa arma sus zonas con la plantilla de Lima y las ajusta en el mapa y en 
   await page.getByRole("menuitemradio", { name: "No entrego ahí" }).click()
   await expect(map.getByRole("button", { name: "San Luis: no entregas ahí" })).toBeVisible()
 
+  // ↓ y ↑ solo mueven: no abren el menú del distrito que se deja. Enter abre el del que tiene foco.
+  const lima = map.getByRole("button", { name: /^Lima: / })
+  await lima.focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(lima).not.toBeFocused()
+  await expect(page.getByRole("menu")).toHaveCount(0)
+  const below = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? "")
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("menu")).toContainText(below.split(":")[0] ?? "")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("menu")).toHaveCount(0)
+
   // Una zona en su cajón: el precio de Lima Este.
   await page.getByRole("button", { name: "Editar Lima Este" }).click()
   const zone = surface(page, "Lima Este")
   await zone.getByLabel("Precio").fill("15")
+  // El mapa se sigue viendo con el cajón abierto.
+  await expect(map).toBeVisible()
   await shot(page, "entregas-zona-escritorio")
   await zone.getByRole("button", { name: "Guardar" }).click()
   await expect(zone).toHaveCount(0)
