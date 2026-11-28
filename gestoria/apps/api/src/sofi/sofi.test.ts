@@ -1182,6 +1182,29 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
       "u-rosa",
     ])
       expect(text, secret).not.toContain(secret)
+    // El mismo tope de la vitrina (por quien pide y por tienda): la visita normal no lo toca.
+    const limited = createApp({
+      appDb: db.appDb,
+      ownerDb: db.ownerDb,
+      account: { url: ACCOUNT, eventsSecret: "", keys },
+      webURL: WEB,
+      showcaseLimits: { perIp: 2, perStore: 3 },
+    })
+    const visit = (ip: string) =>
+      limited.request(`${SERVER}/vitrina/calzadosrosa/zapatilla-de-lona`, {
+        headers: { "cf-connecting-ip": ip },
+      })
+    expect((await visit("203.0.113.1")).status).toBe(200)
+    expect((await visit("203.0.113.1")).status).toBe(200)
+    const third = await visit("203.0.113.1")
+    expect(third.status).toBe(429)
+    expect(third.headers.get("retry-after")).toBe("60")
+    expect(third.headers.get("access-control-allow-origin")).toBe("*")
+    expect(((await third.json()) as Json).error.code).toBe("TOO_MANY")
+    expect((await visit("203.0.113.2")).status).toBe(200)
+    expect((await visit("203.0.113.3")).status).toBe(429)
+    // La app de siempre (sin topes bajos) sigue respondiendo.
+    expect((await app.request(`${SERVER}/vitrina/calzadosrosa/zapatilla-de-lona`)).status).toBe(200)
     await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
       web: { visible: false, slug: "zapatilla-de-lona" },
     })

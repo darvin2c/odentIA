@@ -492,18 +492,24 @@ export function createApp(deps: AppDeps) {
     max: deps.showcaseLimits?.perStore ?? 1_200,
     windowMs: 60_000,
   })
+  // El mismo tope para todo lo de la vitrina (la página del producto y sus fotos): una visita
+  // cuenta igual por cualquiera de las dos.
+  const showcaseTooMany = (c: Context) => {
+    if (
+      showcaseByIp.hit(clientIp(c.req.raw.headers)) &&
+      showcaseByStore.hit(c.req.param("link") ?? "")
+    )
+      return null
+    c.header("retry-after", "60")
+    return c.json(
+      errorBody(c, "TOO_MANY", "Demasiadas visitas seguidas. Prueba en un minuto."),
+      429,
+    )
+  }
   app.get("/vitrina/:link/:producto/medios", async (c) => {
     c.header("access-control-allow-origin", "*")
-    if (
-      !showcaseByIp.hit(clientIp(c.req.raw.headers)) ||
-      !showcaseByStore.hit(c.req.param("link"))
-    ) {
-      c.header("retry-after", "60")
-      return c.json(
-        errorBody(c, "TOO_MANY", "Demasiadas visitas seguidas. Prueba en un minuto."),
-        429,
-      )
-    }
+    const limited = showcaseTooMany(c)
+    if (limited) return limited
     const media = await publicMedia(
       deps.ownerDb,
       deps.storage,
@@ -521,6 +527,9 @@ export function createApp(deps: AppDeps) {
   // La página pública de un producto (`<tienda>.gestoria24.com/<producto>`): solo lo vendible de un
   // producto que se ve en la web. Sin cuenta: es lo público de la tienda.
   app.get("/vitrina/:link/:producto", async (c) => {
+    c.header("access-control-allow-origin", "*")
+    const limited = showcaseTooMany(c)
+    if (limited) return limited
     const page = await publicShowcase(
       deps.ownerDb,
       deps.storage,
