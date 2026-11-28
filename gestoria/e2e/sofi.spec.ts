@@ -39,24 +39,37 @@ test.describe.configure({ mode: "serial" })
 
 test("Sofi se elige con ejemplos y la prueba dice por qué respondió así", async ({ page }) => {
   await as("rosa")
-  await page.setViewportSize(DESKTOP)
+  // El ancho de la laptop de la tienda: la prueba queda al lado, también con el cajón abierto.
+  await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto(`${BASE}/configuracion/sofi`)
   await expect(page.getByRole("heading", { name: "Sofi", level: 1 })).toBeVisible()
   await expect(page.getByText("Su tono: Cercana")).toBeVisible()
+  const chat = page.getByRole("region", { name: "Probar a Sofi" })
+  await expect(chat).toBeInViewport()
+
+  // Apagada: guardar cómo habla no la vuelve a encender.
+  const status = page.getByRole("region", { name: "Si Sofi atiende" })
+  await expect(status.getByText("Apagada")).toBeVisible()
 
   await page
     .getByRole("region", { name: "Cómo habla" })
     .getByRole("button", { name: "Cambiar" })
     .click()
   const talk = surface(page, "Cambiar cómo habla")
+  await expect(chat).toBeInViewport()
   await talk.getByRole("radio", { name: /^Directa/ }).check()
   await talk.getByRole("radio", { name: "Usted" }).click()
   await talk.getByRole("button", { name: "Guardar" }).click()
   await expect(talk).toBeHidden()
   await expect(page.getByText("Su tono: Directa")).toBeVisible()
   await expect(page.getByText("Usted", { exact: true })).toBeVisible()
+  await expect(status.getByText("Apagada")).toBeVisible()
+  // Encender y pausar van aparte, y se dicen en el momento.
+  await status.getByRole("button", { name: "Encender" }).click()
+  await expect(status.getByText("Encendida")).toBeVisible()
+  await status.getByRole("button", { name: "Pausar" }).click()
+  await expect(status.getByText("Apagada")).toBeVisible()
 
-  const chat = page.getByRole("region", { name: "Probar a Sofi" })
   await chat
     .getByRole("textbox", { name: "Tu mensaje, como cliente" })
     .fill("hola, ¿tienen zapatillas?")
@@ -120,4 +133,10 @@ test("el horario del equipo se elige con días y horas, y en el teléfono no se 
   await expect(page.getByRole("heading", { name: "Sofi", level: 1 })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "sofi-telefono")
+  // En el teléfono la prueba queda abajo: «Probar a Sofi», arriba, lleva a ella.
+  const chat = page.getByRole("region", { name: "Probar a Sofi" })
+  await expect(chat).not.toBeInViewport()
+  await page.getByRole("button", { name: "Probar a Sofi" }).click()
+  await expect(chat).toBeInViewport()
+  await expect(chat.getByRole("textbox", { name: "Tu mensaje, como cliente" })).toBeFocused()
 })

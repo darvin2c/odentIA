@@ -17,6 +17,8 @@ import {
   useAppForm,
   useFieldContext,
   useFormSurface,
+  useIconSidebarWhileMounted,
+  useSideDock,
   ViewTabs,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -25,6 +27,7 @@ import { Link } from "@tanstack/react-router"
 import {
   Check,
   Lightbulb,
+  MessageCircle,
   MessageSquarePlus,
   Minus,
   Pause,
@@ -33,7 +36,16 @@ import {
   SendHorizontal,
   Trash2,
 } from "lucide-react"
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
+import {
+  createContext,
+  type KeyboardEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react"
 import { z } from "zod"
 import { MoneyInput, ToggleField } from "./campos"
 import { api } from "./lib/api"
@@ -71,6 +83,21 @@ const CONFIG_KEY = (storeId: string) => ["configuracion", storeId]
 
 type Part = "habla" | "ofrece" | "persona" | "sabe" | "aprendio"
 
+/**
+ * Si hay un formulario de esta página abierto. En una ventana ancha va en la columna lateral, y
+ * entonces el resumen de al lado repite lo mismo: se deja a la vista la prueba, para elegir y
+ * probar a la vez (tablero 8: la prueba siempre a la vista).
+ */
+const EditingContext = createContext<(editing: boolean) => void>(() => {})
+
+function useMarkEditing() {
+  const mark = useContext(EditingContext)
+  useEffect(() => {
+    mark(true)
+    return () => mark(false)
+  }, [mark])
+}
+
 export function SofiPage() {
   const { store } = useStoreContext()
   const overview = useQuery({
@@ -83,8 +110,15 @@ export function SofiPage() {
   })
   const [part, setPart] = useState<Part>("habla")
   const toAnswer = knows.data?.gaps.length ?? 0
+  // El menú de la app en íconos mientras se ajusta a Sofi: la prueba cabe al lado en la laptop.
+  useIconSidebarWhileMounted()
+  const [editing, setEditing] = useState(false)
+  const dock = useSideDock()
+  // El formulario está en la columna lateral: el resumen se esconde (no se desmonta) y la prueba
+  // queda donde estaba, arriba y al lado del formulario.
+  const testOnly = editing && dock.occupied
   return (
-    <>
+    <EditingContext.Provider value={setEditing}>
       <StoreHeader
         title="Sofi"
         subtitle="Tu vendedora: tú eliges cómo habla, qué ofrece y cuándo te pasa el chat."
@@ -118,6 +152,11 @@ export function SofiPage() {
             </PageNotice>
           ) : null}
           <StatusCard overview={overview.data} />
+          {/* En el teléfono la prueba queda debajo: «Probar a Sofi» lleva a ella de un toque. */}
+          <Button variant="outline" className="w-full @3xl:hidden" onClick={goToTest}>
+            <MessageCircle aria-hidden />
+            Probar a Sofi
+          </Button>
           <ViewTabs
             label="Qué ajustar de Sofi"
             value={part}
@@ -134,10 +173,18 @@ export function SofiPage() {
               },
             ]}
           />
-          <div className="grid items-start gap-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(19rem,23rem)]">
-            <section aria-label="Cómo trabaja Sofi" className="flex min-w-0 flex-col gap-4">
+          <div
+            className={cn(
+              "grid items-start gap-4",
+              !testOnly && "@3xl:grid-cols-[minmax(0,1fr)_minmax(19rem,23rem)]",
+            )}
+          >
+            <section
+              aria-label="Cómo trabaja Sofi"
+              className={cn("flex min-w-0 flex-col gap-4", testOnly && "hidden")}
+            >
               {part === "habla" ? <HowSheTalks overview={overview.data} /> : null}
-              {part === "ofrece" ? <WhatSheOffers settings={overview.data.settings} /> : null}
+              {part === "ofrece" ? <WhatSheOffers overview={overview.data} /> : null}
               {part === "persona" ? <WhenToPerson overview={overview.data} /> : null}
               {part === "sabe" || part === "aprendio" ? (
                 knows.isError ? (
@@ -158,27 +205,80 @@ export function SofiPage() {
           </div>
         </div>
       ) : null}
-    </>
+    </EditingContext.Provider>
   )
+}
+
+/** Lleva a la prueba y deja el cursor donde se escribe. */
+function goToTest() {
+  const test = document.getElementById("probar-a-sofi")
+  if (!test) return
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  test.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" })
+  test.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true })
 }
 
 /* ------------------------------------------------------------------ guardar */
 
-/** Guarda lo elegido: lo de siempre más lo que cambió este formulario. */
-function useSaveSettings(settings: AgentSettings) {
+/**
+ * Guarda lo que cambió este formulario, nada más, con la versión que se vio al abrirlo: si otra
+ * persona (u otra pestaña) cambió a Sofi después, el servidor lo rechaza y el formulario lo dice,
+ * en vez de pisar lo suyo. Lo de antes se fija al abrir: aunque la página se ponga al día, este
+ * formulario sigue comparando con lo que la persona vio. Encender o pausar va aparte.
+ */
+function useSaveSettings(overview: SofiOverview) {
+  const { store } = useStoreContext()
+  const queryClient = useQueryClient()
+  const [seen] = useState(() => ({ settings: overview.settings, version: overview.version }))
+  return useMutation({
+    mutationFn: async (change: Partial<Omit<AgentSettings, "enabled">>) => {
+      const changed = Object.fromEntries(
+        Object.entries(change).filter(
+          ([key, value]) => !sameValue(value, seen.settings[key as keyof AgentSettings]),
+        ),
+      )
+      if (Object.keys(changed).length === 0) return null
+      return api(`/api/tiendas/${store.id}/sofi`, {
+        method: "PATCH",
+        body: { ...changed, version: seen.version },
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CONFIG_KEY(store.id) })
+    },
+    // Lo nuevo de la otra persona queda a la vista al cerrar el formulario.
+    onError: () => void queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) }),
+  })
+}
+
+/**
+ * Lo mismo, con «Se presenta como» vacío igual a sin nombre y el horario por su contenido (la base
+ * devuelve sus llaves en otro orden).
+ */
+function sameValue(next: unknown, before: unknown): boolean {
+  const plain = (value: unknown): unknown => {
+    if (typeof value === "string") return value.trim() || null
+    if (Array.isArray(value)) return value.map(plain)
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, inner]) => [key, plain(inner)]),
+      )
+    return value ?? null
+  }
+  return JSON.stringify(plain(next)) === JSON.stringify(plain(before))
+}
+
+/** Encender o pausar: su propia operación, que no toca lo elegido. */
+function useSetEnabled() {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (change: Partial<AgentSettings>) =>
-      api(`/api/tiendas/${store.id}/sofi`, {
-        method: "PATCH",
-        body: {
-          ...settings,
-          ...change,
-          displayName: change.displayName ?? settings.displayName ?? "",
-        },
-      }),
-    onSuccess: async () => {
+    mutationFn: (enabled: boolean) =>
+      api(`/api/tiendas/${store.id}/sofi/estado`, { method: "PUT", body: { enabled } }),
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) })
       await queryClient.invalidateQueries({ queryKey: CONFIG_KEY(store.id) })
     },
@@ -252,7 +352,7 @@ function Line({ on, title, detail }: { on: boolean; title: string; detail?: Reac
 function StatusCard({ overview }: { overview: SofiOverview }) {
   const { store } = useStoreContext()
   const { settings } = overview
-  const save = useSaveSettings(settings)
+  const toggle = useSetEnabled()
   const name = settings.displayName ?? `Sofi, de ${store.name}`
   return (
     <section
@@ -275,15 +375,12 @@ function StatusCard({ overview }: { overview: SofiOverview }) {
       </div>
       <Button
         variant="outline"
-        disabled={save.isPending}
+        disabled={toggle.isPending}
         onClick={() =>
-          save.mutate(
-            { enabled: !settings.enabled },
-            {
-              onSuccess: () => toast.success(settings.enabled ? "Sofi en pausa" : "Sofi encendida"),
-              onError: (error) => toast.error(submitErrorMessage(error)),
-            },
-          )
+          toggle.mutate(!settings.enabled, {
+            onSuccess: () => toast.success(settings.enabled ? "Sofi en pausa" : "Sofi encendida"),
+            onError: (error) => toast.error(submitErrorMessage(error)),
+          })
         }
       >
         {settings.enabled ? <Pause aria-hidden /> : <Play aria-hidden />}
@@ -323,7 +420,7 @@ function HowSheTalks({ overview }: { overview: SofiOverview }) {
           {settings.displayName ?? `Sofi, de ${store.name}`}
         </DetailField>
       </DetailList>
-      {editing ? <TalkForm settings={settings} onClose={() => setEditing(false)} /> : null}
+      {editing ? <TalkForm overview={overview} onClose={() => setEditing(false)} /> : null}
     </Panel>
   )
 }
@@ -335,9 +432,11 @@ const talkSchema = z.object({
   displayName: z.string().trim().max(60, "Máximo 60 caracteres"),
 })
 
-function TalkForm({ settings, onClose }: { settings: AgentSettings; onClose: () => void }) {
+function TalkForm({ overview, onClose }: { overview: SofiOverview; onClose: () => void }) {
+  const { settings } = overview
   const { store } = useStoreContext()
-  const save = useSaveSettings(settings)
+  const save = useSaveSettings(overview)
+  useMarkEditing()
   const form = useAppForm({
     defaultValues: {
       tone: settings.tone,
@@ -459,7 +558,8 @@ function ToneField() {
 
 /* --------------------------------------------------------------- qué ofrece */
 
-function WhatSheOffers({ settings }: { settings: AgentSettings }) {
+function WhatSheOffers({ overview }: { overview: SofiOverview }) {
+  const { settings } = overview
   const [editing, setEditing] = useState<"ofertas" | "seguimientos" | null>(null)
   return (
     <>
@@ -523,17 +623,19 @@ function WhatSheOffers({ settings }: { settings: AgentSettings }) {
         </ul>
       </Panel>
       {editing === "ofertas" ? (
-        <OffersForm settings={settings} onClose={() => setEditing(null)} />
+        <OffersForm overview={overview} onClose={() => setEditing(null)} />
       ) : null}
       {editing === "seguimientos" ? (
-        <FollowForm settings={settings} onClose={() => setEditing(null)} />
+        <FollowForm overview={overview} onClose={() => setEditing(null)} />
       ) : null}
     </>
   )
 }
 
-function OffersForm({ settings, onClose }: { settings: AgentSettings; onClose: () => void }) {
-  const save = useSaveSettings(settings)
+function OffersForm({ overview, onClose }: { overview: SofiOverview; onClose: () => void }) {
+  const { settings } = overview
+  const save = useSaveSettings(overview)
+  useMarkEditing()
   const form = useAppForm({
     defaultValues: {
       offerShipping: settings.offerShipping,
@@ -588,8 +690,10 @@ function OffersForm({ settings, onClose }: { settings: AgentSettings; onClose: (
   )
 }
 
-function FollowForm({ settings, onClose }: { settings: AgentSettings; onClose: () => void }) {
-  const save = useSaveSettings(settings)
+function FollowForm({ overview, onClose }: { overview: SofiOverview; onClose: () => void }) {
+  const { settings } = overview
+  const save = useSaveSettings(overview)
+  useMarkEditing()
   const form = useAppForm({
     defaultValues: {
       followPayment: settings.followPayment,
@@ -682,17 +786,19 @@ function WhenToPerson({ overview }: { overview: SofiOverview }) {
           </p>
         ) : null}
       </Panel>
-      {editing ? <HandoffForm settings={settings} onClose={() => setEditing(false)} /> : null}
+      {editing ? <HandoffForm overview={overview} onClose={() => setEditing(false)} /> : null}
     </>
   )
 }
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
-function HandoffForm({ settings, onClose }: { settings: AgentSettings; onClose: () => void }) {
+function HandoffForm({ overview, onClose }: { overview: SofiOverview; onClose: () => void }) {
+  const { settings } = overview
   const { store } = useStoreContext()
-  const save = useSaveSettings(settings)
+  const save = useSaveSettings(overview)
   const hours = settings.teamHours
+  useMarkEditing()
   const form = useAppForm({
     defaultValues: {
       handoffUpset: settings.handoffUpset,
@@ -1011,6 +1117,7 @@ function AnswerForm({ target, onClose }: { target: AnswerTarget; onClose: () => 
       onClose()
     },
   })
+  useMarkEditing()
   const form = useAppForm({
     defaultValues: { question: existing?.question ?? "", answer: existing?.answer ?? "" },
     validators: { onSubmit: answerSchema },
@@ -1154,6 +1261,7 @@ function GapForm({ gap, onClose }: { gap: Gap; onClose: () => void }) {
       await queryClient.invalidateQueries({ queryKey: CONFIG_KEY(store.id) })
     },
   })
+  useMarkEditing()
   const form = useAppForm({
     defaultValues: { question: gap.question, answer: "" },
     validators: { onSubmit: answerSchema },

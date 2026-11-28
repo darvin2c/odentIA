@@ -212,6 +212,10 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   armar_pedido. «Lo que sabe» llega por `leer_lo_que_sabe` (las preguntas, como JSON en los datos);
   «Lo que aprendió» lo anota solo Sofi, en chats de verdad, y lo cierra solo una persona: nada se
   agrega solo. «Por qué» en la prueba sale solo de lo anotado en su respuesta (`whyOf`).
+- Guardar opciones de Sofi manda solo lo que cambió y la versión que se vio (`version`); sobre una
+  versión vieja la API responde 409. Encender o pausar es su propia operación
+  (`PUT …/sofi/estado`, `setAgentEnabled`), que no cambia esa versión: guardar opciones nunca
+  enciende ni pausa a Sofi.
 - Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
   (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.

@@ -13,6 +13,7 @@ import {
   saleOrder,
   store,
   storeAgent,
+  storeEvent,
   storeMember,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
@@ -105,6 +106,12 @@ async function call(who: Who, method: string, path: string, body?: unknown) {
   })
   const text = await response.text()
   return { status: response.status, json: (text ? JSON.parse(text) : {}) as Json }
+}
+
+/** Guarda opciones de Sofi como la pantalla: con la versión que acaba de ver. */
+async function saveSofi(change: Json, who: Who = "rosa") {
+  const seen = await call(who, "GET", `${base}/sofi`)
+  return call(who, "PATCH", `${base}/sofi`, { ...change, version: seen.json.version ?? null })
 }
 
 const ids = { yape: "", reparto: "", t38: "", t39: "", medias: "", ajena: "" }
@@ -611,33 +618,72 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
       { text: "Hola" },
     )
     expect(written.status).toBe(403)
-    const save = await call("lucia", "PATCH", `${base}/sofi`, {
-      ...DEFAULT_CHOICES,
-      enabled: true,
-      followPayment: true,
-      followThanks: true,
-      followRestock: true,
-      followReturn: true,
-    })
+    const save = await call("lucia", "PATCH", `${base}/sofi`, { tone: "formal", version: null })
     expect(save.status).toBe(403)
+    const turnOn = await call("lucia", "PUT", `${base}/sofi/estado`, { enabled: true })
+    expect(turnOn.status).toBe(403)
     expect((await call("lucia", "GET", `${base}/reportes`)).status).toBe(403)
     expect((await call("lucia", "GET", `${base}/argos`)).status).toBe(403)
     expect((await call("ajena", "GET", `${base}/sofi`)).status).toBe(404)
   })
 
   it("el dueño la enciende y queda escrito quién", async () => {
-    const save = await call("rosa", "PATCH", `${base}/sofi`, {
-      ...DEFAULT_CHOICES,
-      enabled: true,
-      displayName: "Sofi, de Calzados Rosa",
-      followPayment: true,
-      followThanks: true,
-      followRestock: true,
-      followReturn: true,
-    })
+    const on = await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })
+    expect(on.status).toBe(200)
+    const save = await saveSofi({ displayName: "Sofi, de Calzados Rosa" })
     expect(save.status).toBe(200)
     const [row] = await db.ownerDb.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))
-    expect(row).toMatchObject({ enabled: true, updatedBy: "u-rosa" })
+    expect(row).toMatchObject({
+      enabled: true,
+      displayName: "Sofi, de Calzados Rosa",
+      updatedBy: "u-rosa",
+    })
+    const said = await db.ownerDb
+      .select()
+      .from(storeEvent)
+      .where(and(eq(storeEvent.storeId, storeId), eq(storeEvent.action, "configuracion.sofi")))
+    expect(said.map((e) => e.detail)).toEqual([{ encendida: true }])
+  })
+
+  it("una pestaña vieja no vuelve a encender a Sofi ni pisa lo que otra persona cambió", async () => {
+    // Pestaña A: la abrió con Sofi encendida y se quedó ahí.
+    const seen = await call("rosa", "GET", `${base}/sofi`)
+    expect(seen.json.settings.enabled).toBe(true)
+    const version = seen.json.version as string
+    // Pestaña B: la pausa. Pausar no cambia la versión de lo elegido.
+    expect((await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: false })).status).toBe(200)
+    expect((await call("rosa", "GET", `${base}/sofi`)).json.version).toBe(version)
+    // A guarda una opción: manda solo lo que cambió, y Sofi sigue en pausa.
+    const first = await call("rosa", "PATCH", `${base}/sofi`, { offerGift: false, version })
+    expect(first.status).toBe(200)
+    // Aunque una pantalla vieja mande «enabled», guardar opciones no lo toca.
+    const sneaky = await call("rosa", "PATCH", `${base}/sofi`, {
+      enabled: true,
+      emojis: "ninguno",
+      version: first.json.version,
+    })
+    expect(sneaky.status).toBe(200)
+    const after = await call("rosa", "GET", `${base}/sofi`)
+    expect(after.json.settings).toMatchObject({
+      enabled: false,
+      offerGift: false,
+      emojis: "ninguno",
+      displayName: "Sofi, de Calzados Rosa",
+      tone: DEFAULT_CHOICES.tone,
+    })
+    // A, con la versión de cuando abrió, ya no puede guardar: alguien cambió algo después.
+    const stale = await call("rosa", "PATCH", `${base}/sofi`, { tone: "formal", version })
+    expect(stale.status).toBe(409)
+    expect(stale.json.error).toMatchObject({ code: "STALE" })
+    expect(JSON.stringify(stale.json)).toContain(
+      "Alguien cambió a Sofi mientras tenías esto abierto",
+    )
+    expect((await call("rosa", "GET", `${base}/sofi`)).json.settings.tone).toBe(
+      DEFAULT_CHOICES.tone,
+    )
+    // Lo deja como estaba para lo que sigue.
+    expect((await saveSofi({ offerGift: true, emojis: DEFAULT_CHOICES.emojis })).status).toBe(200)
+    expect((await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })).status).toBe(200)
   })
 
   it("Reportes no cuenta los pedidos de prueba", async () => {
@@ -731,7 +777,6 @@ describe("Argos le encarga a Sofi lo de rutina", () => {
 describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", () => {
   const settings = (extra: Json = {}) => ({
     ...DEFAULT_CHOICES,
-    enabled: true,
     displayName: "",
     followPayment: true,
     followThanks: true,
@@ -758,10 +803,9 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
   }
 
   it("lo elegido llega con sus frases fijas; de «Lo que sabe», las preguntas como datos y la respuesta por su herramienta", async () => {
-    const saved = await call(
-      "rosa",
-      "PATCH",
-      `${base}/sofi`,
+    // Argos la dejó apagada en lo anterior: se enciende aparte de lo que se elige.
+    await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })
+    const saved = await saveSofi(
       settings({ tone: "directa", address: "usted", emojis: "ninguno", offerGift: false }),
     )
     expect(saved.status).toBe(200)
@@ -812,7 +856,7 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
   })
 
   it("lo que no supo responder va a «Lo que aprendió» solo en una de verdad, y la tienda lo responde", async () => {
-    await call("rosa", "PATCH", `${base}/sofi`, settings())
+    await saveSofi(settings())
     const ask = use("pasar_a_persona", () => ({
       motivo: "No sé si es de cuero",
       pregunta: "¿La zapatilla blanca es de cuero?",
@@ -858,12 +902,7 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
   })
 
   it("lo que la tienda apaga, cotizar no lo deja ofrecer; y la compra grande la pasa a una persona", async () => {
-    await call(
-      "rosa",
-      "PATCH",
-      `${base}/sofi`,
-      settings({ offerShipping: false, handoffOverCents: 20000 }),
-    )
+    await saveSofi(settings({ offerShipping: false, handoffOverCents: 20000 }))
     const id = await newTest()
     const sent = await write(
       id,
@@ -909,14 +948,14 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
       },
     )
     expect(big.conversation.orders).toEqual([])
-    await call("rosa", "PATCH", `${base}/sofi`, settings())
+    await saveSofi(settings())
   })
 
   it("fuera del horario del equipo dice cuándo le responden, y si la tienda lo pide, espera a una persona", async () => {
     // Domingo 29 de noviembre de 2026, 10 p. m. en Lima; el equipo atiende de lunes a sábado.
     const sunday = new Date("2026-11-30T03:00:00Z")
     const hours = { days: [1, 2, 3, 4, 5, 6], from: "09:00", to: "19:00" }
-    await call("rosa", "PATCH", `${base}/sofi`, settings({ teamHours: hours }))
+    await saveSofi(settings({ teamHours: hours }))
     steps.push(use("pasar_a_persona", () => ({ motivo: "Pide hablar con la dueña" })))
     const id = await realChat("Quiero hablar con la dueña")
     expect(await answer(deps(sunday), storeId, id)).toMatchObject({ handoff: true })
@@ -930,12 +969,7 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
       "Te paso con una persona del equipo: te escribe por aquí mañana desde las 9 a. m.",
     )
     expect(said!.text).not.toBe(SOFI_HANDOFF)
-    await call(
-      "rosa",
-      "PATCH",
-      `${base}/sofi`,
-      settings({ teamHours: hours, afterHoursSells: false }),
-    )
+    await saveSofi(settings({ teamHours: hours, afterHoursSells: false }))
     const quiet = await realChat("Hola, ¿tienen sandalias?")
     expect(await answer(deps(sunday), storeId, quiet)).toEqual({ status: "fuera_de_horario" })
     const waiting = await call("rosa", "GET", `${base}/conversaciones/${quiet}`)
@@ -944,13 +978,8 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
       waitingReason: "Fuera del horario del equipo",
     })
     // Una hora que no existe o un cierre antes de la apertura se dicen en su campo.
-    const wrong = await call(
-      "rosa",
-      "PATCH",
-      `${base}/sofi`,
-      settings({ teamHours: { days: [1], from: "19:00", to: "09:00" } }),
-    )
+    const wrong = await saveSofi(settings({ teamHours: { days: [1], from: "19:00", to: "09:00" } }))
     expect(wrong.status).toBe(400)
-    await call("rosa", "PATCH", `${base}/sofi`, settings())
+    await saveSofi(settings())
   })
 })

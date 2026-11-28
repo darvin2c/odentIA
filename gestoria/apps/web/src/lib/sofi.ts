@@ -38,6 +38,8 @@ export interface AgentSettings {
 
 export interface SofiOverview {
   settings: AgentSettings
+  /** La versión de lo elegido (la hora del último cambio): se manda al guardar. */
+  version: string | null
   /** El horario y lo que dice fuera de él, en las palabras de Sofi; null sin horario. */
   words: { hours: string; afterHours: string } | null
   /** Hay modelo configurado: Sofi puede responder. */
@@ -54,22 +56,22 @@ export interface KnowledgeView {
   productsWithoutDescription: { id: string; name: string }[]
 }
 
-/** Cómo suena cada tono: el ejemplo que ve la tienda al elegir. */
+/** Cómo suena cada tono: el ejemplo que ve la tienda al elegir (el mismo que lee Sofi). */
 export const TONES: { value: AgentTone; label: string; example: string }[] = [
   {
     value: "cercana",
     label: "Cercana",
-    example: "«¡Hola, Ana! Es el que más sale, te va a encantar.»",
+    example: "«Es el que más sale, Ana, ¡te va a encantar!»",
   },
   {
     value: "formal",
     label: "Amable y formal",
-    example: "«Buenas tardes, Ana. Le comento que es nuestro modelo más vendido.»",
+    example: "«Le comento, Ana, que es nuestro modelo más vendido.»",
   },
   {
     value: "directa",
     label: "Directa",
-    example: "«Hola, Ana. Sí lo tengo en tu talla. ¿Te lo envío?»",
+    example: "«Lo tengo en tu talla. ¿Te lo envío?»",
   },
 ]
 

@@ -157,11 +157,13 @@ import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
   agentSettingsInput,
+  agentStateInput,
   conversationView,
   customerMessageInput,
   newTestConversation,
   returnToSofi,
   saveAgentSettings,
+  setAgentEnabled,
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
@@ -879,9 +881,12 @@ export function createApp(deps: AppDeps) {
   )
   app.patch("/api/tiendas/:id/sofi", async (c) => {
     const input = await bodyOf(c, agentSettingsInput)
-    return c.json({
-      settings: await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input),
-    })
+    return c.json(await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  // Encender o pausar: aparte de las opciones, para que guardar una opción nunca la cambie.
+  app.put("/api/tiendas/:id/sofi/estado", async (c) => {
+    const input = await bodyOf(c, agentStateInput)
+    return c.json(await setAgentEnabled(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
   // «Lo que sabe» y «Lo que aprendió» (ADR 0234): de quien cambia la configuración.
   app.get("/api/tiendas/:id/sofi/sabe", async (c) =>

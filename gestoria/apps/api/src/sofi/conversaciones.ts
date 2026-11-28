@@ -38,20 +38,29 @@ import { type AnswerResult, answer, handoffLater, type SofiDeps } from "./sofi.j
 /**
  * Lo que la tienda pone de Sofi: todo se elige (ADR 0234). Lo único escrito es cómo se presenta,
  * que va entre «» como su nombre; «Lo que sabe» va aparte (`saber.ts`).
+ *
+ * Cada cambio manda solo lo que cambió y la versión que vio (`version`, la hora del último
+ * cambio): sobre una versión vieja se rechaza, para que una pestaña abierta hace rato no pise lo
+ * que otra persona cambió. Encender o pausar no va aquí: es su propia operación (`agentStateInput`),
+ * y guardar opciones nunca la toca.
  */
-export const agentSettingsInput = choicesInput.extend({
-  enabled: z.boolean(),
+const optionsInput = choicesInput.extend({
   displayName: z
     .string()
     .trim()
     .max(60, "Máximo 60 caracteres")
-    .default("")
     .transform((value) => value || null),
   followPayment: z.boolean(),
   followThanks: z.boolean(),
   followRestock: z.boolean(),
   followReturn: z.boolean(),
 })
+
+export const agentSettingsInput = optionsInput
+  .partial()
+  .extend({ version: z.iso.datetime({ offset: true }).nullable() })
+
+export const agentStateInput = z.object({ enabled: z.boolean() })
 
 export const customerMessageInput = z.object({
   text: z.string().trim().min(1, "Escribe el mensaje").max(1000, "Máximo 1000 caracteres"),
@@ -112,10 +121,31 @@ export async function agentSettings(
           ),
         }
       : null
-    return { settings, words, modelReady, tests, agentStop: await agentStopIn(tx, storeId) }
+    return {
+      settings,
+      version: versionOf(row),
+      words,
+      modelReady,
+      tests,
+      agentStop: await agentStopIn(tx, storeId),
+    }
   })
 }
 
+/** La versión de lo elegido: la hora del último cambio de opciones; null si nunca se eligió. */
+const versionOf = (row: { updatedAt: Date } | undefined) => row?.updatedAt.toISOString() ?? null
+
+const STALE = () =>
+  new StoreError(
+    409,
+    "STALE",
+    "Alguien cambió a Sofi mientras tenías esto abierto. Ciérralo y vuelve a abrirlo para ver lo nuevo antes de guardar.",
+  )
+
+/**
+ * Guarda solo lo que cambió, si la versión que vio quien guarda es la de ahora. La fila se lee con
+ * candado: dos guardados a la vez no se pisan, el segundo ve la versión nueva y se rechaza.
+ */
 export async function saveAgentSettings(
   appDb: Db,
   person: Person,
@@ -123,20 +153,51 @@ export async function saveAgentSettings(
   input: z.infer<typeof agentSettingsInput>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [before] = await tx.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))
-    const values = { ...input, updatedBy: person.userId, updatedAt: new Date() }
-    await tx
+    const { version, ...change } = input
+    const [before] = await tx
+      .select()
+      .from(storeAgent)
+      .where(eq(storeAgent.storeId, storeId))
+      .for("update")
+    if (versionOf(before) !== version) throw STALE()
+    const values = { ...change, updatedBy: person.userId, updatedAt: new Date() }
+    const [row] = await tx
       .insert(storeAgent)
       .values({ storeId, ...values })
       .onConflictDoUpdate({ target: storeAgent.storeId, set: values })
-    if ((before?.enabled ?? false) !== input.enabled)
-      await tx.insert(storeEvent).values({
-        storeId,
-        actorUserId: person.userId,
-        action: "configuracion.sofi",
-        subject: "Sofi",
-        detail: { encendida: input.enabled },
-      })
+      .returning()
+    return { version: versionOf(row) }
+  })
+}
+
+/**
+ * Encender o pausar a Sofi: su propia operación, que no toca lo elegido ni su versión (una
+ * pestaña con las opciones abiertas puede guardar después). Queda en el registro de la tienda.
+ */
+export async function setAgentEnabled(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof agentStateInput>,
+) {
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const [before] = await tx
+      .select({ enabled: storeAgent.enabled })
+      .from(storeAgent)
+      .where(eq(storeAgent.storeId, storeId))
+      .for("update")
+    if ((before?.enabled ?? false) === input.enabled) return input
+    await tx
+      .insert(storeAgent)
+      .values({ storeId, enabled: input.enabled, updatedBy: person.userId })
+      .onConflictDoUpdate({ target: storeAgent.storeId, set: { enabled: input.enabled } })
+    await tx.insert(storeEvent).values({
+      storeId,
+      actorUserId: person.userId,
+      action: "configuracion.sofi",
+      subject: "Sofi",
+      detail: { encendida: input.enabled },
+    })
     return input
   })
 }
