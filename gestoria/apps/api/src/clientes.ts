@@ -14,6 +14,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import {
+  compareBy,
   consentsIn,
   facetsOf,
   hasFilters,
@@ -437,23 +438,20 @@ export async function listCustomers(
           .filter(([id, p]) => matches(p, consentOf(id), filters))
           .map(([id]) => id)
       : undefined
-    const byTotal = filters.orden === "gasto"
-    const total = (id: string) => profiles.get(id)?.totalCents ?? 0
-    // Por lo que gastó, sin buscar: se eligen aquí las que más gastaron (una de más, para saber si
+    const compare = filters.orden ? compareBy(filters.orden, profiles) : null
+    // Con un orden, sin buscar: se eligen aquí las primeras en ese orden (una de más, para saber si
     // hay otras que no se ven). Buscando, se trae todo lo que coincide y se ordena después.
-    if (byTotal && !query)
-      roots = (roots ?? [...profiles.keys()])
-        .sort((a, b) => total(b) - total(a))
-        .slice(0, MAX_LISTED + 1)
+    if (compare && !query)
+      roots = (roots ?? [...profiles.keys()]).sort(compare).slice(0, MAX_LISTED + 1)
     const found =
       roots && roots.length === 0
         ? []
         : await summariesOf(tx, storeId, {
             ...(roots ? { roots } : {}),
             ...(query ? { search: query } : {}),
-            limit: byTotal ? (roots?.length ?? profiles.size) + 1 : MAX_LISTED + 1,
+            limit: compare ? (roots?.length ?? profiles.size) + 1 : MAX_LISTED + 1,
           })
-    if (byTotal) found.sort((a, b) => total(b.id) - total(a.id))
+    if (compare) found.sort((a, b) => compare(a.id, b.id))
     // Sin buscar, también cuántas podrían ser la misma clienta (el aviso de la lista).
     const similar = query ? null : (await similarIn(tx, storeId)).count
     return {

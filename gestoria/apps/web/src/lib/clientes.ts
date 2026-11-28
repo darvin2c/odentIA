@@ -125,13 +125,18 @@ export interface CustomerFilters {
   categoria?: string
   distrito?: string
   promociones?: "si" | "no"
-  orden?: "reciente" | "gasto"
+  /** Con «-», al revés, como la flecha del menú: «gasto» de menos a más, «-gasto» de más a menos. */
+  orden?: CustomerOrder
 }
+
+export type CustomerOrder = "reciente" | "-reciente" | "gasto" | "-gasto"
 
 /** La dirección de Clientes: lo que se busca, los filtros y el orden (`sort`, el de `FilterBar`). */
 export type CustomerSearch = Omit<CustomerFilters, "orden"> & { q?: string; sort?: string }
 
 const ORDERS = ["reciente", "gasto"]
+const isOrder = (value: string | undefined): value is CustomerOrder =>
+  Boolean(value && ORDERS.includes(value.replace(/^-/, "")))
 
 // La dirección lee «?medida=37» como el número 37: una talla es texto igual.
 const text = (value: unknown) => {
@@ -154,13 +159,14 @@ export function customerSearch(search: Record<string, unknown>): CustomerSearch 
   if (search.promociones === "si" || search.promociones === "no")
     out.promociones = search.promociones
   const sort = text(search.sort)
-  if (sort && ORDERS.includes(sort.replace(/^-/, ""))) out.sort = sort
+  if (isOrder(sort)) out.sort = sort
   return out
 }
 
 /** Los filtros de la dirección, como los pide el servidor y como se guardan en un grupo. */
 export function filtersOf(search: CustomerSearch): CustomerFilters {
-  const orden = search.sort?.replace(/^-/, "")
+  // Con su dirección: lo que muestra la flecha es lo que ordena el servidor.
+  const orden = isOrder(search.sort) ? search.sort : undefined
   return Object.fromEntries(
     Object.entries({
       grupo: search.grupo,
@@ -168,7 +174,7 @@ export function filtersOf(search: CustomerSearch): CustomerFilters {
       categoria: search.categoria,
       distrito: search.distrito,
       promociones: search.promociones,
-      orden: orden === "reciente" || orden === "gasto" ? orden : undefined,
+      orden,
     }).filter(([, value]) => value),
   ) as CustomerFilters
 }
@@ -225,6 +231,25 @@ export function groupNameOf(filters: CustomerFilters): string {
       .filter(Boolean)
       .join(" · ") || "Mi grupo"
   )
+}
+
+/**
+ * Lo que dice «Guardar como grupo»: que Argos lo pone al día y cuántas son hoy con lo que se guarda
+ * (los filtros, sin la búsqueda). Con una búsqueda escrita, avisa que no se guarda. Sin la cuenta
+ * todavía, no da un número.
+ */
+export function saveGroupDescription(input: {
+  searching: boolean
+  count?: number | undefined
+  limited?: boolean | undefined
+}): string {
+  const parts = input.searching ? ["La búsqueda no se guarda: el grupo son los filtros."] : []
+  parts.push("Argos lo pone al día solo: entra quien cumpla, sale quien no.")
+  if (input.count !== undefined)
+    parts.push(
+      `Hoy ${input.count === 1 && !input.limited ? "es" : "son"} ${input.limited ? `más de ${input.count} clientas` : plural(input.count, "clienta", "clientas")}.`,
+    )
+  return parts.join(" ")
 }
 
 export interface SavedGroup {

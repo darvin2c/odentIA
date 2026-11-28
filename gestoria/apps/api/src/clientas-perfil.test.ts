@@ -96,6 +96,17 @@ describe("el grupo de una clienta", () => {
       why: "2 compras, una cada 35 días.",
     })
     expect(of(buy(0), buy(0)).why).toBe("2 compras, el mismo día.")
+    // Tan juntas que el ritmo redondea a 0: no dice «el mismo día» ni «cada 0 días».
+    expect(of(buy(10), buy(10), buy(10), buy(11)).why).toBe("4 compras, en 1 día.")
+  })
+
+  it("con un ritmo de 0, el porqué no da un ritmo", () => {
+    expect(of(buy(60), buy(60))).toMatchObject({
+      segment: "riesgo",
+      rhythmDays: 0,
+      why: "Compró 2 veces el mismo día y ya van 60.",
+    })
+    expect(of(buy(60), buy(60), buy(60), buy(61)).why).toBe("Compró 4 veces en 1 día y ya van 60.")
   })
 
   it("VIP: 5 compras o más en el año y la última hace 90 días o menos", () => {

@@ -12,14 +12,13 @@ import {
 import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
+import { recomputeStoreIn } from "./clientas-grupos.js"
 import { seedDemoPushChoices } from "./semilla-avisos.js"
 import { seedDemoExchanges } from "./semilla-cambios.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
-import { recomputeStoreIn } from "./clientas-grupos.js"
 import { seedDemoSegments } from "./semilla-grupos.js"
-import { profileStore } from "./sofi/perfilar.js"
 import { seedDemoBrand } from "./semilla-marca.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoProfiles } from "./semilla-perfil.js"
@@ -30,6 +29,7 @@ import {
   seedDemoSetupDone,
 } from "./semilla-primeros-pasos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
+import { profileStore } from "./sofi/perfilar.js"
 import { receiveSupportRequest } from "./soporte.js"
 
 /**
@@ -39,7 +39,8 @@ import { receiveSupportRequest } from "./soporte.js"
  * B4 sus pedidos, B5 Sofi y Argos en `semilla-sofi.ts`, Clientes en `semilla-clientes.ts` y
  * «Tu marca» en `semilla-marca.ts`, lo que cada persona elige recibir en el celular en
  * `semilla-avisos.ts` y los grupos de las clientas en `semilla-grupos.ts`). Inicio muestra su
- * «Te toca» con eso mismo; para sus primeros pasos, la demo suma una tienda que recién empieza, Tortas Carmen (`semilla-primeros-pasos.ts`).
+ * «Te toca» con eso mismo; para sus primeros pasos, la demo suma una tienda que recién empieza,
+ * Tortas Carmen (`semilla-primeros-pasos.ts`).
  *
  * Las personas del equipo son copias de cuentas de ejemplo: no existen en la cuenta, así que no
  * se puede entrar con ellas. Para entrar a la tienda, `GESTORIA_SEMILLA_CORREO` deja una

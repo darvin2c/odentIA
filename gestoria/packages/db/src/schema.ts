@@ -1942,7 +1942,8 @@ export interface CustomerGroupFilters {
   categoria?: string
   distrito?: string
   promociones?: "si" | "no"
-  orden?: "reciente" | "gasto"
+  /** Con «-», al revés: la flecha del menú de la lista. */
+  orden?: "reciente" | "-reciente" | "gasto" | "-gasto"
   q?: string
 }
 

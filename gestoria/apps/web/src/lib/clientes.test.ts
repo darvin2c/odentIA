@@ -14,6 +14,7 @@ import {
   purchasesText,
   reasonText,
   sameFilters,
+  saveGroupDescription,
   searchOfGroup,
   sinceText,
   whatsappLink,
@@ -114,11 +115,29 @@ describe("los filtros de Clientes, en la dirección", () => {
     expect(customerSearch({ grupo: "oro", promociones: "talvez", sort: "nombre" })).toEqual({})
   })
 
-  it("el orden va como «orden» al servidor, sin la flecha del menú", () => {
+  it("el orden va como «orden» al servidor, con la dirección de la flecha del menú", () => {
     const filters = filtersOf({ grupo: "vip", sort: "-gasto", q: "ana" })
-    expect(filters).toEqual({ grupo: "vip", orden: "gasto" })
-    expect(listQuery(filters, "ana")).toBe("?grupo=vip&orden=gasto&q=ana")
+    expect(filters).toEqual({ grupo: "vip", orden: "-gasto" })
+    expect(listQuery(filters, "ana")).toBe("?grupo=vip&orden=-gasto&q=ana")
+    expect(filtersOf({ sort: "reciente" })).toEqual({ orden: "reciente" })
+    expect(filtersOf({ sort: "-nombre" })).toEqual({})
     expect(listQuery({})).toBe("")
+  })
+
+  it("«Guardar como grupo» cuenta lo que se guarda: los filtros, sin la búsqueda", () => {
+    expect(saveGroupDescription({ searching: true, count: 12, limited: false })).toBe(
+      "La búsqueda no se guarda: el grupo son los filtros. Argos lo pone al día solo: entra quien cumpla, sale quien no. Hoy son 12 clientas.",
+    )
+    expect(saveGroupDescription({ searching: false, count: 1 })).toBe(
+      "Argos lo pone al día solo: entra quien cumpla, sale quien no. Hoy es 1 clienta.",
+    )
+    // Mientras llega la cuenta, ningún número.
+    expect(saveGroupDescription({ searching: true })).toBe(
+      "La búsqueda no se guarda: el grupo son los filtros. Argos lo pone al día solo: entra quien cumpla, sale quien no.",
+    )
+    expect(saveGroupDescription({ searching: false, count: 200, limited: true })).toContain(
+      "Hoy son más de 200 clientas.",
+    )
   })
 
   it("el orden solo no es un grupo que se pueda guardar", () => {

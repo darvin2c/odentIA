@@ -41,11 +41,11 @@ import { inStore, StoreError } from "./tiendas.js"
  * lo que Argos calcula de cada ficha con las cuentas fijas de `clientas-perfil.ts`, guardado en
  * `customer_profile` para filtrar rápido la lista de Clientes, y los grupos que guarda la tienda.
  *
- * - Una compra es un pedido con ficha, que no es de prueba, en un estado que ya es compra
- *   (`BOUGHT_STATES`), con su día en la hora de la tienda. Un cambio no es otra compra: lo que
- *   lleva y lo que vuelve ajusta lo que gastó en la compra de la que sale (su total ya descuenta lo
- *   que vuelve; el dinero devuelto solo paga ese saldo, no se resta otra vez). Nada de esto toca el
- *   saldo único (`order_balance`): no se cobra ni se debe aquí.
+ * - Una compra es un pedido con ficha, que no es de prueba, pagado según el saldo único
+ *   (`order_balance`, sin recalcularlo) o ya entregado, con su día en la hora de la tienda. Un
+ *   cambio no es otra compra: lo que lleva y lo que vuelve, en toda su cadena de cambios, ajusta lo
+ *   que gastó y lo que llevó en la compra de la que sale (su total ya descuenta lo que vuelve; el
+ *   dinero devuelto solo paga ese saldo, no se resta otra vez). Devuelta entera, no es compra.
  * - Se pidió rebaja si se cedió algo del margen (`margin_used_cents`); compró en liquidación si una
  *   línea salió con su promoción (el precio sin negociar bajo el de lista, con una promoción del
  *   producto vigente el día de la compra).
@@ -81,7 +81,36 @@ const boughtSql = () =>
 
 /* ----------------------------------------------------------------- las compras */
 
-/** Las compras de cada familia (la ficha que se ve y las que se le unieron), por su raíz. */
+/**
+ * Cada pedido con ficha que ya es compra y toda su cadena de cambios: el pedido (`head` es su id) y
+ * cada cambio que sale de él o de otro cambio de la cadena. Una compra es un pedido pagado según el
+ * saldo único (`order_balance`: no debe nada y todo lo que entró está confirmado) o ya entregado: una
+ * captura por confirmar o un contra entrega sin cobrar todavía no lo son. Un cambio cuenta si no se
+ * anuló y ya es compra, o si devuelve dinero (su total bajo cero).
+ */
+const chainSql = (storeId: string, only: ReturnType<typeof sql>) => sql`
+  with recursive chain as (
+    select coalesce(c.merged_into, c.id) as root, o.id, o.id as head, o.created_at, o.total_cents,
+      o.margin_used_cents, o.delivery_zone
+    from sale_order o
+    join customer c on c.id = o.customer_id
+    left join order_balance b on b.order_id = o.id
+    where o.store_id = ${storeId} and o.test = false and o.exchange_of_id is null
+      and o.state in (${boughtSql()}) and (o.state = 'entregado' or coalesce(b.paid, false)) ${only}
+    union all
+    select ch.root, x.id, ch.head, x.created_at, x.total_cents, x.margin_used_cents, x.delivery_zone
+    from sale_order x
+    join chain ch on x.exchange_of_id = ch.id
+    where x.store_id = ${storeId} and x.test = false and x.state <> 'anulado'
+      and (x.state in (${boughtSql()}) or x.total_cents < 0)
+  )`
+
+/**
+ * Las compras de cada familia (la ficha que se ve y las que se le unieron), por su raíz. Lo que
+ * gastó es el total del pedido más el de cada cambio de su cadena (cada uno ya descuenta lo que
+ * vuelve). Lo que llevó es lo que se quedó: lo que volvió en un cambio se resta y lo que se llevó en
+ * el cambio se suma. Un pedido devuelto entero (todo volvió y no se llevó nada nuevo) no es compra.
+ */
 export async function purchasesIn(
   tx: Db,
   storeId: string,
@@ -92,69 +121,88 @@ export async function purchasesIn(
   const out = new Map<string, Purchase[]>()
   if (roots && roots.length === 0) return out
   const only = roots ? sql`and ${inUuids(sql.raw("coalesce(c.merged_into, c.id)"), roots)}` : sql``
+  const chain = chainSql(storeId, only)
   const orders = await tx.execute<{
     root: string
     id: string
+    head: string
     created_at: Date | string
     total_cents: number | string
     margin_used_cents: number | string
     delivery_zone: string | null
-    exchanged: number | string | null
-  }>(sql`
-    select coalesce(c.merged_into, c.id) as root, o.id, o.created_at, o.total_cents,
-      o.margin_used_cents, o.delivery_zone,
-      (select coalesce(sum(x.total_cents), 0) from sale_order x
-        where x.store_id = o.store_id and x.exchange_of_id = o.id and x.test = false
-          and x.state <> 'anulado'
-          and (x.state in (${boughtSql()}) or x.total_cents < 0)) as exchanged
-    from sale_order o
-    join customer c on c.id = o.customer_id
-    where o.store_id = ${storeId} and o.test = false and o.exchange_of_id is null
-      and o.state in (${boughtSql()}) ${only}`)
-  const lines = await tx.execute<{
+  }>(sql`${chain} select * from chain`)
+  type ItemRow = {
     order_id: string
     product_id: string
+    variant_id: string
+    quantity: number | string
+    gift: boolean
     option_values: string[]
     category: string | null
     options: { name: string }[]
     promo: boolean
-  }>(sql`
-    select l.order_id, l.product_id, v.option_values, p.category, p.options,
-      (l.auto_unit_cents < l.list_unit_cents and exists (
+  }
+  const lines = await tx.execute<ItemRow>(sql`${chain}
+    select l.order_id, l.product_id, l.variant_id, l.quantity, l.gift, v.option_values, p.category,
+      p.options,
+      (l.gift = false and l.auto_unit_cents < l.list_unit_cents and exists (
         select 1 from product_promotion pp
         where pp.store_id = l.store_id and pp.product_id = l.product_id
-          and (o.created_at at time zone ${timeZone})::date between pp.starts_on and pp.ends_on
+          and (ch.created_at at time zone ${timeZone})::date between pp.starts_on and pp.ends_on
       )) as promo
-    from sale_order_line l
-    join sale_order o on o.id = l.order_id
-    join customer c on c.id = o.customer_id
+    from chain ch
+    join sale_order_line l on l.order_id = ch.id
     join product_variant v on v.id = l.variant_id
     join product p on p.id = l.product_id
-    where o.store_id = ${storeId} and o.test = false and o.exchange_of_id is null
-      and o.state in (${boughtSql()}) and l.gift = false ${only}
     order by l.order_id, l.position`)
-  const itemsOf = new Map<string, { items: PurchaseItem[]; promo: boolean }>()
-  for (const line of lines) {
-    const measureAt = catalog.indexOf.get(line.product_id)
-    const colorAt = (line.options ?? []).findIndex((option) => fold(option.name) === "color")
-    const row = itemsOf.get(line.order_id) ?? { items: [], promo: false }
-    row.items.push({
-      category: line.category,
-      color: colorAt >= 0 ? (line.option_values[colorAt] ?? null) : null,
-      measure: measureAt === undefined ? null : (line.option_values[measureAt] ?? null),
-    })
-    row.promo ||= Boolean(line.promo)
-    itemsOf.set(line.order_id, row)
+  const returns = await tx.execute<ItemRow>(sql`${chain}
+    select r.order_id, r.product_id, r.variant_id, -r.quantity as quantity, false as gift,
+      v.option_values, p.category, p.options, false as promo
+    from chain ch
+    join sale_order_return r on r.order_id = ch.id
+    join product_variant v on v.id = r.variant_id
+    join product p on p.id = r.product_id
+    order by r.order_id, r.position`)
+  const headOf = new Map([...orders].map((o) => [o.id, o.head]))
+  const itemOf = (row: ItemRow): PurchaseItem => {
+    const measureAt = catalog.indexOf.get(row.product_id)
+    const colorAt = (row.options ?? []).findIndex((option) => fold(option.name) === "color")
+    return {
+      category: row.category,
+      color: colorAt >= 0 ? (row.option_values[colorAt] ?? null) : null,
+      measure: measureAt === undefined ? null : (row.option_values[measureAt] ?? null),
+    }
   }
-  for (const o of orders) {
-    const items = itemsOf.get(o.id)
+  // Lo que se quedó de cada compra, por variante: lo que llevó, menos lo que volvió, más lo nuevo.
+  type Kept = { quantity: number; paid: boolean; item: PurchaseItem }
+  const keptOf = new Map<string, Map<string, Kept>>()
+  const promoOf = new Map<string, boolean>()
+  for (const row of [...lines, ...returns]) {
+    const head = headOf.get(row.order_id)
+    if (!head) continue
+    const kept = keptOf.get(head) ?? new Map<string, Kept>()
+    const now = kept.get(row.variant_id) ?? { quantity: 0, paid: false, item: itemOf(row) }
+    now.quantity += Number(row.quantity)
+    // Lo que vuelve de un regalo no lo hace compra: solo cuenta lo que se llevó pagando.
+    if (Number(row.quantity) > 0 && !row.gift) now.paid = true
+    kept.set(row.variant_id, now)
+    keptOf.set(head, kept)
+    if (row.order_id === head && row.promo) promoOf.set(head, true)
+  }
+  const byHead = Map.groupBy([...orders], (o) => o.head)
+  for (const [head, chainRows] of byHead) {
+    const o = chainRows.find((row) => row.id === head)
+    if (!o) continue
+    const kept = [...(keptOf.get(head)?.values() ?? [])].filter((k) => k.paid && k.quantity > 0)
+    // Devuelto entero: lo que se llevó volvió todo y no se llevó nada nuevo.
+    if (chainRows.length > 1 && kept.length === 0) continue
     const list = out.get(o.root) ?? []
     list.push({
       day: dayIn(timeZone, new Date(o.created_at)),
-      spentCents: Number(o.total_cents) + Number(o.exchanged ?? 0),
+      spentCents: chainRows.reduce((sum, row) => sum + Number(row.total_cents), 0),
       ceded: Number(o.margin_used_cents) > 0,
-      promo: items?.promo ?? false,
-      items: items?.items ?? [],
+      promo: promoOf.get(head) ?? false,
+      items: kept.map((k) => k.item),
       zone: o.delivery_zone,
     })
     out.set(o.root, list)
@@ -384,8 +432,9 @@ const fromState = (s: ProfileState): ListProfile => ({
 
 /**
  * Lo de cada ficha que se ve, para la lista: lo que guardó la vuelta de la noche y, en el momento,
- * lo de las fichas que no tienen fila o que cambiaron después (una ficha o un pedido de la
- * familia, un dato del perfil, unir o separar).
+ * lo de las fichas que no tienen fila, cuya fila es de un día anterior al de hoy de la tienda (los
+ * días sin comprar ya son otros) o que cambiaron después (una ficha o un pedido de la familia, un
+ * dato del perfil, unir o separar).
  */
 export async function listProfilesIn(
   tx: Db,
@@ -409,6 +458,7 @@ export async function listProfilesIn(
       p.last_bought_on::text as last_bought_on, p.measures, p.categories, p.districts,
       p.price_sensitivity,
       (p.customer_id is null
+        or p.computed_for < ${clock.today}::date
         or exists (select 1 from customer c where c.store_id = r.store_id
           and coalesce(c.merged_into, c.id) = r.id and c.updated_at > p.computed_at)
         or exists (select 1 from sale_order o join customer c on c.id = o.customer_id
@@ -477,6 +527,30 @@ const optionalText = (max: number) =>
     z.string().trim().max(max, `Máximo ${max} caracteres`).optional(),
   )
 
+/** Los órdenes de la lista: lo que gastó o cuándo compró, cada uno en las dos direcciones. */
+export const LIST_ORDERS = ["reciente", "-reciente", "gasto", "-gasto"] as const
+export type ListOrder = (typeof LIST_ORDERS)[number]
+
+/**
+ * Cómo se ordenan dos fichas: `gasto` de lo que menos gastó a lo que más (`-gasto`, al revés);
+ * `reciente` de la que compró hace menos a la que compró hace más (`-reciente`, al revés). Las que
+ * no compran van al final en los dos sentidos.
+ */
+export function compareBy(order: ListOrder, profiles: Map<string, ListProfile>) {
+  const descending = order.startsWith("-")
+  const sign = descending ? -1 : 1
+  return (a: string, b: string) => {
+    const pa = profiles.get(a)
+    const pb = profiles.get(b)
+    if (order.endsWith("gasto")) return sign * ((pa?.totalCents ?? 0) - (pb?.totalCents ?? 0))
+    const da = pa?.lastBoughtOn ?? null
+    const db = pb?.lastBoughtOn ?? null
+    if (!da || !db) return da ? -1 : db ? 1 : 0
+    // Compró hace menos: el día más nuevo primero.
+    return da === db ? 0 : sign * (da > db ? -1 : 1)
+  }
+}
+
 /** Los filtros de Clientes, los mismos que guarda un grupo. */
 export const listFilters = z.object({
   grupo: z.preprocess(
@@ -490,9 +564,10 @@ export const listFilters = z.object({
     (value) => (value === "" ? undefined : value),
     z.enum(["si", "no"], "Elige sí o no").optional(),
   ),
+  /** Con «-», al revés (la flecha del menú): `gasto` de menos a más, `reciente` lo último primero. */
   orden: z.preprocess(
     (value) => (value === "" ? undefined : value),
-    z.enum(["reciente", "gasto"], "Ordena por lo reciente o por lo que gastó").optional(),
+    z.enum(LIST_ORDERS, "Ordena por lo reciente o por lo que gastó").optional(),
   ),
   q: optionalText(80),
 })
@@ -527,8 +602,14 @@ export function facetsOf(profiles: Map<string, ListProfile>) {
   }
   for (const p of profiles.values()) {
     segments[p.segment] += 1
+    // La talla y el distrito de hoy (el primero), como filtra `matches`: así cada valor trae a alguien.
+    const today = {
+      measures: p.measures.slice(0, 1),
+      categories: p.categories,
+      districts: p.districts.slice(0, 1),
+    }
     for (const key of ["measures", "categories", "districts"] as const)
-      for (const value of p[key]) {
+      for (const value of today[key]) {
         const row = counts[key].get(fold(value)) ?? { value, n: 0 }
         row.n += 1
         counts[key].set(fold(value), row)

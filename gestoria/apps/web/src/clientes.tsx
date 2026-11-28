@@ -77,6 +77,7 @@ import {
   type Segment,
   type SimilarPair,
   sameFilters,
+  saveGroupDescription,
   searchOfGroup,
   sinceText,
   WANTED_KIND,
@@ -413,7 +414,7 @@ export function CustomersIndex() {
         filters={filterDefs}
         sortOptions={[
           { value: "reciente", label: "Compró hace menos" },
-          { value: "gasto", label: "Gastó más" },
+          { value: "gasto", label: "Lo que gastó" },
         ]}
         searchLabel="Buscar en clientes"
         searchPlaceholder="Buscar por nombre o teléfono"
@@ -482,8 +483,7 @@ export function CustomersIndex() {
       {saving ? (
         <SaveGroupSheet
           filters={filters}
-          count={customers.length}
-          limited={Boolean(list.data?.limited)}
+          searching={Boolean(search.q)}
           onClose={() => setSaving(false)}
         />
       ) : null}
@@ -576,21 +576,25 @@ function SavedGroups({
 
 /**
  * «Guardar como grupo»: lo elegido en la lista, con un nombre. No es una lista fija: Argos lo pone
- * al día solo (entra quien cumpla, sale quien no).
+ * al día solo (entra quien cumpla, sale quien no). La cuenta es la de lo que se guarda, los
+ * filtros sin la búsqueda: sin búsqueda es la misma lista que se ve.
  */
 function SaveGroupSheet({
   filters,
-  count,
-  limited,
+  searching,
   onClose,
 }: {
   filters: CustomerFilters
-  count: number
-  limited: boolean
+  searching: boolean
   onClose: () => void
 }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
+  const query = listQuery(filters)
+  const counted = useQuery({
+    queryKey: [...CUSTOMERS_KEY(store.id), query],
+    queryFn: () => api<CustomerList>(`/api/tiendas/${store.id}/clientes${query}`),
+  })
   const save = useMutation({
     mutationFn: (body: { name: string; filters: CustomerFilters }) =>
       api<{ group: SavedGroup }>(`/api/tiendas/${store.id}/clientes/grupos`, {
@@ -614,13 +618,16 @@ function SaveGroupSheet({
     },
   })
   const surface = useFormSurface(form)
-  const today = limited ? `más de ${count} clientas` : plural(count, "clienta", "clientas")
   return (
     <FormDrawer
       {...surface}
       open
       title="Guardar como grupo"
-      description={`Argos lo pone al día solo: entra quien cumpla, sale quien no. Hoy son ${today}.`}
+      description={saveGroupDescription({
+        searching,
+        count: counted.data?.customers.length,
+        limited: counted.data?.limited,
+      })}
       submitLabel="Guardar grupo"
       onClose={onClose}
     >

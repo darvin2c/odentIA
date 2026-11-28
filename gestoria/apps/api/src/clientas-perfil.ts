@@ -86,6 +86,18 @@ export function daysBetween(from: string, to: string): number {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
+/**
+ * Cómo compra, con 2 compras o más: «una cada 40 días» o, con un ritmo de 0 (todas el mismo día, o
+ * tan juntas que redondea a 0), sin dar un ritmo: «el mismo día», «en 1 día». Con `verb`, la frase
+ * empieza con él («Compraba cada 40 días») o, sin ritmo, «Compró 2 veces el mismo día».
+ */
+function boughtHow(n: number, spanDays: number, rhythmDays: number, verb?: string): string {
+  const when = spanDays === 0 ? "el mismo día" : `en ${plural(spanDays, "día", "días")}`
+  if (rhythmDays === 0) return verb ? `Compró ${n} veces ${when}` : when
+  const every = plural(rhythmDays, "día", "días")
+  return verb ? `${verb} cada ${every}` : `una cada ${every}`
+}
+
 /** Lo que se repite, de lo más a lo menos; si empatan, lo de la compra más reciente primero. */
 function tally(purchases: Purchase[], pick: (item: PurchaseItem) => string | null) {
   const seen = new Map<string, number>()
@@ -150,13 +162,10 @@ export function computedOf(purchases: Purchase[], today: string, currency: strin
     out.why = `${year.length} compras, ${money(yearCents)} en ${plural(months, "mes", "meses")}.`
   } else if (n >= 2 && last > Math.max(45, 1.5 * (out.rhythmDays ?? 0))) {
     out.segment = "riesgo"
-    out.why = `Compraba cada ${plural(out.rhythmDays ?? 0, "día", "días")} y ya van ${last}.`
+    out.why = `${boughtHow(n, first - last, out.rhythmDays ?? 0, "Compraba")} y ya van ${last}.`
   } else if (n >= 2) {
     out.segment = "frecuente"
-    out.why =
-      out.rhythmDays === 0
-        ? `${n} compras, el mismo día.`
-        : `${n} compras, una cada ${plural(out.rhythmDays ?? 0, "día", "días")}.`
+    out.why = `${n} compras, ${boughtHow(n, first - last, out.rhythmDays ?? 0)}.`
   } else {
     out.segment = "nueva"
     out.why =

@@ -13,10 +13,12 @@ import {
   customerGroup,
   customerProfile,
   type Db,
+  orderPayment,
   productPromotion,
   saleOrder,
   stockRequest,
   store,
+  storeDeliveryMethod,
   storeMember,
   storeSupportAccess,
   withPerson,
@@ -111,17 +113,22 @@ async function chat(name: string) {
 }
 
 /**
- * Una compra: la arma Sofi en el chat (o Lucía, con un precio acordado) y se anota su captura.
- * `daysAgo` la mueve a ese día con el dueño de la base, como si fuera de entonces.
+ * Una compra: la arma Sofi en el chat (o Lucía, con un precio acordado), se anota su captura y Rosa
+ * la confirma (una compra es un pedido pagado). Con `confirm: false` la captura queda por
+ * confirmar. `daysAgo` la mueve a ese día con el dueño de la base, como si fuera de entonces.
  */
 async function sale(input: {
   name?: string
   customerId?: string
   conversationId?: string
   variantId: string
+  /** Más de un producto: cada variante, una vez. */
+  more?: string[]
   unitCents?: number
   daysAgo?: number
   paid?: boolean
+  confirm?: boolean
+  paymentMethodId?: string
   zone?: string
 }) {
   const by = input.conversationId && !input.unitCents ? SOFI_ACTOR : "u-lucia"
@@ -135,10 +142,13 @@ async function sale(input: {
         customerName: input.name ?? "",
         channel: "whatsapp",
         address: "Av. Primavera 123",
-        lines: [{ variantId: input.variantId, quantity: 1, unitCents: input.unitCents ?? null }],
+        lines: [
+          { variantId: input.variantId, quantity: 1, unitCents: input.unitCents ?? null },
+          ...(input.more ?? []).map((variantId) => ({ variantId, quantity: 1, unitCents: null })),
+        ],
         deliveryMethodId: ids.reparto,
         zone: input.zone ?? "Surco",
-        paymentMethodId: ids.yape,
+        paymentMethodId: input.paymentMethodId ?? ids.yape,
       }),
       { conversationId: input.conversationId ?? null },
     )
@@ -153,12 +163,28 @@ async function sale(input: {
     by === SOFI_ACTOR
       ? await withAgent(db.appDb, SOFI_ACTOR, storeId, run)
       : await withPerson(db.appDb, { userId: "u-lucia", email: people.lucia.email, storeId }, run)
+  if (input.paid !== false && input.confirm !== false) await confirm(order.id)
   if (input.daysAgo)
     await db.ownerDb
       .update(saleOrder)
       .set({ createdAt: new Date(Date.now() - input.daysAgo * DAY) })
       .where(eq(saleOrder.id, order.id))
   return order
+}
+
+/** Rosa confirma la captura por confirmar del pedido. */
+async function confirm(orderId: string) {
+  const [payment] = await db.ownerDb
+    .select({ id: orderPayment.id })
+    .from(orderPayment)
+    .where(eq(orderPayment.orderId, orderId))
+  const done = await call(
+    "rosa",
+    "POST",
+    `${base}/pedidos/${orderId}/pagos/${payment!.id}/revision`,
+    { decision: "confirmar" },
+  )
+  expect(done.status).toBe(200)
 }
 
 const list = async (query = "", who: Who = "lucia") => call(who, "GET", `${base}/clientes${query}`)
@@ -535,11 +561,26 @@ describe("los filtros de la lista", () => {
     expect((await list("?grupo=riesgo")).json.facets.segments.frecuente).toBe(3)
   })
 
-  it("por lo que gastó, de más a menos", async () => {
-    const { json } = await list("?orden=gasto")
-    const totals = (json.customers as Json[]).map((c) => c.totalCents)
-    expect(totals).toEqual([...totals].sort((a, b) => b - a))
-    expect(json.customers[0].id).toBe(fichas.andrea)
+  it("por lo que gastó y por cuándo compró, en la dirección de la flecha", async () => {
+    const totalsOf = async (query: string) =>
+      ((await list(query)).json.customers as Json[]).map((c) => c.totalCents as number)
+    // «-gasto», de más a menos; «gasto», de menos a más.
+    const down = await totalsOf("?orden=-gasto")
+    expect(down).toEqual([...down].sort((a, b) => b - a))
+    expect((await list("?orden=-gasto")).json.customers[0].id).toBe(fichas.andrea)
+    const up = await totalsOf("?orden=gasto")
+    expect(up).toEqual([...down].sort((a, b) => a - b))
+    // «reciente», la que compró hace menos primero; «-reciente», al revés. Sin compras, al final.
+    const daysOf = async (query: string) =>
+      ((await list(query)).json.customers as Json[]).map((c) => c.lastBoughtDays as number | null)
+    const recent = await daysOf("?orden=reciente")
+    expect(recent.at(-1)).toBeNull()
+    const bought = recent.filter((d): d is number => d !== null)
+    expect(bought).toEqual([...bought].sort((a, b) => a - b))
+    const old = await daysOf("?orden=-reciente")
+    expect(old.at(-1)).toBeNull()
+    expect(old.filter((d) => d !== null)).toEqual([...bought].sort((a, b) => b - a))
+    expect((await list("?orden=nombre")).status).toBe(400)
   })
 
   it("un grupo que no existe es un error, no una lista vacía", async () => {
@@ -688,5 +729,158 @@ describe("las reglas de la base", () => {
       tx.select().from(customerGroup).where(sql`true`),
     )) as unknown[]
     expect(ajenos).toEqual([])
+  })
+})
+
+describe("lo que la lista cuenta", () => {
+  const deliver = async (orderId: string, body: Json = {}) => {
+    const done = await call("lucia", "POST", `${base}/pedidos/${orderId}/entregado`, body)
+    expect(done.json.order?.state).toBe("entregado")
+  }
+  /** Un cambio del pedido entregado, con el envío a cuenta de la tienda. */
+  const exchange = async (orderId: string, body: Json) => {
+    const created = await call("lucia", "POST", `${base}/pedidos/${orderId}/cambio`, {
+      reason: "Le quedó chica",
+      deliveryMethodId: ids.reparto,
+      zone: "Surco",
+      storePaysDelivery: true,
+      address: "Av. Primavera 123",
+      ...body,
+    })
+    expect(created.status).toBe(201)
+    return created.json.order as Json
+  }
+  const totalOf = async (orderId: string) =>
+    (
+      await db.ownerDb
+        .select({ total: saleOrder.totalCents })
+        .from(saleOrder)
+        .where(eq(saleOrder.id, orderId))
+    )[0]!.total
+
+  it("una fila de un día anterior se calcula en el momento", async () => {
+    // Lo guardado es de ayer y nada cambió después: igual vale la cuenta de hoy.
+    await db.ownerDb
+      .update(customerProfile)
+      .set({
+        segment: "vip",
+        why: "De ayer.",
+        computedFor: addDays(dayIn(LIMA), -1),
+        computedAt: new Date(Date.now() + HOUR),
+      })
+      .where(eq(customerProfile.customerId, fichas.lorena))
+    expect(row((await list()).json.customers, fichas.lorena)).toMatchObject({
+      segment: "frecuente",
+      segmentWhy: expect.not.stringContaining("De ayer"),
+    })
+    await recalculateStore(db.ownerDb, storeId)
+  })
+
+  it("una compra es un pedido pagado: una captura por confirmar o un contra entrega sin cobrar todavía no", async () => {
+    const ruth = await sale({ name: "Ruth Salas", variantId: ids.beige37, confirm: false })
+    expect(row((await list()).json.customers, ruth.customerId!)).toMatchObject({
+      segment: "sin_compras",
+      ordersCount: 0,
+    })
+    await confirm(ruth.id)
+    expect(row((await list()).json.customers, ruth.customerId!)).toMatchObject({
+      segment: "nueva",
+      ordersCount: 1,
+    })
+    // Contra entrega: sale sin pago y es compra cuando se entrega.
+    await db.ownerDb
+      .update(storeDeliveryMethod)
+      .set({ acceptsPayOnDelivery: true })
+      .where(eq(storeDeliveryMethod.id, ids.reparto))
+    const efectivo = (
+      await call("rosa", "POST", `${base}/medios-de-pago`, {
+        name: "Efectivo",
+        typeCode: "10",
+        collection: "al_recibir",
+      })
+    ).json.method.id as string
+    const sofia = await sale({
+      name: "Sofía León",
+      variantId: ids.beige37,
+      paid: false,
+      paymentMethodId: efectivo,
+    })
+    expect(sofia.state).toBe("por_salir")
+    expect(row((await list()).json.customers, sofia.customerId!)).toMatchObject({
+      segment: "sin_compras",
+      ordersCount: 0,
+    })
+    await deliver(sofia.id, { collectedCents: sofia.totalCents })
+    expect(row((await list()).json.customers, sofia.customerId!)).toMatchObject({
+      segment: "nueva",
+      ordersCount: 1,
+    })
+  })
+
+  it("lo que gastó suma toda la cadena de cambios y lo que compra es lo que se quedó", async () => {
+    // Valeria llevó una sandalia beige 37 y un botín 40; cambió la sandalia por la negra 38 y
+    // después devolvió la negra. Se quedó solo con el botín.
+    const bought = await sale({ name: "Valeria Ríos", variantId: ids.beige37, more: [ids.botin40] })
+    const valeria = bought.customerId!
+    await deliver(bought.id)
+    const first = await exchange(bought.id, {
+      returns: [{ variantId: ids.beige37, quantity: 1 }],
+      takes: [{ variantId: ids.negra38, quantity: 1 }],
+    })
+    await deliver(first.id)
+    const second = await exchange(first.id, {
+      returns: [{ variantId: ids.negra38, quantity: 1 }],
+      takes: [],
+    })
+    const totals = [
+      await totalOf(bought.id),
+      await totalOf(first.id),
+      await totalOf(second.id as string),
+    ]
+    expect(totals[2]).toBeLessThan(0)
+    expect(row((await list()).json.customers, valeria)).toMatchObject({
+      ordersCount: 1,
+      totalCents: totals[0]! + totals[1]! + totals[2]!,
+      measure: "40",
+    })
+    const ficha = (await call("lucia", "GET", `${base}/clientes/${valeria}`)).json.customer
+    expect(ficha.computed).toMatchObject({
+      categories: [["Botines", 1]],
+      measures: [["40", 1]],
+      colors: [],
+    })
+  })
+
+  it("un pedido devuelto entero no es compra", async () => {
+    const bought = await sale({ name: "Ximena Rojas", variantId: ids.beige37 })
+    await deliver(bought.id)
+    await exchange(bought.id, { returns: [{ variantId: ids.beige37, quantity: 1 }], takes: [] })
+    expect(row((await list()).json.customers, bought.customerId!)).toMatchObject({
+      segment: "sin_compras",
+      ordersCount: 0,
+      totalCents: 0,
+      lastBoughtDays: null,
+    })
+  })
+
+  it("el filtro de talla ofrece solo la talla de hoy de cada una, la misma que filtra", async () => {
+    await call("rosa", "POST", `${base}/variantes/${ids.botin43}/movimientos`, {
+      kind: "entrada",
+      quantity: 5,
+    })
+    // Wendy compra en 37 (dos veces) y una vez llevó un botín 43: su talla de hoy es 37.
+    const first = await sale({ name: "Wendy Paz", variantId: ids.beige37, daysAgo: 5 })
+    await sale({ customerId: first.customerId!, variantId: ids.beige37, daysAgo: 3 })
+    await sale({ customerId: first.customerId!, variantId: ids.botin43, daysAgo: 1 })
+    const { json } = await list()
+    expect(row(json.customers, first.customerId!)?.measure).toBe("37")
+    expect(json.facets.measures).not.toContain("43")
+    expect(json.facets.measures).toContain("37")
+    expect((await list("?medida=43")).json.customers).toEqual([])
+    // «reciente» con días distintos: la que compró hace menos primero.
+    const recent = ((await list("?orden=reciente")).json.customers as Json[])
+      .map((c) => c.lastBoughtDays as number | null)
+      .filter((d): d is number => d !== null)
+    expect(recent).toEqual([...recent].sort((a, b) => a - b))
   })
 })
