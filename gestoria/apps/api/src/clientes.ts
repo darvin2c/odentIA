@@ -13,8 +13,22 @@ import {
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import {
+  consentsIn,
+  facetsOf,
+  hasFilters,
+  type ListFilters,
+  lastBoughtDaysOf,
+  listProfilesIn,
+  matches,
+  priceNotesIn,
+  profilesIn,
+  wantedIn,
+} from "./clientas-grupos.js"
+import { computedOf, whoLine } from "./clientas-perfil.js"
 import type { Person } from "./cuenta.js"
-import { customerProfileIn } from "./perfil.js"
+import { storeClockIn } from "./hora.js"
+import { type ConsentView, customerProfileIn, measureCatalogIn } from "./perfil.js"
 import { balancesIn, unpaidBalance } from "./saldo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -397,21 +411,70 @@ function lineText(line: { productName: string; variantName: string; quantity: nu
   return `${line.productName}${variant}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`
 }
 
-/** Clientes: la lista, o lo que coincide con lo que se busca (nombre o teléfono). */
-export async function listCustomers(appDb: Db, person: Person, storeId: string, search = "") {
+/**
+ * Clientes: la lista, o lo que coincide con lo que se busca (nombre o teléfono) y con los filtros
+ * de «Lo que Argos calcula» (su grupo, su medida, lo que compra, su distrito y si acepta
+ * promociones). Cada fila suma su grupo y lo que gastó; `facets` es lo que se puede filtrar en toda
+ * la tienda, sin los filtros. El grupo sale de `customer_profile` (la vuelta de la noche) o, si la
+ * ficha cambió después, de la misma cuenta hecha ahora (`clientas-grupos.ts`).
+ */
+export async function listCustomers(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  options: string | ListFilters = "",
+) {
+  const filters: ListFilters = typeof options === "string" ? { q: options } : options
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const query = search.trim().slice(0, 80)
-    // Una de más, para saber si hay otras que no se ven.
-    const found = await summariesOf(tx, storeId, {
-      ...(query ? { search: query } : {}),
-      limit: MAX_LISTED + 1,
-    })
+    const query = (filters.q ?? "").trim().slice(0, 80)
+    const clock = await storeClockIn(tx, storeId)
+    const profiles = await listProfilesIn(tx, storeId, clock)
+    const consents = await consentsIn(tx, storeId)
+    const { label: measureLabel } = await measureCatalogIn(tx, storeId)
+    const consentOf = (id: string): ConsentView => consents.get(id) ?? "sin_preguntar"
+    let roots = hasFilters(filters)
+      ? [...profiles.entries()]
+          .filter(([id, p]) => matches(p, consentOf(id), filters))
+          .map(([id]) => id)
+      : undefined
+    const byTotal = filters.orden === "gasto"
+    const total = (id: string) => profiles.get(id)?.totalCents ?? 0
+    // Por lo que gastó, sin buscar: se eligen aquí las que más gastaron (una de más, para saber si
+    // hay otras que no se ven). Buscando, se trae todo lo que coincide y se ordena después.
+    if (byTotal && !query)
+      roots = (roots ?? [...profiles.keys()])
+        .sort((a, b) => total(b) - total(a))
+        .slice(0, MAX_LISTED + 1)
+    const found =
+      roots && roots.length === 0
+        ? []
+        : await summariesOf(tx, storeId, {
+            ...(roots ? { roots } : {}),
+            ...(query ? { search: query } : {}),
+            limit: byTotal ? (roots?.length ?? profiles.size) + 1 : MAX_LISTED + 1,
+          })
+    if (byTotal) found.sort((a, b) => total(b.id) - total(a.id))
     // Sin buscar, también cuántas podrían ser la misma clienta (el aviso de la lista).
     const similar = query ? null : (await similarIn(tx, storeId)).count
     return {
-      customers: found.slice(0, MAX_LISTED),
+      customers: found.slice(0, MAX_LISTED).map((row) => {
+        const p = profiles.get(row.id)
+        return {
+          ...row,
+          segment: p?.segment ?? ("sin_compras" as const),
+          segmentWhy: p?.why ?? "Todavía no compra.",
+          totalCents: p?.totalCents ?? 0,
+          ordersCount: p?.ordersCount ?? 0,
+          lastBoughtDays: lastBoughtDaysOf(p, clock.today),
+          measure: p?.measures[0] ?? null,
+          district: p?.districts[0] ?? null,
+          consent: consentOf(row.id),
+        }
+      }),
       similar,
       limited: found.length > MAX_LISTED,
+      facets: facetsOf(profiles),
+      measureLabel,
     }
   })
 }
@@ -655,6 +718,19 @@ export async function customerDetail(
       .select({ country: store.country })
       .from(store)
       .where(eq(store.id, storeId))
+    const profile = await customerProfileIn(tx, storeId, head.id, seat)
+    // «Lo que Argos calcula»: la misma cuenta de la lista y de la vuelta de la noche, hecha ahora.
+    const clock = await storeClockIn(tx, storeId)
+    // Con rebaja o en liquidación, cada compra: la misma regla de la sensibilidad al precio.
+    const priceNotes = await priceNotesIn(
+      tx,
+      storeId,
+      clock.timeZone,
+      orders.map((o) => o.id),
+    )
+    const live = (await profilesIn(tx, storeId, clock, [head.id])).get(head.id)
+    const wanted = await wantedIn(tx, storeId, ids)
+    const computed = live?.computed ?? computedOf([], clock.today, "PEN")
     return {
       id: head.id,
       name: head.name,
@@ -679,6 +755,7 @@ export async function customerDetail(
         balance: balances.get(o.id) ?? unpaidBalance(o.totalCents),
         createdAt: o.createdAt,
         text: (linesBy.get(o.id) ?? []).map(lineText).join(", "),
+        priceNote: priceNotes.get(o.id) ?? null,
       })),
       addresses,
       /**
@@ -738,7 +815,18 @@ export async function customerDetail(
         phone: similarNames.get(id)?.phone ?? null,
       })),
       /** «Lo que Argos sabe de ella» y cuándo se le puede escribir (`perfil.ts`). */
-      profile: await customerProfileIn(tx, storeId, head.id, seat),
+      profile,
+      /** «Lo que Argos calcula»: su grupo, sus compras y lo que quiso y no compró. */
+      computed: { ...computed, wanted },
+      /** Quién es, en una línea (sin su grupo, que va como insignia). */
+      whoLine: whoLine({
+        purchases: live?.purchases ?? [],
+        computed,
+        measureLabel: profile.measureLabel,
+        measure: live?.measure ?? null,
+        district: live?.district ?? null,
+        wanted,
+      }),
     }
   })
 }

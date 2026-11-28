@@ -342,6 +342,27 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         screen: "clientes",
       },
       {
+        id: "grupo-de-una-clienta",
+        q: "¿Qué es el grupo de una clienta?",
+        a: [
+          "En su ficha, «Lo que Argos calcula», «Su grupo» dice dónde está ella según sus compras, con el porqué debajo: «VIP», «Frecuente», «Nueva», «En riesgo», «Dormida», «Perdida» o «Sin compras». En la lista de Clientes va junto a su nombre.",
+          "Son cuentas fijas, las mismas para todas, que Argos rehace cada noche: VIP, 5 compras o más en el último año y la última hace 90 días o menos; en riesgo, ya pasó vez y media lo que suele tardar entre compra y compra (o 45 días) sin volver; dormida, de 91 días a un año sin comprar; perdida, más de un año. Con una sola compra reciente es nueva; con dos o más y al día, frecuente.",
+          "Lo que gastó cuenta sus compras menos lo que volvió en un cambio. Lo de «Probar a Sofi» y lo anulado no cuentan. Si casi siempre compra con rebaja o con promoción, también lo dice.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "guardar-grupo",
+        q: "¿Cómo guardo un grupo de clientas?",
+        a: [
+          "En Clientes, elige los filtros (su grupo, su talla, lo que compra, su distrito o si acepta promociones) y toca «Guardar como grupo»: le pones un nombre y queda en «Tus grupos». Para volver a ver a todas, «Todas».",
+          "El grupo guarda los filtros, no las clientas: cada vez que lo abres trae a las que cumplen hoy, porque Argos lo pone al día solo. Quitar un grupo no cambia a ninguna clienta.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
         id: "no-quiere-promociones",
         q: "¿Qué pasa si una clienta dice que no quiere promociones?",
         a: [

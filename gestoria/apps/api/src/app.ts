@@ -52,6 +52,7 @@ import {
   updateVariant,
   variantPatch,
 } from "./catalogo.js"
+import { createGroup, groupInput, listFilters, listGroups, removeGroup } from "./clientas-grupos.js"
 import {
   customerDetail,
   customerPatch,
@@ -806,11 +807,25 @@ export function createApp(deps: AppDeps) {
   )
 
   // Las clientas (entrega 4): la lista, la ficha, «¿Es la misma clienta?», unir y separar.
-  app.get("/api/tiendas/:id/clientes", async (c) =>
-    c.json(
-      await listCustomers(deps.appDb, c.get("person"), c.req.param("id"), c.req.query("buscar")),
-    ),
+  // Con los filtros de «Lo que Argos calcula» (`?grupo=…&medida=…`); «buscar» sigue valiendo como «q».
+  app.get("/api/tiendas/:id/clientes", async (c) => {
+    const query = c.req.query()
+    const filters = listFilters.parse({ ...query, q: query.q ?? query.buscar })
+    return c.json(await listCustomers(deps.appDb, c.get("person"), c.req.param("id"), filters))
+  })
+  // Los grupos guardados («Tus grupos»): sus filtros, nunca las clientas. Antes de `:customerId`.
+  app.get("/api/tiendas/:id/clientes/grupos", async (c) =>
+    c.json(await listGroups(deps.appDb, c.get("person"), c.req.param("id"))),
   )
+  app.post("/api/tiendas/:id/clientes/grupos", async (c) => {
+    const input = await bodyOf(c, groupInput)
+    return c.json(await createGroup(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.delete("/api/tiendas/:id/clientes/grupos/:groupId", async (c) => {
+    const { id, groupId } = c.req.param()
+    await removeGroup(deps.appDb, c.get("person"), id, groupId)
+    return c.body(null, 204)
+  })
   // «?de=…»: solo las de esa ficha (desde su aviso).
   app.get("/api/tiendas/:id/clientes/parecidas", async (c) =>
     c.json(

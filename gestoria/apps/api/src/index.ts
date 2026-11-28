@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server"
 import { deliverOutbox, purgeOutbox, refreshStates, reviewStoreTeams } from "./acuerdo.js"
 import { createApp } from "./app.js"
 import { runPushRound, webPushSender } from "./avisos.js"
+import { runNightlyProfiles } from "./clientas-grupos.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
@@ -88,6 +89,27 @@ async function argos() {
 }
 setTimeout(() => void argos(), 90_000).unref()
 setInterval(() => void argos(), 15 * 60_000).unref()
+
+// El grupo de cada clienta: cada hora mira las tiendas cuyo día ya pasó las 03:00 en su hora y que
+// no se calcularon hoy, y las recalcula enteras con cuentas fijas. Lo escribe solo el dueño de la
+// base, en un solo servidor a la vez (candado de la base).
+async function nightlyProfiles() {
+  try {
+    const run = await withSessionLock(ownerDb, "gestoria_grupos_de_clientas", () =>
+      runNightlyProfiles(ownerDb, new Date()),
+    )
+    if (run?.stores)
+      console.log(
+        `gestoria-api: grupos de clientas al día en ${run.stores} tienda(s), ${run.customers} ficha(s)`,
+      )
+    if (run?.failed)
+      console.warn(`gestoria-api: ${run.failed} tienda(s) quedan para la vuelta siguiente`)
+  } catch (error) {
+    console.error("gestoria-api: los grupos de clientas fallaron", error)
+  }
+}
+setTimeout(() => void nightlyProfiles(), 120_000).unref()
+setInterval(() => void nightlyProfiles(), HOUR).unref()
 
 // El acuerdo con la administración (B7): cada 30 segundos envía lo que espera en la bandeja de
 // salida (con la misma clave al reintentar) y pregunta el estado de las tiendas a las que les
