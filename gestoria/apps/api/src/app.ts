@@ -75,18 +75,23 @@ import {
   updateCustomer,
 } from "./clientes.js"
 import {
-  configOverview,
-  createDelivery,
   createPayment,
-  deleteDelivery,
   deletePayment,
-  deliveryInput,
-  deliveryPatch,
   paymentInput,
   paymentPatch,
+  paymentQrContent,
+  putPaymentQr,
+  removePaymentQr,
+  updatePayment,
+} from "./cobros.js"
+import {
+  configOverview,
+  createDelivery,
+  deleteDelivery,
+  deliveryInput,
+  deliveryPatch,
   paymentsAndDeliveries,
   updateDelivery,
-  updatePayment,
 } from "./configuracion.js"
 import {
   type AccountConfig,
@@ -114,20 +119,27 @@ import {
   storeImageContent,
 } from "./marca.js"
 import {
+  connectInput,
+  createTrialLink,
+  disconnectPaymentLink,
+  finishConnect,
+  finishInput,
+  paymentLinkStatus,
+  receiveConnectNotice,
+  startConnect,
+} from "./pasarela.js"
+import {
   addReceipt,
   assignCourier,
   cancelInput,
   cancelOrder,
   changeInput,
   changeOrder,
-  connectPaymentLink,
   courierInput,
   createOrder,
   createPaymentLink,
   deliverInput,
-  disconnectPaymentLink,
   type LinkDeps,
-  linkConnectionInput,
   listOrders,
   markDelivered,
   markMissed,
@@ -138,7 +150,6 @@ import {
   type OrderFilter,
   orderDetail,
   orderInput,
-  paymentLinkStatus,
   previewChange,
   quoteInput,
   quoteOrder,
@@ -224,6 +235,8 @@ const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
 /** «Guardar» de Tu marca lleva el logo y la portada, cada una con su tope, y unos pocos campos. */
 const BRAND_SAVE = /^\/api\/tiendas\/[^/]+\/marca$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
+/** El QR de Yape o Plin (Cobros): una imagen, con el tope de una foto. */
+const QR_UPLOAD = /^\/api\/tiendas\/[^/]+\/medios-de-pago\/[^/]+\/qr$/
 /** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
 /** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
 const MAX_LINK_NOTICES = 120
@@ -339,6 +352,7 @@ export function createApp(deps: AppDeps) {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && BRAND_SAVE.test(c.req.path)) return brandSave(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
+    if (c.req.method === "POST" && QR_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && RECEIPT_UPLOAD.test(c.req.path)) return receipt(c, next)
     if (c.req.method === "POST" && PLAN_RECEIPT_UPLOAD.test(c.req.path)) return planReceipt(c, next)
     return small(c, next)
@@ -392,6 +406,19 @@ export function createApp(deps: AppDeps) {
       link,
     )
     return c.json({ message: result.message }, result.status)
+  })
+
+  // El aviso de Mercado Pago de que una cuenta desvinculó la aplicación (`mp-connect`): se
+  // comprueba con su API antes de creerlo, y responde siempre lo mismo.
+  let connectNotices = { since: 0, count: 0 }
+  app.post("/avisos/mercadopago", async (c) => {
+    const now = Date.now()
+    if (now - connectNotices.since > LINK_NOTICE_WINDOW_MS)
+      connectNotices = { since: now, count: 0 }
+    if (++connectNotices.count > MAX_LINK_NOTICES)
+      return c.json(errorBody(c, "TOO_MANY", "Demasiados avisos; reintenta en un minuto"), 429)
+    await receiveConnectNotice(deps.ownerDb, await c.req.text(), link)
+    return c.json({ message: "Recibido" })
   })
 
   // Todo lo de /api pide el token de la cuenta y una copia activa.
@@ -555,6 +582,28 @@ export function createApp(deps: AppDeps) {
     const { id, methodId } = c.req.param()
     await deletePayment(deps.appDb, c.get("person"), id, methodId)
     return c.body(null, 204)
+  })
+  // El QR de Yape o Plin: su contenido tal cual (se mira qué es por sus primeros bytes).
+  app.post("/api/tiendas/:id/medios-de-pago/:methodId/qr", async (c) => {
+    const { id, methodId } = c.req.param()
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    return c.json(await putPaymentQr(deps.appDb, c.get("person"), id, methodId, bytes))
+  })
+  app.delete("/api/tiendas/:id/medios-de-pago/:methodId/qr", async (c) => {
+    const { id, methodId } = c.req.param()
+    await removePaymentQr(deps.appDb, c.get("person"), id, methodId)
+    return c.body(null, 204)
+  })
+  app.get("/api/tiendas/:id/medios-de-pago/:methodId/qr", async (c) => {
+    const { id, methodId } = c.req.param()
+    const image = await paymentQrContent(deps.appDb, c.get("person"), id, methodId)
+    return c.body(new Uint8Array(image.content), 200, {
+      "content-type": image.contentType,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+      // Cambia con la misma dirección: la pantalla la pide con su versión (`?v=`).
+      "cache-control": "private, max-age=86400",
+    })
   })
   app.post("/api/tiendas/:id/formas-de-entrega", async (c) => {
     const input = await bodyOf(c, deliveryInput)
@@ -887,16 +936,22 @@ export function createApp(deps: AppDeps) {
     return c.json(await correctFact(deps.appDb, c.get("person"), id, customerId, input))
   })
 
-  // El link de pago de la tienda (B4): se conecta en Pagos y entregas.
+  // La pasarela de la tienda (Cobros, tablero 6): se conecta entrando a la cuenta de Mercado Pago.
   app.get("/api/tiendas/:id/link-de-pago", async (c) =>
     c.json(await paymentLinkStatus(deps.appDb, c.get("person"), c.req.param("id"), link)),
   )
-  app.patch("/api/tiendas/:id/link-de-pago", async (c) => {
-    const input = await bodyOf(c, linkConnectionInput)
-    return c.json(
-      await connectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"), input, link),
-    )
+  app.post("/api/tiendas/:id/link-de-pago/conectar", async (c) => {
+    const input = await bodyOf(c, connectInput)
+    return c.json(await startConnect(deps.appDb, c.get("person"), c.req.param("id"), input, link))
   })
+  // La vuelta de Mercado Pago, con la persona: el intento dice de qué tienda es.
+  app.post("/api/link-de-pago/vuelta", async (c) => {
+    const input = await bodyOf(c, finishInput)
+    return c.json(await finishConnect(deps.appDb, c.get("person"), input, link))
+  })
+  app.post("/api/tiendas/:id/link-de-pago/prueba", async (c) =>
+    c.json({ trial: await createTrialLink(deps.appDb, c.get("person"), c.req.param("id"), link) }),
+  )
   app.delete("/api/tiendas/:id/link-de-pago", async (c) => {
     await disconnectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"))
     return c.body(null, 204)

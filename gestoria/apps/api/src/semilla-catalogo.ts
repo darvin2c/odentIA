@@ -148,42 +148,66 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
     .where(eq(storePaymentMethod.storeId, storeId))
     .limit(1)
   if (!anyPayment)
+    // Cobros (tablero 6): Yape y Plin con su celular y su titular (el QR lo suma semilla-cobros.ts),
+    // la transferencia con su banco, su cuenta y un CCI con sus dígitos de control, y lo de al
+    // recibir con su nota. Lo que envía Sofi lo arma el servidor igual que aquí.
     await tx.insert(storePaymentMethod).values([
       {
         storeId,
+        kind: "yape",
         name: "Yape",
         typeCode: "68",
         collection: "comprobante",
-        details: "987 654 321 · Rosa Quispe",
+        phone: "+51987654321",
+        holder: "Rosa Quispe M.",
+        details: "Yape al 987 654 321 a nombre de Rosa Quispe M.",
       },
       {
         storeId,
+        kind: "plin",
         name: "Plin",
         typeCode: "68",
         collection: "comprobante",
-        details: "987 654 321 · Rosa Quispe",
+        phone: "+51987654321",
+        holder: "Rosa Quispe M.",
+        details: "Plin al 987 654 321 a nombre de Rosa Quispe M.",
       },
       {
         storeId,
+        kind: "transferencia",
         name: "Transferencia BCP",
         typeCode: "30",
         collection: "comprobante",
-        details: "Cuenta 191-2345678-0-12 a nombre de Rosa Quispe. CCI al pedirlo.",
+        bankCode: "002",
+        accountNumber: "191-2345678-0-12",
+        cci: "00219100234567801253",
+        holder: "Rosa Quispe Mamani",
+        details:
+          "BCP · cuenta 191-2345678-0-12 · CCI 002 191 002345678012 53 · a nombre de Rosa Quispe Mamani",
       },
       {
         storeId,
+        kind: "efectivo",
         name: "Efectivo al recibir",
         typeCode: "10",
         collection: "al_recibir",
-        details: "Solo con reparto propio",
+        details: "Solo en tus zonas de Lima, con tu repartidor",
       },
       {
         storeId,
-        name: "Tarjeta con enlace",
+        kind: "pos",
+        name: "Tarjeta con tu POS",
         typeCode: "48",
+        collection: "al_recibir",
+        details: "Kevin lleva el POS de la tienda",
+      },
+      {
+        storeId,
+        kind: "link",
+        name: "Link de pago (Yape o tarjeta)",
+        typeCode: "68",
         collection: "link",
         details: "",
-        isActive: false,
       },
     ])
   const [anyDelivery] = await tx

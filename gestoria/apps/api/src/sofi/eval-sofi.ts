@@ -337,7 +337,16 @@ async function armarTienda(owner: Db, storeId: string, secretsKey: Buffer) {
 
 /** El link de pago del banco: un proveedor controlado que devuelve una dirección de prueba. */
 const bancoLink: LinkAdapter = {
-  async verify() {},
+  authorizeURL: () => "https://pago.prueba/permiso",
+  async exchange() {
+    throw new Error("el banco no se conecta en la medición")
+  },
+  async refresh() {
+    throw new Error("el banco no se renueva en la medición")
+  },
+  async account() {
+    return { id: "banco", label: null }
+  },
   async create(_token, order) {
     return { url: `https://pago.prueba/${order.number}`, ref: `ref-${order.id}` }
   },

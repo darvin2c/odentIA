@@ -260,6 +260,20 @@
       "when": 1795844732033,
       "tag": "0052_el_link_libre",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795845272533,
+      "tag": "0053_los_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795845285532,
+      "tag": "0054_reglas_cobros",
+      "breakpoints": true
     }
   ]
 }
