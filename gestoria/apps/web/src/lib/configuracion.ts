@@ -243,8 +243,12 @@ export interface ConfigOverview {
   catalog: { products: number; withStock: number }
   /** Los medios con que se cobra: un link de pago sin pasarela no viene (no cobra). */
   payments: { name: string; typeCode: PaymentTypeCode; collection: PaymentCollection }[]
-  /** La pasarela del link de pago: solo si está conectada y con qué. */
-  paymentLink: { provider: "mercadopago" } | null
+  /** La pasarela del link de pago: con qué, en qué modo y si sirve (sin cuenta ni llaves). */
+  paymentLink: {
+    provider: "mercadopago"
+    mode: "prueba" | "real"
+    state: "conectada" | "vencida" | "sin_permiso"
+  } | null
   deliveries: {
     name: string
     type: DeliveryType
@@ -413,17 +417,24 @@ export function toDoItems(
   const byCapture = overview.payments
     .filter((p) => p.collection === "comprobante")
     .map((p) => p.name)
+  const gateway = overview.paymentLink
+  const charging = gateway?.state === "conectada" && gateway.mode === "real"
+  // No frena la venta: aunque esté a medias (en prueba o sin permiso) va en «Para vender más».
   more.push({
     id: "link",
-    state: overview.paymentLink ? "hecho" : "opcional",
+    state: charging ? "hecho" : "opcional",
     title: "Cobrar por link de pago",
-    detail: overview.paymentLink
-      ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}: el pago se confirma solo.`
-      : byCapture.length > 0
+    detail: !gateway
+      ? byCapture.length > 0
         ? `El pago se confirma solo. Ya cobras con ${listText(byCapture)} por captura.`
-        : "El pago se confirma solo, sin revisar capturas.",
+        : "El pago se confirma solo, sin revisar capturas."
+      : gateway.state !== "conectada"
+        ? `${PROVIDER_NAMES[gateway.provider]} ya no deja cobrar: vuelve a conectarlo.`
+        : gateway.mode === "prueba"
+          ? `${PROVIDER_NAMES[gateway.provider]} en modo prueba: prueba con S/ 1 y pasa a cobrar de verdad.`
+          : `Con ${PROVIDER_NAMES[gateway.provider]}: el pago se confirma solo.`,
     action: {
-      label: overview.paymentLink ? "Ver" : "Conectar pasarela",
+      label: charging ? "Ver" : gateway ? "Terminar" : "Conectar pasarela",
       path: SECTIONS.pagos.path,
     },
   })
@@ -518,11 +529,19 @@ export function configLines(
     status:
       overview.payments.length === 0
         ? "Falta"
-        : overview.paymentLink
-          ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
-          : "Sin pasarela",
-    // Sin pasarela se vende igual (con captura o al recibir): el punto, solo sin forma de cobrar.
-    pending: overview.payments.length === 0,
+        : !overview.paymentLink
+          ? "Sin pasarela"
+          : overview.paymentLink.state !== "conectada"
+            ? `${PROVIDER_NAMES[overview.paymentLink.provider]}: sin permiso`
+            : overview.paymentLink.mode === "prueba"
+              ? `${PROVIDER_NAMES[overview.paymentLink.provider]} en prueba`
+              : `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`,
+    // Sin pasarela se vende igual (con captura o al recibir): el punto, sin forma de cobrar o con
+    // la pasarela a medias (en prueba o sin permiso).
+    pending:
+      overview.payments.length === 0 ||
+      (overview.paymentLink !== null &&
+        (overview.paymentLink.state !== "conectada" || overview.paymentLink.mode !== "real")),
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
   const districts = overview.deliveries.reduce((sum, d) => sum + (d.districts ?? 0), 0)
@@ -624,8 +643,12 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   { text: "Moneda", section: "datos", terms: ["moneda", "soles", "dólares"] },
   { text: "Logo y portada", section: "marca", terms: ["logo", "portada", "foto", "imagen"] },
   { text: "Color de tu marca", section: "marca", terms: ["color", "colores"] },
-  { text: "Nombre que ve el cliente", section: "marca", terms: ["nombre", "marca", "cliente"] },
-  { text: "Nombre de tu link", section: "marca", terms: ["link", "enlace", "url", "dirección"] },
+  {
+    text: "Nombre que ve la clienta",
+    section: "marca",
+    terms: ["nombre", "marca", "cliente", "clienta"],
+  },
+  { text: "Tu link", section: "marca", terms: ["link", "enlace", "url", "dirección", "dominio"] },
   { text: "Encender o apagar a Sofi", section: "sofi", terms: ["sofi", "vendedora", "apagar"] },
   {
     text: "Lo que Sofi debe saber",
@@ -647,6 +670,11 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
     text: "Cobrar por link de pago",
     section: "pagos",
     terms: ["link", "pasarela", "mercado pago", "tarjeta", "yape", "enlace"],
+  },
+  {
+    text: "Probar Mercado Pago con S/ 1",
+    section: "pagos",
+    terms: ["prueba", "probar", "modo prueba", "cobrar de verdad", "comisión"],
   },
   {
     text: "Quién confirma un pago con captura",

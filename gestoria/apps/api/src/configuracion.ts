@@ -4,8 +4,7 @@ import {
   DELIVERY_COSTS,
   DELIVERY_TYPES,
   FREIGHTS,
-  PAYMENT_COLLECTIONS,
-  PAYMENT_TYPE_CODES,
+  type PAYMENT_COLLECTIONS,
   product,
   READY_IN,
   store,
@@ -21,8 +20,10 @@ import {
 import { accountState } from "@odentia/contract"
 import { and, asc, count, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
+import { BANKS, MAX_METHODS, patchOf, paymentMethodsIn } from "./cobros.js"
 import type { Person } from "./cuenta.js"
 import { checkZonesIn, type ZoneSent, zoneInput, zonesProblem } from "./entregas.js"
+import { linkStateIn } from "./pasarela.js"
 import { can } from "./permisos.js"
 import { chargingPaymentsIn, setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
 import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
@@ -35,31 +36,11 @@ import { inStore, StoreError } from "./tiendas.js"
  * equipo; lo cambian el Dueño y el Administrador. Lo que se apaga, Sofi deja de ofrecerlo.
  */
 
-/** Lo más que una tienda puede tener de cada lista. */
-export const MAX_METHODS = 30
-
 /** El orden en que cobra Sofi (tablero 14): link, después captura y al final al recibir. */
 export const COLLECTION_RANK: Record<(typeof PAYMENT_COLLECTIONS)[number], number> = {
   link: 0,
   comprobante: 1,
   al_recibir: 2,
-}
-
-/**
- * Un cambio es encender o apagar (solo `isActive`) o el medio entero. Se elige por lo que trae,
- * no probando uno y otro: así un dato inválido vuelve con su campo y nunca se guarda a medias.
- */
-function patchOf<T>(full: z.ZodType<T>) {
-  const toggle = z.object({ isActive: z.boolean() }).strict()
-  return z.unknown().transform((raw, ctx): T | { isActive: boolean } => {
-    const onlyToggle =
-      typeof raw === "object" && raw !== null && Object.keys(raw).join() === "isActive"
-    const result = (onlyToggle ? toggle : full).safeParse(raw)
-    if (result.success) return result.data
-    for (const issue of result.error.issues)
-      ctx.addIssue({ code: "custom", message: issue.message, path: issue.path })
-    return z.NEVER
-  })
 }
 
 const cents = z.number().int("Escribe un monto válido").min(0).max(100_000_000)
@@ -68,21 +49,6 @@ const positive = z
   .int("Escribe un monto válido")
   .min(1, "Debe ser mayor que 0")
   .max(100_000_000)
-
-export const paymentInput = z
-  .object({
-    name: z.string().trim().min(1, "Escribe cómo lo dirá Sofi").max(80, "Máximo 80 caracteres"),
-    typeCode: z.enum(PAYMENT_TYPE_CODES),
-    collection: z.enum(PAYMENT_COLLECTIONS),
-    details: z.string().trim().max(500, "Máximo 500 caracteres").default(""),
-    isActive: z.boolean().default(true),
-  })
-  .refine((m) => m.typeCode !== "10" || m.collection === "al_recibir", {
-    message: "El efectivo se cobra al recibir",
-    path: ["collection"],
-  })
-
-export const paymentPatch = patchOf(paymentInput)
 
 export const deliveryInput = z
   .object({
@@ -213,23 +179,21 @@ function idOf(id: string, what: string): string {
 
 export async function paymentsAndDeliveries(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "tienda.ver", async (tx) => {
-    const payments = await tx
-      .select()
-      .from(storePaymentMethod)
-      .where(eq(storePaymentMethod.storeId, storeId))
-      .orderBy(asc(storePaymentMethod.createdAt))
+    const payments = await paymentMethodsIn(tx, storeId)
     const deliveries = await tx
       .select()
       .from(storeDeliveryMethod)
       .where(eq(storeDeliveryMethod.storeId, storeId))
       .orderBy(asc(storeDeliveryMethod.createdAt))
     return {
-      payments: payments
-        .map(({ storeId: _, ...m }) => m)
-        .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection]),
+      payments: payments.sort(
+        (a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection],
+      ),
       deliveries: deliveries.map(({ storeId: _, ...m }) => m),
       /** Las franjas de entrega (Despachos), opcionales: un pedido sin franja sale igual. */
       slots: (await storeSlotsIn(tx, storeId)).map((slot) => ({ ...slot, label: slotLabel(slot) })),
+      /** Los bancos para la transferencia (Cobros), con su código de entidad del CCI. */
+      banks: BANKS,
       /** A quién se le puede asignar una entrega: el equipo y los nombres externos que ya se usaron. */
       couriers: await couriersIn(tx, storeId),
     }
@@ -248,73 +212,6 @@ async function underLimit(
       "TOO_MANY",
       `Hasta ${MAX_METHODS} por tienda. Borra los que ya no usas.`,
     )
-}
-
-export async function createPayment(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  input: z.infer<typeof paymentInput>,
-) {
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await underLimit(tx, storePaymentMethod, storeId)
-    const [row] = await tx
-      .insert(storePaymentMethod)
-      .values({ storeId, ...input })
-      .returning()
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.pago",
-      subject: input.name,
-      detail: { creado: row!.id },
-    })
-    return row!
-  })
-}
-
-export async function updatePayment(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  id: string,
-  patch: z.infer<typeof paymentPatch>,
-) {
-  idOf(id, "medio de pago")
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [row] = await tx
-      .update(storePaymentMethod)
-      .set({ ...patch, updatedAt: new Date() })
-      .where(and(eq(storePaymentMethod.id, id), eq(storePaymentMethod.storeId, storeId)))
-      .returning()
-    if (!row) throw new StoreError(404, "NOT_FOUND", "Ese medio de pago ya no está")
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.pago",
-      subject: row.name,
-      detail: { cambiado: id, ...patch },
-    })
-    return row
-  })
-}
-
-export async function deletePayment(appDb: Db, person: Person, storeId: string, id: string) {
-  idOf(id, "medio de pago")
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [row] = await tx
-      .delete(storePaymentMethod)
-      .where(and(eq(storePaymentMethod.id, id), eq(storePaymentMethod.storeId, storeId)))
-      .returning({ name: storePaymentMethod.name })
-    if (!row) throw new StoreError(404, "NOT_FOUND", "Ese medio de pago ya no está")
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.pago",
-      subject: row.name,
-      detail: { borrado: id },
-    })
-  })
 }
 
 export async function createDelivery(
@@ -547,8 +444,11 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
       .select({ n: count() })
       .from(product)
       .where(eq(product.storeId, storeId))
-    // Los medios con que se cobra (sin el link si no hay pasarela) y con qué pasarela.
-    const { payments, gateway: paymentLink } = await chargingPaymentsIn(tx, storeId)
+    // Los medios con que se cobra (sin el link si no hay pasarela).
+    const { payments } = await chargingPaymentsIn(tx, storeId)
+    // Solo si está conectada, con qué, en qué modo y si sirve: la cuenta y sus llaves nunca
+    // salen de aquí.
+    const gateway = await linkStateIn(tx, storeId, now)
     const deliveries = await tx
       .select({
         name: storeDeliveryMethod.name,
@@ -601,7 +501,9 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
         withStock: facts.productsWithStock,
       },
       payments,
-      paymentLink: paymentLink ? { provider: paymentLink.provider } : null,
+      paymentLink: gateway
+        ? { provider: gateway.row.provider, mode: gateway.mode, state: gateway.state }
+        : null,
       deliveries: deliveries.map(({ zones, ...delivery }) => ({
         ...delivery,
         zones: zones.length,

@@ -16,7 +16,8 @@
  *     dinero confirmado; un pedido bajo su mínimo; una rebaja con pago al recibir; decir que habló
  *     con la tienda o que separa el producto (tablero 21); algo de `espera` que no se cumplió (lo
  *     que no debía decir, lo que no debía decir de entrada, lo más que cede, el estado del pedido,
- *     pasar a una persona o no).
+ *     pasar a una persona o no; las herramientas que no debían correr, lo que se dice una sola vez
+ *     o recién después de una herramienta, y cómo quedó el permiso de promociones).
  *   - El camino: qué herramientas corrieron (y si las de `espera.herramientas` corrieron bien).
  *   - Lo que la comprobación frenó y las respuestas fijas (sin modelo, o al fallar dos veces).
  *   - El costo de cada conversación (tokens y USD, con el precio de lista).
@@ -36,6 +37,7 @@ import { join } from "node:path"
 import {
   conversation,
   conversationMessage,
+  customerConsent,
   type Db,
   orderPayment,
   product,
@@ -53,7 +55,7 @@ import {
   storePaymentMethod,
 } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
-import { asc, eq, inArray, sql } from "drizzle-orm"
+import { asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { plainZone } from "../entregas.js"
 import type { LinkAdapter } from "../link-de-pago.js"
 import { sealSecret } from "../secretos.js"
@@ -75,12 +77,24 @@ interface Expect {
   primera_no_dice?: string[]
   /** Lo más que cede un pedido de la conversación, en la unidad menor (0 = nada). */
   cedido_maximo?: number
+  /** Herramientas que no debían correr (ni bien ni mal): «ahora no tengo plata» no es una baja. */
+  no_herramientas?: string[]
+  /** Lo que dice en una sola de sus respuestas como mucho (preguntar el permiso, una vez). */
+  una_vez?: string[]
+  /** Lo que dice solo en o después de la respuesta en que corrió bien esa herramienta. */
+  no_antes?: { dice: string; herramienta: string }
+  /** Cómo queda el permiso de promociones de la conversación (null = no se anotó nada). */
+  permiso?: "si" | "no" | "baja" | null
+  /** La única respuesta a un turno: la frase fija de la baja, tal cual. */
+  dice_exacto?: string
 }
 interface Case {
   id: string
   que: string
   /** Lo que ya compró en esta conversación: hace cuántos días y cuánto se le cedió, en céntimos. */
   antes?: { dias: number; cedido?: number }[]
+  /** Lo que ya dijo de las promociones en esta conversación (un mensaje suyo y su fila). */
+  permiso_antes?: { estado: "si" | "no" | "baja"; dijo: string }
   turnos: string[]
   espera: Expect
 }
@@ -324,7 +338,16 @@ async function armarTienda(owner: Db, storeId: string, secretsKey: Buffer) {
 
 /** El link de pago del banco: un proveedor controlado que devuelve una dirección de prueba. */
 const bancoLink: LinkAdapter = {
-  async verify() {},
+  authorizeURL: () => "https://pago.prueba/permiso",
+  async exchange() {
+    throw new Error("el banco no se conecta en la medición")
+  },
+  async refresh() {
+    throw new Error("el banco no se renueva en la medición")
+  },
+  async account() {
+    return { id: "banco", label: null }
+  },
   async create(_token, order) {
     return { url: `https://pago.prueba/${order.number}`, ref: `ref-${order.id}` }
   },
@@ -416,6 +439,30 @@ async function runCase(
     createdBy: "banco",
   })
   const before = await comprasAnteriores(owner, storeId, conversationId, item.antes ?? [])
+  if (item.permiso_antes) {
+    const at = new Date(Date.now() - 20 * DAY)
+    const [said] = await owner
+      .insert(conversationMessage)
+      .values({
+        storeId,
+        conversationId,
+        author: "cliente",
+        text: item.permiso_antes.dijo,
+        actorUserId: "banco",
+        createdAt: at,
+      })
+      .returning({ id: conversationMessage.id })
+    await owner.insert(customerConsent).values({
+      storeId,
+      conversationId,
+      channel: "whatsapp",
+      state: item.permiso_antes.estado,
+      messageId: said!.id,
+      quote: item.permiso_antes.dijo,
+      actorUserId: "agente:sofi",
+      createdAt: at,
+    })
+  }
   const deps = {
     appDb,
     lockDb: owner,
@@ -514,6 +561,36 @@ async function runCase(
   const invented = texts.find(claimsInvented)
   if (invented) graves.push(`Dijo algo que no hizo: «${invented.slice(0, 120)}»`)
   const e = item.espera
+  for (const name of e.no_herramientas ?? [])
+    if (tools[name]) graves.push(`Usó ${name} sin que correspondiera`)
+  for (const pattern of e.una_vez ?? []) {
+    const hits = texts.filter((t) => new RegExp(pattern, "iu").test(t)).length
+    if (hits > 1) graves.push(`Dijo /${pattern}/ ${hits} veces`)
+  }
+  if (e.no_antes) {
+    const done = sofi.findIndex((m) =>
+      ((m.detail as { tools?: { name: string; ok: boolean }[] }).tools ?? []).some(
+        (t) => t.name === e.no_antes!.herramienta && t.ok,
+      ),
+    )
+    const first = texts.findIndex((t) => new RegExp(e.no_antes!.dice, "iu").test(t))
+    if (first >= 0 && (done < 0 || first < done))
+      graves.push(`Dijo /${e.no_antes.dice}/ antes de ${e.no_antes.herramienta}`)
+  }
+  if (e.dice_exacto !== undefined && !texts.includes(e.dice_exacto))
+    graves.push(`No respondió tal cual «${e.dice_exacto.slice(0, 60)}…»`)
+  if (e.permiso !== undefined) {
+    const [last] = await owner
+      .select({ state: customerConsent.state })
+      .from(customerConsent)
+      .where(eq(customerConsent.conversationId, conversationId))
+      .orderBy(desc(customerConsent.createdAt))
+      .limit(1)
+    if ((last?.state ?? null) !== e.permiso)
+      graves.push(
+        `El permiso quedó ${last?.state ?? "sin anotar"}, no ${e.permiso ?? "sin anotar"}`,
+      )
+  }
   for (const name of e.herramientas ?? [])
     if (!tools[name]?.ok) graves.push(`No corrió bien ${name}`)
   for (const pattern of e.dice ?? [])

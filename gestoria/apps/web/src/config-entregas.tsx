@@ -1,4 +1,5 @@
 import { Badge, Button, Checkbox, cn, FieldGroup, Input, toast } from "@odentia/ui"
+import { Switch } from "@odentia/ui/components/switch"
 import {
   ConfirmDialog,
   clockMinutes,
@@ -49,7 +50,6 @@ import {
   zoneTone,
 } from "./lib/zonas"
 import { LimaMap } from "./mapa-lima"
-import { ActiveSwitch, DeleteButton } from "./pagos"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
@@ -2024,5 +2024,91 @@ function SlotsSection({
         ) : null}
       </div>
     </section>
+  )
+}
+
+/** Encender o apagar guarda al momento; si falla, vuelve como estaba y lo dice. */
+function ActiveSwitch({
+  path,
+  storeId,
+  name,
+  active,
+  canEdit,
+}: {
+  path: string
+  storeId: string
+  name: string
+  active: boolean
+  canEdit: boolean
+}) {
+  const queryClient = useQueryClient()
+  const toggle = useMutation({
+    mutationFn: (isActive: boolean) => api(path, { method: "PATCH", body: { isActive } }),
+    onSuccess: async (_, isActive) => {
+      await queryClient.invalidateQueries({ queryKey: LISTS_PREFIX(storeId) })
+      toast.success(isActive ? `${name}: encendido` : `${name}: apagado, Sofi ya no lo ofrece`)
+    },
+    onError: (error) => toast.error(submitErrorMessage(error)),
+  })
+  const shown = toggle.isPending ? Boolean(toggle.variables) : active
+  if (!canEdit) return <Badge variant="outline">{active ? "Encendido" : "Apagado"}</Badge>
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <Switch
+        checked={shown}
+        disabled={toggle.isPending}
+        onCheckedChange={(next) => toggle.mutate(next)}
+        aria-label={`${name}: ${shown ? "encendido" : "apagado"}`}
+      />
+      <span aria-hidden>{shown ? "Encendido" : "Apagado"}</span>
+    </div>
+  )
+}
+
+/** Borrar, con su confirmación: lo que ya se cobró o entregó conserva lo suyo. */
+function DeleteButton({
+  what,
+  path,
+  storeId,
+  onDone,
+}: {
+  what: string
+  path: string
+  storeId: string
+  onDone: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [asking, setAsking] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => api(path, { method: "DELETE" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LISTS_PREFIX(storeId) })
+      toast.success(`${what} borrado`)
+      setAsking(false)
+      onDone()
+    },
+  })
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        className="self-start text-danger"
+        onClick={() => setAsking(true)}
+      >
+        <Trash2 aria-hidden />
+        Borrar
+      </Button>
+      <ConfirmDialog
+        open={asking}
+        title={`¿Borrar «${what}»?`}
+        description="Sofi deja de ofrecerlo. Si solo es por un tiempo, mejor apágalo."
+        confirmLabel="Borrar"
+        pending={remove.isPending}
+        error={remove.isError ? submitErrorMessage(remove.error) : null}
+        onConfirm={() => remove.mutate()}
+        onClose={() => setAsking(false)}
+      />
+    </>
   )
 }

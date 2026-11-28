@@ -8,12 +8,14 @@
  */
 import { randomUUID } from "node:crypto"
 import {
+  conversation,
   conversationMessage,
   orderEvent,
   saleOrder,
   store,
   storeAgent,
   storeMember,
+  storeSupportAccess,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import { and, eq, sql } from "drizzle-orm"
@@ -35,10 +37,21 @@ let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"]
 let app: ReturnType<typeof createApp>
 let keys: ReturnType<typeof createLocalJWKSet>
 
-const people = {
+const people: Record<
+  "rosa" | "mario" | "lucia" | "ajena" | "soporte",
+  { id: string; email: string; name: string; staffVerified?: boolean }
+> = {
   rosa: { id: "u-rosa", email: "rosa@calzados.test", name: "Rosa Quispe" },
+  mario: { id: "u-mario", email: "mario@calzados.test", name: "Mario Díaz" },
   lucia: { id: "u-lucia", email: "lucia@calzados.test", name: "Lucía Torres" },
   ajena: { id: "u-ajena", email: "ajena@otra.test", name: "Ajena" },
+  // Soporte de gestorIA, entrando desde la administración (con el código del personal).
+  soporte: {
+    id: "u-soporte",
+    email: "soporte@gestoria.test",
+    name: "Ana de Soporte",
+    staffVerified: true,
+  },
 }
 type Who = keyof typeof people
 const storeId = randomUUID()
@@ -81,7 +94,13 @@ const lastTool = (r: ChatRequest): Json => {
 async function tokenFor(who: Who) {
   const p = people[who]
   const iat = Math.floor(Date.now() / 1000)
-  return new SignJWT({ email: p.email, emailVerified: true, name: p.name, image: null })
+  return new SignJWT({
+    email: p.email,
+    emailVerified: true,
+    name: p.name,
+    image: null,
+    ...(p.staffVerified ? { staffVerified: true } : {}),
+  })
     .setProtectedHeader({ alg: "EdDSA", kid: "k1" })
     .setSubject(p.id)
     .setIssuer(ACCOUNT)
@@ -146,9 +165,24 @@ beforeAll(async () => {
   ])
   await db.ownerDb.insert(storeMember).values([
     { storeId, userId: "u-rosa", role: "owner" },
+    { storeId, userId: "u-mario", role: "admin", addedBy: "u-rosa" },
     { storeId, userId: "u-lucia", role: "sales", addedBy: "u-rosa" },
     { storeId: otherStore, userId: "u-ajena", role: "owner" },
   ])
+  // La tienda aceptó que soporte mire, y la entrada sigue vigente.
+  const now = Date.now()
+  await db.ownerDb.insert(storeSupportAccess).values({
+    storeId,
+    staffUserId: people.soporte.id,
+    staffName: people.soporte.name,
+    minutes: 30,
+    reason: "Revisar la configuración",
+    state: "aceptado",
+    requestExpiresAt: new Date(now + 86_400_000),
+    answeredAt: new Date(now),
+    answeredBy: "u-rosa",
+    expiresAt: new Date(now + 1_800_000),
+  })
   const pay = async (body: Json) =>
     (await call("rosa", "POST", `${base}/medios-de-pago`, body)).json.method.id as string
   ids.yape = await pay({
@@ -313,8 +347,8 @@ describe("Sofi vende con las reglas de la tienda", () => {
     // Con una persona atendiendo, Sofi no escribe.
     const quiet = await write(id, "¿Hola?")
     expect(quiet.result.status).toBe("persona")
-    // «Devolver a Sofi» y sigue.
-    const back = await call("lucia", "POST", `${base}/conversaciones/${id}/devolver`)
+    // «Devolver a Sofi» y sigue. Es una prueba: la devuelve quien prueba a Sofi (Configuración).
+    const back = await call("rosa", "POST", `${base}/conversaciones/${id}/devolver`)
     expect(back.json.conversation.handler).toBe("sofi")
   })
 
@@ -557,6 +591,51 @@ describe("Sofi vende con las reglas de la tienda", () => {
     expect(order).toMatchObject({ marginUsedCents: 1000, state: "por_pagar" })
     expect(order!.priceExpiresAt?.toISOString()).toBe(offer.vence)
   })
+
+  it("si la clienta pregunta por tarjeta o link, el mismo pedido no se anota otra vez", async () => {
+    const id = await newTest()
+    const args = {
+      lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+      entrega_id: ids.reparto,
+    }
+    const order = { ...args, nombre: "Eva", direccion: "Av. Larco 100" }
+    await write(
+      id,
+      "Dame el link para pagar con tarjeta",
+      use("cotizar", () => args),
+      (r) => ({ content: `Te queda en ${lastTool(r).total}. ¿Lo confirmo?` }),
+    )
+    let number = ""
+    await write(
+      id,
+      "Sí, confirmo. Soy Eva, Av. Larco 100",
+      use("armar_pedido", () => order),
+      (r) => {
+        number = lastTool(r).pedido
+        return { toolCalls: [toolCall("link_de_pago", { pedido: number })] }
+      },
+      (r) => {
+        // En la prueba no hay link: le dice que el pedido ya está anotado, para no rehacerlo.
+        expect(lastTool(r).problema).toContain(`${number} ya está anotado`)
+        return { content: `Tu pedido ${number} queda anotado. Puedes pagar por Yape.` }
+      },
+    )
+    // La clienta vuelve a preguntar y el modelo intenta anotarlo igual otra vez.
+    const again = await write(
+      id,
+      "¿Puedo pagar con tarjeta?",
+      use("armar_pedido", () => order),
+      (r) => {
+        const result = lastTool(r)
+        expect(result).toMatchObject({ ok: true, pedido: number })
+        expect(result).not.toHaveProperty("reemplaza")
+        return { content: `Tu pedido ${number} sigue en pie. Puedes pagar por Yape.` }
+      },
+    )
+    expect(again.conversation.orders).toEqual([
+      expect.objectContaining({ number, state: "por_pagar" }),
+    ])
+  })
 })
 
 describe("el envío que dice Sofi", () => {
@@ -785,6 +864,66 @@ describe("lo que escribe el cliente mientras Sofi responde", () => {
 })
 
 describe("lo que pone el dueño y lo que ve cada rol", () => {
+  it("Sofi, sus opciones y «Probar a Sofi» son de quien cambia la configuración", async () => {
+    const id = await newTest()
+    await write(id, "Hola", say("¡Hola! ¿En qué te ayudo?"))
+    // Ventas atiende y soporte solo mira: los dos entran a la tienda, pero ninguno ve
+    // Configuración ni lo que Sofi tiene puesto.
+    for (const who of ["lucia", "soporte"] as const) {
+      expect((await call(who, "GET", `${base}/catalogo`)).status).toBe(200)
+      for (const [method, path] of [
+        ["GET", `${base}/sofi`],
+        ["GET", `${base}/conversaciones/${id}`],
+        ["POST", `${base}/conversaciones/${id}/devolver`],
+      ] as const) {
+        const refused = await call(who, method, path)
+        expect([refused.status, refused.json.error?.code]).toEqual([403, "FORBIDDEN"])
+      }
+    }
+    for (const who of ["rosa", "mario"] as const) {
+      const sofi = await call(who, "GET", `${base}/sofi`)
+      expect(sofi.status).toBe(200)
+      expect(sofi.json.tests.map((t: Json) => t.id)).toContain(id)
+      const view = await call(who, "GET", `${base}/conversaciones/${id}`)
+      expect(view.status).toBe(200)
+      // Dueño y Administrador ven Reportes: también lo que costó la prueba.
+      expect(view.json.conversation.costMicros).toBeGreaterThan(0)
+    }
+  })
+
+  it("Ventas atiende un chat sin ver lo que costó el modelo", async ({ onTestFinished }) => {
+    const [chat] = await db.ownerDb
+      .insert(conversation)
+      .values({ storeId, channel: "whatsapp", customerName: "Carla", createdBy: "canal" })
+      .returning({ id: conversation.id })
+    // Fuera al terminar, también si falla: no cuenta en los Reportes que se prueban después.
+    onTestFinished(async () => {
+      await db.ownerDb
+        .delete(conversationMessage)
+        .where(eq(conversationMessage.conversationId, chat!.id))
+      await db.ownerDb.delete(conversation).where(eq(conversation.id, chat!.id))
+    })
+    await db.ownerDb.insert(conversationMessage).values([
+      { storeId, conversationId: chat!.id, author: "cliente", text: "Hola", actorUserId: "canal" },
+      {
+        storeId,
+        conversationId: chat!.id,
+        author: "sofi",
+        text: "¡Hola!",
+        delivery: "sin_enviar",
+        detail: { tools: [], costo: 987_654_321 },
+        actorUserId: "agente:sofi",
+      },
+    ])
+    const seen = await call("lucia", "GET", `${base}/conversaciones/${chat!.id}`)
+    expect(seen.status).toBe(200)
+    expect(seen.json.conversation).not.toHaveProperty("costMicros")
+    expect(JSON.stringify(seen.json)).not.toContain("costMicros")
+    expect(JSON.stringify(seen.json)).not.toContain("987654321")
+    const owner = await call("rosa", "GET", `${base}/conversaciones/${chat!.id}`)
+    expect(owner.json.conversation.costMicros).toBe(987_654_321)
+  })
+
   it("Ventas no prueba a Sofi, no la configura ni ve Reportes", async () => {
     // «Probar a Sofi» vive en Configuración: es de quien la ajusta.
     expect((await call("lucia", "POST", `${base}/sofi/pruebas`)).status).toBe(403)

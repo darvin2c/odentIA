@@ -36,7 +36,14 @@ import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
 import { deliveryPriceOf, freeFromOf, payOnDeliveryOf } from "./entregas.js"
 import { storeClockIn } from "./hora.js"
-import type { LinkAdapters } from "./link-de-pago.js"
+import type { LinkAdapters, LinkApp } from "./link-de-pago.js"
+import {
+  chargesOrders,
+  linkStateIn,
+  linkTokenIn,
+  receiveTrialPayment,
+  trialOf,
+} from "./pasarela.js"
 import { can } from "./permisos.js"
 import {
   autoUnitCents,
@@ -57,7 +64,7 @@ import {
   slotLabel,
 } from "./repartidores.js"
 import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
-import { openSecret, sealSecret } from "./secretos.js"
+import { openSecret } from "./secretos.js"
 import { cancelSale, heldBy, recordReturn, recordSale } from "./stock.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -1095,15 +1102,13 @@ export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     .orderBy(productPhoto.productId, asc(productPhoto.position))
   const photoBy = new Map(photos.map((p) => [p.productId, p.id]))
   const { storeId: _s, linkRef: _r, paymentMethodId: _p, conversationId: _c, ...rest } = order
-  // El link solo se ofrece a un pedido por pagar.
-  const linkConnected =
-    order.state === "por_pagar" &&
-    (
-      await tx
-        .select({ provider: storePaymentLink.provider })
-        .from(storePaymentLink)
-        .where(eq(storePaymentLink.storeId, storeId))
-    ).length > 0
+  // El link solo se ofrece a un pedido por pagar, con la pasarela cobrando de verdad. En modo
+  // prueba, el pedido lo dice (y se cobra con captura o al recibir).
+  const link = order.state === "por_pagar" ? await linkStateIn(tx, storeId) : null
+  const linkConnected = chargesOrders(link)
+  const linkTestMode = Boolean(link?.usable && link.mode === "prueba")
+  // Conectada, pero Mercado Pago ya no deja usarla (venció o quitaron el permiso).
+  const linkBroken = Boolean(link && !link.usable)
   const balance = await balanceIn(tx, order)
   const now = Date.now()
   // Cambios y devoluciones (tablero 17): de qué pedido sale este, los que salieron de este, lo que
@@ -1176,6 +1181,8 @@ export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     bySofi: order.createdBy === SOFI_ACTOR,
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
     linkConnected,
+    linkTestMode,
+    linkBroken,
     /** La ficha de la clienta que se ve (si quedó dentro de otra, esa otra); nula sin ficha. */
     customerId: await shownCustomerId(tx, order.customerId),
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,
@@ -2456,6 +2463,11 @@ export interface LinkDeps {
   secretsKey: Buffer | null
   /** La dirección pública de este servidor, adonde avisa el proveedor. */
   apiURL: string
+  /**
+   * La aplicación de gestorIA en Mercado Pago (su id y su secreto, `GESTORIA_MERCADOPAGO_*`) y
+   * adónde vuelve la persona al dar permiso. Sin ella no se conecta una cuenta nueva.
+   */
+  app?: LinkApp | null
 }
 
 export function linkNotificationURL(deps: LinkDeps, storeId: string): string {
@@ -2520,23 +2532,34 @@ export async function createPaymentLinkWith(
         "PRICE_EXPIRED",
         "El precio acordado venció (vale 24 horas). Si sigue en pie, usa «Cambiar» para volver a acordarlo.",
       )
-    const [connection] = await tx
-      .select()
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
-    if (!connection || !deps.secretsKey)
+    const link = await linkStateIn(tx, storeId)
+    if (!link || !deps.secretsKey)
       throw new StoreError(
         409,
         "LINK_NOT_CONNECTED",
-        "La tienda todavía no conectó su link de pago. Se conecta en Pagos y entregas.",
+        "La tienda todavía no conectó su link de pago. Se conecta en Configuración › Cobros.",
       )
+    if (!link.usable)
+      throw new StoreError(
+        409,
+        "LINK_NOT_CONNECTED",
+        "Mercado Pago ya no deja cobrar con la cuenta de la tienda: vuelve a conectarla en Configuración › Cobros.",
+      )
+    // En modo prueba el dinero es de prueba: un pedido de verdad nunca se cobra así.
+    if (link.mode !== "real")
+      throw new StoreError(
+        409,
+        "LINK_TEST_MODE",
+        "Mercado Pago está en modo prueba: este pedido se cobra con captura o al recibir hasta que pases a «Cobrar de verdad» en Cobros.",
+      )
+    const connection = link.row
     const { name, currency } = await storeRow(tx, storeId)
     return {
       order,
       connection,
       name,
       currency,
-      token: openSecret(deps.secretsKey, storeId, connection.accessTokenEnc),
+      token: openSecret(deps.secretsKey, storeId, await linkTokenIn(tx, storeId)),
     }
   })
   if ("url" in prepared) return { url: prepared.url }
@@ -2592,7 +2615,8 @@ export async function receiveLinkNotice(
     .select()
     .from(storePaymentLink)
     .where(eq(storePaymentLink.storeId, storeId))
-  if (!connection || !deps.secretsKey) return done
+  // Sin permiso, el token ya no lee nada: no se pregunta (el aviso volvería sin fin).
+  if (!connection || !deps.secretsKey || connection.revokedAt) return done
   const adapter = deps.adapters[connection.provider]
   const secret = connection.webhookSecretEnc
     ? openSecret(deps.secretsKey, storeId, connection.webhookSecretEnc)
@@ -2606,6 +2630,14 @@ export async function receiveLinkNotice(
     openSecret(deps.secretsKey, storeId, connection.accessTokenEnc),
     notice.ref,
   )
+  // El link de prueba de S/ 1 de la tienda (Cobros): no es un pedido.
+  const trialId = trialOf(payment?.orderId ?? null)
+  if (payment && trialId) {
+    await receiveTrialPayment(ownerDb, storeId, trialId, payment)
+    return done
+  }
+  // En modo prueba ningún pedido se cobra por link: un pago de prueba nunca paga un pedido.
+  if (connection.mode !== "real") return done
   if (!payment?.approved || !payment.orderId || !z.uuid().safeParse(payment.orderId).success)
     return done
   const orderId = payment.orderId
@@ -2683,127 +2715,5 @@ export async function receiveLinkNotice(
       porRevisar: note,
     })
     return done
-  })
-}
-
-/* ----------------------------------------------- conectar el link de pago (configuración) */
-
-export const linkConnectionInput = z.object({
-  provider: z.literal("mercadopago"),
-  accessToken: z
-    .string()
-    .trim()
-    .min(20, "Pega el «Access token» completo")
-    .max(300, "Ese token es demasiado largo")
-    .regex(/^[A-Za-z0-9_-]+$/, "Pega solo el token, sin espacios"),
-  /** Vacía: se queda la que había (al cambiar la cuenta no se pierde la firma sin querer). */
-  webhookSecret: z
-    .string()
-    .trim()
-    .max(200, "Esa clave es demasiado larga")
-    .regex(/^[A-Za-z0-9_-]*$/, "Pega solo la clave, sin espacios")
-    .default("")
-    .transform((value) => value || null),
-})
-
-/**
- * Al cambiar o quitar la cuenta del link, los links ya creados de los pedidos por pagar dejan de
- * valer: eran de la otra cuenta, y sus pagos no se podrían leer. Se vuelve a crear uno.
- */
-async function forgetOpenLinks(tx: Db, storeId: string) {
-  await tx
-    .update(saleOrder)
-    .set({ linkUrl: null, linkRef: null, linkExpiresAt: null, updatedAt: new Date() })
-    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.state, "por_pagar")))
-}
-
-export async function paymentLinkStatus(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  deps: LinkDeps,
-) {
-  return inStore(appDb, person, storeId, "tienda.ver", async (tx) => {
-    const [row] = await tx
-      .select({
-        provider: storePaymentLink.provider,
-        hint: storePaymentLink.hint,
-        signed: sql<boolean>`${storePaymentLink.webhookSecretEnc} is not null`,
-        connectedAt: storePaymentLink.connectedAt,
-        connectedByName: accountCopy.name,
-      })
-      .from(storePaymentLink)
-      .leftJoin(accountCopy, eq(accountCopy.userId, storePaymentLink.connectedBy))
-      .where(eq(storePaymentLink.storeId, storeId))
-    return { available: Boolean(deps.secretsKey), connection: row ?? null }
-  })
-}
-
-/** Conecta (o cambia) el link de pago: primero se comprueba el token con el proveedor. */
-export async function connectPaymentLink(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  input: z.infer<typeof linkConnectionInput>,
-  deps: LinkDeps,
-) {
-  const key = deps.secretsKey
-  if (!key)
-    throw new StoreError(
-      409,
-      "LINK_UNAVAILABLE",
-      "El link de pago todavía no está disponible en gestorIA.",
-    )
-  // Antes de la llamada, el permiso: quien no puede configurar no prueba tokens con nuestro servidor.
-  await inStore(appDb, person, storeId, "configuracion", async () => {})
-  await deps.adapters[input.provider].verify(input.accessToken)
-  await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [before] = await tx
-      .select()
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
-    const sameAccount =
-      before && openSecret(key, storeId, before.accessTokenEnc) === input.accessToken
-    const values = {
-      provider: input.provider,
-      accessTokenEnc: sealSecret(key, storeId, input.accessToken),
-      webhookSecretEnc: input.webhookSecret
-        ? sealSecret(key, storeId, input.webhookSecret)
-        : (before?.webhookSecretEnc ?? null),
-      hint: input.accessToken.slice(-4),
-      connectedBy: person.userId,
-      connectedAt: new Date(),
-    }
-    await tx
-      .insert(storePaymentLink)
-      .values({ storeId, ...values })
-      .onConflictDoUpdate({ target: storePaymentLink.storeId, set: values })
-    if (!sameAccount) await forgetOpenLinks(tx, storeId)
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.pago",
-      subject: "Link de pago",
-      detail: { conectado: input.provider, firma: Boolean(values.webhookSecretEnc) },
-    })
-  })
-  return paymentLinkStatus(appDb, person, storeId, deps)
-}
-
-export async function disconnectPaymentLink(appDb: Db, person: Person, storeId: string) {
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [row] = await tx
-      .delete(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
-      .returning({ provider: storePaymentLink.provider })
-    if (!row) throw new StoreError(404, "NOT_FOUND", "El link de pago ya estaba desconectado")
-    await forgetOpenLinks(tx, storeId)
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.pago",
-      subject: "Link de pago",
-      detail: { desconectado: row.provider },
-    })
   })
 }

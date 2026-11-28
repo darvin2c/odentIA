@@ -52,7 +52,7 @@ horarios, las agencias y qué pasa si la clienta no está. El usuario lo llamó 
 
 ## Consecuencias
 
-- Las zonas de antes quedan sin distritos (la migración 0037 les pone lo de siempre): siguen
+- Las zonas de antes quedan sin distritos (la migración 0055 les pone lo de siempre): siguen
   funcionando por su nombre; Sofi no las encuentra por distrito hasta que la tienda los marque.
 - Fuera de Lima y el Callao no hay distritos que marcar: una tienda de provincia usa zonas por
   nombre o la agencia, como antes.
