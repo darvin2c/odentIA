@@ -12,7 +12,7 @@ import {
 } from "@odentia/ui"
 import { DetailDrawer, RadioChips } from "@odentia/ui-patterns"
 import { Bike, Camera, Check, CircleAlert, MoreHorizontal, PackageOpen, Repeat, UserRound } from "lucide-react"
-import { type ReactNode, useId, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { foto, RUBROS } from "../datos"
 import { elegirSolo, mostrarCobro, PasarHoja, pasar, SofiAvisa, textoAviso } from "../despachos/hojas"
 import {
@@ -114,8 +114,18 @@ export function CajonGlobal() {
     },
     () => abierto,
   )
-  const { rubro } = useRuta()
+  const { rubro, path } = useRuta()
   const all = usePedidos(rubro)
+  // Ir a otra pantalla (por ejemplo, «Ver la página del pedido») cierra el cajón.
+  const antes = useRef(path)
+  useEffect(() => {
+    if (antes.current === path) return
+    antes.current = path
+    if (abierto) {
+      abierto = null
+      avisarSubs()
+    }
+  }, [path])
   const p = a ? all.find((x) => x.id === a.pid) : undefined
   if (!a || !p) return null
   return (

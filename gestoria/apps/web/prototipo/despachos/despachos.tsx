@@ -70,7 +70,7 @@ import {
  * - La semana se desliza (`ScheduleSnapPager`) y el día también: sigue al dedo y encaja.
  *   Las flechas, «Hoy» y tocar un día hacen lo mismo sin deslizar.
  * - Mantener una entrega y moverla a otro día, franja o repartidor abre «Pasar a…» ya lleno.
- * - Arriba, solo lo que necesita a una persona, con su único botón: «Listo: se lo di a Kevin».
+ * - Arriba, solo lo que necesita a una persona, con su único botón («Empacar»), que abre el cajón.
  * - Por franja o por repartidor; en escritorio, además, la semana entera.
  * v2 (lo pidió el dueño):
  * - Cada entrega muestra su etapa (la de Pedidos) y, aparte, el cobro. Arriba del día, la tira de

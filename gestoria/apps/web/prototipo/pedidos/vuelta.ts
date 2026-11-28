@@ -19,7 +19,7 @@ import {
  * Los cambios y las devoluciones del prototipo. Todo depende de la política de la tienda: gestorIA
  * trae una recomendada por rubro y la tienda la ajusta. Sofi la informa con sus palabras y, con la
  * casilla de Configuración › Sofi marcada, pasa cada caso a una persona ya armado para aprobarlo
- * con un toque, sin dejar de contestar lo que sí sabe (como odentIA, ADR 0050).
+ * para aprobarlo en su cajón, sin dejar de contestar lo que sí sabe (como odentIA, ADR 0050).
  */
 
 /* ---------- La política de la tienda ---------- */
@@ -604,7 +604,7 @@ function crearCambio(r: RubroId, p: Pedido, v: Vuelta, quien: string): string {
   return num
 }
 
-/** Aprobar el caso que Sofi dejó listo: un toque, y desde ahí sigue solo. */
+/** Aprobar el caso que Sofi dejó listo (se confirma en el cajón), y desde ahí sigue solo. */
 export function aprobar(r: RubroId, p: Pedido, quien: string, excepcion?: string) {
   const pol = politicaDe(r)
   let num: string | undefined
@@ -649,7 +649,7 @@ export function aprobar(r: RubroId, p: Pedido, quien: string, excepcion?: string
         ? `Aprobó una excepción a la política: «${excepcion}». Sofi se lo dijo a ${nom(p)}.`
         : quien === "Sofi"
           ? `Aprobó ${v0.tipo === "cambio" ? "el cambio" : "la devolución"}${num ? `: pedido ${num}, enlazado` : ""}.`
-          : `Aprobó ${v0.tipo === "cambio" ? "el cambio" : "la devolución"} que dejó listo Sofi${num ? `: pedido ${num}, enlazado` : ""}. Un toque.`,
+          : `Aprobó ${v0.tipo === "cambio" ? "el cambio" : "la devolución"} que dejó listo Sofi${num ? `: pedido ${num}, enlazado` : ""}.`,
     },
   )
 }
@@ -802,7 +802,7 @@ export function pasosVuelta(p: Pedido, enlazado?: Pedido) {
           : "Cerrado"
   const vuelveL =
     v.como === "agencia" ? "En camino de vuelta" : v.como === "tienda" ? "Lo trae a la tienda" : "Por recoger"
-  const pasa = v.arm.dentro ? (CASILLA ? "Una persona · un toque" : "Sofi, sola") : "Una persona · excepción"
+  const pasa = v.arm.dentro ? (CASILLA ? "Una persona · lo aprueba" : "Sofi, sola") : "Una persona · excepción"
   return [
     { k: "solicitado" as const, l: "Solicitado", h: v.hechos.solicitado, falta: { quien: n, cuando: "" } },
     {

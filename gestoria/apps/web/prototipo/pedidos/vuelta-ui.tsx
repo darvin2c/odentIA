@@ -66,7 +66,7 @@ export function CasillaSofi({ compacta }: { compacta?: boolean }) {
         </span>
         <span className="text-xs text-muted-foreground">
           {on
-            ? "Marcada (viene así). Sofi arma el caso según tu política y te lo pasa para aprobarlo con un toque, sin dejar de contestar."
+            ? "Marcada (viene así). Sofi arma el caso según tu política y te lo pasa para aprobarlo en su cajón, sin dejar de contestar."
             : "Desmarcada. Sofi hace sola lo que está dentro de tu política y solo te pasa lo que queda fuera."}
         </span>
       </span>
@@ -228,7 +228,7 @@ export function VueltaBloque({ p }: { p: Pedido }) {
         <Sparkles className="size-3.5 text-primary" aria-hidden />
         Sofi lo armó según tu política: {ENVIO[pol.envio].toLowerCase()} paga el envío de vuelta,{" "}
         {DINERO[pol.dinero].toLowerCase()}.
-        <a href={href("/pedidos/politica")} className="font-medium text-primary hover:underline">
+        <a href={href("/pedidos/politica")} className="inline-flex items-center font-medium text-primary hover:underline pointer-coarse:min-h-11 max-sm:min-h-11">
           Según tu política de cambios y devoluciones
         </a>
       </p>

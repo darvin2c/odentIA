@@ -1484,7 +1484,7 @@ function semillaVueltas(rubro: RubroId, pr: (i: number) => Producto): Pedido[] {
       "Lun 24 · 10:30 a. m.",
       "persona",
       "Rosa",
-      "Aprobó el cambio por falla que dejó listo Sofi: pedido 0154, enlazado. Un toque.",
+      "Aprobó el cambio por falla que dejó listo Sofi: pedido 0154, enlazado.",
     ),
     ev(
       "Lun 24 · 10:30 a. m.",
@@ -1611,7 +1611,7 @@ function semillaVueltas(rubro: RubroId, pr: (i: number) => Producto): Pedido[] {
       "Mié 26 · 6:40 p. m.",
       "persona",
       "Rosa",
-      "Aprobó la devolución como saldo a favor que dejó lista Sofi. Un toque.",
+      "Aprobó la devolución como saldo a favor que dejó lista Sofi.",
     ),
     ev(
       "Mié 26 · 6:40 p. m.",
@@ -1691,7 +1691,7 @@ function semillaVueltas(rubro: RubroId, pr: (i: number) => Producto): Pedido[] {
       "Sofi",
       "Pasó la devolución a Rosa como un tema, con todo el chat, el motivo y el pedido. Siguió contestando: le mostró otras sandalias.",
     ),
-    ev("Lun 24 · 9:30 a. m.", "persona", "Rosa", "Aprobó la devolución que dejó lista Sofi. Un toque."),
+    ev("Lun 24 · 9:30 a. m.", "persona", "Rosa", "Aprobó la devolución que dejó lista Sofi."),
     ev(
       "Lun 24 · 9:30 a. m.",
       "gestoria",
@@ -1783,7 +1783,7 @@ function semillaVueltas(rubro: RubroId, pr: (i: number) => Producto): Pedido[] {
     ],
   })
   renata.eventos.push(
-    ev("Vie 21 · 5:00 p. m.", "persona", "Rosa", "Aprobó la devolución que dejó lista Sofi. Un toque."),
+    ev("Vie 21 · 5:00 p. m.", "persona", "Rosa", "Aprobó la devolución que dejó lista Sofi."),
     ev(
       "Sáb 22 · 11:02 a. m.",
       "sofi",
@@ -1958,7 +1958,7 @@ export function tocaDe(p: Pedido): Pedido["toca"] {
   if (p.paso === "preparando" && p.entrega.repartidor && p.entrega.tipo === "moto")
     return {
       texto: `Empácalo: sale hoy de ${p.entrega.franja} con ${p.entrega.repartidor}.`,
-      boton: `Listo: se lo di a ${p.entrega.repartidor}`,
+      boton: "Empacar",
       accion: "empacar",
     }
   return undefined
@@ -2060,8 +2060,8 @@ export function loQueFalta(p: Pedido): Falta[] {
       quien: "Una persona",
       cuando: e.dia === "Hoy" ? "Hoy, antes de la franja" : `${e.dia ?? "Ese día"}, antes de la franja`,
       texto: e.repartidor
-        ? `Lo empaca y toca «Listo: se lo di a ${e.repartidor}». Un toque.`
-        : "Lo empaca y toca «Listo» cuando se lo da al repartidor. Un toque.",
+        ? `Lo empaca: «Empacar» abre lo que va en el paquete y ahí confirma «Listo: se lo di a ${e.repartidor}».`
+        : "Lo empaca y toca «Listo» cuando se lo da al repartidor.",
       paso: "por_salir",
     })
   if (antes("en_camino"))

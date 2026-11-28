@@ -30,7 +30,7 @@ const PASOS: { s: Paso; es: string; mueve: string; solo: boolean; avisa?: string
   {
     s: "preparando",
     es: "Sale hoy y ya tiene repartidor: hay que empacarlo.",
-    mueve: "Una persona lo empaca y toca «Listo: se lo di a Kevin». Un toque.",
+    mueve: "Una persona toca «Empacar», mira lo que va en el paquete y confirma «Listo: se lo di a Kevin».",
     solo: false,
   },
   {
@@ -65,7 +65,7 @@ const VUELTA: [string, string, boolean, string][] = [
   ],
   [
     "Aprobado",
-    "Una persona, un toque",
+    "Una persona: lo confirma en el cajón",
     false,
     "Sofi pasa el caso armado como un tema, con el chat. Dentro de la política: «Aprobar». Fuera: la excepción, con su motivo.",
   ],
@@ -102,7 +102,7 @@ export function ComoAvanzaPage() {
         }}
       />
       <p className="max-w-3xl text-sm text-muted-foreground">
-        Casi todo avanza solo. A una persona solo le queda empacar (un toque), confirmar capturas de
+        Casi todo avanza solo. A una persona solo le queda empacar (lo confirma en el cajón, con lo que va en el paquete a la vista), confirmar capturas de
         Yape o Plin, aprobar los cambios y devoluciones que deja listos Sofi, revisar lo que vuelve
         y los casos raros, como no tener repartidor libre. Una regla que no se salta: sin pago
         confirmado no se entrega.
@@ -220,7 +220,7 @@ export function ComoAvanzaPage() {
             [
               RotateCcw,
               "Cambio o devolución",
-              "Tiene su propio camino de vuelta (abajo). Sofi lo atiende según tu política y lo deja listo para aprobar con un toque.",
+              "Tiene su propio camino de vuelta (abajo). Sofi lo atiende según tu política y lo deja listo para aprobarlo en su cajón.",
             ],
             [
               UserRound,

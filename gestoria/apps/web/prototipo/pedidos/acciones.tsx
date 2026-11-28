@@ -458,7 +458,7 @@ function PasarA({ p, onClose, asignar }: { p: Pedido; onClose: () => void; asign
           },
         )
         toast.success(
-          asignar ? `Lo lleva ${rep}. Cuando lo empaques, es un toque.` : `Pasó a ${dia?.toLowerCase()}.`,
+          asignar ? `Lo lleva ${rep}. Cuando lo empaques, lo confirmas en su cajón.` : `Pasó a ${dia?.toLowerCase()}.`,
         )
         onClose()
       }}

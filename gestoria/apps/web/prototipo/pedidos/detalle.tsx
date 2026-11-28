@@ -104,7 +104,7 @@ export function queSigue(p: Pedido): { texto: string; persona: boolean } {
             persona: false,
           }
         : {
-            texto: `${p.entrega.repartidor} lo lleva.${k.falta ? ` Cobra ${money(k.falta)}: sin pago confirmado no entrega.` : " Está pagado: lo entrega con un toque."}`,
+            texto: `${p.entrega.repartidor} lo lleva.${k.falta ? ` Cobra ${money(k.falta)}: sin pago confirmado no entrega.` : " Está pagado: lo entrega y lo confirma en su app."}`,
             persona: false,
           }
     case "entregado":
