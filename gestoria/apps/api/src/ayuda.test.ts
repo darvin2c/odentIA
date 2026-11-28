@@ -118,7 +118,9 @@ describe("la pantalla donde está", () => {
     expect(storePath(`/tiendas/${STORE}/pedidos?pedido=p-1`, STORE)).toBe("/pedidos")
     expect(storePath(`/tiendas/${STORE}`, STORE)).toBe("/")
     expect(helpScreenOf("/")).toBe("inicio")
-    expect(helpScreenOf("/catalogo/prod-1")).toBe("catalogo")
+    expect(helpScreenOf("/catalogo")).toBe("catalogo")
+    // La ficha de un producto tiene su pantalla, con sus preguntas.
+    expect(helpScreenOf("/catalogo/prod-1")).toBe("producto")
     // Configuración abre en «Lo que falta»; Datos de la tienda tiene su ruta.
     expect(helpScreenOf("/configuracion")).toBe("configuracion")
     expect(helpScreenOf("/configuracion/datos")).toBe("datos")
@@ -149,14 +151,22 @@ describe("la pantalla donde está", () => {
     expect(owner.title).toBe("Pedidos")
     expect(owner.suggestions).toHaveLength(3)
     // A Ventas no se le sugiere lo que no puede hacer, aunque abra la pantalla: del catálogo, solo
-    // responder lo que Sofi no supo y ver la vista previa.
-    expect(helpScreenView("sales", "/catalogo")).toEqual({
-      title: "Catálogo",
+    // responder lo que Sofi no supo y ver la vista previa, que están en la ficha.
+    expect(helpScreenView("sales", "/catalogo")).toEqual({ title: "Catálogo", suggestions: [] })
+    // En la ficha, Ventas ve lo que sí puede: el simulador, lo que Sofi no supo y la vista previa.
+    expect(helpScreenView("sales", "/catalogo/prod-1")).toEqual({
+      title: "Ficha del producto",
       suggestions: [
+        "¿Cuánto cobraría Sofi por un producto?",
         "Sofi no supo responder algo de un producto, ¿cómo se lo enseño?",
         "¿Cómo se ve mi producto en la vitrina y en la web?",
       ],
     })
+    expect(helpScreenView("owner", "/catalogo/prod-1").suggestions[0]).toBe(
+      "¿Cómo guardo los cambios de un producto?",
+    )
+    // A Ventas no le dice que no puede usar el simulador.
+    expect(helpAnswerFor("sales", STORE, "faq:simulador")?.restriction).toBeNull()
     expect(helpScreenView("sales", "/")).toEqual({
       title: "Inicio",
       suggestions: ["¿Qué me toca hacer hoy?"],
@@ -165,6 +175,37 @@ describe("la pantalla donde está", () => {
     expect(helpScreenView("support", "/pedidos").suggestions).toEqual([])
     expect(helpScreenView("owner", "/clientes").title).toBe("Clientes")
     expect(helpScreenView("owner", "/no-existe")).toEqual({ title: null, suggestions: [] })
+  })
+
+  it("«Cargar muchos» tiene su pantalla; «Agregar desde fotos», la suya dentro del catálogo", () => {
+    expect(helpScreenOf("/catalogo/cargar")).toBe("cargar")
+    // El panel no tiene dirección propia: en el catálogo sigue siendo el catálogo.
+    expect(helpScreenOf("/catalogo")).toBe("catalogo")
+    const cargar = helpScreenView("owner", "/catalogo/cargar")
+    expect(cargar.title).toBe("Cargar muchos")
+    expect(cargar.suggestions[0]).toBe("¿Cómo cargo muchos productos con sus fotos de una vez?")
+    // En el catálogo se sugiere también «Agregar desde fotos», como antes.
+    expect(helpScreenView("owner", "/catalogo").suggestions).toContain(
+      "¿Cómo agrego un producto desde sus fotos?",
+    )
+    const topics = helpTopics()
+    const agregar = topics.find((t) => t.id === "agregar")!
+    expect(agregar.title).toBe("Agregar desde fotos")
+    expect(agregar.faqs.map((f) => f.id)).toEqual(
+      expect.arrayContaining(["agregar-desde-fotos", "que-hace-la-ia", "agregar-sin-guardar"]),
+    )
+    expect(topics.find((t) => t.id === "cargar")!.faqs.map((f) => f.id)).toEqual(
+      expect.arrayContaining(["cargar-muchos", "cargar-no-crear", "juntar-con-ia"]),
+    )
+    // Su respuesta dice dónde, y el enlace del panel lleva al catálogo, donde está el botón.
+    expect(helpAnswerFor("owner", STORE, "faq:agregar-desde-fotos")).toMatchObject({
+      where: "Agregar desde fotos",
+      path: `/tiendas/${STORE}/catalogo`,
+    })
+    expect(helpAnswerFor("owner", STORE, "faq:cargar-muchos")).toMatchObject({
+      where: "Cargar muchos",
+      path: `/tiendas/${STORE}/catalogo/cargar`,
+    })
   })
 
   it("a quien no configura la tienda le explica por qué en Configuración solo ve sus avisos", () => {
@@ -274,10 +315,10 @@ describe("lo que respondió Ariadna, hecho texto", () => {
       kind: "guia",
       written: "Unido.",
       argos: false,
-      basedOn: "La guía de gestorIA: Catálogo y Pedidos.",
+      basedOn: "La guía de gestorIA: Ficha del producto y Pedidos.",
     })
     expect(reply.answers.map((one) => [one.where, one.path])).toEqual([
-      ["Catálogo", `/tiendas/${STORE}/catalogo`],
+      ["Ficha del producto", `/tiendas/${STORE}/catalogo`],
       ["Pedidos", `/tiendas/${STORE}/pedidos`],
     ])
     expect(reply.answers[0]?.restriction).toContain("Lo pueden hacer: Dueño y Administrador.")

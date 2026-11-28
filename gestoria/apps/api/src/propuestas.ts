@@ -407,7 +407,7 @@ export async function proposeForLoadItem(
   ai: PhotoAi,
 ) {
   const begun = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const item = await itemRow(tx, loadId, itemId)
     const photos = (await loadPhotoKeys(tx, loadId, itemId))
       .slice(0, MAX_LOOK_PHOTOS)
@@ -459,7 +459,7 @@ export async function proposeGroups(
   ai: PhotoAi,
 ) {
   const begun = await inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const photos = await loadPhotoKeys(tx, loadId, null)
     const named = await tx
       .select({ id: bulkLoadItem.id })
@@ -736,6 +736,7 @@ async function applyColorIn(
   storeId: string,
   productId: string,
   color: z.infer<typeof colorValue>,
+  reason: string | null,
 ) {
   const detail = await detailIn(tx, storeId, productId)
   const rowLabel = detail.rubro ? RUBROS[detail.rubro].rowLabel : "Color"
@@ -822,7 +823,7 @@ async function applyColorIn(
     cells,
     unitCostCents: null,
   }
-  await saveGridIn(tx, person, storeId, productId, grid, FROM_AI)
+  await saveGridIn(tx, person, storeId, productId, grid, reason)
   // Las demás fotos de ese color pasan a ser de ese color.
   const [look] = await tx
     .select({ id: productColor.id, value: productColor.value })
@@ -831,28 +832,33 @@ async function applyColorIn(
     .then((list) => list.filter((l) => sameText(l.value, name)))
   if (look)
     for (const photoId of photos)
-      await updatePhotoIn(tx, person, storeId, photoId, { colorId: look.id }, FROM_AI)
+      await updatePhotoIn(tx, person, storeId, photoId, { colorId: look.id }, reason)
 }
 
-/** Usa una propuesta en un producto, por la operación de siempre de la ficha. */
+/**
+ * Usa una propuesta en un producto, por la operación de siempre de la ficha. `reason` es lo que
+ * dice el historial: «Propuesta de la IA» solo si se usó lo que propuso; lo que la persona
+ * respondió o cambió es suyo (null).
+ */
 async function useOnProductIn(
   tx: Db,
   person: Person,
   storeId: string,
   row: ProposalRow,
   value: unknown,
+  reason: string | null,
 ) {
   const productId = row.productId!
   const patchOf = (patch: unknown) => productPatch.parse(patch)
   const field = row.field
   if (field === "nombre")
-    return updateProductIn(tx, person, storeId, productId, patchOf({ name: value }), FROM_AI)
+    return updateProductIn(tx, person, storeId, productId, patchOf({ name: value }), reason)
   if (field === "categoria")
-    return updateProductIn(tx, person, storeId, productId, patchOf({ category: value }), FROM_AI)
+    return updateProductIn(tx, person, storeId, productId, patchOf({ category: value }), reason)
   if (field === "descripcion")
-    return updateProductIn(tx, person, storeId, productId, patchOf({ description: value }), FROM_AI)
+    return updateProductIn(tx, person, storeId, productId, patchOf({ description: value }), reason)
   if (field === "rubro")
-    return updateProductIn(tx, person, storeId, productId, patchOf({ rubro: value }), FROM_AI)
+    return updateProductIn(tx, person, storeId, productId, patchOf({ rubro: value }), reason)
   if (field === "palabras") {
     const current = await productRow(tx, storeId, productId)
     const words = z.array(z.string()).parse(value)
@@ -860,7 +866,7 @@ async function useOnProductIn(
       ...current.keywords,
       ...words.filter((w) => !current.keywords.some((k) => sameText(k, w))),
     ]
-    return updateProductIn(tx, person, storeId, productId, patchOf({ keywords: next }), FROM_AI)
+    return updateProductIn(tx, person, storeId, productId, patchOf({ keywords: next }), reason)
   }
   if (field.startsWith("dato:") || field.startsWith("pregunta:")) {
     const key = field.slice(field.indexOf(":") + 1)
@@ -893,18 +899,21 @@ async function useOnProductIn(
         })
       rubro = z.enum(PRODUCT_RUBROS).parse(proposed.value)
       await decideIn(tx, person, proposed, "usada")
+      // El rubro sí es lo que propuso la IA: va en su propia línea del historial.
+      if (reason !== FROM_AI)
+        await updateProductIn(tx, person, storeId, productId, patchOf({ rubro }), FROM_AI)
     }
     return updateProductIn(
       tx,
       person,
       storeId,
       productId,
-      patchOf({ ...(rubro ? { rubro } : {}), rubroData: { [key]: value } }),
-      FROM_AI,
+      patchOf({ ...(rubro && reason === FROM_AI ? { rubro } : {}), rubroData: { [key]: value } }),
+      reason,
     )
   }
   if (field === "color") {
-    await applyColorIn(tx, person, storeId, productId, colorValue.parse(value))
+    await applyColorIn(tx, person, storeId, productId, colorValue.parse(value), reason)
     return detailIn(tx, storeId, productId)
   }
   throw new StoreError(409, "NOT_FOR_PRODUCT", "Esta propuesta no se usa en la ficha")
@@ -920,7 +929,7 @@ async function useOnLoadIn(
 ) {
   if (row.field === "juntar") {
     const { photos } = joinValue.parse(value)
-    return joinPhotosIn(tx, storeId, row.loadId!, photos)
+    return joinPhotosIn(tx, person, storeId, row.loadId!, photos)
   }
   if (!ITEM_FIELDS.has(row.field))
     throw new StoreError(
@@ -934,7 +943,7 @@ async function useOnLoadIn(
     .where(and(eq(bulkLoadItem.id, row.itemId!), eq(bulkLoadItem.storeId, storeId)))
   if (!found) throw new StoreError(404, "NOT_FOUND", "Ese producto ya no está en la carga")
   // Primero la carga tomada; después el producto, como en «Revisar» de siempre.
-  await openLoadRow(tx, storeId, found.loadId)
+  await openLoadRow(tx, person, storeId, found.loadId)
   const item = await itemRow(tx, found.loadId, row.itemId!)
   const text = z.string().trim().min(1, "Escribe el valor")
   const colors = colorsOf(item.options)
@@ -976,8 +985,10 @@ export async function useProposal(
     const changed =
       input.value !== undefined && JSON.stringify(input.value) !== JSON.stringify(row.value)
     const value = changed ? input.value : row.value
+    // Lo respondido a una pregunta o cambiado es de la persona; lo usado tal cual, de la IA.
+    const reason = changed || row.field.startsWith("pregunta:") ? null : FROM_AI
     const result = row.productId
-      ? forRole(await useOnProductIn(tx, person, storeId, row, value), role)
+      ? forRole(await useOnProductIn(tx, person, storeId, row, value, reason), role)
       : await useOnLoadIn(tx, person, storeId, row, value)
     await decideIn(tx, person, row, changed ? "cambiada" : "usada", value)
     return { result }
@@ -1055,7 +1066,7 @@ export async function applyAll(
             .where(eq(aiProposal.id, row.id))
             .for("update")
           if (fresh?.state !== "propuesta") return
-          if (row.productId) await useOnProductIn(sp, person, storeId, fresh, fresh.value)
+          if (row.productId) await useOnProductIn(sp, person, storeId, fresh, fresh.value, FROM_AI)
           else await useOnLoadIn(sp, person, storeId, fresh, fresh.value)
           await decideIn(sp, person, fresh, "usada")
           applied++

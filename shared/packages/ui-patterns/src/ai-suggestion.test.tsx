@@ -139,6 +139,23 @@ describe("propuesta de la IA", () => {
     expect(screen.queryByRole("button")).toBeNull()
   })
 
+  it("después de «Aplicar todos» el foco queda en la línea que dice lo que pasó", async () => {
+    function Barra() {
+      const [count, setCount] = useState(3)
+      return (
+        <div>
+          <button type="button">Antes</button>
+          <AiSuggestionBar count={count} onAcceptAll={() => setCount(0)} />
+        </div>
+      )
+    }
+    render(<Barra />)
+    await userEvent.click(screen.getByRole("button", { name: "Aplicar todos" }))
+    const status = screen.getByRole("status")
+    expect(status.textContent).toContain("Usaste las 3 propuestas.")
+    await waitFor(() => expect(document.activeElement).toBe(status))
+  })
+
   it("la pregunta nombra su grupo y devuelve la respuesta elegida", () => {
     const answer = vi.fn()
     render(

@@ -821,6 +821,51 @@ describe("Sofi vende con las reglas de la tienda", () => {
       expect.objectContaining({ number, state: "por_pagar" }),
     ])
   })
+
+  it("«algo más barato» es más barato de verdad: compara el precio de venta de hoy", async () => {
+    const product = async (name: string, listPriceCents: number) => {
+      const created = await call("rosa", "POST", `${base}/productos`, { name, listPriceCents })
+      const id = created.json.product.id as string
+      const variant = (await call("rosa", "GET", `${base}/productos/${id}`)).json.product
+        .variants[0].id as string
+      await call("rosa", "POST", `${base}/variantes/${variant}/movimientos`, {
+        kind: "entrada",
+        quantity: 3,
+      })
+      return id
+    }
+    const botin = await product("Botín de cuero QA", 21900)
+    const mocasin = await product("Mocasín de cuero QA", 14900)
+    // La tienda puso el mocasín como lo más barato del botín: desde el mocasín, el botín no lo es.
+    await call("rosa", "PATCH", `${base}/productos/${botin}`, {
+      links: [{ productId: mocasin, kind: "parecido" }],
+    })
+    // La ficha compara con el mismo precio de venta de hoy.
+    const listed = (await call("rosa", "GET", `${base}/catalogo`)).json.products as Json[]
+    expect(listed.find((p) => p.id === botin)?.saleFromCents).toBe(21900)
+    expect(listed.find((p) => p.id === mocasin)?.saleFromCents).toBe(14900)
+    const id = await newTest()
+    await write(
+      id,
+      "¿Tienen mocasines?",
+      use("buscar_productos", () => ({ texto: "mocasín de cuero QA" })),
+      (r) => {
+        const found = lastTool(r).productos.find((p: Json) => p.producto_id === mocasin)
+        expect(found.parecido).toEqual([])
+        return { content: "Sí, tenemos el mocasín de cuero." }
+      },
+    )
+    await write(
+      id,
+      "¿Y el botín?",
+      use("buscar_productos", () => ({ texto: "botín de cuero QA" })),
+      (r) => {
+        const found = lastTool(r).productos.find((p: Json) => p.producto_id === botin)
+        expect(found.parecido).toEqual([expect.objectContaining({ producto_id: mocasin })])
+        return { content: "Sí, también tenemos el botín." }
+      },
+    )
+  })
 })
 
 describe("el envío que dice Sofi", () => {
@@ -1393,7 +1438,10 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
       },
     )
     // «Qué usó Sofi»: lo que leyó y está en lo que escribió.
-    expect(lastSofi(sent).used).toContainEqual({ label: "Cómo calza: normal", target: "datos" })
+    expect(lastSofi(sent).used).toContainEqual({
+      label: "Cómo calza: normal",
+      target: "dato:horma",
+    })
   })
 
   it("cada estado dice lo suyo, y lo que ya no se vende no sale", async () => {

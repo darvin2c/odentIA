@@ -82,8 +82,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   las copias (miniatura, vitrina, WhatsApp) las arma `imagenes.ts`. El video no se rearma.
 - Ver es un enlace firmado que vence: la app (`catalogo.ver`), la vitrina pública
   (`/vitrina/:link/:producto/medios`, solo lo que se ve en la web, nunca la original) y lo que
-  manda Sofi (`sofiMediaIn`, la copia de WhatsApp de la foto del color pedido o el video; la
-  elige su herramienta `mandar_foto`, y sin almacenamiento elige igual y no firma).
+  manda Sofi (`sofiMediaIn`, la copia de WhatsApp de la foto del color pedido o, sin ella, la que
+  es para todos; nunca la de otro color. La elige su herramienta `mandar_foto`, y sin
+  almacenamiento elige igual y no firma).
 - La foto sin fondo es una propuesta (`cutout`), cada una en su carpeta (`cutout_id`); la original
   no se borra nunca. Nadie borra un
   archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en

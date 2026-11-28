@@ -120,6 +120,77 @@ export const HELP_SCREENS = {
       "código de barras",
     ],
   },
+  // «Agregar desde fotos» es un panel del catálogo, sin dirección propia: comparte la del
+  // catálogo (que gana al buscar la pantalla, por ir antes) y su enlace lleva allí, al botón.
+  agregar: {
+    label: "Agregar desde fotos",
+    path: "/catalogo",
+    opens: "configuracion",
+    purpose:
+      "Subir un producto empezando por sus fotos: la IA propone el nombre, la categoría, los colores y lo que se ve, pregunta lo que no ve y nunca pone el precio. Nada se guarda hasta «Guardar y abrir la ficha».",
+    terms: [
+      "agregar desde fotos",
+      "subir un producto",
+      "producto nuevo",
+      "me llegaron",
+      "con sus fotos",
+      "tomar fotos",
+      "cámara",
+      "mirar las fotos",
+      "la IA propone",
+      "aplicar todos",
+      "punteado",
+    ],
+  },
+  cargar: {
+    label: "Cargar muchos",
+    path: "/catalogo/cargar",
+    opens: "configuracion",
+    purpose:
+      "Cargar muchos productos de una vez desde sus fotos sueltas y la hoja de la tienda: cada foto arma un producto, se juntan, se les pone precio a varios a la vez y nada pasa al catálogo hasta «Crear».",
+    terms: [
+      "cargar muchos",
+      "muchos productos",
+      "todas las fotos",
+      "fotos sueltas",
+      "juntar",
+      "juntar con IA",
+      "carga",
+      "descartar la carga",
+      "no crear este",
+      "excel",
+      "hoja",
+    ],
+  },
+  // La ficha de un producto: su propia pantalla en la Ayuda, con sus preguntas. Su ruta lleva el
+  // producto (`$productId`); el enlace de la Ayuda va al Catálogo, donde se elige.
+  producto: {
+    label: "Ficha del producto",
+    path: "/catalogo/$productId",
+    opens: "catalogo.ver",
+    purpose:
+      "La ficha de un producto, que se guarda sola: fotos, colores y tallas con su stock en una cuadrícula (también pegando desde Excel), precio, mínimo, margen, lo que Sofi puede ofrecer, promociones, estado, datos del rubro, lo que Sofi no supo y quién cambió qué.",
+    terms: [
+      "ficha",
+      "producto",
+      "cuadrícula",
+      "pegar",
+      "excel",
+      "deshacer",
+      "stock",
+      "tallas",
+      "colores",
+      "precio",
+      "mínimo",
+      "margen",
+      "cuánto gano",
+      "simulador",
+      "cuánto cobraría",
+      "estado",
+      "rubro",
+      "otra pestaña",
+    ],
+  },
   caja: {
     label: "Caja",
     path: "/caja",
@@ -599,11 +670,11 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo agrego un producto desde sus fotos?",
         a: [
           "En Catálogo, «Agregar desde fotos»: suelta o elige hasta 8 fotos del producto (de frente, de lado, el detalle, puesto) y toca «Mirar las fotos». En el celular, «Tomar fotos» abre la cámara.",
-          "La IA propone el nombre, la categoría, los colores con sus fotos y una descripción para vender. Lo punteado (✦) es lo que propone: con «Usar» lo tomas, con «Cambiar» lo escribes a tu manera y con «Descartar» lo quitas. Lo que no se ve en una foto, como cómo calza, lo pregunta en amarillo.",
+          "La IA propone el nombre, la categoría, los colores con sus fotos y una descripción para vender. Lo punteado (✦) es lo que propone: «Aplicar todos» lo usa de una vez; o toca ✦ en cada dato para «Usar», «Cambiar» (lo escribes a tu manera) o «Descartar». Lo que no se ve en una foto, como cómo calza, lo pregunta en amarillo.",
           "El precio lo pones tú: la IA nunca lo propone. «Ver cómo queda» muestra cómo se vería en tu vitrina y en WhatsApp antes de guardar. Con «Guardar y abrir la ficha» se crea; lo que no usaste te espera en la ficha.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "agregar",
       },
       {
         id: "que-hace-la-ia",
@@ -614,7 +685,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Mira un número de fotos por día y sale del saldo de tu plan. Si llega a su tope o no está, lo dice y sigues cargando a mano: nada se frena. En «Cargar muchos», «Juntar con IA» propone qué fotos son del mismo producto y tú confirmas cada grupo.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "agregar",
       },
       {
         id: "subir-hoja",
@@ -635,7 +706,55 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Nada pasa al catálogo hasta «Crear»: si a alguno le falta el nombre o el precio, no se crea ninguno y se marca qué falta. «Descartar la carga» la cierra sin crear nada.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "cargar",
+      },
+      {
+        id: "cargar-no-crear",
+        q: "¿Qué pasa si marco «No crear este» o descarto la carga?",
+        a: [
+          "«No crear este» lo deja aparte: el aviso trae «Deshacer» y abajo de la tabla sigue con «Volver a incluir». Al «Crear», lo que quedó aparte no pasa al catálogo y sus fotos se borran.",
+          "«Descartar la carga» primero te pregunta: si sigues, se borran sus fotos y sus productos por crear, y nada pasa al catálogo. No se puede deshacer.",
+        ],
+        needs: "configuracion",
+        screen: "cargar",
+      },
+      {
+        id: "cargar-de-quien",
+        q: "¿Quién más ve la carga que abrí?",
+        a: [
+          "La carga abierta es de la tienda: la ve y la puede cambiar quien puede cambiar el catálogo. Arriba dice quién la abrió y cuándo; si la abrió otra persona, lo que cambies, crees o descartes cambia también para ella.",
+          "«Agregar desde fotos» también usa una carga mientras miras las fotos: si alguien la crea o la descarta desde «Cargar muchos», al guardar te dice quién lo hizo.",
+        ],
+        needs: "configuracion",
+        screen: "cargar",
+      },
+      {
+        id: "juntar-con-ia",
+        q: "¿Qué hace «Juntar con IA»?",
+        a: [
+          "Mira las fotos sueltas de la carga y propone qué fotos son del mismo producto. Cada grupo lo confirmas tú; nada se junta solo.",
+          "Si no hay fotos sueltas, o si no encuentra fotos del mismo producto, lo deja escrito junto a la tabla y no cambia nada: júntalas tú con «Juntar en uno» si son del mismo.",
+        ],
+        needs: "configuracion",
+        screen: "cargar",
+      },
+      {
+        id: "agregar-sin-guardar",
+        q: "¿Qué pasa si cierro «Agregar desde fotos» sin guardar?",
+        a: [
+          "Nada pasa al catálogo y las fotos que subiste se borran; antes de cerrar te lo pregunta. Lo que miró la IA ya contó para su tope del día.",
+        ],
+        needs: "configuracion",
+        screen: "agregar",
+      },
+      {
+        id: "agregar-preguntas",
+        q: "¿Qué hago con lo que la IA pregunta en amarillo?",
+        a: [
+          "Es lo que no se ve en las fotos, como cómo calza. Respóndelo con sus opciones o escríbelo, o déjalo: nada se frena. Lo que respondes queda en la ficha y en su historial a tu nombre.",
+        ],
+        needs: "configuracion",
+        screen: "agregar",
       },
       {
         id: "fotos-y-video",
@@ -653,20 +772,22 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo guardo los cambios de un producto?",
         a: [
           "La ficha se guarda sola: arriba dice «Guardando…» y luego «Guardado». Si algo no se pudo guardar, lo dice ahí y en su campo; lo demás sí se guarda. Sin internet, lo escrito se queda y se guarda al volver.",
-          "Con «Deshacer» y «Rehacer» (o Ctrl+Z y Ctrl+Mayús+Z) vuelves atrás un cambio. En el menú ⋯, «Volver a lo guardado» deja la ficha como estaba y «Quién cambió qué» muestra cada cambio con quién y cuándo.",
+          "Con «Deshacer» y «Rehacer» (o Ctrl+Z y Ctrl+Mayús+Z) vuelves atrás un cambio, también uno ya guardado: el stock vuelve a lo que había, y si al deshacer baja, pide el motivo. Dentro de un campo, Ctrl+Z deshace lo que escribes en ese campo, y lo escrito se guarda al salir de él o con Enter. En el menú ⋯, «Volver a lo guardado» deja la ficha como estaba y «Quién cambió qué» muestra cada cambio con quién y cuándo.",
+          "Si la misma ficha está abierta en otra pestaña o la cambia otra persona, lo de ella no se pisa: lo que cambió en otra cosa ya lo ves, y si cambiaron lo mismo, la ficha dice «Alguien cambió esta ficha» y eliges «Guardar lo mío» o «Quedarme con lo otro». Lo tuyo no se pierde.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "cuadricula",
         q: "¿Cómo lleno el stock de muchas tallas y colores de una vez?",
         a: [
           "En la cuadrícula de «Variantes»: con las flechas te mueves y con Mayúscula y las flechas eliges varias celdas. Escribe un número y Enter: se llena todo lo elegido. Abajo, «Poner» hace lo mismo con un valor para todas.",
-          "También pegas desde Excel o Google Sheets: copia las celdas allá y pégalas con Ctrl+V sobre la primera celda. Las pestañas «Precio» y «Código de barras» se llenan igual; una celda de precio vacía usa el precio del producto.",
+          "También pegas desde Excel o Google Sheets: copia la tabla allá, con su fila de colores y su columna de tallas o sin ellas, toca la primera celda y pega con Ctrl+V. Con sus títulos, cada número va a su talla y su color por el nombre, aunque estén en otro orden; sin títulos, se pega desde la celda que elegiste. Lo que no entra se dice («No entró»), y lo pegado queda marcado, con «Deshacer».",
+          "Las pestañas «Precio» y «Código de barras» se llenan igual; una celda de precio vacía usa el precio del producto.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "cambiar-stock",
@@ -677,7 +798,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Las ventas lo bajan solas cuando se confirma el pago, o cuando el pedido sale si se paga al recibir, y vuelve si se anula.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "color-y-foto",
@@ -687,7 +808,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "También desde «Fotos y videos»: en el menú de cada foto, «Es del color» y «La que manda Sofi» (la ★). Si una foto trae «Sin fondo», es una propuesta: «Usar esta» o «Dejar la original»; la original se guarda siempre.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "precio-minimo",
@@ -698,17 +819,27 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "En «Precio por cantidad y promociones» van el precio por cantidad, el de revendedora («Por mayor») y las promociones con fecha, de todo el producto, de un color o de una talla. No se suman: a cada variante le toca la mejor.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "margen",
-        q: "¿Cuánto gano con cada producto y cuánto cobraría Sofi?",
+        q: "¿Cuánto gano con cada producto?",
         a: [
-          "En «Precio y ofertas de Sofi», con el costo de la última entrada, la barra dice cuánto ganas seguro hasta el mínimo y cuánto puede ceder Sofi. Cambia al momento con el precio o el mínimo.",
-          "En «Probar cuánto cobraría Sofi» eliges cuántos, la entrega y la variante: dice lo menos que cobraría, con la misma cuenta de los pedidos.",
+          "En «Precio y ofertas de Sofi», con el costo (de lo último que entró de cada variante, el más alto), la barra dice cuánto ganas al precio de hoy, cuánto puede ceder Sofi (del precio al mínimo) y cuánto ganas en el mínimo, sin contar el envío. La cuenta la hace gestorIA con lo guardado: se pone al día al guardarse el precio o el mínimo.",
+          "Lo que ganas en el peor caso, con el envío que pone la tienda, lo dice «Probar cuánto cobraría Sofi».",
         ],
         needs: "costos.ver",
-        screen: "catalogo",
+        screen: "producto",
+      },
+      {
+        id: "simulador",
+        q: "¿Cuánto cobraría Sofi por un producto?",
+        a: [
+          "En la ficha, «Probar cuánto cobraría Sofi»: eliges cuántos, la entrega y la variante, y dice lo menos que cobraría, con la misma cuenta de los pedidos. No guarda nada.",
+          "Lo que se gana en cada caso lo ve solo quien ve los costos.",
+        ],
+        needs: "catalogo.ver",
+        screen: "producto",
       },
       {
         id: "estado-producto",
@@ -718,7 +849,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Por encargo, con cupo o en preventa se vende sin stock. En liquidación el precio es el final y no se negocia. Lo que ya no se vende no entra a un pedido nuevo.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "datos-rubro",
@@ -729,7 +860,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Con «Plantilla» ajustas qué pide cada producto de ese rubro en tu tienda: «Sofi lo necesita», «Suma» o «Quitar», y agregar un dato tuyo.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "sofi-no-supo",
@@ -740,7 +871,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Quien atiende y no cambia la ficha la propone para la ficha; quien cambia la ficha la guarda, también desde la ficha, en «Lo que Sofi no supo», con «Guardar en la ficha». Lo que preguntaste en una prueba queda solo en la ficha.",
         ],
         needs: "ventas.atender",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "probar-como-clienta",
@@ -780,7 +911,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "Sale de la ficha de ahora: fotos, colores, tallas que hay, precio y promoción. Nunca muestra el mínimo, el costo ni lo que Sofi puede ofrecer. En la web pública solo está si «Se muestra en tu catálogo» está encendido.",
         ],
         needs: "catalogo.ver",
-        screen: "catalogo",
+        screen: "producto",
       },
       {
         id: "web-paquete-cruzada",
@@ -790,7 +921,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
           "El código del producto va en «Organización» y el código de barras de cada variante, en la cuadrícula, en «Código de barras».",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "producto",
       },
     ],
   },
@@ -1044,6 +1175,15 @@ function within(path: string, screen: string): boolean {
 }
 
 /**
+ * Cuán precisa es una pantalla: primero sus partes fijas y, a igual número, lo largo. Así
+ * `/catalogo/cargar` gana a `/catalogo/$productId` para la ruta de «Cargar muchos».
+ */
+function precision(screen: string): number {
+  const fixed = screen.split("/").filter((part) => part !== "" && !part.startsWith("$")).length
+  return fixed * 1000 + screen.length
+}
+
+/**
  * La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. Con un
  * panel abierto (`#probar-como-clienta`), la del panel.
  */
@@ -1055,10 +1195,13 @@ export function helpScreenOf(path: string): HelpScreen | null {
     const own = "panel" in screen ? screen.panel : null
     if (own && own !== panel) continue
     if (!within(bare, screen.path)) continue
+    // El panel abierto gana a su pantalla; entre iguales, la más precisa.
+    const foundPanel = found !== null && "panel" in HELP_SCREENS[found]
     const better =
       !found ||
-      (own !== null && !("panel" in HELP_SCREENS[found])) ||
-      screen.path.length > HELP_SCREENS[found].path.length
+      (own !== null && !foundPanel) ||
+      ((own !== null) === foundPanel &&
+        precision(screen.path) > precision(HELP_SCREENS[found].path))
     if (better) found = key
   }
   return found
@@ -1071,11 +1214,17 @@ export function helpScreenView(
 ): { title: string | null; suggestions: string[] } {
   const screen = helpScreenOf(path)
   if (!screen) return { title: null, suggestions: [] }
+  // Las de la misma ruta y el mismo panel: la ficha y «Probar como clienta» tienen las suyas.
+  const panelOf = (key: HelpScreen) => {
+    const s = HELP_SCREENS[key]
+    return "panel" in s ? s.panel : null
+  }
   return {
     title: HELP_SCREENS[screen].label,
     suggestions: FAQS.filter(
       (faq) =>
-        faq.screen === screen &&
+        HELP_SCREENS[faq.screen].path === HELP_SCREENS[screen].path &&
+        panelOf(faq.screen) === panelOf(screen) &&
         (faq.forWhoCannot
           ? !can(seat, faq.needs) && can(seat, HELP_SCREENS[screen].opens)
           : can(seat, faq.needs)),
@@ -1118,10 +1267,11 @@ function restrictionFor(seat: StoreSeat, needs: StorePermission): string | null 
  * enlace fijo: lleva a donde se elige, la parte de la ruta antes del producto.
  */
 function pathFor(seat: StoreSeat, storeId: string, screen: HelpScreen): string | null {
-  const { path, opens } = HELP_SCREENS[screen]
+  const { path: full, opens } = HELP_SCREENS[screen]
   if (!can(seat, opens)) return null
-  const fixed = path.split("/$", 1)[0] ?? path
-  return `/tiendas/${storeId}${fixed === "/" ? "" : fixed}`
+  // Una ruta con su parte variable lleva a lo de antes de ella (la ficha, al Catálogo).
+  const path = full.split("/$")[0] || "/"
+  return `/tiendas/${storeId}${path === "/" ? "" : path}`
 }
 
 function isScreen(id: string): id is HelpScreen {

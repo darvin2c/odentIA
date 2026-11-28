@@ -1384,6 +1384,9 @@ export async function sellable(appDb: Db, person: Person, storeId: string, now =
           autoUnitCents: auto,
           floorUnitCents: floorOf(row.pricing, auto),
           promotion: row.promotion,
+          /** Por encargo, con cupo o en preventa: se vende sin stock (el pedido espera). */
+          sellsWithoutStock: row.sellsWithoutStock,
+          status: row.status,
         }
       }),
     }

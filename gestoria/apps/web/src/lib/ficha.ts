@@ -509,6 +509,26 @@ function namesOf(grid: Grid | null) {
   }
 }
 
+/**
+ * Cómo se ve la cuadrícula sin su stock: los nombres, los colores, los precios y los códigos, por
+ * nombre (no por los ids de la pantalla). Para saber si otra pestaña cambió algo de eso.
+ */
+export function gridLook(grid: Grid | null) {
+  if (!grid) return null
+  return {
+    rowName: grid.rowName,
+    columnName: grid.columnName,
+    rows: grid.rows.map(({ id: _id, ...row }) => row),
+    columns: grid.columns.map((c) => c.value),
+    cells: grid.rows.flatMap((r) =>
+      grid.columns.map((c) => {
+        const cell = grid.cells[cellKey(r.id, c.id)]
+        return [cell?.priceCents ?? null, cell?.barcode ?? null]
+      }),
+    ),
+  }
+}
+
 export function gridChanged(base: Draft, draft: Draft): boolean {
   return !same(base.grid, draft.grid)
 }
@@ -646,6 +666,26 @@ export function onBase(step: Step, now: Grid | null): Draft {
     cells[key] = { ...cell, stock: Math.max(0, current.stock + cell.stock - then.stock) }
   }
   return { ...step.draft, grid: { ...grid, cells } }
+}
+
+/**
+ * Después de guardar la cuadrícula: cada paso de deshacer y rehacer mueve su cuadrícula guardada lo
+ * mismo que esta pantalla movió el stock (`sent − before`). Así, al volver, `onBase` suma solo lo
+ * que cambió otra persona o una venta, nunca otra vez lo que la misma persona ya guardó.
+ */
+export function shiftBases(history: History, before: Grid | null, sent: Grid): History {
+  const shift = (step: Step): Step => {
+    if (!step.base) return step
+    const cells = { ...step.base.cells }
+    for (const [key, cell] of Object.entries(step.base.cells)) {
+      const now = sent.cells[key]
+      if (!now) continue
+      const delta = now.stock - (before?.cells[key]?.stock ?? 0)
+      if (delta !== 0) cells[key] = { ...cell, stock: cell.stock + delta }
+    }
+    return { ...step, base: { ...step.base, cells } }
+  }
+  return { undo: history.undo.map(shift), redo: history.redo.map(shift) }
 }
 
 /* ------------------------------------------------------------------ números y textos */

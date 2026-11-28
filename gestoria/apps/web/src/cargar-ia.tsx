@@ -2,8 +2,9 @@ import { Button, toast } from "@odentia/ui"
 import { AiSuggestion, PageNotice } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Sparkles } from "lucide-react"
+import { useState } from "react"
 import { Swatch } from "./ficha/piezas"
-import { api } from "./lib/api"
+import { ApiError, api } from "./lib/api"
 import {
   applyProposal,
   type ColorValue,
@@ -27,10 +28,18 @@ interface Photo {
   urls: { miniatura: string } | null
 }
 
+/** Lo que queda escrito cuando «Juntar con IA» no encuentra qué juntar: un resultado, no un error. */
+export const NOTHING_TO_JOIN = "No encontré fotos del mismo producto para juntar."
+/** Sin dos fotos sueltas, la IA no mira: no hay nada que juntar. */
+export const NO_LOOSE_PHOTOS = "No hay fotos sueltas para juntar."
+
 /** «Juntar con IA» y «Completar con IA» de un producto de la carga. */
 export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
+  // Sin grupos, el resultado queda fijo junto a la tabla hasta que se vuelva a pedir o cambien
+  // las fotos de la carga.
+  const [groupNote, setGroupNote] = useState<string | null>(null)
   const key = LOAD_PROPOSALS_KEY(store.id, loadId)
   const done = (data: LoadProposals, what: string) => {
     queryClient.setQueryData(key, data)
@@ -42,16 +51,21 @@ export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
       api<LoadProposals>(`/api/tiendas/${store.id}/cargas/${loadId}/ia/juntar`, {
         method: "POST",
       }),
+    onMutate: () => setGroupNote(null),
     onSuccess: (data) => {
       const n = data.proposals.filter((p) => p.kind === "juntar").length
-      done(
-        data,
-        n
-          ? `La IA propone juntar ${n} ${n === 1 ? "grupo" : "grupos"} de fotos`
-          : "La IA no vio fotos del mismo producto",
-      )
+      if (n) done(data, `La IA propone juntar ${n} ${n === 1 ? "grupo" : "grupos"} de fotos`)
+      else {
+        queryClient.setQueryData(key, data)
+        void queryClient.invalidateQueries({ queryKey: ["ia-tope", store.id] })
+        setGroupNote(NOTHING_TO_JOIN)
+      }
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "NOTHING_TO_GROUP")
+        setGroupNote(NO_LOOSE_PHOTOS)
+      else toast.error(error.message)
+    },
   })
   const complete = useMutation({
     mutationFn: (itemId: string) =>
@@ -84,13 +98,32 @@ export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
     },
     onError: (error) => toast.error(error.message),
   })
-  return { group, complete, decide, all }
+  return { group, complete, decide, all, groupNote, clearGroupNote: () => setGroupNote(null) }
 }
 
 const LABEL: Record<string, string> = {
   nombre: "Nombre",
   categoria: "Categoría",
   descripcion: "Descripción",
+}
+
+/**
+ * Lo que dijo «Juntar con IA» cuando no hubo qué juntar, fijo y en neutro. La región está siempre
+ * montada para que el lector de pantalla la anuncie al cambiar.
+ */
+export function JoinNote({ ia }: { ia: ReturnType<typeof useLoadIa> }) {
+  return (
+    <p
+      role="status"
+      className={
+        ia.groupNote
+          ? "rounded-xl border bg-card px-3 py-2 text-sm text-muted-foreground"
+          : "sr-only"
+      }
+    >
+      {ia.groupNote ?? ""}
+    </p>
+  )
 }
 
 export function LoadIaPanel({

@@ -26,7 +26,7 @@ import { Minus, Plus, Trash2, TriangleAlert } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
-import { axesOf, type DraftPromotion, sameText } from "../lib/ficha"
+import { axesOf, type DraftPromotion, same, sameText } from "../lib/ficha"
 import { currencySymbol, type DeliveryMethod, money, moneyInput, readMoney } from "../lib/tienda"
 import { useFichaContext } from "./contexto"
 import { FieldProblem, Fold, Section, useTyped } from "./piezas"
@@ -131,19 +131,42 @@ export function Count({
   )
 }
 
-/** La barra del margen: del costo al mínimo se gana seguro; del mínimo al precio, lo que Sofi cede. */
-function MarginBar({ cost, min, list }: { cost: number; min: number | null; list: number }) {
-  const { store, unitOne } = useFichaContext()
+/** Lo que el servidor cuenta de la barra del margen (`POST /simular` con una unidad). */
+interface MarginNumbers {
+  listUnitCents: number
+  autoUnitCents: number
+  reason: Simulation["reason"]
+  floorUnitCents: number
+  canCedeCents: number
+  costCents: number | null
+  floorGainCents: number | null
+}
+
+/**
+ * La barra del margen: el costo, el mínimo y el precio, con lo que Sofi puede ceder (precio −
+ * mínimo). La cuenta es del servidor (`POST /simular`, la misma regla de los pedidos): aquí solo se
+ * dibuja. Dice el hecho, sin prometer: lo que se gana en el mínimo es antes del envío, y el peor
+ * caso con el envío lo da «Probar cuánto cobraría Sofi».
+ */
+function MarginBar({ numbers, stale }: { numbers: MarginNumbers; stale: boolean }) {
+  const { store, unitOne, draft } = useFichaContext()
   const fmt = (cents: number) => money(cents, store.currency)
-  const max = Math.max(list, cost, min ?? 0) * 1.04 || 1
+  const cost = numbers.costCents ?? 0
+  const list = numbers.autoUnitCents
+  const min = numbers.floorUnitCents
+  const negotiates = numbers.canCedeCents > 0
+  const max = Math.max(list, cost, min) * 1.04 || 1
   const pc = (v: number) => `${Math.max(0, Math.min(100, (v / max) * 100))}%`
-  const m = min ?? list
-  const loss = min !== null && min < cost
+  const loss = numbers.floorGainCents !== null && numbers.floorGainCents < 0
   const gain = list - cost
   const pct = list ? Math.round((gain / list) * 100) : 0
-  const from = Math.max(m, loss ? cost : m)
+  const listLabel = numbers.reason === "lista" ? "Precio" : "Precio de hoy"
   return (
-    <div className="flex flex-col gap-3" aria-live="polite">
+    <div
+      className={cn("flex flex-col gap-3", stale && "opacity-60")}
+      aria-live="polite"
+      aria-busy={stale || undefined}
+    >
       <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
         <span
           className="absolute inset-y-0 left-0 bg-foreground/18 motion-safe:transition-[width] motion-safe:duration-500"
@@ -152,18 +175,18 @@ function MarginBar({ cost, min, list }: { cost: number; min: number | null; list
         {!loss ? (
           <span
             className="absolute inset-y-0 bg-success/70 motion-safe:transition-[left,width] motion-safe:duration-500"
-            style={{ left: pc(cost), width: `calc(${pc(m)} - ${pc(cost)})` }}
+            style={{ left: pc(cost), width: `calc(${pc(min)} - ${pc(cost)})` }}
           />
         ) : (
           <span
             className="absolute inset-y-0 bg-destructive/60 motion-safe:transition-[left,width] motion-safe:duration-500"
-            style={{ left: pc(m), width: `calc(${pc(cost)} - ${pc(m)})` }}
+            style={{ left: pc(min), width: `calc(${pc(cost)} - ${pc(min)})` }}
           />
         )}
-        {min !== null ? (
+        {negotiates ? (
           <span
             className="rayas absolute inset-y-0 motion-safe:transition-[left,width] motion-safe:duration-500"
-            style={{ left: pc(from), width: `calc(${pc(list)} - ${pc(from)})` }}
+            style={{ left: pc(min), width: `calc(${pc(list)} - ${pc(min)})` }}
           />
         ) : null}
       </div>
@@ -172,47 +195,45 @@ function MarginBar({ cost, min, list }: { cost: number; min: number | null; list
           <span className="size-2.5 rounded-sm bg-foreground/20" aria-hidden />
           Costo <b className="font-semibold text-foreground tabular-nums">{fmt(cost)}</b>
         </span>
-        {min !== null && !loss ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2.5 rounded-sm bg-success/70" aria-hidden />
-            Ganas seguro{" "}
-            <b className="font-semibold text-foreground tabular-nums">{fmt(min - cost)}</b>
-          </span>
-        ) : null}
-        {min !== null ? (
+        {negotiates ? (
           <span className="inline-flex items-center gap-1.5">
             <span className="rayas size-2.5 rounded-sm" aria-hidden />
             Sofi puede ceder{" "}
-            <b className="font-semibold text-foreground tabular-nums">{fmt(list - from)}</b>
+            <b className="font-semibold text-foreground tabular-nums">
+              {fmt(numbers.canCedeCents)}
+            </b>
           </span>
         ) : null}
         <span className="ml-auto inline-flex items-center gap-1.5">
-          Precio <b className="font-semibold text-foreground tabular-nums">{fmt(list)}</b>
+          {listLabel} <b className="font-semibold text-foreground tabular-nums">{fmt(list)}</b>
         </span>
       </div>
       <p className="text-sm">
         {loss ? (
           <span className="inline-flex items-start gap-1.5 text-destructive">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-            El mínimo está {fmt(cost - (min ?? 0))} por debajo del costo: si Sofi baja hasta ahí,
-            vende a pérdida.
+            El mínimo está {fmt(cost - min)} por debajo del costo: si Sofi baja hasta ahí, vende a
+            pérdida.
           </span>
         ) : (
           <>
-            Ganas <b className="tabular-nums">{fmt(gain)}</b> por {unitOne} a precio de lista ({pct}{" "}
-            %).{" "}
-            {min !== null ? (
+            Ganas <b className="tabular-nums">{fmt(gain)}</b> por {unitOne} a{" "}
+            {numbers.reason === "lista" ? "precio de lista" : "precio de hoy"} ({pct} %).{" "}
+            {negotiates && numbers.floorGainCents !== null ? (
               <span className="text-muted-foreground">
-                Sofi puede ceder hasta{" "}
-                <b className="text-foreground tabular-nums">{fmt(list - min)}</b>; en el mínimo aún
-                ganas {fmt(min - cost)}.
+                En el mínimo ganas {fmt(numbers.floorGainCents)}, sin contar el envío
+                {draft.offers.delivery ? " que Sofi puede poner" : ""}. Con el envío, mira «Probar
+                cuánto cobraría Sofi».
               </span>
-            ) : (
+            ) : !negotiates ? (
               <span className="text-muted-foreground">Sin mínimo, Sofi no negocia.</span>
-            )}
+            ) : null}
           </>
         )}
       </p>
+      {stale ? (
+        <p className="text-xs text-muted-foreground">Se pone al día al guardarse el precio.</p>
+      ) : null}
     </div>
   )
 }
@@ -669,7 +690,7 @@ function Simulator() {
           ) : null}
           {!s.negotiable ? (
             <dd className="col-span-2 text-xs text-muted-foreground">
-              A este precio no negocia: no hay margen sobre el mínimo.
+              A este precio Sofi no cede nada más.
             </dd>
           ) : null}
           {s.problems ? (
@@ -687,7 +708,7 @@ function Simulator() {
 }
 
 export function PriceCard() {
-  const { draft, sheet, store, edit, costs, change, errors, unit, rubro } = useFichaContext()
+  const { draft, base, sheet, store, edit, costs, change, errors, unit, rubro } = useFichaContext()
   const listId = useId()
   const [adding, setAdding] = useState(false)
   const today = todayIn(store.timeZone)
@@ -698,6 +719,17 @@ export function PriceCard() {
   const rowLabel = draft.grid?.rowName ?? rubro?.rowLabel ?? "Color"
   const columnLabel = draft.grid?.columnName ?? rubro?.columnLabel ?? "Talla"
   const settled = draft.status?.kind === "liquidacion"
+  // La barra del margen: la cuenta del servidor con una unidad, al día con lo guardado.
+  const margin = useQuery({
+    queryKey: ["simular", store.id, sheet.id, sheet.updatedAt, "margen"],
+    queryFn: () =>
+      api<MarginNumbers>(`/api/tiendas/${store.id}/productos/${sheet.id}/simular`, {
+        method: "POST",
+        body: { quantity: 1 },
+      }),
+    enabled: costs && cost !== null && sheet.variants.length > 0,
+    placeholderData: (previous) => previous,
+  })
   return (
     <Section
       id="precio"
@@ -705,67 +737,78 @@ export function PriceCard() {
       summary={`${fmt(draft.listPriceCents)}${draft.minPriceCents !== null ? ` · baja hasta ${fmt(draft.minPriceCents)}` : " · no negocia"}`}
       contains={["campo-minimo", "ofertas", "promos", "simulador"]}
     >
-      <div className={cn("grid gap-3", costs ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2")}>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={listId} className="text-sm font-medium">
-            Precio
-          </label>
-          <Amount
-            id={listId}
-            cents={draft.listPriceCents}
-            disabled={!edit}
-            invalid={!!errors.listPriceCents}
-            onChange={(v) =>
-              v !== null &&
-              change("Cambiaste el precio", (d) => (d.listPriceCents = v), { group: "precio" })
-            }
-          />
-          <FieldProblem message={errors.listPriceCents} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="campo-minimo" className="text-sm font-medium">
-            Mínimo
-          </label>
-          <Amount
-            id="campo-minimo"
-            cents={settled ? draft.listPriceCents : draft.minPriceCents}
-            placeholder="No negocia"
-            disabled={!edit || settled}
-            invalid={!!errors.minPriceCents}
-            onChange={(v) =>
-              change("Cambiaste el mínimo", (d) => (d.minPriceCents = v), { group: "minimo" })
-            }
-          />
-          <FieldProblem message={errors.minPriceCents} />
-          {settled ? (
-            <p className="text-xs text-muted-foreground">En liquidación el precio es el final.</p>
+      <div className="@container/precio">
+        <div
+          className={cn("grid gap-3", costs ? "grid-cols-2 @md/precio:grid-cols-3" : "grid-cols-2")}
+        >
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={listId} className="text-sm font-medium">
+              Precio
+            </label>
+            <Amount
+              id={listId}
+              cents={draft.listPriceCents}
+              disabled={!edit}
+              invalid={!!errors.listPriceCents}
+              onChange={(v) =>
+                v !== null &&
+                change("Cambiaste el precio", (d) => (d.listPriceCents = v), { group: "precio" })
+              }
+            />
+            <FieldProblem message={errors.listPriceCents} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="campo-minimo" className="text-sm font-medium">
+              Mínimo
+            </label>
+            <Amount
+              id="campo-minimo"
+              cents={settled ? draft.listPriceCents : draft.minPriceCents}
+              placeholder="No negocia"
+              disabled={!edit || settled}
+              invalid={!!errors.minPriceCents}
+              onChange={(v) =>
+                change("Cambiaste el mínimo", (d) => (d.minPriceCents = v), { group: "minimo" })
+              }
+            />
+            <FieldProblem message={errors.minPriceCents} />
+            {settled ? (
+              <p className="text-xs text-muted-foreground">En liquidación el precio es el final.</p>
+            ) : null}
+          </div>
+          {costs ? (
+            <div className="col-span-2 flex flex-col gap-1.5 @md/precio:col-span-1">
+              <span className="text-sm font-medium">Costo</span>
+              <div className="flex h-9 items-center rounded-3xl bg-muted px-3 text-sm whitespace-nowrap">
+                <span className="tabular-nums">{cost !== null ? fmt(cost) : "Sin costo"}</span>
+              </div>
+              {cost !== null ? (
+                <p className="text-xs text-muted-foreground">
+                  De lo último que entró de cada variante, el más alto.
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
-        {costs ? (
-          <div className="col-span-2 flex flex-col gap-1.5 sm:col-span-1">
-            <span className="text-sm font-medium">Costo</span>
-            <div className="flex h-9 items-center justify-between rounded-3xl bg-muted px-3 text-sm">
-              <span className="tabular-nums">{cost !== null ? fmt(cost) : "Sin costo"}</span>
-              <span className="text-xs text-muted-foreground">el de la última entrada</span>
-            </div>
-          </div>
-        ) : null}
       </div>
 
-      {costs && cost !== null ? (
+      {costs && cost !== null && margin.data ? (
         <MarginBar
-          cost={cost}
-          min={settled ? draft.listPriceCents : draft.minPriceCents}
-          list={draft.listPriceCents}
+          numbers={margin.data}
+          stale={
+            draft.listPriceCents !== base.listPriceCents ||
+            draft.minPriceCents !== base.minPriceCents ||
+            !same(draft.status, base.status)
+          }
         />
       ) : null}
 
-      <div id="ofertas" className="flex scroll-mt-24 flex-col gap-1 rounded-xl">
+      <div id="ofertas" className="@container/ofertas flex scroll-mt-24 flex-col gap-1 rounded-xl">
         <span className="text-sm font-semibold">Lo que Sofi puede ofrecer</span>
         <span className="text-sm text-muted-foreground">
           Una sola vez por conversación, del mismo margen y si paga a una hora exacta.
         </span>
-        <div className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+        <div className="mt-2 grid gap-x-6 gap-y-1 @md/ofertas:grid-cols-2">
           {(
             [
               ["delivery", "Envío gratis"],

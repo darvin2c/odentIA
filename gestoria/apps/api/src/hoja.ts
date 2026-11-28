@@ -2,13 +2,14 @@ import {
   type Db,
   type ProductOption,
   product,
+  productEvent,
   productVariant,
   stockMovement,
   store,
   storeEvent,
 } from "@gestoria/db"
 import { and, eq, isNull } from "drizzle-orm"
-import { MAX_PRODUCTS, makeSku, productInput } from "./catalogo.js"
+import { MAX_PRODUCTS, makeSku, productInput, slugOf } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { parseMoney } from "./dinero.js"
 import { SheetReadError, sheetSource, toExampleColumns } from "./leer-hoja.js"
@@ -421,10 +422,26 @@ export async function createPlanned(
   // Los códigos que traen quedan tomados antes de armar los que faltan.
   for (const p of products) for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
   // De a tantas filas por consulta: tres consultas por bloque, no tres por fila.
+  // Cada uno nace con su nombre en el link, sin chocar con otro de la tienda ni de la carga.
+  const slugs = new Set(
+    (
+      await tx.select({ slug: product.webSlug }).from(product).where(eq(product.storeId, storeId))
+    ).map((r) => r.slug),
+  )
+  const slugFor = (name: string) => {
+    const base = slugOf(name).slice(0, 76).replace(/-+$/, "")
+    if (!base) return null
+    let slug = base
+    for (let n = 2; slugs.has(slug) && n < 1000; n++) slug = `${base}-${n}`
+    if (slugs.has(slug)) return null
+    slugs.add(slug)
+    return slug
+  }
   const created = await tx
     .insert(product)
     .values(
       products.map((p) => ({
+        webSlug: slugFor(p.name),
         storeId,
         name: p.name,
         category: p.category,
@@ -435,6 +452,19 @@ export async function createPlanned(
     )
     .returning({ id: product.id, name: product.name })
   const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
+  // Cada producto nuevo empieza su historial con «Creó el producto», sin motivo, como el que se
+  // agrega solo: el motivo de la hoja o de la carga es el del stock que entra.
+  if (created.length > 0)
+    await tx.insert(productEvent).values(
+      created.map((row) => ({
+        storeId,
+        productId: row.id,
+        actorUserId: person.userId,
+        action: "creado" as const,
+        changes: [],
+        reason: null,
+      })),
+    )
   const rows = products.flatMap((p) =>
     p.variants.map((v) => ({
       planned: v,

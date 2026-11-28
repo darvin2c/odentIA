@@ -108,7 +108,11 @@ function fieldText(field: TemplateField, value: RubroValue | undefined): string 
 
 export interface SofiProductFacts {
   /** Lo que dice cada dato del rubro que la tienda respondió: «Cómo calza: Normal». */
-  datos: { dato: string; valor: string }[]
+  datos: {
+    dato: string
+    valor: string /** Su clave en la ficha (`#dato-<clave>`); no va al modelo. */
+    clave: string
+  }[]
   /** Lo que la ficha todavía no dice: Sofi no lo afirma. */
   sin_dato: string[]
   /** Lo que hace y dice en su estado (encargo, cupo, preventa, liquidación); null si está disponible. */
@@ -183,7 +187,7 @@ export async function sofiFactsIn(
     const missing: string[] = []
     for (const field of template) {
       const text = fieldText(field, row.rubroData[field.key])
-      if (text) datos.push({ dato: field.label, valor: text })
+      if (text) datos.push({ dato: field.label, valor: text, clave: field.key })
       else missing.push(field.label)
     }
     const colorValues = row.colorOption === null ? [] : (row.options[row.colorOption]?.values ?? [])

@@ -39,12 +39,13 @@ import { Check, Lightbulb, MessageCircle, Minus, Pause, Play, Plus, Trash2 } fro
 import { createContext, type ReactNode, useContext, useEffect, useId, useState } from "react"
 import { z } from "zod"
 import { MoneyInput, ToggleField } from "./campos"
+import { ClientTestPiece } from "./ficha/probar"
 import { api } from "./lib/api"
+import { anchorOf } from "./lib/ficha"
 import { AGENT_STOP_WORDS } from "./lib/plan"
 import { type AgentSettings, DAYS, type KnowledgeView, type SofiOverview, TONES } from "./lib/sofi"
-import { money, moneyInput, readMoney } from "./lib/tienda"
-import { ClientTestPiece } from "./ficha/probar"
 import type { CatalogItem } from "./lib/tienda"
+import { money, moneyInput, readMoney } from "./lib/tienda"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
@@ -1398,10 +1399,12 @@ function TestAsClient() {
           readiness={product.readiness}
           edit={store.permissions.includes("configuracion")}
           extraQuick={["¿Hacen cambios de talla?", "Quiero hablar con una persona"]}
-          onGo={() =>
+          // A la ficha, en el dato del que salió (`#dato-<clave>`, `#precio`, `#variantes`…).
+          onGo={(target) =>
             void navigate({
               to: "/tiendas/$id/catalogo/$productId",
               params: { id: store.id, productId: product.id },
+              hash: anchorOf(target),
             })
           }
           title={title}

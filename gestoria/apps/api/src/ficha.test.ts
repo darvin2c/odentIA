@@ -254,6 +254,15 @@ describe("los datos del rubro y qué tan lista está para Sofi (decisión 2)", (
     expect(slug.json.error.code).toBe("SLUG_TAKEN")
   })
 
+  it("un producto nuevo nace con su nombre en el link, sin chocar con otro", async () => {
+    const first = await newProduct("Mocasín Ñandú")
+    const second = await newProduct("Mocasín - Ñandú")
+    const slugOf = async (product: string) =>
+      (await call("lucia", "GET", `${base}/productos/${product}`)).json.product.web.slug
+    expect(await slugOf(first)).toBe("mocasin-nandu")
+    expect(await slugOf(second)).toBe("mocasin-nandu-2")
+  })
+
   it("el estado lo pone la tienda; disponible y agotado salen del stock", async () => {
     const encargo = await call("rosa", "PATCH", `${base}/productos/${id}`, {
       status: { kind: "encargo", days: 5 },
@@ -533,6 +542,79 @@ describe("la cuadrícula de tallas y colores (decisión 6)", () => {
       sales.json.events[0].changes.some((c: { field: string }) => c.field === "unitCostCents"),
     ).toBe(false)
   })
+
+  it("dos pestañas de la misma ficha: la que vio una versión vieja recibe 409 y no pisa", async () => {
+    const seen = (await call("rosa", "GET", `${base}/productos/${id}`)).json.product
+    // La primera pestaña guarda el nombre.
+    const first = await call("rosa", "PATCH", `${base}/productos/${id}`, {
+      name: "Zapatilla de la primera pestaña",
+      version: seen.updatedAt,
+    })
+    expect(first.status).toBe(200)
+    // La segunda, con lo que vio antes, no pisa lo de la primera.
+    const second = await call("rosa", "PATCH", `${base}/productos/${id}`, {
+      name: "Zapatilla de la segunda pestaña",
+      version: seen.updatedAt,
+    })
+    expect(second.status).toBe(409)
+    expect(second.json.error.code).toBe("STALE")
+    const now = (await call("rosa", "GET", `${base}/productos/${id}`)).json.product
+    expect(now.name).toBe("Zapatilla de la primera pestaña")
+    // La cuadrícula también: con la versión vieja no se guarda.
+    const staleGrid = await call("rosa", "POST", `${base}/productos/${id}/cuadricula`, {
+      ...grid(),
+      version: seen.updatedAt,
+    })
+    expect(staleGrid.status).toBe(409)
+    // Con la versión de ahora, sí.
+    const ok = await call("rosa", "PATCH", `${base}/productos/${id}`, {
+      name: "Zapatilla de la segunda pestaña",
+      version: now.updatedAt,
+    })
+    expect(ok.status).toBe(200)
+  })
+
+  it("el historial dice el antes y el después del precio y del mínimo, y qué color cambió", async () => {
+    const product = await newProduct("Sandalia del historial", 12900, 9900)
+    await call("rosa", "PATCH", `${base}/productos/${product}`, {
+      listPriceCents: 13900,
+      minPriceCents: 10900,
+    })
+    await call("rosa", "POST", `${base}/productos/${product}/cuadricula`, grid())
+    await call("rosa", "POST", `${base}/productos/${product}/cuadricula`, {
+      ...grid(),
+      rows: {
+        name: "Color",
+        values: [
+          { was: "blanca", value: "crema", hex: "#efe6d8" },
+          { value: "negra", hex: "#1f1f1f" },
+          { value: "roja", hex: "#cc0000" },
+        ],
+      },
+      cells: [
+        ...grid().cells.map((c) => (c.row === "blanca" ? { ...c, row: "crema" } : c)),
+        { row: "roja", column: "38", stock: 0, priceCents: null },
+        { row: "roja", column: "39", stock: 0, priceCents: null },
+      ],
+    })
+    const events = (await call("rosa", "GET", `${base}/productos/${product}/historial`)).json
+      .events as { action: string; changes: { field: string; from: unknown; to: unknown }[] }[]
+    const price = events.find((e) => e.changes.some((c) => c.field === "listPriceCents"))!
+    expect(price.changes).toEqual(
+      expect.arrayContaining([
+        { field: "listPriceCents", from: 12900, to: 13900 },
+        { field: "minPriceCents", from: 9900, to: 10900 },
+      ]),
+    )
+    const colors = events[0]!
+    expect(colors.changes).toEqual(
+      expect.arrayContaining([
+        { field: "colorRenamed", from: "blanca", to: "crema" },
+        { field: "colorAdded", from: null, to: "roja" },
+      ]),
+    )
+    expect(events.at(-1)!.action).toBe("creado")
+  })
 })
 
 describe("lo que Sofi no supo (decisión 11)", () => {
@@ -806,5 +888,46 @@ describe("el precio de la ficha (dinero)", () => {
     })
     expect(sales.json).toMatchObject({ costCents: null, gainCents: null })
     expect(sales.json.lowest.totalCents).toBe(9900)
+  })
+
+  it("la barra del margen sale del servidor: lo que cede es precio − mínimo y el envío gratis se resta", async () => {
+    // Un costo más alto que el mínimo: lo que Sofi cede sigue siendo precio − mínimo.
+    const lossy = await newProduct("Botín de prueba del margen", 14000, 8000)
+    const saved = await call("rosa", "POST", `${base}/productos/${lossy}/cuadricula`, {
+      rows: null,
+      columns: { name: "Talla", values: [{ value: "38" }] },
+      cells: [{ row: null, column: "38", stock: 1, priceCents: null }],
+      unitCostCents: 9000,
+    })
+    expect(saved.status).toBe(200)
+    const bar = await call("rosa", "POST", `${base}/productos/${lossy}/simular`, { quantity: 1 })
+    expect(bar.json).toMatchObject({
+      listUnitCents: 14000,
+      floorUnitCents: 8000,
+      canCedeCents: 6000,
+      costCents: 9000,
+      floorGainCents: -1000,
+    })
+    // Ventas ve lo que cede, no lo que se gana.
+    const sales = await call("lucia", "POST", `${base}/productos/${lossy}/simular`, { quantity: 1 })
+    expect(sales.json).toMatchObject({ canCedeCents: 6000, floorGainCents: null })
+
+    // Con el envío gratis desde S/ 50, el peor caso paga el envío.
+    const free = await call("rosa", "POST", `${base}/formas-de-entrega`, {
+      name: "Reparto gratis desde S/ 50",
+      type: "DeliveryModeOwnFleet",
+      cost: "fijo",
+      priceCents: 1000,
+      maxDiscountCents: 1000,
+      freeFromCents: 5000,
+    })
+    expect(free.status).toBe(201)
+    const owner = await call("rosa", "POST", `${base}/productos/${id}/simular`, {
+      variantId: variant("blanca,38"),
+      quantity: 1,
+      deliveryMethodId: free.json.method.id,
+    })
+    expect(owner.json.lowest).toMatchObject({ totalCents: 9900, deliveryFreeByPolicy: true })
+    expect(owner.json.gainCents).toBe(9900 - 6800 - 1000)
   })
 })

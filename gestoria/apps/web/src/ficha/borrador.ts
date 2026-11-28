@@ -2,11 +2,14 @@ import { useEffect, useMemo, useSyncExternalStore } from "react"
 import { ApiError } from "../lib/api"
 import {
   cellKey,
+  changedFields,
   type Draft,
   draftOf,
+  FIELD_NAMES,
   type Grid,
   gridBody,
   gridChanged,
+  gridLook,
   gridOf,
   type History,
   heldOf,
@@ -19,6 +22,7 @@ import {
   record,
   type Sheet,
   same,
+  shiftBases,
 } from "../lib/ficha"
 
 /**
@@ -42,6 +46,11 @@ export type SaveStatus =
   | { kind: "reason"; cells: number }
   /** A medio escribir (las medidas del paquete): se guarda al completarlo. */
   | { kind: "incomplete"; message: string }
+  /**
+   * Otra pestaña u otra persona cambió lo mismo mientras se editaba: no se pisa. Lo escrito se
+   * queda y la persona elige (`keepMine` o `takeTheirs`).
+   */
+  | { kind: "conflict"; message: string }
 
 /** Lo que responde la cuadrícula: la ficha y lo que se vendió mientras se editaba. */
 export interface GridSaved {
@@ -51,7 +60,9 @@ export interface GridSaved {
 
 export interface SaveApi {
   patch: (body: Record<string, unknown>) => Promise<Sheet>
-  grid: (body: ReturnType<typeof gridBody>) => Promise<GridSaved>
+  grid: (body: ReturnType<typeof gridBody> & { version?: string }) => Promise<GridSaved>
+  /** La ficha de ahora en el servidor: después de un 409, para ver qué cambió. */
+  load: () => Promise<Sheet>
 }
 
 interface State {
@@ -68,6 +79,8 @@ interface State {
   last: { label: string; at: number } | null
   /** Lo que se vendió mientras se editaba la cuadrícula, para avisarlo. */
   sold: string | null
+  /** Lo que cambió otra pestaña u otra persona y ya se ve aquí, para avisarlo. */
+  news: string | null
 }
 
 const DELAY = 900
@@ -97,13 +110,27 @@ export class FichaStore {
   private restored = false
   /** Cuántas pantallas lo usan: se suelta solo sin ninguna. */
   mounted = 0
+  /** Lo escrito en un campo espera a que se salga de él (`release`) para guardarse. */
+  private held = false
+  /** Los campos que otra pestaña cambió igual: no se envían hasta que la persona elija. */
+  private clash: string[] = []
+  /**
+   * La versión de la ficha sobre la que está lo guardado de esta pantalla (`base`): va con cada
+   * envío y, si cambió en el servidor, responde 409. Una ficha que llega mientras hay algo sin
+   * guardar no la mueve: así lo de otra pestaña no se pisa sin avisar.
+   */
+  private version: string
+  private readonly typing: () => boolean
 
   constructor(
     sheet: Sheet,
     private readonly api: SaveApi,
     private readonly onSaved: (sheet: Sheet) => void,
     private readonly readOnly: boolean,
+    options: { typing?: () => boolean } = {},
   ) {
+    this.typing = options.typing ?? typingInPage
+    this.version = sheet.updatedAt
     const base = draftOf(sheet)
     this.state = {
       sheet,
@@ -115,6 +142,7 @@ export class FichaStore {
       reason: "",
       last: null,
       sold: null,
+      news: null,
     }
     if (!readOnly) this.restore()
   }
@@ -219,7 +247,30 @@ export class FichaStore {
 
   setReason(reason: string) {
     this.set({ reason })
-    if (reason.trim().length >= 3) void this.flush()
+    // Un motivo elegido se guarda ya; uno que se escribe, al salir del campo.
+    if (reason.trim().length >= 3) this.tick()
+  }
+
+  /**
+   * Se salió del campo (o se dio Enter): lo que esperaba se guarda. Mientras se escribe no se
+   * guarda nada: el deshacer del campo (Ctrl+Z del navegador) pasa por valores que nadie escribió
+   * («S/ 1» camino a «S/ 149») y ninguno de esos debe llegar al servidor ni al historial.
+   */
+  release() {
+    // También si el guardado todavía no se había intentado (se salió antes de los 900 ms).
+    if (!this.held && (this.inflight || this.pendingCount() === 0)) return
+    this.held = false
+    clearTimeout(this.timer)
+    this.timer = setTimeout(() => void this.flush(), 0)
+  }
+
+  /** El guardado que corre solo: si se está escribiendo en un campo, espera a `release`. */
+  private tick() {
+    if (this.typing()) {
+      this.held = true
+      return
+    }
+    void this.flush()
   }
 
   /** Llegó la ficha del servidor (al volver a la pestaña, después de una venta). */
@@ -229,6 +280,7 @@ export class FichaStore {
       return
     }
     const base = draftOf(sheet, gridOf(sheet, idsOf(this.state.base.grid)))
+    this.version = sheet.updatedAt
     this.set({ sheet, base, draft: base })
   }
 
@@ -236,7 +288,7 @@ export class FichaStore {
     this.persist()
     if (this.state.status.kind !== "saving") this.set({ status: { kind: "pending" } })
     clearTimeout(this.timer)
-    this.timer = setTimeout(() => void this.flush(), DELAY)
+    this.timer = setTimeout(() => this.tick(), DELAY)
   }
 
   /** Guarda ya lo que falte (al salir de la página o al pedirlo). */
@@ -258,39 +310,54 @@ export class FichaStore {
     try {
       // Primero la cuadrícula: un color que cambia de nombre lleva sus promociones con él.
       const { base, draft } = this.state
+      let stale = false
       if (
         draft.grid !== null &&
         gridChanged(base, draft) &&
+        !this.clash.includes("grid") &&
         JSON.stringify(draft.grid) !== this.gridRejected
-      )
-        offline = (await this.saveGrid(this.state.reason)) === "offline"
-      const patch = offline
-        ? null
-        : patchOf(this.state.base, this.state.draft, this.state.sheet, this.rejected)
+      ) {
+        const result = await this.saveGrid(this.state.reason)
+        offline = result === "offline"
+        stale = result === "stale"
+      }
+      const patch = offline || stale ? null : this.patchNow()
       if (patch) {
         const sent = clone(this.state.draft)
         try {
-          const saved = await this.api.patch(patch)
+          const saved = await this.api.patch({ ...patch, version: this.version })
           this.applyPatch(saved, sent, Object.keys(patch))
         } catch (error) {
-          offline = this.failPatch(error, sent, Object.keys(patch)) === "offline"
+          if (isStale(error)) stale = true
+          else offline = this.failPatch(error, sent, Object.keys(patch)) === "offline"
         }
       }
+      // Otra pestaña cambió la ficha: se mira qué, se toma lo que no se tocó aquí y se sigue.
+      if (stale) offline = (await this.onStale()) === "offline"
     } finally {
       this.inflight = false
     }
     if (offline) return
     if (this.again || this.canSendMore()) {
-      this.timer = setTimeout(() => void this.flush(), 50)
+      this.timer = setTimeout(() => this.tick(), 50)
       return
     }
     this.settle()
   }
 
+  /** Lo del producto que se puede enviar ahora: sin lo rechazado ni lo que choca con otra pestaña. */
+  private patchNow() {
+    const patch = patchOf(this.state.base, this.state.draft, this.state.sheet, this.rejected)
+    if (!patch) return null
+    for (const field of this.clash) delete patch[field]
+    return Object.keys(patch).length > 0 ? patch : null
+  }
+
   /** Si queda algo que se puede enviar ahora (no rechazado ni esperando el motivo). */
   private canSendMore() {
-    const { base, draft, sheet } = this.state
-    if (patchOf(base, draft, sheet, this.rejected)) return true
+    const { base, draft } = this.state
+    if (this.patchNow()) return true
+    if (this.clash.includes("grid")) return false
     const reasoned = this.state.reason.trim().length >= 3
     const grid = JSON.stringify(draft.grid)
     return (
@@ -304,6 +371,11 @@ export class FichaStore {
   /** Cómo queda después de guardar: guardado, esperando el motivo o con algo rechazado. */
   private settle() {
     const { base, draft, errors } = this.state
+    if (this.clash.length > 0) {
+      this.set({ status: { kind: "conflict", message: clashMessage(this.clash) } })
+      this.persist()
+      return
+    }
     const grid = JSON.stringify(draft.grid)
     const lowered = gridChanged(base, draft)
       ? Math.max(loweredCells(base.grid, draft.grid), grid === this.needsReason ? 1 : 0)
@@ -329,7 +401,9 @@ export class FichaStore {
    * La cuadrícula, sobre el stock de ahora: lo que cambió la persona se suma a lo que hay hoy en
    * el servidor (si se vendió algo mientras tanto, no se pisa la venta).
    */
-  private async saveGrid(reason: string): Promise<"saved" | "waiting" | "rejected" | "offline"> {
+  private async saveGrid(
+    reason: string,
+  ): Promise<"saved" | "waiting" | "rejected" | "offline" | "stale"> {
     const sent = clone(this.state.draft.grid!)
     const base = this.state.base.grid
     // Sin motivo y bajando el stock, no se envía: se pide el motivo. Lo que se envía es lo que
@@ -337,9 +411,10 @@ export class FichaStore {
     const lowered = loweredCells(base, sent)
     if (lowered > 0 && reason.trim().length < 3) return "waiting"
     try {
-      const { product: saved, meanwhile = [] } = await this.api.grid(
-        gridBody(base, sent, lowered > 0 ? { reason: reason.trim() } : {}),
-      )
+      const { product: saved, meanwhile = [] } = await this.api.grid({
+        ...gridBody(base, sent, lowered > 0 ? { reason: reason.trim() } : {}),
+        version: this.version,
+      })
       const grid = gridOf(saved, idsOf(sent))
       // Lo que se siguió escribiendo mientras se guardaba va sobre lo guardado de ahora (con lo
       // que se vendió en ese momento), nunca sobre el stock de antes.
@@ -351,6 +426,8 @@ export class FichaStore {
         sheet: saved,
         base: { ...this.state.base, grid },
         draft,
+        // Deshacer lo ya guardado vuelve al stock de verdad: los pasos se mueven con lo guardado.
+        history: shiftBases(this.state.history, base, sent),
         reason: "",
         errors: withoutGridErrors(this.state.errors),
         sold: meanwhile.length
@@ -359,6 +436,7 @@ export class FichaStore {
               .join(", ")}. Lo que cambiaste se sumó a eso.`
           : this.state.sold,
       })
+      this.version = saved.updatedAt
       // Lo del producto que cambia con la cuadrícula (las promociones de un color renombrado).
       this.rebaseFields(baseDraft)
       // El servidor cambió: lo rechazado antes (una promoción de un color renombrado) se reintenta.
@@ -368,6 +446,7 @@ export class FichaStore {
       this.onSaved(saved)
       return "saved"
     } catch (error) {
+      if (isStale(error)) return "stale"
       if (this.isFinal(error)) return "rejected"
       if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
         this.gridRejected = JSON.stringify(sent)
@@ -403,6 +482,7 @@ export class FichaStore {
     const errors = { ...this.state.errors }
     for (const key of Object.keys(errors))
       if (fields.some((f) => key === f || key.startsWith(`${f}.`))) delete errors[key]
+    this.version = saved.updatedAt
     this.set({ sheet: saved, base, draft, errors })
     this.onSaved(saved)
   }
@@ -417,6 +497,86 @@ export class FichaStore {
       ;(base as Record<string, unknown>)[field] = fresh[field]
     }
     this.set({ base, draft })
+  }
+
+  /**
+   * El servidor dijo que la ficha cambió desde la versión que se vio (otra pestaña, otra persona).
+   * Se trae la de ahora: lo que cambió allá y aquí no se tocó, se toma; lo que se cambió en los
+   * dos lados no se pisa y espera a que la persona elija. Lo escrito nunca se pierde.
+   */
+  private async onStale(): Promise<"merged" | "offline"> {
+    let latest: Sheet
+    try {
+      latest = await this.api.load()
+    } catch (error) {
+      this.offline(error)
+      return "offline"
+    }
+    const { base, draft } = this.state
+    const fresh = draftOf(latest, gridOf(latest, idsOf(draft.grid)))
+    const mine = changedFields(base, draft)
+    const theirs = changedFields(base, fresh)
+    const clash: string[] = []
+    const nextBase = { ...fresh }
+    const nextDraft = { ...fresh } as Record<string, unknown>
+    for (const field of mine) {
+      const merged = PARTS.has(field)
+        ? mergeMine(base[field], draft[field], fresh[field])
+        : { value: draft[field], clash: true }
+      nextDraft[field] = merged.value
+      // Un dato con partes (los del rubro, el paquete…) choca solo si las dos tocaron la misma.
+      if (theirs.includes(field) && merged.clash) clash.push(field)
+    }
+    const gridMine = gridChanged(base, draft)
+    const gridTheirs = !same(gridLook(base.grid), gridLook(fresh.grid))
+    if (gridMine && !gridTheirs) {
+      // El stock va por diferencia (`seenStock`): lo que se vio antes sigue siendo la base.
+      nextDraft.grid = draft.grid
+      nextBase.grid = base.grid
+    } else if (gridMine) {
+      // Las dos cambiaron la cuadrícula: lo de aquí, puesto sobre el stock de ahora (lo vendido
+      // o lo que entró allá no se pisa), y la persona elige.
+      clash.push("grid")
+      nextDraft.grid = onSaved(draft.grid, base.grid!, fresh.grid)
+    }
+    const changed = [
+      ...theirs.filter((f) => !mine.includes(f)).map((f) => FIELD_NAMES[f] ?? f),
+      ...(gridTheirs && !gridMine ? ["los colores o las tallas"] : []),
+    ]
+    this.clash = clash
+    this.version = latest.updatedAt
+    this.set({
+      sheet: latest,
+      base: nextBase,
+      draft: nextDraft as unknown as Draft,
+      news:
+        changed.length > 0 && clash.length === 0
+          ? `Alguien cambió esta ficha mientras la tenías abierta: ${listOf(changed)}. Ya lo ves aquí; lo tuyo se guarda igual.`
+          : this.state.news,
+    })
+    this.onSaved(latest)
+    return "merged"
+  }
+
+  /** Ante un cambio de otra pestaña en lo mismo: se guarda lo de esta pantalla encima. */
+  keepMine() {
+    if (!this.clash.length) return
+    this.clash = []
+    this.set({ status: { kind: "pending" } })
+    void this.flush()
+  }
+
+  /** Ante un cambio de otra pestaña en lo mismo: se queda lo de la otra y se suelta lo de aquí. */
+  takeTheirs() {
+    if (!this.clash.length) return
+    const draft = { ...this.state.draft }
+    for (const field of this.clash)
+      (draft as Record<string, unknown>)[field] = (
+        this.state.base as unknown as Record<string, unknown>
+      )[field]
+    this.clash = []
+    this.set({ draft, status: { kind: "pending" } })
+    void this.flush()
   }
 
   /**
@@ -466,7 +626,7 @@ export class FichaStore {
     // Sigue viva: otra pestaña no recupera este borrador mientras se reintenta.
     this.persist()
     clearTimeout(this.timer)
-    this.timer = setTimeout(() => void this.flush(), RETRY)
+    this.timer = setTimeout(() => this.tick(), RETRY)
   }
 
   /** Lo que no se guardó queda en el navegador, por si se cierra la pestaña. */
@@ -558,6 +718,71 @@ export class FichaStore {
   idle(): boolean {
     return !this.inflight && (this.closed || this.pendingCount() === 0)
   }
+}
+
+/** Los datos que tienen partes sueltas: cada parte es de quien la cambió. */
+const PARTS = new Set<string>(["rubroData", "package", "offers", "web"])
+
+const isPlain = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v)
+
+/**
+ * Lo de esta pantalla sobre lo de ahora: en un dato con partes (los del rubro, el paquete, lo que
+ * Sofi puede ofrecer), solo las partes que cambió esta pantalla; lo demás queda como lo dejó la
+ * otra. `clash`: las dos cambiaron la misma parte (o el dato entero, si no tiene partes).
+ */
+function mergeMine(
+  before: unknown,
+  mine: unknown,
+  now: unknown,
+): { value: unknown; clash: boolean } {
+  if (!isPlain(before) || !isPlain(mine) || !isPlain(now)) return { value: mine, clash: true }
+  const value: Record<string, unknown> = { ...now }
+  let clash = false
+  for (const key of new Set([...Object.keys(before), ...Object.keys(mine)])) {
+    if (same(before[key] ?? null, mine[key] ?? null)) continue
+    value[key] = mine[key] ?? null
+    if (!same(before[key] ?? null, now[key] ?? null)) clash = true
+  }
+  return { value, clash }
+}
+
+/** El servidor dijo 409: la ficha cambió desde la versión que se vio. */
+const isStale = (error: unknown) =>
+  error instanceof ApiError && error.status === 409 && error.code === "STALE"
+
+/** «el precio y el mínimo»: una lista en palabras. */
+function listOf(items: string[]): string {
+  const unique = [...new Set(items)]
+  return unique.length > 1
+    ? `${unique.slice(0, -1).join(", ")} y ${unique.at(-1)}`
+    : (unique[0] ?? "")
+}
+
+function clashMessage(clash: string[]): string {
+  const names = clash.map((f) =>
+    f === "grid" ? "los colores, las tallas o el stock" : (FIELD_NAMES[f] ?? f),
+  )
+  return `Alguien cambió esta ficha mientras la tenías abierta: ${listOf(names)}. Lo tuyo sigue aquí, sin guardar.`
+}
+
+/** Si es algo donde se escribe (un campo de texto o de número). */
+export function isTextEntry(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false
+  if (target instanceof HTMLTextAreaElement || target.isContentEditable) return true
+  return (
+    target instanceof HTMLInputElement &&
+    ["text", "number", "search", "email", "tel", "url"].includes(target.type) &&
+    !target.readOnly &&
+    // Lo escondido de un control (el input de un grupo de radios) no es un campo donde se escribe.
+    target.tabIndex >= 0 &&
+    target.getAttribute("aria-hidden") !== "true"
+  )
+}
+
+/** Si el foco está en algo donde se escribe. */
+function typingInPage(): boolean {
+  return typeof document !== "undefined" && isTextEntry(document.activeElement)
 }
 
 /**

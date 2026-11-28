@@ -626,7 +626,10 @@ export interface SofiMedia {
   mimeType: string
   /** El enlace firmado (una hora); null sin almacenamiento configurado (`MEDIA_OFF`). */
   url: string | null
-  /** El color de la foto o del video, como está en la ficha; null si es de todo el producto. */
+  /**
+   * El color de la foto o del video, como está en la ficha; null si es para todos los colores.
+   * Así Sofi dice el hecho.
+   */
   color: string | null
   /** Lo que muestra el video («Puesta, caminando»). */
   label: string | null
@@ -635,10 +638,12 @@ export interface SofiMedia {
 
 /**
  * Qué foto y qué video manda Sofi (decisión 9): si la clienta pide un color, la foto elegida de
- * ese color (la que dice «★»), si no la primera de ese color; sin color o sin foto del color, la
- * primera del producto. El video, el del color o, si no tiene, el del producto. Lee con el
- * mismo `tx` de la herramienta de Sofi (`mandar_foto`), ya dentro de la tienda. Sin
- * almacenamiento elige igual y no firma: la pantalla dice que no hay dónde verlas.
+ * ese color (la que dice «★»), si no la primera de ese color; sin foto de ese color, la primera
+ * que es para todos (sin color) o ninguna: nunca la de otro color. Sin color pedido, la primera
+ * del producto. El video, el del color o, si no tiene, el del producto. Cada uno dice de qué
+ * color es (`color`), para que Sofi diga el hecho. Lee con el mismo `tx` de la herramienta de
+ * Sofi (`mandar_foto`), ya dentro de la tienda. Sin almacenamiento elige igual y no firma: la
+ * pantalla dice que no hay dónde verlas.
  */
 export async function sofiMediaIn(
   tx: Db,
@@ -664,17 +669,23 @@ export async function sofiMediaIn(
     .where(and(eq(productPhoto.productId, productId), eq(productPhoto.storeId, storeId)))
     .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
   const stored = photos.filter((p) => p.objectKey)
-  const chosen =
-    (color && stored.find((p) => p.id === color.photoId)) ||
-    (color && stored.find((p) => p.colorId === color.id)) ||
-    stored[0]
+  const asked = Boolean(colorValue?.trim())
+  const chosen = asked
+    ? // La ★ cuenta solo si es de ese color o para todos: nunca una foto de otro color.
+      (color &&
+        stored.find(
+          (p) => p.id === color.photoId && (p.colorId === color.id || p.colorId === null),
+        )) ||
+      (color && stored.find((p) => p.colorId === color.id)) ||
+      stored.find((p) => p.colorId === null)
+    : stored[0]
+  const colorOf = (colorId: string | null) => colors.find((c) => c.id === colorId)?.value ?? null
   const videos = await tx
     .select()
     .from(productVideo)
     .where(and(eq(productVideo.productId, productId), eq(productVideo.storeId, storeId)))
   const video =
     (color && videos.find((v) => v.colorId === color.id)) || videos.find((v) => v.colorId === null)
-  const colorName = (id: string | null) => colors.find((c) => c.id === id)?.value ?? null
   return {
     photo: chosen
       ? {
@@ -687,8 +698,8 @@ export async function sofiMediaIn(
                 PUBLIC_LINK_SECONDS,
               )
             : null,
-          color:
-            colorName(chosen.colorId) ?? colors.find((c) => c.photoId === chosen.id)?.value ?? null,
+          // La de todos que es la ★ del color pedido es de ese color; si no, el suyo.
+          color: colorOf(chosen.colorId) ?? (color?.photoId === chosen.id ? color.value : null),
           label: null,
           durationMs: null,
         }
@@ -701,7 +712,7 @@ export async function sofiMediaIn(
           url: storage
             ? await storage.signedUrl(`${video.objectKey}/video`, PUBLIC_LINK_SECONDS)
             : null,
-          color: colorName(video.colorId),
+          color: colorOf(video.colorId),
           label: video.label || null,
           durationMs: video.durationMs,
         }

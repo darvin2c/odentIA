@@ -18,7 +18,7 @@ import {
   storeMember,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
-import { and, eq, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import sharp from "sharp"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -238,6 +238,16 @@ describe("la IA mira las fotos de un producto y propone", () => {
     expect(detail).toMatchObject({ name: "Zapatilla", rubroData: {}, keywords: [] })
   })
 
+  const lastEvent = async () =>
+    (
+      await db.ownerDb
+        .select()
+        .from(productEvent)
+        .where(eq(productEvent.productId, zapatilla))
+        .orderBy(desc(productEvent.createdAt), desc(productEvent.id))
+        .limit(1)
+    )[0]
+
   const proposalOf = async (field: string) =>
     (await call("rosa", "GET", `${base}/productos/${zapatilla}/ia`)).json.proposals.find(
       (p: { field: string }) => p.field === field,
@@ -280,6 +290,8 @@ describe("la IA mira las fotos de un producto y propone", () => {
     expect(changed.json.result.rubroData).toMatchObject({ material: "Sintético" })
     const [row] = await db.ownerDb.select().from(aiProposal).where(eq(aiProposal.id, material.id))
     expect(row).toMatchObject({ state: "cambiada", appliedValue: "Sintético" })
+    // Lo que eligió ella es suyo: el historial no lo anota como «Propuesta de la IA».
+    expect(await lastEvent()).toMatchObject({ action: "cambiado", reason: null })
   })
 
   it("el color se usa con «Tallas y stock»: su hex, su foto y las fotos de ese color", async () => {
@@ -315,6 +327,12 @@ describe("la IA mira las fotos de un producto y propone", () => {
       value: "Chico",
     })
     expect(answered.json.result.rubroData).toMatchObject({ horma: "Chico" })
+    // La respuesta es de quien respondió: no queda como «Propuesta de la IA».
+    expect(await lastEvent()).toMatchObject({
+      action: "cambiado",
+      actorUserId: "u-rosa",
+      reason: null,
+    })
     const palabras = await proposalOf("palabras")
     const dropped = await call("rosa", "POST", `${base}/ia/propuestas/${palabras.id}/descartar`)
     expect(dropped.json).toEqual({ id: palabras.id, state: "descartada" })

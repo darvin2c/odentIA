@@ -248,6 +248,7 @@ export function AddFromPhotos({
     price: useId(),
     sizes: useId(),
     list: useId(),
+    results: useId(),
   }
 
   const add = (files: FileList | File[]) => {
@@ -367,10 +368,21 @@ export function AddFromPhotos({
   const fieldOf = (p: Proposal) => template?.fields.find((f) => f.key === keyOf(p.field))
   const labelOf = (p: Proposal) =>
     p.kind === "palabras" ? "Cómo la buscan" : (fieldOf(p)?.label ?? p.reason)
-  const acceptAll = () =>
+  // Después de «Mirar las fotos» y de «Aplicar todos», el foco va a lo que vio la IA (las fotos,
+  // sus avisos y lo propuesto), no al principio de la página: lo que lo tenía (el botón, la
+  // barra) ya no está. No va a un campo: en el celular abriría el teclado sobre los avisos.
+  const focusFirst = () =>
+    requestAnimationFrame(() => document.getElementById(ids.results)?.focus())
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al llegar a lo propuesto
+  useEffect(() => {
+    if (step === "propuesta") focusFirst()
+  }, [step])
+  const acceptAll = () => {
     setDecided((now) =>
       Object.fromEntries([...Object.entries(now), ...undecided.map((p) => [p.id, "usar"])]),
     )
+    focusFirst()
+  }
 
   async function save() {
     if (!target) return
@@ -450,7 +462,15 @@ export function AddFromPhotos({
         params: { id: store.id, productId },
       })
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "No se pudo guardar")
+      // Las fotos van en una carga de la tienda: si alguien la creó o la descartó desde «Cargar
+      // muchos», el servidor dice quién; aquí se dice dónde y cómo seguir.
+      setError(
+        problem instanceof ApiError && problem.code === "LOAD_CLOSED"
+          ? `Desde «Cargar muchos»: ${problem.message.replace(" Abre otra para seguir.", " Cierra y vuelve a elegir las fotos.")}`
+          : problem instanceof Error
+            ? problem.message
+            : "No se pudo guardar",
+      )
     } finally {
       setSaving(false)
     }
@@ -601,21 +621,29 @@ export function AddFromPhotos({
         </div>
       ) : (
         <div className="flex flex-col gap-5">
-          <PhotoStrip photos={photos} />
-          {aiOff ? (
-            <PageNotice tone="aviso" label="Sigue a mano">
-              {aiOff}
-            </PageNotice>
-          ) : null}
-          {notice ? (
-            <PageNotice tone="aviso" label="Ojo con las fotos">
-              {notice}
-            </PageNotice>
-          ) : null}
-          <AiSuggestionBar count={undecided.length} onAcceptAll={acceptAll}>
-            La IA propone {undecided.length} {undecided.length === 1 ? "cosa" : "cosas"}
-            {questions.length ? " y pregunta lo que no ve" : ""}.
-          </AiSuggestionBar>
+          <div
+            id={ids.results}
+            tabIndex={-1}
+            role="group"
+            aria-label={aiOff ? "La IA no miró: sigue a mano" : "Lo que vio la IA"}
+            className="flex flex-col gap-5 rounded-2xl outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+          >
+            <PhotoStrip photos={photos} />
+            {aiOff ? (
+              <PageNotice tone="aviso" label="Sigue a mano">
+                {aiOff}
+              </PageNotice>
+            ) : null}
+            {notice ? (
+              <PageNotice tone="aviso" label="Ojo con las fotos">
+                {notice}
+              </PageNotice>
+            ) : null}
+            <AiSuggestionBar count={undecided.length} onAcceptAll={acceptAll}>
+              La IA propone {undecided.length} {undecided.length === 1 ? "cosa" : "cosas"}
+              {questions.length ? " y pregunta lo que no ve" : ""}.
+            </AiSuggestionBar>
+          </div>
 
           <TextRow
             id={ids.name}

@@ -23,7 +23,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MessageCircleQuestion, Plus, Settings2, Trash2 } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
 import {
@@ -788,6 +788,17 @@ function NewQuestion({
 export function DataCard({ templates }: { templates: RubroTemplate[] }) {
   const { draft, sheet, edit, change } = useFichaContext()
   const [adjusting, setAdjusting] = useState(false)
+  // El rubro al que se llegó con las flechas, todavía sin elegir.
+  const [pick, setPick] = useState<ProductRubro | null>(null)
+  const arrowed = useRef(false)
+  const choose = (v: ProductRubro) => {
+    setPick(null)
+    if (v === draft.rubro) return
+    change(`Rubro: ${templates.find((t) => t.id === v)?.label ?? v}`, (d) => {
+      // Lo del rubro de antes queda guardado sin mostrarse: si vuelve, vuelve con sus datos.
+      d.rubro = v
+    })
+  }
   const rubro = templates.find((t) => t.id === draft.rubro) ?? null
   // Lo que se ve es la plantilla de la tienda de ese rubro; si recién se eligió, la de la tienda.
   const fields = draft.rubro === sheet.rubro ? sheet.template : (rubro?.fields ?? [])
@@ -812,24 +823,45 @@ export function DataCard({ templates }: { templates: RubroTemplate[] }) {
         ) : null
       }
     >
-      <div className="flex flex-col gap-2">
+      {/* El rubro cambia los datos que pide la ficha: con las flechas solo se recorre, y se elige
+          con Enter o Espacio (o tocándolo). Salir sin elegir lo deja como estaba. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: solo escucha las teclas del grupo de adentro */}
+      <div
+        className="flex flex-col gap-2"
+        onKeyDownCapture={(e) => {
+          arrowed.current = e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End"
+          if ((e.key === "Enter" || e.key === " ") && pick) {
+            e.preventDefault()
+            choose(pick)
+          }
+        }}
+        onPointerDownCapture={() => {
+          arrowed.current = false
+        }}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setPick(null)
+        }}
+      >
         <span className="text-sm font-medium" id="rubro-l">
           Rubro
         </span>
         <RadioChips
           aria-labelledby="rubro-l"
-          value={draft.rubro}
+          aria-describedby={pick ? "rubro-elige" : undefined}
+          value={pick ?? draft.rubro}
           disabled={!edit}
           options={templates.map((t) => ({ value: t.id, label: t.label }))}
-          onChange={(v) =>
-            v &&
-            v !== draft.rubro &&
-            change(`Rubro: ${templates.find((t) => t.id === v)?.label ?? v}`, (d) => {
-              // Lo del rubro de antes queda guardado sin mostrarse: si vuelve, vuelve con sus datos.
-              d.rubro = v as ProductRubro
-            })
-          }
+          onChange={(v) => {
+            if (!v) return
+            if (arrowed.current) setPick(v === draft.rubro ? null : (v as ProductRubro))
+            else choose(v as ProductRubro)
+          }}
         />
+        {pick ? (
+          <p id="rubro-elige" className="text-sm text-muted-foreground">
+            Enter para elegir «{templates.find((t) => t.id === pick)?.label ?? pick}».
+          </p>
+        ) : null}
         <RubroProposal labelOf={(id) => templates.find((t) => t.id === id)?.label ?? id} />
         {!draft.rubro ? (
           <p className="text-sm text-muted-foreground">
