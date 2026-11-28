@@ -17,7 +17,9 @@ la Ayuda. La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la
   el WhatsApp del celular de quien invita, con el mensaje escrito. Lo envía la persona: gestorIA
   anota solo que se abrió ese WhatsApp (`shared_at`, `shared_by`, `invitacion.enviada`) y lo dice
   «Enviada por ti por WhatsApp», nunca que llegó. Se sigue aceptando solo con la cuenta del correo
-  invitado; la invitación no cambia lo que dice: se anula y se hace otra.
+  invitado; la invitación no cambia lo que dice: se anula y se hace otra. «Corregir» abre el cajón
+  de invitar con sus datos puestos y, al crear la nueva, la API anula la anterior en el mismo paso
+  (`replaces`); «Anular» se confirma antes, porque no se deshace.
 - **El repartidor de fuera lleva celular y pago por entrega** (`store_courier.phone`, `pay_cents` en
   la unidad menor de la moneda de la tienda, `failed_trip_paid`). Es un dato que anota la tienda
   para saber cuánto le debe: gestorIA no le paga, no lo descuenta ni lo suma a ninguna cifra. Lo
@@ -28,9 +30,12 @@ la Ayuda. La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la
   se unió» son de gestorIA Reparto (tablero 23 del lienzo principal), que no existe: el mensaje de
   WhatsApp al repartidor no lleva link, y no se guarda «qué puede cobrar en la puerta» hasta que
   haya quien lo aplique.
-- **«Plan y pagos» dice arriba, en una frase, lo que manda el acuerdo**: la cuota del plan, el saldo
-  usado y lo que queda, si lo usado pasó el saldo y en cuánto (`budget.spentCents`, sin impuestos),
-  cuándo cierra el mes, con qué se paga y el tope. gestorIA no suma ni calcula impuestos o precios:
+- **«Plan y pagos» dice primero lo que se debe**: «Por pagar» con la cifra de cada cobro y su
+  vencimiento (o «Nada por pagar»). Después, lo que manda el acuerdo: el plan, el saldo usado y lo
+  que queda, si lo usado pasó el saldo y en cuánto (`budget.spentCents`, sin impuestos), el tope,
+  cuándo cierra el mes y con qué se paga. El precio del plan no se muestra como «pagas X al mes»:
+  no es la cifra del mes, y esa la dirá la administración cuando la mande. «Subir comprobante» se
+  nombra solo donde está el botón (algo por pagar, cómo pagarlo y la administración conectada). gestorIA no suma ni calcula impuestos o precios:
   el total de cada cobro es el de la administración, en «Por pagar». Los movimientos por pedido (el
   1 % del tablero 18) no los manda el acuerdo hoy: la pantalla dice qué se verá, sin inventar
   filas. Cambiar el tope sigue siendo pedirlo a gestorIA: «Pedir otro tope» abre la Ayuda con

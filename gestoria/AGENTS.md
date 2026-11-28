@@ -38,7 +38,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   el rol de Dueño, y una tienda nunca se queda sin Dueño.
 - La tienda de cada pedido sale del equipo de la persona, nunca del navegador (`inStore`).
 - Una invitación se acepta solo entrando con la cuenta del correo invitado; el enlace no basta.
-  No cambia lo que dice: se anula y se hace otra. Cada cambio del equipo queda en `store_event`
+  No cambia lo que dice: se anula y se hace otra («Corregir» lo hace en un paso, con `replaces`;
+  «Anular» se confirma). Cada cambio del equipo queda en `store_event`
   con quién lo hizo.
 - Equipo y repartidores (`apps/web/src/equipo.tsx`; ADR 0235): la invitación lleva nombre y celular
   (E.164) y sale por el WhatsApp del celular de quien invita. Lo envía la persona: se anota solo que
@@ -241,8 +242,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
   conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.
 - «Plan y pagos» es del Dueño (`plan`). Los textos los escribe gestorIA; la administración manda datos.
-  Arriba, la cuota, el saldo usado y lo que pasó del saldo, tal como lo manda la administración
-  (`budget`): gestorIA no suma, no calcula impuestos ni precios; el total de cada cobro es el suyo. Los movimientos por pedido llegan cuando el
+  Arriba, lo que se debe («Por pagar» con la cifra del cobro y su vencimiento); después el plan, el
+  saldo usado y lo que pasó del saldo y el tope, tal como lo manda la administración (`budget`). El
+  precio del plan no es «pagas X al mes»: esa cifra la manda la administración o no se dice.
+  gestorIA no suma, no calcula impuestos ni precios; el total de cada cobro es el suyo. «Subir
+  comprobante» se nombra solo donde está el botón (`receiptHere`). Los movimientos por pedido llegan cuando el
   acuerdo los mande (tablero 18): hasta entonces, un `EmptyState` que dice qué se verá, sin filas
   inventadas. Se pregunta desde la Ayuda de la cabecera, escribiendo a soporte, no con un
   formulario en la página; «Pedir otro tope» abre la Ayuda con ese mensaje ya escrito
