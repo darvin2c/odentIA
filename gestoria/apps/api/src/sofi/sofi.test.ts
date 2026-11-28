@@ -647,7 +647,11 @@ describe("Sofi vende con las reglas de la tienda", () => {
       .select({ detail: conversationMessage.detail })
       .from(conversationMessage)
       .where(
-        and(eq(conversationMessage.conversationId, id), eq(conversationMessage.author, "sofi")),
+        and(
+          eq(conversationMessage.conversationId, id),
+          eq(conversationMessage.author, "sofi"),
+          sql`(${conversationMessage.detail} -> 'oferta') is not null`,
+        ),
       )
     const offer = (said!.detail as Json).oferta
     expect(offer.cedido).toBe(1000)
@@ -738,7 +742,7 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
     expect(written.status).toBe(403)
     const save = await call("lucia", "PATCH", `${base}/sofi`, { tone: "formal", version: null })
     expect(save.status).toBe(403)
-    const turnOn = await call("lucia", "PUT", `${base}/sofi/estado`, { enabled: true })
+    const turnOn = await call("lucia", "PATCH", `${base}/sofi/estado`, { enabled: true })
     expect(turnOn.status).toBe(403)
     expect((await call("lucia", "GET", `${base}/reportes`)).status).toBe(403)
     expect((await call("lucia", "GET", `${base}/argos`)).status).toBe(403)
@@ -748,7 +752,7 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
   it("el dueño la enciende y queda escrito quién", async () => {
     // Nunca eligió nada: encender no le pone versión (una pestaña abierta puede guardar igual).
     expect((await call("rosa", "GET", `${base}/sofi`)).json.version).toBeNull()
-    const on = await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })
+    const on = await call("rosa", "PATCH", `${base}/sofi/estado`, { enabled: true })
     expect(on.status).toBe(200)
     expect((await call("rosa", "GET", `${base}/sofi`)).json.version).toBeNull()
     const save = await saveSofi({ displayName: "Sofi, de Calzados Rosa" })
@@ -772,7 +776,9 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
     expect(seen.json.settings.enabled).toBe(true)
     const version = seen.json.version as string
     // Pestaña B: la pausa. Pausar no cambia la versión de lo elegido.
-    expect((await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: false })).status).toBe(200)
+    expect((await call("rosa", "PATCH", `${base}/sofi/estado`, { enabled: false })).status).toBe(
+      200,
+    )
     expect((await call("rosa", "GET", `${base}/sofi`)).json.version).toBe(version)
     // A guarda una opción: manda solo lo que cambió, y Sofi sigue en pausa.
     const first = await call("rosa", "PATCH", `${base}/sofi`, { offerGift: false, version })
@@ -804,7 +810,7 @@ describe("lo que pone el dueño y lo que ve cada rol", () => {
     )
     // Lo deja como estaba para lo que sigue.
     expect((await saveSofi({ offerGift: true, emojis: DEFAULT_CHOICES.emojis })).status).toBe(200)
-    expect((await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })).status).toBe(200)
+    expect((await call("rosa", "PATCH", `${base}/sofi/estado`, { enabled: true })).status).toBe(200)
   })
 
   it("Reportes no cuenta los pedidos de prueba", async () => {
@@ -925,7 +931,7 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
 
   it("lo elegido llega con sus frases fijas; de «Lo que sabe», las preguntas como datos y la respuesta por su herramienta", async () => {
     // Argos la dejó apagada en lo anterior: se enciende aparte de lo que se elige.
-    await call("rosa", "PUT", `${base}/sofi/estado`, { enabled: true })
+    await call("rosa", "PATCH", `${base}/sofi/estado`, { enabled: true })
     const saved = await saveSofi(
       settings({ tone: "directa", address: "usted", emojis: "ninguno", offerGift: false }),
     )

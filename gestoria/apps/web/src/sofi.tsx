@@ -152,11 +152,14 @@ export function SofiPage() {
             </PageNotice>
           ) : null}
           <StatusCard overview={overview.data} />
-          {/* En el teléfono la prueba queda debajo: «Probar a Sofi» lleva a ella de un toque. */}
-          <Button variant="outline" className="w-full @3xl:hidden" onClick={goToTest}>
-            <MessageCircle aria-hidden />
-            Probar a Sofi
-          </Button>
+          {/* En el teléfono la prueba queda debajo: «Probar a Sofi» lleva a ella de un toque. Con
+              un formulario al lado, la prueba ya está arriba y el botón sobra. */}
+          {testOnly ? null : (
+            <Button variant="outline" className="w-full @3xl:hidden" onClick={goToTest}>
+              <MessageCircle aria-hidden />
+              Probar a Sofi
+            </Button>
+          )}
           <ViewTabs
             label="Qué ajustar de Sofi"
             value={part}
@@ -277,7 +280,7 @@ function useSetEnabled() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (enabled: boolean) =>
-      api(`/api/tiendas/${store.id}/sofi/estado`, { method: "PUT", body: { enabled } }),
+      api(`/api/tiendas/${store.id}/sofi/estado`, { method: "PATCH", body: { enabled } }),
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: SOFI_KEY(store.id) })
       await queryClient.invalidateQueries({ queryKey: CONFIG_KEY(store.id) })

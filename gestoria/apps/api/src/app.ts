@@ -884,7 +884,7 @@ export function createApp(deps: AppDeps) {
     return c.json(await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
   // Encender o pausar: aparte de las opciones, para que guardar una opción nunca la cambie.
-  app.put("/api/tiendas/:id/sofi/estado", async (c) => {
+  app.patch("/api/tiendas/:id/sofi/estado", async (c) => {
     const input = await bodyOf(c, agentStateInput)
     return c.json(await setAgentEnabled(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
