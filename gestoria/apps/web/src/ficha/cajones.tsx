@@ -308,8 +308,9 @@ export function KardexDrawer({ onClose }: { onClose: () => void }) {
 
 /** «Quién cambió qué»: cada cambio guardado, con quién y cuándo; arriba, lo que falta guardar. */
 export function HistoryDrawer({ pending, onClose }: { pending: number; onClose: () => void }) {
-  const { store, sheet, unit } = useFichaContext()
+  const { store, sheet, unit, unitOne } = useFichaContext()
   const history = useHistory(store.id, sheet.id)
+  const words = { unit, unitOne, money: (c: number) => money(c, store.currency) }
   return (
     <DetailDrawer
       open
@@ -337,7 +338,7 @@ export function HistoryDrawer({ pending, onClose }: { pending: number; onClose: 
                 className="absolute top-1.5 -left-5 size-[11px] rounded-full border-2 border-card bg-muted-foreground/50"
                 aria-hidden
               />
-              <span>{eventLine(e, unit)}</span>
+              <span>{eventLine(e, words)}</span>
               {e.reason ? (
                 <span className="text-muted-foreground">Motivo: «{e.reason}»</span>
               ) : null}

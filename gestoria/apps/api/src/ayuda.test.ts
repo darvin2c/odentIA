@@ -118,7 +118,9 @@ describe("la pantalla donde está", () => {
     expect(storePath(`/tiendas/${STORE}/pedidos?pedido=p-1`, STORE)).toBe("/pedidos")
     expect(storePath(`/tiendas/${STORE}`, STORE)).toBe("/")
     expect(helpScreenOf("/")).toBe("inicio")
-    expect(helpScreenOf("/catalogo/prod-1")).toBe("catalogo")
+    expect(helpScreenOf("/catalogo")).toBe("catalogo")
+    // La ficha de un producto tiene su pantalla, con sus preguntas.
+    expect(helpScreenOf("/catalogo/prod-1")).toBe("producto")
     // Configuración abre en «Lo que falta»; Datos de la tienda tiene su ruta.
     expect(helpScreenOf("/configuracion")).toBe("configuracion")
     expect(helpScreenOf("/configuracion/datos")).toBe("datos")
@@ -133,10 +135,20 @@ describe("la pantalla donde está", () => {
     expect(owner.suggestions).toHaveLength(3)
     // A Ventas no se le sugiere lo que no puede hacer, aunque abra la pantalla: del catálogo, solo
     // responder lo que Sofi no supo.
-    expect(helpScreenView("sales", "/catalogo")).toEqual({
-      title: "Catálogo",
-      suggestions: ["Sofi no supo responder algo de un producto, ¿cómo se lo enseño?"],
+    expect(helpScreenView("sales", "/catalogo")).toEqual({ title: "Catálogo", suggestions: [] })
+    // En la ficha, Ventas ve lo que sí puede: el simulador y lo que Sofi no supo.
+    expect(helpScreenView("sales", "/catalogo/prod-1")).toEqual({
+      title: "Ficha del producto",
+      suggestions: [
+        "¿Cuánto cobraría Sofi por un producto?",
+        "Sofi no supo responder algo de un producto, ¿cómo se lo enseño?",
+      ],
     })
+    expect(helpScreenView("owner", "/catalogo/prod-1").suggestions[0]).toBe(
+      "¿Cómo guardo los cambios de un producto?",
+    )
+    // A Ventas no le dice que no puede usar el simulador.
+    expect(helpAnswerFor("sales", STORE, "faq:simulador")?.restriction).toBeNull()
     expect(helpScreenView("sales", "/")).toEqual({
       title: "Inicio",
       suggestions: ["¿Qué me toca hacer hoy?"],
@@ -254,10 +266,10 @@ describe("lo que respondió Ariadna, hecho texto", () => {
       kind: "guia",
       written: "Unido.",
       argos: false,
-      basedOn: "La guía de gestorIA: Catálogo y Pedidos.",
+      basedOn: "La guía de gestorIA: Ficha del producto y Pedidos.",
     })
     expect(reply.answers.map((one) => [one.where, one.path])).toEqual([
-      ["Catálogo", `/tiendas/${STORE}/catalogo`],
+      ["Ficha del producto", `/tiendas/${STORE}/catalogo`],
       ["Pedidos", `/tiendas/${STORE}/pedidos`],
     ])
     expect(reply.answers[0]?.restriction).toContain("Lo pueden hacer: Dueño y Administrador.")

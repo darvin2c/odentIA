@@ -17,6 +17,7 @@ import { and, eq, inArray, isNotNull, isNull, notInArray } from "drizzle-orm"
 import { z } from "zod"
 import {
   barcodeInput,
+  checkVersion,
   codeInput,
   combinations,
   detailIn,
@@ -28,6 +29,7 @@ import {
   productRow,
   sameText,
   takenSkus,
+  versionInput,
 } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { deliveryListOf, pad, storeRow, todayIn, variantPrices } from "./pedidos.js"
@@ -122,6 +124,8 @@ export const gridInput = z
     unitCostCents: z.number().int().min(0).max(100_000_000).nullable().default(null),
     /** Por qué baja el stock o se quita una variante con stock (ADR 0206). */
     reason: z.string().trim().max(300).optional(),
+    /** La versión de la ficha que vio la pantalla: si cambió después, 409 (`checkVersion`). */
+    version: versionInput.optional(),
   })
   .superRefine((grid, ctx) => {
     for (const [axis, list] of [
@@ -206,6 +210,7 @@ async function saveGridIn(
   productId: string,
   grid: GridInput,
 ) {
+  await checkVersion(tx, storeId, productId, grid.version)
   const current = await productRow(tx, storeId, productId)
   if (current.options.length > 2)
     throw new StoreError(
@@ -492,6 +497,8 @@ async function saveGridIn(
   }
 
   // Los colores: cómo se ve cada uno y su foto. Uno que cambió de nombre sigue siendo el mismo.
+  // Lo que cambió de cada color queda en el historial con su nombre.
+  const colorChanges: ProductChange[] = []
   if (grid.rows) {
     const looks = await tx.select().from(productColor).where(eq(productColor.productId, productId))
     const photoIds = grid.rows.values.map((v) => v.photoId).filter((id): id is string => !!id)
@@ -518,6 +525,9 @@ async function saveGridIn(
       lookOf[i] = look
     })
     for (const look of looks)
+      if (!used.has(look.id))
+        colorChanges.push({ field: "colorRemoved", from: look.value, to: null })
+    for (const look of looks)
       await tx
         .update(productColor)
         .set({ value: `~${look.id.slice(0, 28)}` })
@@ -535,6 +545,15 @@ async function saveGridIn(
         photoId: item.photoId,
         updatedAt: now,
       }
+      if (!look) colorChanges.push({ field: "colorAdded", from: null, to: item.value })
+      else if (look.value !== item.value)
+        colorChanges.push({ field: "colorRenamed", from: look.value, to: item.value })
+      else if (
+        look.hex !== values.hex ||
+        look.hex2 !== values.hex2 ||
+        look.photoId !== values.photoId
+      )
+        colorChanges.push({ field: "colorLook", from: null, to: item.value })
       let colorId = look?.id
       if (look) await tx.update(productColor).set(values).where(eq(productColor.id, look.id))
       else {
@@ -551,7 +570,7 @@ async function saveGridIn(
   }
   await dropGoneColors(tx, productId)
 
-  const changes: ProductChange[] = []
+  const changes: ProductChange[] = [...colorChanges]
   if (JSON.stringify(current.options) !== JSON.stringify(next))
     changes.push({ field: "options", from: current.options, to: next })
   changes.push(...priceChanges, ...promoChanges)
@@ -672,6 +691,13 @@ export async function simulatePrice(
       floorUnitCents: floor,
       /** Se negocia: hay margen entre el precio sin negociar y el mínimo. */
       negotiable: floor < auto.cents,
+      /**
+       * Lo que Sofi puede ceder de su precio de hoy hasta el mínimo, por todas las unidades: la
+       * barra del margen de la ficha. Lo ve también Ventas, que ya ve el mínimo para negociar.
+       */
+      canCedeCents: (auto.cents - floor) * input.quantity,
+      /** Lo que se gana vendiendo en el mínimo, sin el envío; solo con `costos.ver`. */
+      floorGainCents: costCents !== null ? (floor - costCents) * input.quantity : null,
       deliveryName,
       deliveryListCents: delivery.listCents,
       lowest,
@@ -682,8 +708,9 @@ export async function simulatePrice(
         costCents !== null && lowest
           ? lowest.subtotalCents -
             costCents * input.quantity -
-            // El envío que pone la tienda sale de lo que gana.
-            (lowest.marginUsedCents - lowest.discountCents - lowest.giftCents)
+            // El envío que no paga la clienta lo paga la tienda: el que cede Sofi del margen y
+            // también el gratis desde un monto.
+            (lowest.deliveryListCents - lowest.deliveryCents)
           : null,
     }
   })
