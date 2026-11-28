@@ -22,7 +22,7 @@ import { and, asc, count, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { can } from "./permisos.js"
-import { setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
+import { chargingPaymentsIn, setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
 import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
 import { supportForTeam } from "./soporte.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -337,20 +337,8 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
       .select({ n: count() })
       .from(product)
       .where(eq(product.storeId, storeId))
-    const payments = await tx
-      .select({
-        name: storePaymentMethod.name,
-        typeCode: storePaymentMethod.typeCode,
-        collection: storePaymentMethod.collection,
-      })
-      .from(storePaymentMethod)
-      .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-      .orderBy(asc(storePaymentMethod.createdAt))
-    // Solo si está conectada y con qué: la cuenta y sus llaves nunca salen de aquí.
-    const [paymentLink] = await tx
-      .select({ provider: storePaymentLink.provider })
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
+    // Los medios con que se cobra (sin el link si no hay pasarela) y con qué pasarela.
+    const { payments, gateway: paymentLink } = await chargingPaymentsIn(tx, storeId)
     const deliveries = await tx
       .select({
         name: storeDeliveryMethod.name,

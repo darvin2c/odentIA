@@ -403,6 +403,11 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
         {setup.steps.map((s) => {
           const view = stepView(s.step, s.state, setup.facts, store)
           const isNext = s.step === next
+          // Lo que no frena la venta no es una falta: se ve como opcional.
+          const badge =
+            s.state === "falta" && !s.sells
+              ? { label: "Opcional", variant: "secondary" as const }
+              : STATE_BADGES[s.state]
           return (
             <li
               key={s.step}
@@ -416,13 +421,7 @@ function FirstSteps({ setup }: { setup: NonNullable<StoreHome["setup"]> }) {
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="flex flex-wrap items-center gap-2 font-semibold">
                     {view.title}
-                    {s.state === "falta" && !s.sells ? (
-                      <Badge variant="secondary">Opcional</Badge>
-                    ) : (
-                      <Badge variant={STATE_BADGES[s.state].variant}>
-                        {STATE_BADGES[s.state].label}
-                      </Badge>
-                    )}
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
                   </span>
                   <span className={cn("text-sm text-muted-foreground", !isNext && "max-sm:hidden")}>
                     {view.detail}

@@ -199,10 +199,11 @@ describe("lo que falta para vender", () => {
     })
     expect(link?.detail).toContain("Yape y Plin")
     // Los chats todavía dicen «Muy pronto»: Sofi no vende sola, y el título no lo promete.
-    expect(toDoTitle(setupProgress(ROSA.steps).left, false)).toBe("Para vender te falta 1 cosa")
-    expect(toDoTitle(setupProgress(ROSA.steps).left, true)).toBe(
-      "Para que Sofi venda sola te falta 1 cosa",
+    expect(toDoTitle(ROSA.steps)).toBe("Para vender te falta 1 cosa")
+    const withChats = ROSA.steps.map((s) =>
+      s.step === "chats" ? { ...s, state: "hecho" as const } : s,
     )
+    expect(toDoTitle(withChats)).toBe("Para que Sofi venda sola te falta 1 cosa")
   })
 
   it("Inicio y Configuración cuentan igual: sin lo de «Muy pronto» ni lo que no frena la venta", () => {
@@ -216,29 +217,20 @@ describe("lo que falta para vender", () => {
       "entregas",
       "sofi",
     ])
-    expect(toDoTitle(setupProgress(CARMEN.steps).left, true)).toBe(
-      "Para que Sofi venda sola te faltan 3 cosas",
-    )
+    expect(toDoTitle(CARMEN.steps)).toBe("Para vender te faltan 3 cosas")
   })
 
   it("un link de pago sin pasarela no es una forma de cobrar", () => {
     const onlyLink: ConfigOverview = {
       ...CARMEN,
-      payments: [{ name: "Link de pago", typeCode: "68", collection: "link" }],
-      // El servidor tampoco lo cuenta (`setupFactsIn`).
+      // El servidor no manda el link sin pasarela (`chargingPaymentsIn`) ni da el paso por hecho.
+      payments: [],
       steps: CARMEN.steps.map((s) => (s.step === "pagos" ? { ...s, state: "falta" } : s)),
     }
     const pagos = toDoItems(onlyLink, STORE).selling.find((i) => i.id === "pagos")
     expect(pagos).toMatchObject({ state: "falta", action: { label: "Agregar un medio" } })
     expect(pagos?.detail).not.toContain("Link de pago")
     expect(configLines(onlyLink, STORE).pagos).toMatchObject({ status: "Falta", pending: true })
-    const withYape: ConfigOverview = {
-      ...ROSA,
-      payments: [...ROSA.payments, { name: "Link de pago", typeCode: "68", collection: "link" }],
-    }
-    expect(toDoItems(withYape, STORE).selling.find((i) => i.id === "pagos")?.detail).toBe(
-      "Yape, Plin y Efectivo",
-    )
   })
 
   it("con todo listo lo dice; sin Sofi, «para vender»", () => {
@@ -250,8 +242,7 @@ describe("lo que falta para vender", () => {
     const { selling } = toDoItems(done, STORE)
     expect(selling.find((i) => i.id === "sofi")?.state).toBe("saltado")
     expect(setupProgress(done.steps).left).toBe(0)
-    expect(toDoTitle(0, false)).toBe("Tienes todo para vender")
-    expect(toDoTitle(2, false)).toBe("Para vender te faltan 2 cosas")
+    expect(toDoTitle(done.steps)).toBe("Tienes todo para vender")
   })
 
   it("soporte ve el paso de Sofi, que cuenta igual (sin botón: no cambia nada)", () => {

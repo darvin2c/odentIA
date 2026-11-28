@@ -39,7 +39,7 @@ export const SKIPPABLE_STEPS: readonly SetupStep[] = ["sofi", "equipo"]
  * como falta (ni en Inicio ni en «Lo que falta» de Configuración) y no impiden que la lista quede
  * lista.
  */
-export const NOT_SELLING_STEPS: readonly SetupStep[] = ["equipo"]
+const NOT_SELLING_STEPS: readonly SetupStep[] = ["equipo"]
 
 /**
  * Si ya se pueden conectar los chats. Mientras la Bandeja espera la app de Meta, no: el paso dice
@@ -123,6 +123,34 @@ export function setupFinished(steps: readonly SetupStepView[]): boolean {
 }
 
 /**
+ * Los medios de pago encendidos con los que se cobra, y la pasarela si está conectada (solo con
+ * qué: sus llaves no salen de aquí). Un link de pago sin pasarela no cobra: no viene. Lo leen los
+ * primeros pasos y «Lo que falta» de Configuración (`configOverview`), así cuentan lo mismo.
+ */
+export async function chargingPaymentsIn(tx: Db, storeId: string) {
+  const [gateway] = await tx
+    .select({ provider: storePaymentLink.provider })
+    .from(storePaymentLink)
+    .where(eq(storePaymentLink.storeId, storeId))
+  const payments = await tx
+    .select({
+      name: storePaymentMethod.name,
+      typeCode: storePaymentMethod.typeCode,
+      collection: storePaymentMethod.collection,
+    })
+    .from(storePaymentMethod)
+    .where(
+      and(
+        eq(storePaymentMethod.storeId, storeId),
+        eq(storePaymentMethod.isActive, true),
+        gateway ? undefined : ne(storePaymentMethod.collection, "link"),
+      ),
+    )
+    .orderBy(asc(storePaymentMethod.createdAt))
+  return { payments, gateway: gateway ?? null }
+}
+
+/**
  * Lo guardado en cada apartado que marca los pasos. También lo lee «Lo que falta» de
  * Configuración (`configuracion.ts`): las dos listas miran lo mismo y no lo vuelven a contar.
  */
@@ -141,21 +169,7 @@ export async function setupFactsIn(tx: Db, storeId: string, now: Date): Promise<
         gt(productVariant.stock, 0),
       ),
     )
-  const [gateway] = await tx
-    .select({ provider: storePaymentLink.provider })
-    .from(storePaymentLink)
-    .where(eq(storePaymentLink.storeId, storeId))
-  const payments = await tx
-    .select({ name: storePaymentMethod.name })
-    .from(storePaymentMethod)
-    .where(
-      and(
-        eq(storePaymentMethod.storeId, storeId),
-        eq(storePaymentMethod.isActive, true),
-        gateway ? undefined : ne(storePaymentMethod.collection, "link"),
-      ),
-    )
-    .orderBy(asc(storePaymentMethod.createdAt))
+  const { payments } = await chargingPaymentsIn(tx, storeId)
   const deliveries = await tx
     .select({ name: storeDeliveryMethod.name })
     .from(storeDeliveryMethod)

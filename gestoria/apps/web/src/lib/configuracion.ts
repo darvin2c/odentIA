@@ -1,4 +1,5 @@
 import type { MyStore } from "./api"
+import type { SetupStep, SetupStepState } from "./inicio"
 import { STATUS_WORDS } from "./plan"
 import type { DeliveryCost, DeliveryType, PaymentCollection, PaymentTypeCode } from "./tienda"
 import { money } from "./tienda"
@@ -196,6 +197,10 @@ export function notYoursText(
   }
 }
 
+/** A quien no configura la tienda (Ventas), por qué solo ve lo suyo. Repite la misma matriz. */
+export const ONLY_YOURS_TEXT =
+  "Aquí ves lo que cambias tú. Los datos de la tienda, Sofi, los cobros, las entregas y el equipo los cambian el Dueño y el Administrador."
+
 /** El apartado de una ruta de la tienda (`/configuracion/marca`), o null si no es uno. */
 export function configSectionOf(path: string): ConfigSection | null {
   return CONFIG_GROUPS.flatMap((group) => group.items).find((item) => item.path === path) ?? null
@@ -211,16 +216,13 @@ export function sectionById(id: ConfigSectionId): ConfigSection {
  * palabras de la pantalla. Nada se marca a mano.
  */
 
-export type SetupStep = "datos" | "catalogo" | "pagos" | "entregas" | "chats" | "sofi" | "equipo"
-type SetupState = "hecho" | "falta" | "saltado" | "pronto"
-
 /**
  * La única cuenta de lo que falta para vender: la de Inicio («Tu tienda está casi lista · 3 de
  * 5») y la de Configuración («Lo que falta», «3 de 5 listas»). Sale de los pasos del servidor
  * (`setupSteps`): hecho o saltado está listo; lo de «Muy pronto» y lo que no frena la venta
  * (`sells`: invitar al equipo) no cuentan.
  */
-export function setupProgress(steps: readonly { state: SetupState; sells: boolean }[]): {
+export function setupProgress(steps: readonly { state: SetupStepState; sells: boolean }[]): {
   done: number
   total: number
   left: number
@@ -231,7 +233,7 @@ export function setupProgress(steps: readonly { state: SetupState; sells: boolea
 }
 
 export interface ConfigOverview {
-  steps: { step: SetupStep; state: SetupState; skippable: boolean; sells: boolean }[]
+  steps: { step: SetupStep; state: SetupStepState; skippable: boolean; sells: boolean }[]
   brand: {
     publicName: string | null
     brandColor: string | null
@@ -239,6 +241,7 @@ export interface ConfigOverview {
     link: string | null
   }
   catalog: { products: number; withStock: number }
+  /** Los medios con que se cobra: un link de pago sin pasarela no viene (no cobra). */
   payments: { name: string; typeCode: PaymentTypeCode; collection: PaymentCollection }[]
   /** La pasarela del link de pago: solo si está conectada y con qué. */
   paymentLink: { provider: "mercadopago" } | null
@@ -314,26 +317,13 @@ export interface ToDoItem {
   action: { label: string; path: string }
 }
 
-type ToDoSource = Pick<
-  ConfigOverview,
-  "steps" | "brand" | "catalog" | "payments" | "paymentLink" | "deliveries"
->
-
-/**
- * Los medios con que se cobra de verdad: un link de pago sin pasarela conectada no cobra, así que
- * no cuenta (igual que en los primeros pasos del servidor, `setupFactsIn`).
- */
-export function workingPayments(overview: Pick<ToDoSource, "payments" | "paymentLink">) {
-  return overview.payments.filter((p) => p.collection !== "link" || overview.paymentLink !== null)
-}
-
 /**
  * Lo que falta para vender, en su orden (`selling`), y lo que ayuda a vender más (`more`): lo hecho
  * queda con su ✓ y lo pendiente, con su botón. El estado de lo que frena la venta es el del paso
  * del servidor: el mismo que ve Inicio.
  */
 export function toDoItems(
-  overview: ToDoSource,
+  overview: ConfigOverview,
   store: Pick<MyStore, "name">,
 ): { selling: ToDoItem[]; more: ToDoItem[] } {
   const stateOf = (step: SetupStep): ToDoItem["state"] => {
@@ -364,7 +354,7 @@ export function toDoItems(
         : "Sube tus productos con sus tallas, precios y stock.",
     action: { label: stocked ? "Ver" : "Ir al catálogo", path: "/catalogo" },
   })
-  const names = workingPayments(overview).map((p) => p.name)
+  const names = overview.payments.map((p) => p.name)
   const paid = stateOf("pagos") === "hecho"
   selling.push({
     id: "pagos",
@@ -443,8 +433,11 @@ export function toDoItems(
  * promete que Sofi venda sola si de verdad puede: con los chats conectables (no «Muy pronto») y
  * sin haberla saltado. Mientras tanto dice «Para vender…».
  */
-export function toDoTitle(left: number, sofiSells: boolean): string {
+export function toDoTitle(steps: ConfigOverview["steps"]): string {
+  const { left } = setupProgress(steps)
   if (left === 0) return "Tienes todo para vender"
+  const stateOf = (step: SetupStep) => steps.find((s) => s.step === step)?.state
+  const sofiSells = stateOf("chats") !== "pronto" && stateOf("sofi") !== "saltado"
   const lead = sofiSells ? "Para que Sofi venda sola" : "Para vender"
   return left === 1 ? `${lead} te falta 1 cosa` : `${lead} te faltan ${left} cosas`
 }
@@ -499,23 +492,14 @@ export function configLines(
   }
   if (overview.sofi) {
     const skipped = overview.steps.some((s) => s.step === "sofi" && s.state === "saltado")
+    const onOff = overview.sofi.enabled ? "Encendida" : "Apagada"
+    const pending = !overview.sofi.tried && !skipped
     lines.sofi = {
       id: "sofi",
       // Lo pendiente va en el estado, junto a su punto: «Encendida · ● Sin probar».
-      summary: overview.sofi.tried
-        ? "Ya la probaste"
-        : skipped
-          ? "No la usas por ahora"
-          : overview.sofi.enabled
-            ? "Encendida"
-            : "Apagada",
-      status:
-        overview.sofi.tried || skipped
-          ? overview.sofi.enabled
-            ? "Encendida"
-            : "Apagada"
-          : "Sin probar",
-      pending: !overview.sofi.tried && !skipped,
+      summary: overview.sofi.tried ? "Ya la probaste" : skipped ? "No la usas por ahora" : onOff,
+      status: pending ? "Sin probar" : onOff,
+      pending,
     }
   }
   const byCollection = (collection: PaymentCollection) =>
@@ -530,13 +514,13 @@ export function configLines(
     id: "pagos",
     summary: paymentParts.length > 0 ? paymentParts.join(" · ") : "Sin medios de pago",
     status:
-      workingPayments(overview).length === 0
+      overview.payments.length === 0
         ? "Falta"
         : overview.paymentLink
           ? `Con ${PROVIDER_NAMES[overview.paymentLink.provider]}`
           : "Sin pasarela",
     // Sin pasarela se vende igual (con captura o al recibir): el punto, solo sin forma de cobrar.
-    pending: workingPayments(overview).length === 0,
+    pending: overview.payments.length === 0,
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
   const ownFleet = overview.deliveries.some((d) => d.type === "DeliveryModeOwnFleet")

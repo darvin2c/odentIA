@@ -41,6 +41,7 @@ import {
   configSectionOf,
   namesIndex,
   notYoursText,
+  ONLY_YOURS_TEXT,
   SEARCH_INDEX,
   type SearchResult,
   searchConfig,
@@ -124,10 +125,7 @@ export function ConfigFrame({ children }: { children: ReactNode }) {
     !hasHome && store.role !== "support" ? (
       <p className="flex items-start gap-2 text-sm text-muted-foreground">
         <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-        <span>
-          Aquí ves lo que cambias tú. Los datos de la tienda, Sofi, los cobros, las entregas y el
-          equipo los cambian el Dueño y el Administrador.
-        </span>
+        <span>{ONLY_YOURS_TEXT}</span>
       </p>
     ) : null
   if (visible.length === 0)
@@ -312,14 +310,19 @@ export function ConfigHomePage() {
   )
 }
 
+/** Cómo se dice el estado de cada cosa, al lector de pantalla y a la vista. */
+const ROW_WORDS: Record<ToDoItem["state"], string> = {
+  hecho: "Listo",
+  falta: "Falta",
+  saltado: "Saltado",
+  opcional: "Cuando quieras",
+}
+
 function ToDoCard({ store, overview }: { store: MyStore; overview: ConfigOverview }) {
   const canChange = store.permissions.includes("configuracion")
   const { selling, more } = toDoItems(overview, store)
   const progress = setupProgress(overview.steps)
-  // Sofi vende sola solo con los chats conectables y sin haberla saltado.
-  const chatsReady = overview.steps.some((s) => s.step === "chats" && s.state !== "pronto")
-  const sofiSells = chatsReady && selling.find((item) => item.id === "sofi")?.state !== "saltado"
-  const title = toDoTitle(progress.left, sofiSells)
+  const title = toDoTitle(overview.steps)
   const moreLeft = more.filter((item) => item.state === "opcional")
   // Solo lo primero que falta lleva el botón principal; lo demás, el secundario.
   const first = selling.find((item) => item.state === "falta")?.id
@@ -357,15 +360,7 @@ function ToDoCard({ store, overview }: { store: MyStore; overview: ConfigOvervie
           ) : (
             <Minus aria-hidden className="size-4" />
           )}
-          <span className="sr-only">
-            {item.state === "hecho"
-              ? "Listo:"
-              : item.state === "saltado"
-                ? "Saltado:"
-                : item.state === "opcional"
-                  ? "Cuando quieras:"
-                  : "Falta:"}
-          </span>
+          <span className="sr-only">{ROW_WORDS[item.state]}:</span>
         </span>
         <div className="flex min-w-0 flex-1 basis-56 flex-col">
           <span className={cn("font-medium", !pending && "text-muted-foreground")}>
@@ -384,13 +379,7 @@ function ToDoCard({ store, overview }: { store: MyStore; overview: ConfigOvervie
           </Button>
         ) : (
           <span className="text-sm text-muted-foreground max-sm:ml-11">
-            {item.state === "hecho"
-              ? "Listo"
-              : item.state === "saltado"
-                ? "No lo necesitas"
-                : item.state === "opcional"
-                  ? "Cuando quieras"
-                  : "Falta"}
+            {item.state === "saltado" ? "No lo necesitas" : ROW_WORDS[item.state]}
           </span>
         )}
       </li>
