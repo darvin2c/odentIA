@@ -202,8 +202,6 @@ export interface Pedido {
   vuelta?: Vuelta
   /** Lo que espera a una persona, con su único botón. */
   toca?: { texto: string; boton: string; accion: Accion; urgente?: boolean }
-  /** Lo generó gestorIA sola: cuenta para el 1 %. */
-  unoPorCiento: boolean
   /** Fue mostrado en la historia de Valeria (el pedido de la portada). */
   estrella?: boolean
 }
@@ -413,7 +411,6 @@ function seed(rubro: RubroId): Pedido[] {
         hora: "11:04 p. m.",
       },
     ],
-    unoPorCiento: true,
   }
 
   const carla: Pedido = {
@@ -477,7 +474,6 @@ function seed(rubro: RubroId): Pedido[] {
         hora: "9:12 a. m.",
       },
     ],
-    unoPorCiento: true,
   }
   {
     const t = cuentas(carla).total
@@ -585,7 +581,6 @@ function seed(rubro: RubroId): Pedido[] {
         hora: "10:05 a. m.",
       },
     ],
-    unoPorCiento: true,
   }
 
   const jorge: Pedido = {
@@ -669,7 +664,6 @@ function seed(rubro: RubroId): Pedido[] {
       { de: "clienta", texto: "sí porfa, mañana en la tarde", hora: "5:29 p. m." },
       { de: "sofi", texto: "¡Listo! Mañana entre 2 y 6 p. m. con Kevin.", hora: "5:30 p. m." },
     ],
-    unoPorCiento: true,
   }
 
   const andreaLinea = linea(pr(3), 0, 2)
@@ -755,7 +749,6 @@ function seed(rubro: RubroId): Pedido[] {
       av("Mar 25 · 3:42 p. m.", "entregado", "Kevin dejó tu pedido. ¿Te llegó bien?"),
     ],
     chat: [],
-    unoPorCiento: true,
   }
 
   /** Un cambio que sí necesita a una persona: el modelo que pide cuesta más. */
@@ -814,7 +807,6 @@ function seed(rubro: RubroId): Pedido[] {
       av("Lun 24 · 11:05 a. m.", "entregado", "Jhon dejó tu pedido. ¿Te llegó bien?"),
     ],
     chat: [],
-    unoPorCiento: true,
   }
   patricia.pagos.push({
     id: id("pg"),
@@ -927,7 +919,6 @@ function seed(rubro: RubroId): Pedido[] {
       },
       { de: "clienta", texto: "Siii muéstrame", hora: "7:41 a. m." },
     ],
-    unoPorCiento: true,
   }
   milagros.pagos.push({
     id: id("pg"),
@@ -982,7 +973,6 @@ function seed(rubro: RubroId): Pedido[] {
       boton: "Elegir cómo sale",
       accion: "asignar",
     },
-    unoPorCiento: false,
   }
 
   const martin: Pedido = {
@@ -1036,7 +1026,6 @@ function seed(rubro: RubroId): Pedido[] {
       ),
     ],
     chat: [],
-    unoPorCiento: false,
   }
 
   const rocio: Pedido = {
@@ -1091,7 +1080,6 @@ function seed(rubro: RubroId): Pedido[] {
       ),
     ],
     chat: [],
-    unoPorCiento: true,
   }
 
   const carmen: Pedido = {
@@ -1141,7 +1129,6 @@ function seed(rubro: RubroId): Pedido[] {
       av("Jue 27 · 7:02 a. m.", "pagado", "¡Pago recibido, Carmen! Sale hoy entre 2 y 6 p. m."),
     ],
     chat: [],
-    unoPorCiento: true,
   }
   carmen.pagos.push({
     id: id("pg"),
@@ -1208,7 +1195,6 @@ function seed(rubro: RubroId): Pedido[] {
       ),
     ],
     chat: [],
-    unoPorCiento: true,
   }
   mariela.pagos.push({
     id: id("pg"),
@@ -1255,7 +1241,6 @@ function seed(rubro: RubroId): Pedido[] {
       av("Mié 26 · 10:55 a. m.", "entregado", "Kevin dejó tu pedido. ¿Te llegó bien?"),
     ],
     chat: [],
-    unoPorCiento: true,
   }
   lucero.pagos.push({
     id: id("pg"),
@@ -1396,7 +1381,6 @@ function entregadoEl(o: {
       ),
     ],
     chat: [],
-    unoPorCiento: true,
   }
 }
 
@@ -1568,7 +1552,6 @@ function semillaVueltas(rubro: RubroId, pr: (i: number) => Producto): Pedido[] {
     cambioDe: "0141",
     cambioEn: undefined,
     vuelta: undefined,
-    unoPorCiento: false,
   }
   out.push(gabriela, gCambio)
 
@@ -1925,6 +1908,13 @@ export function mover(
     })
   list[i] = p
   S.porRubro[r] = [...list]
+  emit()
+}
+
+/** «Deshacer» del repartidor: vuelve los pedidos a como estaban antes de confirmar. */
+export function reponer(r: RubroId, copias: Pedido[]) {
+  const list = pedidosDe(r).map((p) => copias.find((c) => c.id === p.id) ?? p)
+  S.porRubro[r] = list
   emit()
 }
 

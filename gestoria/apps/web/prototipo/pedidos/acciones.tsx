@@ -3,7 +3,7 @@ import { Textarea } from "@odentia/ui/components/textarea"
 import { AgentMark, RadioChips } from "@odentia/ui-patterns"
 import { Ampliable, ImagenPago } from "./ejemplos"
 import { Hoja } from "./hoja"
-import { CircleAlert, Link2, MessageCircle } from "lucide-react"
+import { CircleAlert, MessageCircle } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { DISTRITOS, foto, RUBROS } from "../datos"
 import { useRuta } from "../ruta"
@@ -758,7 +758,6 @@ function CambioDevolucion({ p, onClose }: { p: Pedido; onClose: () => void }) {
             cambioDe: p.id,
             cambioPide: undefined,
             toca: undefined,
-            unoPorCiento: false,
             estrella: false,
           }
           if (sofi)
@@ -1096,7 +1095,6 @@ export function Anotar({ onClose }: { onClose: () => void }) {
                 ]
               : [],
           chat: [],
-          unoPorCiento: false,
         })
         toast.success(`Anotado el ${num}.`)
         onClose()
@@ -1185,10 +1183,6 @@ export function Anotar({ onClose }: { onClose: () => void }) {
           />
         )}
       </Campo>
-      <p className="flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
-        <Link2 className="size-3.5" aria-hidden />
-        Lo vendió tu equipo: no cuenta para el 1 % de gestorIA.
-      </p>
     </Hoja>
   )
 }

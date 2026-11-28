@@ -253,7 +253,6 @@ function semana(rubro: RubroId): Pedido[] {
       ],
       avisos: [],
       chat: [],
-      unoPorCiento: true,
     }
     const total = cuentas(p).total
     const cobrado =

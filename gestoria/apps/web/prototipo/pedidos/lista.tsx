@@ -145,7 +145,7 @@ function OrigenIcon({ p }: { p: Pedido }) {
           : Sparkles
   return (
     <I
-      className={cn("size-3.5 shrink-0", p.unoPorCiento ? "text-primary" : "text-muted-foreground")}
+      className={"size-3.5 shrink-0 text-muted-foreground"}
       aria-hidden
     />
   )

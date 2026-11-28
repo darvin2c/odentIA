@@ -613,11 +613,6 @@ export function OrigenB({ p }: { p: Pedido }) {
                   ? "Armó su carrito sola en el catálogo de la tienda."
                   : `Lo anotó ${o.quien} a mano.`}
           </span>
-          <span className="mt-1 text-xs text-muted-foreground">
-            {p.unoPorCiento
-              ? "Lo generó gestorIA: cuenta para el 1 %."
-              : "Lo vendió tu equipo: no cuenta para el 1 %."}
-          </span>
         </span>
       </div>
     </Bloque>

@@ -585,7 +585,6 @@ function crearCambio(r: RubroId, p: Pedido, v: Vuelta, quien: string): string {
     cambioPide: undefined,
     vuelta: undefined,
     toca: undefined,
-    unoPorCiento: false,
     estrella: false,
   }
   if (!cobrar)
