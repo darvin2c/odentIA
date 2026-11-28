@@ -2,6 +2,7 @@ import {
   Badge,
   Button,
   cn,
+  Input,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -13,19 +14,39 @@ import {
 } from "@odentia/ui"
 import {
   EmptyState,
+  FilterBar,
+  ListSearchScope,
   PageHeader,
   PageNotice,
   PageShell,
   PersonAvatar,
+  RadioChips,
   SideDockProvider,
   SideDockSlot,
   useIconSidebarWhileMounted,
+  type ListSearchController,
   useMediaQuery,
+  useScopedListSearch,
 } from "@odentia/ui-patterns"
-import { CalendarCheck, Check, MoreHorizontal, Package, Repeat, Truck, UserRound } from "lucide-react"
+import {
+  Banknote,
+  CalendarCheck,
+  Check,
+  MoreHorizontal,
+  Package,
+  Repeat,
+  Route,
+  ScrollText,
+  Truck,
+  UserRound,
+  X,
+} from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { llegaronATienda } from "../pedidos/cobros"
+import { filtrosComunes, pasaFiltros, type Rep } from "../pedidos/filtros"
 import { money, usePedidos } from "../pedidos/modelo"
-import { useRuta } from "../ruta"
+import { ConRouter } from "../pedidos/router"
+import { ir, useRuta } from "../ruta"
 import {
   ArrastreProvider,
   type Destino,
@@ -140,7 +161,7 @@ function TiraEtapas({
   return (
     <div
       role="group"
-      aria-label="Etapas del día: toca una para ver solo esas"
+      aria-label="Etapa: toca una para ver solo esas; tócala otra vez para quitarla"
       className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0"
     >
       <button
@@ -159,6 +180,7 @@ function TiraEtapas({
           key={et}
           type="button"
           aria-pressed={filtro === et}
+          aria-label={filtro === et ? `Quitar el filtro: ${ETAPA[et].label}` : `${ETAPA[et].label}: ${n}`}
           onClick={() => setFiltro(filtro === et ? null : et)}
           className={cn(
             "flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border bg-card px-3.5 text-sm whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -167,13 +189,42 @@ function TiraEtapas({
         >
           <Punto et={et} />
           {ETAPA[et].label} <b className="tabular-nums">{n}</b>
+          {filtro === et ? <X aria-hidden className="size-3.5" /> : null}
         </button>
       ))}
     </div>
   )
 }
 
+/** Los filtros de Despachos, para volver a ellos tal como estaban. */
+const memo: { filtros: Record<string, string | undefined> } = { filtros: {} }
+
+/**
+ * Despachos con sus filtros: el mismo FilterBar de Pedidos (Repartidor, Cobro y Zona, con su
+ * número) y la tira de etapas, que es el filtro Etapa. Valen en «Por franja», «Por repartidor» y la
+ * semana de escritorio.
+ */
 export function DespachosPage() {
+  const scope = useScopedListSearch(memo.filtros)
+  useEffect(() => {
+    memo.filtros = scope.search as typeof memo.filtros
+  }, [scope.search])
+  return <Despachos scope={scope} />
+}
+
+/**
+ * El router en memoria (para el FilterBar) envuelve solo la barra: envolver toda la pantalla hacía
+ * que el carrusel de días perdiera su lugar al cambiar el alto de la ventana.
+ */
+function Barra({ scope, children }: { scope: ListSearchController; children: ReactNode }) {
+  return (
+    <ConRouter>
+      <ListSearchScope value={scope}>{children}</ListSearchScope>
+    </ConRouter>
+  )
+}
+
+function Despachos({ scope }: { scope: ListSearchController }) {
   const { rubro, q } = useRuta()
   const all = usePedidos(rubro)
   const ents = useMemo(() => entregasDe(all), [all])
@@ -182,7 +233,7 @@ export function DespachosPage() {
   const ancho = useMediaQuery("(min-width: 1024px)")
   const [ver, setVer] = useState<"dia" | "semana">(q.get("ver") === "dia" ? "dia" : "semana")
   const [faltas, setFaltas] = useState<Faltas>(q.get("falta") ? { [HOY]: [q.get("falta")!] } : {})
-  const [caja, setCaja] = useState<Record<string, number>>({})
+  const [caja, setCaja] = useState<Record<string, Caja>>({})
   const [hoja, setHoja] = useState<Hoja | null>(
     q.get("hoja") === "falta"
       ? { k: "falta", rep: "Jhon" }
@@ -190,9 +241,25 @@ export function DespachosPage() {
         ? { k: "pedido", id: q.get("abrir")! }
         : null,
   )
-  const [filtro, setFiltro] = useState<Etapa | null>(null)
-  // Otro día, otro filtro: la tira es de cada día.
-  useEffect(() => setFiltro(null), [fecha])
+  // La tira de etapas es el filtro Etapa: vive con los demás, y «Limpiar» también la quita.
+  const { get, setParams, resetFilters } = scope
+  const filtro = (get("etapa") as Etapa | undefined) ?? null
+  const setFiltro = (et: Etapa | null) => setParams({ etapa: et ?? undefined })
+  const fRep = get("rep") as Rep | undefined
+  const busca = (get("q") ?? "").toLowerCase()
+  const fCobro = get("cobro")
+  const fZona = get("zona")
+  const hayFiltro = !!(filtro || fRep || fCobro || fZona || busca)
+  // Lo que se ve: todo menos la etapa, que se cuenta en la tira.
+  const vis = useMemo(
+    () =>
+      ents.filter(
+        (e) =>
+          (!busca || `${e.p.id} ${e.p.clienta} ${e.p.telefono}`.toLowerCase().includes(busca)) &&
+          pasaFiltros(e.p, { rep: fRep, cobro: fCobro, zona: fZona }),
+      ),
+    [ents, busca, fRep, fCobro, fZona],
+  )
   // Un enlace con `?dia=` (desde Inicio o un caso del lienzo) abre ese día aunque ya esté abierto.
   const qDia = q.get("dia")
   const qVista = q.get("vista")
@@ -247,7 +314,11 @@ export function DespachosPage() {
       feriado: FERIADOS[f],
     }
   }
-  const comun = { ents, faltas, abrir, setHoja, caja, setCaja, filtro }
+  const comun = { ents, vis, faltas, abrir, setHoja, caja, setCaja, filtro, fRep, hayFiltro, limpiar: resetFilters }
+  // Cada opción con su número, sobre lo que se mira: el día o la semana.
+  const enVista = (semana ? ents.filter((e) => semanaDe(lunes).includes(e.fecha)) : delDia(fecha)).map(
+    (e) => e.p,
+  )
 
   const h = hoja && hoja.k !== "falta" ? porId(hoja.id) : undefined
   return (
@@ -261,7 +332,30 @@ export function DespachosPage() {
       describir={describir}
     >
       <PageShell className="flex flex-col gap-4 pb-24 lg:pb-8">
-        <PageHeader title="Despachos" />
+        <PageHeader
+          title="Despachos"
+          menu={[
+            {
+              label: "Cobros: pago al recibir",
+              icon: <ScrollText aria-hidden />,
+              onSelect: () => ir("/configuracion/cobros"),
+            },
+            {
+              label: "Ver la app del repartidor",
+              icon: <Route aria-hidden />,
+              onSelect: () => ir("/reparto"),
+            },
+          ]}
+        />
+        <Barra scope={scope}>
+          <FilterBar
+            className="filtros-dedo"
+            filters={filtrosComunes(enVista)}
+            sortOptions={[]}
+            searchLabel="Buscar en despachos"
+            searchPlaceholder="Nombre o número"
+          />
+        </Barra>
         {/* La semana: deslizar, las flechas, «Hoy» o tocar un día. Queda arriba al bajar. */}
         <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-2 bg-canvas/95 px-4 pt-1 pb-2 backdrop-blur sm:-mx-6 sm:px-6">
           <div className="flex items-center gap-1">
@@ -315,6 +409,13 @@ export function DespachosPage() {
 
         {semana ? <MenuEnIconos /> : null}
         {semana ? (
+          <TiraEtapas
+            list={vis.filter((e) => semanaDe(lunes).includes(e.fecha))}
+            filtro={filtro}
+            setFiltro={setFiltro}
+          />
+        ) : null}
+        {semana ? (
           <Pager
             aria-label="Semanas: desliza a la izquierda para la siguiente"
             position={lunes}
@@ -349,7 +450,7 @@ export function DespachosPage() {
                 </TabsList>
               </Tabs>
             </div>
-            <TiraEtapas list={delDia(fecha)} filtro={filtro} setFiltro={setFiltro} />
+            <TiraEtapas list={vis.filter((e) => e.fecha === fecha)} filtro={filtro} setFiltro={setFiltro} />
             <Pager
               aria-label="Días: desliza a la izquierda para el día siguiente"
               position={fecha}
@@ -431,14 +532,27 @@ function rango(lunes: string) {
     : `${d(lunes)} ${m(lunes)} – ${d(fin)} ${m(fin)}`
 }
 
+/** Lo que Caja recibió de un repartidor: cuánto y, si no cuadra, la diferencia y su motivo. */
+interface Caja {
+  monto: number
+  diferencia: number
+  motivo?: string
+}
+
 interface Comun {
+  /** Todas las entregas: los cupos se cuentan sin filtros. */
   ents: Ent[]
+  /** Las que pasan los filtros (menos la etapa, que se cuenta en la tira). */
+  vis: Ent[]
   faltas: Faltas
   abrir: (e: Ent) => void
   filtro: Etapa | null
+  fRep?: Rep
+  hayFiltro: boolean
+  limpiar: () => void
   setHoja: (h: Hoja) => void
-  caja: Record<string, number>
-  setCaja: (c: Record<string, number>) => void
+  caja: Record<string, Caja>
+  setCaja: (c: Record<string, Caja>) => void
 }
 
 /* ---------- El día ---------- */
@@ -447,16 +561,21 @@ function DiaPane({
   fecha,
   vista,
   ents,
+  vis,
   faltas,
   abrir,
   setHoja,
   caja,
   setCaja,
   filtro,
+  fRep,
+  hayFiltro,
+  limpiar: resetFilters,
   angosto,
 }: Comun & { fecha: string; vista: Vista; angosto?: boolean }) {
-  const todoElDia = ordenar(ents.filter((e) => e.fecha === fecha))
+  const todoElDia = ordenar(vis.filter((e) => e.fecha === fecha))
   const dia = filtro ? todoElDia.filter((e) => e.etapa === filtro) : todoElDia
+  const hayAlgo = ents.some((e) => e.fecha === fecha)
   const toca = dia.filter(necesita)
   const noEntrego = dia.filter((e) => e.estado === "no_entregado")
   const feriado = FERIADOS[fecha]
@@ -477,6 +596,9 @@ function DiaPane({
             {dia.length ? " Lo que se anotó antes, pásalo a otro día." : ""}
           </PageNotice>
         ) : null}
+        {fRep === "Kevin" || fRep === "Jhon" ? (
+          <RutaDe rep={fRep} fecha={fecha} dia={dia} abrir={abrir} />
+        ) : null}
         {toca.length ? (
           <section
             aria-labelledby={`toca-${fecha}`}
@@ -491,7 +613,7 @@ function DiaPane({
               ))}
             </ul>
           </section>
-        ) : dia.length && !pasado && !filtro ? (
+        ) : dia.length && !pasado && !hayFiltro ? (
           <p className="flex items-center gap-2 rounded-2xl bg-success-soft px-4 py-3 text-sm text-success">
             <Check aria-hidden className="size-4" />
             Nada te toca este día: lo demás avanza solo.
@@ -506,10 +628,17 @@ function DiaPane({
         ) : null}
       </div>
       <div className="flex flex-col gap-5">
-        {dia.length === 0 && filtro && todoElDia.length ? (
-          <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">
-            Nada en «{ETAPA[filtro].label}» este día.
-          </p>
+        {dia.length === 0 && hayFiltro && hayAlgo ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            <span className="flex-1">
+              Nada con estos filtros este día
+              {filtro ? ` (etapa «${ETAPA[filtro].label}»)` : ""}.
+            </span>
+            <Button variant="outline" className="h-11" onClick={resetFilters}>
+              <X aria-hidden />
+              Limpiar los filtros
+            </Button>
+          </div>
         ) : dia.length === 0 ? (
           feriado ? null : (
             <EmptyState
@@ -643,7 +772,7 @@ function Tarjeta({
     </span>
   )
   const { props, arrastrando, levantando } = useArrastrable(e.id, fantasma)
-  const nombre = `${e.p.clienta}, pedido ${e.p.id}: ${et.label}, ${e.cobro.texto}, ${donde(e)}`
+  const nombre = `${e.p.clienta}, pedido ${e.p.id}: ${et.label}, ${e.cobro.texto}${e.vuelto ? `, lleva vuelto de ${money(e.vuelto)}` : ""}, ${donde(e)}`
   if (compacta)
     return (
       <button
@@ -710,6 +839,12 @@ function Tarjeta({
           <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
             <Badge variant={et.tono}>{et.label}</Badge>
             <Cobro e={e} corto />
+            {e.vuelto ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-warning-soft px-1.5 font-medium">
+                <Banknote aria-hidden className="size-3.5" />
+                Lleva vuelto de {money(e.vuelto)}
+              </span>
+            ) : null}
           </span>
           <span className="flex items-center gap-1 truncate text-[13px]">
             {e.recojo ? (
@@ -754,6 +889,81 @@ function Tarjeta({
         ) : null}
       </div>
     </li>
+  )
+}
+
+/**
+ * Al elegir un repartidor: su ruta del día en orden y lo que cobra en la puerta, con el vuelto que
+ * tiene que llevar. Es la misma lista que ve en gestorIA Reparto.
+ */
+function RutaDe({ rep, fecha, dia, abrir }: { rep: string; fecha: string; dia: Ent[]; abrir: (e: Ent) => void }) {
+  const ruta = dia.filter((e) => e.p.entrega.repartidor === rep)
+  const sigue = ruta.filter((e) => !["entregado", "recogido", "en_tienda"].includes(e.etapa) && !e.p.rechazo)
+  const cobra = sigue.filter((e) => e.p.cobro === "al_recibir").reduce((a, e) => a + e.falta, 0)
+  const vuelto = sigue.reduce((a, e) => a + e.vuelto, 0)
+  return (
+    <section aria-labelledby={`ruta-${fecha}`} className="flex flex-col gap-2 rounded-2xl border bg-card p-3">
+      <div className="flex items-center gap-2 px-1">
+        <PersonAvatar name={rep} className="size-8" />
+        <h3 id={`ruta-${fecha}`} className="text-sm font-semibold">
+          La ruta de {rep}
+          <span className="ml-1.5 font-normal text-muted-foreground">
+            {ruta.length} {ruta.length === 1 ? "parada" : "paradas"}
+          </span>
+        </h3>
+      </div>
+      {ruta.length ? (
+        <ol className="flex flex-col divide-y rounded-xl border">
+          {ruta.map((e, i) => (
+            <li key={e.id}>
+              <button
+                type="button"
+                onClick={() => abrir(e)}
+                aria-label={`Parada ${i + 1}: ${e.p.clienta}, ${ETAPA[e.etapa].label}, ${e.cobro.texto}${e.vuelto ? `, lleva vuelto de ${money(e.vuelto)}` : ""}`}
+                className="flex min-h-12 w-full items-center gap-2.5 px-2.5 py-2 text-left text-sm outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              >
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold tabular-nums">
+                  {i + 1}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Punto et={e.etapa} />
+                    <b className="truncate font-medium">{e.p.clienta}</b>
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {[e.p.entrega.franja ? FRANJA_NOMBRE[e.p.entrega.franja]?.split(" · ")[0] : null, e.p.entrega.zona.split(",")[0], ETAPA[e.etapa].corto]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                <span className="flex shrink-0 flex-col items-end text-xs">
+                  <Cobro e={e} corto />
+                  {e.vuelto ? <span className="text-muted-foreground">vuelto {money(e.vuelto)}</span> : null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">
+          {rep} no tiene paradas con estos filtros.
+        </p>
+      )}
+      {cobra || vuelto ? (
+        <dl className="flex flex-col gap-1 rounded-xl bg-muted/70 px-3 py-2 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Cobra en la puerta</dt>
+            <dd className="font-semibold tabular-nums">{money(cobra)}</dd>
+          </div>
+          {vuelto ? (
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Sale con vuelto</dt>
+              <dd className="font-semibold tabular-nums">{money(vuelto)}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+    </section>
   )
 }
 
@@ -847,12 +1057,13 @@ function PorRepartidor({
   faltas: Faltas
   abrir: (e: Ent) => void
   setHoja: (h: Hoja) => void
-  caja: Record<string, number>
-  setCaja: (c: Record<string, number>) => void
+  caja: Record<string, Caja>
+  setCaja: (c: Record<string, Caja>) => void
 }) {
   const hoy = fecha === HOY
   // «Recibí» también se confirma: a quién, cuánto y de cuántas entregas.
-  const [recibir, setRecibir] = useState<{ rep: string; monto: number; pendientes: number } | null>(null)
+  const { rubro } = useRuta()
+  const [recibir, setRecibir] = useState<Recibir | null>(null)
   const grupos = [
     ...REPARTIDORES.map((r) => ({
       rep: r as string | null,
@@ -921,24 +1132,65 @@ function PorRepartidor({
                     <span className="text-muted-foreground">Cobra en la puerta</span>
                     <b className="tabular-nums">{money(plata.porCobrar)}</b>
                   </div>
+                  {plata.vuelto ? (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Sale con vuelto</span>
+                      <b className="tabular-nums">{money(plata.vuelto)}</b>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between gap-3">
                     <span className="text-muted-foreground">Ya cobró en efectivo</span>
                     <b className="tabular-nums">{money(plata.cobrado)}</b>
                   </div>
+                  {plata.pos || plata.yape ? (
+                    <div className="flex justify-between gap-3 text-muted-foreground">
+                      <span>Con POS · con Yape o Plin</span>
+                      <span className="tabular-nums">
+                        {money(plata.pos)} · {money(plata.yape)}
+                      </span>
+                    </div>
+                  ) : null}
                   {recibido !== undefined ? (
-                    <p className="flex items-center gap-2 text-success">
-                      <Check aria-hidden className="size-4" />
-                      Caja recibió {money(recibido)} de {g.rep}.
+                    <p className="flex items-start gap-2 text-success">
+                      <Check aria-hidden className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        Caja recibió {money(recibido.monto)} de {g.rep}.
+                        {recibido.diferencia ? (
+                          <span className="block text-warning">
+                            {recibido.diferencia < 0 ? "Faltan" : "Sobran"} {money(Math.abs(recibido.diferencia))}:{" "}
+                            {recibido.motivo}
+                          </span>
+                        ) : null}
+                      </span>
                     </p>
                   ) : (
-                    <Button
-                      variant={pendientes ? "outline" : "default"}
-                      className="h-11"
-                      disabled={plata.cobrado === 0}
-                      onClick={() => setRecibir({ rep: g.rep!, monto: plata.cobrado, pendientes })}
-                    >
-                      Recibí {money(plata.cobrado)} de {g.rep}
-                    </Button>
+                    <>
+                      {plata.entrega !== plata.cobrado ? (
+                        <p className="rounded-lg bg-warning-soft px-2.5 py-1.5 text-[13px]">
+                          {g.rep} cerró su día: entrega {money(plata.entrega)}, {money(Math.abs(plata.entrega - plata.cobrado))}{" "}
+                          {plata.entrega < plata.cobrado ? "menos" : "más"}. Dice: «{plata.motivo}»
+                        </p>
+                      ) : null}
+                      <Button
+                        variant={pendientes ? "outline" : "default"}
+                        className="h-11"
+                        disabled={plata.cobrado === 0}
+                        onClick={() =>
+                          setRecibir({
+                            rep: g.rep!,
+                            efectivo: plata.cobrado,
+                            pos: plata.pos,
+                            yape: plata.yape,
+                            entrega: plata.entrega,
+                            motivo: plata.motivo,
+                            pendientes,
+                            vuelven: plata.vuelven,
+                          })
+                        }
+                      >
+                        Recibí {money(plata.entrega)} de {g.rep}
+                      </Button>
+                    </>
                   )}
                 </div>
               ) : null
@@ -963,42 +1215,126 @@ function PorRepartidor({
         )
       })}
       {recibir ? (
-        <Hoja
-          open
-          dock={false}
+        <RecibirHoja
+          r={recibir}
           onClose={() => setRecibir(null)}
-          title={`Recibir la plata de ${recibir.rep}`}
-          description="Lo que cobró en efectivo hoy. Queda en Caja a su nombre."
-          submitLabel={`Recibí ${money(recibir.monto)}`}
-          onSubmit={(ev) => {
-            ev.preventDefault()
-            setCaja({ ...caja, [recibir.rep]: recibir.monto })
-            toast.success(`Quedó en Caja: ${money(recibir.monto)} de ${recibir.rep}.`, {
-              description: recibir.pendientes
-                ? `Le quedan ${recibir.pendientes} por entregar; lo que cobre después se suma aparte.`
-                : "Cerró su día.",
+          onHecho={(c) => {
+            setCaja({ ...caja, [recibir.rep]: c })
+            llegaronATienda(rubro, recibir.rep)
+            toast.success(`Quedó en Caja: ${money(c.monto)} de ${recibir.rep}.`, {
+              description: c.diferencia
+                ? `${c.diferencia < 0 ? "Faltan" : "Sobran"} ${money(Math.abs(c.diferencia))}: ${c.motivo?.replace(/\.$/, "")}. Queda anotado en Caja.`
+                : recibir.pendientes
+                  ? `Le quedan ${recibir.pendientes} por entregar; lo que cobre después se suma aparte.`
+                  : "Cerró su día.",
             })
             setRecibir(null)
           }}
-        >
-          <dl className="flex flex-col divide-y rounded-xl border text-sm">
-            <div className="flex justify-between gap-3 px-3 py-2.5">
-              <dt className="text-muted-foreground">De quién</dt>
-              <dd className="font-medium">{recibir.rep}</dd>
-            </div>
-            <div className="flex justify-between gap-3 px-3 py-2.5">
-              <dt className="text-muted-foreground">Cuánto</dt>
-              <dd className="font-heading text-lg font-bold tabular-nums">{money(recibir.monto)}</dd>
-            </div>
-            <div className="flex justify-between gap-3 px-3 py-2.5">
-              <dt className="text-muted-foreground">Le quedan</dt>
-              <dd>{recibir.pendientes ? `${recibir.pendientes} por entregar` : "Nada: cerró su día"}</dd>
-            </div>
-          </dl>
-          <p className="text-sm text-muted-foreground">Cuéntalo antes de confirmar.</p>
-        </Hoja>
+        />
       ) : null}
     </div>
+  )
+}
+
+interface Recibir {
+  rep: string
+  efectivo: number
+  pos: number
+  yape: number
+  /** Lo que dice que entrega al cerrar su día. */
+  entrega: number
+  motivo?: string
+  pendientes: number
+  vuelven: Ent[]
+}
+
+const MOTIVOS_DIF = ["Dio vuelto de más", "Pagó con otro medio", "Un billete falso o roto", "Aún no se sabe"]
+
+/**
+ * El cierre del repartidor: cuánto cobró con cada medio, cuánto entrega a Caja y, si no cuadra, la
+ * diferencia (falta o sobra) con su motivo. Lo que trae de vuelta queda en la tienda.
+ */
+function RecibirHoja({ r, onClose, onHecho }: { r: Recibir; onClose: () => void; onHecho: (c: Caja) => void }) {
+  const [contado, setContado] = useState(String(r.entrega))
+  const n = Number(contado.replace(",", ".")) || 0
+  const dif = Math.round((n - r.efectivo) * 100) / 100
+  const delRep = r.motivo ? `Lo que dice ${r.rep}` : null
+  const [motivo, setMotivo] = useState<string>(delRep ?? MOTIVOS_DIF[0]!)
+  const fila = (k: string, v: ReactNode, fuerte?: boolean) => (
+    <div className="flex justify-between gap-3 px-3 py-2.5">
+      <dt className="text-muted-foreground">{k}</dt>
+      <dd className={cn("text-right tabular-nums", fuerte ? "font-heading text-lg font-bold" : "font-medium")}>{v}</dd>
+    </div>
+  )
+  return (
+    <Hoja
+      open
+      dock={false}
+      onClose={onClose}
+      title={`Recibir la plata de ${r.rep}`}
+      description="Lo que cobró hoy en la puerta. El efectivo queda en Caja a su nombre."
+      submitLabel={`Recibí ${money(n)}${dif ? ` · ${dif < 0 ? "faltan" : "sobran"} ${money(Math.abs(dif))}` : ""}`}
+      onSubmit={(ev) => {
+        ev.preventDefault()
+        onHecho({
+          monto: n,
+          diferencia: dif,
+          motivo: dif ? (motivo === delRep ? `${r.motivo}` : motivo) : undefined,
+        })
+      }}
+    >
+      <dl className="flex flex-col divide-y rounded-xl border text-sm">
+        {fila("Cobró en efectivo", money(r.efectivo))}
+        {fila("Con POS (va a la cuenta)", money(r.pos))}
+        {fila("Con Yape o Plin a la tienda", money(r.yape))}
+        {fila("Tendría que entregar a Caja", money(r.efectivo), true)}
+        {r.entrega !== r.efectivo ? fila(`${r.rep} dice que entrega`, money(r.entrega)) : null}
+        {fila("Le quedan", r.pendientes ? `${r.pendientes} por entregar` : "Nada: cerró su día")}
+        {r.vuelven.length
+          ? fila(
+              "Trae de vuelta",
+              r.vuelven.map((e) => `${e.p.id} · ${e.p.clienta.split(" ")[0]} (${e.p.rechazo?.motivo.toLowerCase()})`).join(", "),
+            )
+          : null}
+      </dl>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="font-medium">Contaste</span>
+        <span className="flex items-center gap-2">
+          S/
+          <Input
+            inputMode="decimal"
+            value={contado}
+            onChange={(ev) => setContado(ev.target.value)}
+            className="h-11 w-32 tabular-nums"
+            aria-describedby="dif-caja"
+          />
+        </span>
+      </label>
+      {dif ? (
+        <div id="dif-caja" className="flex flex-col gap-2 rounded-xl border border-warning/50 bg-warning-soft/60 p-3 text-sm" role="status">
+          <b>
+            {dif < 0 ? "Faltan" : "Sobran"} {money(Math.abs(dif))} frente a lo que cobró en efectivo.
+          </b>
+          {r.motivo ? <span>{r.rep} dice: «{r.motivo}»</span> : null}
+          <span id="motivo-dif" className="text-xs font-medium">
+            El motivo
+          </span>
+          <div className="max-sm:[&_label]:min-h-11 pointer-coarse:[&_label]:min-h-11">
+          <RadioChips
+            aria-labelledby="motivo-dif"
+            value={motivo}
+            options={[...(delRep ? [delRep] : []), ...MOTIVOS_DIF].map((m) => ({ value: m, label: m }))}
+            onChange={setMotivo}
+          />
+          </div>
+          <span className="text-xs text-muted-foreground">Queda anotado en Caja con el nombre de {r.rep}.</span>
+        </div>
+      ) : (
+        <p id="dif-caja" className="text-sm text-muted-foreground">
+          Cuadra con lo que cobró. Cuéntalo antes de confirmar.
+        </p>
+      )}
+    </Hoja>
   )
 }
 
@@ -1007,11 +1343,14 @@ function PorRepartidor({
 function SemanaTablero({
   lunes,
   fecha,
-  ents,
+  ents: todas,
+  vis,
+  filtro,
   faltas,
   abrir,
   abrirDia,
 }: Comun & { lunes: string; fecha: string; abrirDia: (f: string) => void }) {
+  const ents = filtro ? vis.filter((e) => e.etapa === filtro) : vis
   const dias = semanaDe(lunes)
   const filas: { titulo: string; franja: string | null }[] = [
     ...FRANJAS.map((f) => ({ titulo: FRANJA_NOMBRE[f] ?? f, franja: f as string | null })),
@@ -1086,6 +1425,7 @@ function SemanaTablero({
             {...f}
             dias={dias}
             ents={ents}
+            todas={todas}
             faltas={faltas}
             abrir={abrir}
             activo={!!activo}
@@ -1093,17 +1433,10 @@ function SemanaTablero({
           />
         ))}
       </div>
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        {porEtapa(ents.filter((e) => dias.includes(e.fecha))).map(({ et }) => (
-          <span key={et} className="inline-flex items-center gap-1">
-            <Punto et={et} />
-            {ETAPA[et].label}
-          </span>
-        ))}
-        <span className="basis-full">
-          Arrastra una entrega a otro día o franja: se abre su cajón con «Pasar a…» ya lleno. Toca
-          el día para verlo por repartidor.
-        </span>
+      {/* Los colores de cada etapa están arriba, en la tira, que también filtra. */}
+      <p className="text-xs text-muted-foreground">
+        Arrastra una entrega a otro día o franja: se abre su cajón con «Pasar a…» ya lleno. Toca el
+        día para verlo por repartidor.
       </p>
       {toca.length ? (
         <section
@@ -1128,6 +1461,7 @@ function FilaSemana({
   franja,
   dias,
   ents,
+  todas,
   faltas,
   abrir,
   activo,
@@ -1137,6 +1471,7 @@ function FilaSemana({
   franja: string | null
   dias: string[]
   ents: Ent[]
+  todas: Ent[]
   faltas: Faltas
   abrir: (e: Ent) => void
   activo: boolean
@@ -1151,7 +1486,7 @@ function FilaSemana({
         )
         const destino: Destino = { fecha: d, franja }
         const encima = JSON.stringify(destino) === JSON.stringify(sobre)
-        const lleno = franja && d >= HOY ? llena(ents, d, franja, faltas) : false
+        const lleno = franja && d >= HOY ? llena(todas, d, franja, faltas) : false
         return (
           <div
             key={d}

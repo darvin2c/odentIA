@@ -15,6 +15,12 @@ import { cuentas, entregaTexto, money, PASO, type Pedido, teToca, tocaDe } from 
 
 /** La etapa del pedido y, si algo vuelve, la de su cambio o devolución. Con el nombre de Pedidos. */
 export function EtapaBadge({ p }: { p: Pedido }) {
+  if (p.rechazo)
+    return p.rechazo.enTienda ? (
+      <Badge variant="secondary">De vuelta en la tienda</Badge>
+    ) : (
+      <Badge variant="destructive">Vuelve a la tienda</Badge>
+    )
   const v = p.vuelta
   if (!v || v.estado === "cerrado" || v.estado === "rechazado")
     return <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].label}</Badge>

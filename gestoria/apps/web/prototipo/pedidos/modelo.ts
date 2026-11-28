@@ -185,6 +185,17 @@ export interface Pedido {
   cambioEn?: string
   /** Lo que pasó en la última salida, si no se entregó. */
   noEntregado?: string
+  /** Al recibir en efectivo: con cuánto dijo que paga (Sofi se lo pregunta). El repartidor lleva el vuelto. */
+  pagaCon?: number
+  /** Pidió pagar al recibir y la política de cobros no lo acepta: la regla que le explicó Sofi. */
+  reglaCobro?: string
+  /** No quiso recibirlo o no pagó en la puerta: el producto vuelve a la tienda. */
+  rechazo?: { motivo: string; quien: string; cuando: string; dijo?: string; enTienda?: boolean }
+  /**
+   * Cargos que se suman al saldo, como el viaje que no se entregó cuando lo paga la clienta.
+   * Propuesto: hoy el saldo del pedido no tiene cargos (tablero «Para programar»).
+   */
+  cargos?: { id: string; concepto: string; monto: number; propuesto: boolean }[]
   /** Lo que pidió para cambiar, si cuesta distinto o no hay stock: lo decide una persona. */
   cambioPide?: Linea
   /** El pedido de cambio o devolución de este pedido entregado, con sus propios pasos. */
@@ -216,7 +227,8 @@ export type Accion =
 
 export function cuentas(p: Pedido) {
   const productos = p.lineas.reduce((a, l) => a + (l.vuelve ? -1 : 1) * l.precio * l.qty, 0)
-  const total = productos + p.entrega.envio
+  const cargos = (p.cargos ?? []).reduce((a, c) => a + c.monto, 0)
+  const total = productos + p.entrega.envio + cargos
   const confirmado = p.pagos
     .filter((x) => x.estado === "confirmado")
     .reduce((a, x) => a + x.monto, 0)
@@ -226,6 +238,7 @@ export function cuentas(p: Pedido) {
   const falta = Math.max(0, total - confirmado - porConfirmar)
   return {
     productos,
+    cargos,
     total,
     confirmado,
     porConfirmar,

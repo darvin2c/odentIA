@@ -28,6 +28,7 @@ import { foto, RUBROS } from "../datos"
 import { href, ir, useRuta } from "../ruta"
 import { abrirCajon } from "./cajon"
 import { Ampliable, FotoMarcada, ImagenPago } from "./ejemplos"
+import { EtapaBadge } from "./tarjeta"
 import {
   type Accion,
   type Actor,
@@ -70,6 +71,13 @@ export const ACTOR: Record<Actor, { label: string; Icon: typeof Bot; tono: strin
 export function queSigue(p: Pedido): { texto: string; persona: boolean } {
   const k = cuentas(p)
   const n = p.clienta.split(" ")[0]
+  if (p.rechazo)
+    return {
+      texto: p.rechazo.enTienda
+        ? `volvió a la tienda. Sofi espera si ${n} lo quiere otro día.`
+        : `${p.rechazo.motivo.toLowerCase()}: ${p.rechazo.quien} lo trae de vuelta a la tienda. Sofi le preguntó si lo quiere otro día.`,
+      persona: false,
+    }
   const toca = tocaDe(p)
   if (toca) return { texto: toca.texto, persona: true }
   switch (p.paso) {
@@ -350,6 +358,15 @@ export function Carrito({ p }: { p: Pedido }) {
             {p.entrega.envio ? money(p.entrega.envio) : "Gratis"}
           </span>
         </li>
+        {(p.cargos ?? []).map((c) => (
+          <li key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+            <span className="text-muted-foreground">
+              {c.concepto}
+              {c.propuesto ? " · cargo propuesto" : ""}
+            </span>
+            <span className="tabular-nums">{money(c.monto)}</span>
+          </li>
+        ))}
         <li className="flex items-center justify-between py-2 text-sm font-semibold">
           <span>Total</span>
           <span className="tabular-nums">{money(k.total)}</span>
@@ -398,6 +415,34 @@ export function Saldo({
           </div>
         ))}
       </dl>
+      {p.cargos?.length ? (
+        <ul className="flex flex-col divide-y rounded-xl border border-dashed px-3">
+          {p.cargos.map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">
+                  {c.concepto} · {money(c.monto)}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Lo paga la clienta, como dice tu política de cobros. Se cobra si lo quiere otro día.
+                </span>
+              </span>
+              {c.propuesto ? <Badge variant="outline">Cargo propuesto</Badge> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {p.pagaCon && k.alRecibir && k.falta ? (
+        <p className="rounded-lg bg-warning-soft px-2.5 py-1.5 text-[13px]">
+          <b>Paga con {money(p.pagaCon)} en efectivo:</b> {p.entrega.repartidor ?? "el repartidor"} lleva vuelto de{" "}
+          {money(Math.max(0, p.pagaCon - k.falta))}. Se lo preguntó Sofi al cerrar el pedido.
+        </p>
+      ) : null}
+      {p.reglaCobro ? (
+        <p className="rounded-lg bg-muted px-2.5 py-1.5 text-[13px]">
+          <b>Pidió pagar al recibir.</b> {p.reglaCobro} Sofi se lo explicó y le dejó su link.
+        </p>
+      ) : null}
       {p.pagos.length ? (
         <ul className="flex flex-col divide-y">
           {p.pagos.map((g) => (
@@ -450,7 +495,9 @@ export function Saldo({
           ? `Paga en su link: ${CONFIRMA.link.toLowerCase()}.`
           : p.cobro === "captura"
             ? `Yape o Plin al número de la tienda: ${CONFIRMA.yape.toLowerCase()}. Si falta algo, Sofi lo cobra con su link.`
-            : "Paga al recibir: lo confirma el repartidor (efectivo, o POS con la foto del voucher)."}{" "}
+            : p.pagos.some((g) => g.medio === "link" && g.estado === "confirmado")
+              ? "Era al recibir y pagó antes con su link: ya no cobra en la puerta."
+              : "Paga al recibir: lo confirma el repartidor (efectivo, o POS con la foto del voucher). El día de la entrega, Sofi le recuerda el monto y le ofrece pagar ya con su link."}{" "}
         Sin pago confirmado no se entrega.
       </p>
     </Bloque>
@@ -1069,7 +1116,7 @@ export function PedidoPage({ pid }: { pid: string }) {
           <span>
             {CANAL[p.canal]} · {p.creado}
           </span>
-          <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].label}</Badge>
+          <EtapaBadge p={p} />
           {k.pagado ? (
             <Badge variant="success">Pagado</Badge>
           ) : k.falta && !["anulado", "por_pagar"].includes(p.paso) ? (

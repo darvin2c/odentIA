@@ -1,5 +1,6 @@
 import { addDays, formatDateLong, formatDayShort, weekDates } from "@odentia/ui-patterns"
 import { foto as _foto, RUBROS, type RubroId } from "../datos"
+import { alRecibirPara, COBRO_TIENDA, pagoAntes, vueltoDe } from "../pedidos/cobros"
 import { vueltaToca } from "../pedidos/vuelta"
 import {
   cuentas,
@@ -147,6 +148,8 @@ const FILAS: Fila[] = [
     1,
   ],
   ["0186", "Lucía Fernández", "Rímac", "Hoy", "2 a 6 p. m.", "Jhon", "por_salir", "link", 2],
+  // Pagó al recibir con la tarjeta, en el POS de Jhon.
+  ["0189", "Gloria Núñez", "Surquillo", "Hoy", "9 a 1 p. m.", "Jhon", "entregado", "al_recibir", 2],
   ["0170", "Sofía Medina", "Trujillo, por agencia", "Hoy", null, null, "preparando", "link", 0],
   // Viernes 28 y sábado 29.
   ["0171", "Ana Lucía Torres", "Surco", "Vie 28", "9 a 1 p. m.", "Kevin", "pagado", "link", 3],
@@ -163,6 +166,8 @@ const FILAS: Fila[] = [
   ],
   ["0173", "Katherine Paz", "Callao", "Vie 28", "2 a 6 p. m.", "Jhon", "pagado", "link", 5],
   ["0174", "Fátima Rojas", "Surquillo", "Vie 28", "2 a 6 p. m.", "Kevin", "por_pagar", "link", 2],
+  // Pidió pagar al recibir en Carabayllo, donde la tienda no lo acepta: Sofi le dejó su link.
+  ["0187", "Pilar Huamán", "Carabayllo", "Vie 28", "2 a 6 p. m.", "Kevin", "por_pagar", "link", 3],
   ["0175", "Liliana Chávez", "San Isidro", "Sáb 29", "9 a 1 p. m.", "Kevin", "pagado", "link", 4],
   [
     "0176",
@@ -268,6 +273,7 @@ function semana(rubro: RubroId): Pedido[] {
         cuando: dia === "Hoy" ? "Hoy · 11:40 a. m." : dia,
         quien: cobrado === "efectivo" ? (rep ?? "") : cobrado === "link" ? "la pasarela" : "Rosa",
       })
+    contraEntrega(p)
     if (agencia)
       p.toca = {
         texto: "Sale hoy por Olva a Trujillo: falta el número de envío.",
@@ -278,6 +284,116 @@ function semana(rubro: RubroId): Pedido[] {
   })
 }
 MAS_PEDIDOS.push(semana)
+
+const msg = (de: "clienta" | "sofi", texto: string, hora: string) => ({ de, texto, hora })
+
+/**
+ * Los casos del pago contra entrega, sobre los mismos pedidos de la semana:
+ * 1. Lorena (0155) paga en efectivo con S/ 200: Kevin lleva el vuelto.
+ * 2. Brenda (0169) era al recibir y pagó antes con su link, tras el recordatorio de Sofi.
+ * 3. Melissa (0151) no quiso recibirlo: vuelve a la tienda con Jhon y el viaje va a su saldo.
+ * 4. Jhon cierra su día con S/ 10 menos (`CIERRE_DECLARADO`).
+ * 5. Pilar (0187) pidió pagar al recibir en Carabayllo, donde la tienda no lo acepta.
+ * Además, el día de la entrega Sofi recuerda el monto a cada clienta que paga al recibir.
+ */
+function contraEntrega(p: Pedido) {
+  const n = p.clienta.split(" ")[0]!
+  const k = cuentas(p)
+  const pol = COBRO_TIENDA
+  const regla = alRecibirPara(pol, { nombre: n, zona: p.entrega.zona, monto: k.total, envio: p.entrega.envio, compras: 1 })
+  if (p.id === "0155") {
+    p.pagaCon = Math.ceil((k.falta + 1) / 100) * 100
+    p.chat.push(
+      msg("clienta", "¿Lo puedo pagar cuando llegue?", "Ayer · 7:40 p. m."),
+      msg("sofi", regla.sofi, "Ayer · 7:40 p. m."),
+      msg("clienta", `Con un billete de ${p.pagaCon}`, "Ayer · 7:42 p. m."),
+      msg(
+        "sofi",
+        `Listo, ${n}: Kevin lleva vuelto de ${money(p.pagaCon - k.falta)}. Llega hoy de 2 a 6 p. m.`,
+        "Ayer · 7:42 p. m.",
+      ),
+    )
+  }
+  if (p.id === "0169") {
+    p.chat.push(
+      msg(
+        "sofi",
+        `Hola, ${n}: hoy llega tu pedido de 2 a 6 p. m. Son ${money(k.total)} al recibir, en efectivo, Yape o tarjeta. Si prefieres, paga ya con tu link y así no esperas el vuelto.`,
+        "Hoy · 8:00 a. m.",
+      ),
+      msg("clienta", "Mejor lo pago ya 👍", "Hoy · 8:14 a. m."),
+    )
+    p.pagos.push({
+      id: nuevoId("pg"),
+      medio: "link",
+      monto: k.total,
+      estado: "confirmado",
+      cuando: "Hoy · 8:15 a. m.",
+      quien: "la pasarela",
+    })
+    p.eventos.push({
+      id: nuevoId("e"),
+      cuando: "Hoy · 8:15 a. m.",
+      actor: "pasarela",
+      quien: "La pasarela",
+      texto: "Pagó antes con su link, tras el recordatorio de Sofi. Ya no es al recibir.",
+    })
+  }
+  if (p.id === "0151") {
+    p.rechazo = {
+      motivo: "No quiso recibirlo",
+      quien: "Jhon",
+      cuando: "Hoy · 11:55 a. m.",
+      dijo: "Ya no lo necesito, me lo regalaron",
+    }
+    if (pol.viaje === "clienta")
+      p.cargos = [{ id: nuevoId("cg"), concepto: "El viaje que no se entregó", monto: p.entrega.envio, propuesto: true }]
+    p.eventos.push({
+      id: nuevoId("e"),
+      cuando: "Hoy · 11:55 a. m.",
+      actor: "repartidor",
+      quien: "Jhon",
+      texto: "«No se entregó»: no quiso recibirlo («Ya no lo necesito, me lo regalaron»). Lo trae de vuelta a la tienda.",
+    })
+    p.chat.push(
+      msg(
+        "sofi",
+        `${n}, Jhon no pudo dejarte tu pedido y vuelve a la tienda. Si lo quieres otro día, te lo llevamos: el viaje de hoy (${money(p.entrega.envio)}) se suma a tu saldo, como dice la política de la tienda.`,
+        "Hoy · 11:56 a. m.",
+      ),
+    )
+  }
+  if (p.id === "0189" && p.pagos[0]) {
+    p.pagos[0].medio = "pos"
+    p.pagos[0].quien = "Jhon"
+  }
+  if (p.id === "0187") {
+    const no = alRecibirPara(pol, { nombre: n, zona: p.entrega.zona, monto: k.total, envio: p.entrega.envio, compras: 0 })
+    p.reglaCobro = no.regla
+    p.separadoHasta = "Vie 28 · 12 p. m."
+    p.chat.push(
+      msg("clienta", "Hola, ¿puedo pagar al recibir? Vivo en Carabayllo", "Hoy · 9:30 a. m."),
+      msg("sofi", no.sofi, "Hoy · 9:30 a. m."),
+    )
+  }
+  // El día de la entrega, Sofi le recuerda el monto y le ofrece pagar ya con su link.
+  if (p.cobro === "al_recibir" && p.entrega.dia === "Hoy" && !p.rechazo && ["preparando", "por_salir", "en_camino"].includes(p.paso))
+    p.avisos.push({
+      id: nuevoId("a"),
+      cuando: "Hoy · 8:00 a. m.",
+      clave: "link",
+      estado: "enviado",
+      texto: `Hoy llega tu pedido. Son ${money(pagoAntes(p) ? cuentas(p).total : cuentas(p).falta)} al recibir${vueltoDe(p) ? ` (pagas con ${money(p.pagaCon!)}: el repartidor lleva tu vuelto)` : ""}. Si prefieres, paga ya con tu link y así no esperas el vuelto.`,
+    })
+}
+
+/**
+ * Lo que cada repartidor dice que entrega al cerrar su día, frente a lo que cobró en efectivo. Jhon
+ * entrega S/ 10 menos y dice por qué (caso 4 del pago contra entrega).
+ */
+export const CIERRE_DECLARADO: Record<string, { delta: number; motivo: string }> = {
+  Jhon: { delta: -10, motivo: "Di S/ 10 de vuelto de más en la 0154 (Yesenia)." },
+}
 
 /* ---------- Los recojos: salen de los cambios y devoluciones de Pedidos ---------- */
 
@@ -361,7 +477,7 @@ export const ESTADO: Record<
  * La etapa del pedido, con el mismo nombre y color que en Pedidos (`PASO`), más las salidas y el
  * recojo. Es lo que se ve en cada tarjeta; el cobro va aparte.
  */
-export type Etapa = Paso | "no_entregado" | "por_recoger" | "recogido"
+export type Etapa = Paso | "no_entregado" | "vuelve_tienda" | "en_tienda" | "por_recoger" | "recogido"
 export type Tono =
   | "warning"
   | "soft"
@@ -373,6 +489,8 @@ export type Tono =
 export const ETAPA: Record<Etapa, { label: string; corto: string; tono: Tono }> = {
   ...PASO,
   no_entregado: { label: "No se entregó", corto: "No se entregó", tono: "destructive" },
+  vuelve_tienda: { label: "Vuelve a la tienda", corto: "Vuelve", tono: "destructive" },
+  en_tienda: { label: "De vuelta en la tienda", corto: "En la tienda", tono: "secondary" },
   por_recoger: { label: "Por recoger", corto: "Por recoger", tono: "default" },
   recogido: { label: "Recogido", corto: "Recogido", tono: "success" },
 }
@@ -386,6 +504,8 @@ export const ORDEN_ETAPAS: Etapa[] = [
   "en_camino",
   "entregado",
   "no_entregado",
+  "vuelve_tienda",
+  "en_tienda",
   "por_recoger",
   "recogido",
   "anulado",
@@ -417,6 +537,8 @@ export interface Ent {
   /** «Pagado», «Falta S/ 169», «Al recibir S/ 169», «S/ 74 por confirmar». Aparte de la etapa. */
   cobro: { texto: string; tono: "ok" | "falta" | "espera" }
   falta: number
+  /** Al recibir en efectivo: el vuelto que lleva el repartidor. */
+  vuelto: number
   recojo?: Recojo
 }
 
@@ -434,6 +556,18 @@ function tocaDe(p: Pedido, estado: Estado, fecha: string, recojo?: Recojo): Ent[
   const n = p.clienta.split(" ")[0]
   if (FERIADOS[fecha] && !["entregado", "en_camino"].includes(estado))
     return { texto: "Quedó en un feriado: pásalo a otro día.", persona: true }
+  if (p.rechazo) {
+    const cargo = (p.cargos ?? []).reduce((a, c) => a + c.monto, 0)
+    return p.rechazo.enTienda
+      ? {
+          texto: `Volvió a la tienda. Sofi espera si ${n} lo quiere otro día${cargo ? `: el viaje (${money(cargo)}) va a su saldo` : ""}.`,
+          persona: false,
+        }
+      : {
+          texto: `${p.rechazo.motivo}${p.rechazo.dijo ? `: «${p.rechazo.dijo}»` : ""}. ${p.rechazo.quien} lo trae de vuelta; Sofi le preguntó si lo quiere otro día.`,
+          persona: false,
+        }
+  }
   if (recojo) {
     if (p.paso === "entregado") return { texto: `${rep} lo recogió y trajo la foto.`, persona: false }
     if (p.paso === "preparando" && recojo.lleva)
@@ -476,7 +610,7 @@ function tocaDe(p: Pedido, estado: Estado, fecha: string, recojo?: Recojo): Ent[
       }
     case "por_salir":
       return {
-        texto: `Sigue solo: ${rep} lo recoge y toca «Salí».${k.falta && k.alRecibir ? ` Cobra ${money(k.falta)} en la puerta.` : ""}`,
+        texto: `Sigue solo: ${rep} lo recoge y toca «Salí».${k.falta && k.alRecibir ? ` Cobra ${money(k.falta)} en la puerta${vueltoDe(p) ? ` y lleva vuelto de ${money(vueltoDe(p))}` : ""}.` : pagoAntes(p) ? ` ${n} pagó antes con su link: no cobra en la puerta.` : ""}`,
         persona: false,
       }
     case "en_camino":
@@ -518,10 +652,20 @@ export function entregaDe(p: Pedido, recojo?: Recojo): Ent | null {
   } else if (p.paso === "por_salir") estado = p.noEntregado ? "no_entregado" : "por_salir"
   else if (p.paso === "en_camino") estado = "en_camino"
   else estado = "entregado"
+  // No quiso recibirlo o no pagó: no sale otra vez sola, vuelve a la tienda.
+  if (p.rechazo) {
+    estado = "no_entregado"
+    boton = undefined
+  }
   // Quedó en un feriado (se anotó antes de marcarlo): lo decide una persona.
   if (FERIADOS[fecha] && !boton && !["entregado", "en_camino"].includes(estado))
     boton = { texto: "Pasar a otro día", tipo: "pasar" }
-  const cobro: Ent["cobro"] = recojo?.devuelve
+  const cargo = k.cargos
+  const cobro: Ent["cobro"] = p.rechazo
+    ? cargo
+      ? { texto: `Viaje ${money(cargo)} a su saldo`, tono: "espera" }
+      : { texto: "Sin cobro", tono: "ok" }
+    : recojo?.devuelve
     ? { texto: `Devolver ${money(recojo.devuelve)}`, tono: "espera" }
     : recojo
       ? { texto: "Sin cobro", tono: "ok" }
@@ -533,7 +677,11 @@ export function entregaDe(p: Pedido, recojo?: Recojo): Ent | null {
               tono: "falta",
             }
           : { texto: "Pagado", tono: "ok" }
-  const etapa: Etapa = recojo
+  const etapa: Etapa = p.rechazo
+    ? p.rechazo.enTienda
+      ? "en_tienda"
+      : "vuelve_tienda"
+    : recojo
     ? p.paso === "entregado"
       ? "recogido"
       : "por_recoger"
@@ -552,6 +700,7 @@ export function entregaDe(p: Pedido, recojo?: Recojo): Ent | null {
     ),
     cobro,
     falta: k.falta,
+    vuelto: vueltoDe(p),
     recojo,
   }
 }
@@ -613,6 +762,7 @@ export function paradaDeVuelta(p: Pedido): Ent | null {
       ? { texto: `Devolver ${money(recojo.devuelve)}`, tono: "espera" }
       : { texto: "Sin cobro", tono: "ok" },
     falta: 0,
+    vuelto: 0,
     recojo,
   }
 }
@@ -652,20 +802,29 @@ export function llena(list: Ent[], fecha: string, franja: string, faltas: Faltas
 /** El efectivo que un repartidor cobró hoy y lo que le falta cobrar en la puerta. */
 export function plataDe(list: Ent[], rep: string) {
   const hoy = list.filter((e) => e.fecha === HOY && e.p.entrega.repartidor === rep)
-  const cobrado = hoy
+  const cobros = hoy
     .flatMap((e) => e.p.pagos)
-    .filter(
-      (g) =>
-        g.estado === "confirmado" &&
-        g.medio === "efectivo" &&
-        g.quien === rep &&
-        g.cuando.startsWith("Hoy"),
-    )
-    .reduce((a, g) => a + g.monto, 0)
+    .filter((g) => g.estado === "confirmado" && g.quien === rep && g.cuando.startsWith("Hoy"))
+  const de = (m: string[]) => cobros.filter((g) => m.includes(g.medio)).reduce((a, g) => a + g.monto, 0)
+  const cobrado = de(["efectivo"])
   const porCobrar = hoy
-    .filter((e) => e.estado !== "entregado" && e.p.cobro === "al_recibir")
+    .filter((e) => e.estado !== "entregado" && !e.p.rechazo && e.p.cobro === "al_recibir")
     .reduce((a, e) => a + e.falta, 0)
-  return { cobrado, porCobrar, entregas: hoy }
+  const vuelto = hoy.filter((e) => e.estado !== "entregado").reduce((a, e) => a + e.vuelto, 0)
+  const cierre = CIERRE_DECLARADO[rep]
+  return {
+    /** El efectivo: lo que entrega a Caja. */
+    cobrado,
+    pos: de(["pos"]),
+    yape: de(["yape", "plin"]),
+    porCobrar,
+    vuelto,
+    /** Lo que dice que entrega al cerrar su día; si no declaró nada, lo que cobró. */
+    entrega: cierre ? cobrado + cierre.delta : cobrado,
+    motivo: cierre?.motivo,
+    vuelven: hoy.filter((e) => e.p.rechazo && !e.p.rechazo.enTienda),
+    entregas: hoy,
+  }
 }
 
 export const foto = _foto

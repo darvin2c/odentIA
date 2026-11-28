@@ -27,6 +27,7 @@ import { foto } from "../datos"
 import { ir, useRuta } from "../ruta"
 import { Anotar } from "./acciones"
 import { abrirCajon } from "./cajon"
+import { filtrosComunes, pasaFiltros } from "./filtros"
 import { EtapaBadge, TeTocaPanel } from "./tarjeta"
 import { LoQueAprende } from "./vuelta-ui"
 import {
@@ -169,6 +170,8 @@ function Lista() {
   const fDia = get("dia")
   const fCanal = get("canal")
   const fOrigen = get("origen")
+  const fRep = get("rep")
+  const fCobro = get("cobro")
   const sort = get("sort")
   const filtrados = all.filter(
     (p) =>
@@ -178,7 +181,8 @@ function Lista() {
           .includes(busca)) &&
       (!fDia || diaDe(p) === fDia) &&
       (!fCanal || p.canal === fCanal) &&
-      (!fOrigen || p.origen.k === fOrigen),
+      (!fOrigen || p.origen.k === fOrigen) &&
+      pasaFiltros(p, { rep: fRep, cobro: fCobro }),
   )
   const enVista = (v: Vista) =>
     filtrados.filter((p) =>
@@ -198,7 +202,7 @@ function Lista() {
             ? diaDe(a).localeCompare(diaDe(b)) * -1
             : Number(b.id) - Number(a.id),
       ),
-    [all, vista, busca, fDia, fCanal, fOrigen, sort],
+    [all, vista, busca, fDia, fCanal, fOrigen, fRep, fCobro, sort],
   )
 
   const filters: FilterDef[] = [
@@ -213,6 +217,8 @@ function Lista() {
         { value: "antes", label: "Días pasados" },
       ],
     },
+    // Los mismos Repartidor y Cobro que Despachos: las dos pantallas filtran igual.
+    ...filtrosComunes(all, false),
     {
       key: "canal",
       label: "Canal",
@@ -402,6 +408,11 @@ function Lista() {
             onSelect: () => ir("/clienta", { extra: "p=0165" }),
           },
           {
+            label: "Cobros: pago al recibir",
+            icon: <ScrollText aria-hidden />,
+            onSelect: () => ir("/configuracion/cobros"),
+          },
+          {
             label: "Ver la app del repartidor",
             icon: <Route aria-hidden />,
             onSelect: () => ir("/reparto"),
@@ -420,6 +431,7 @@ function Lista() {
           }))}
         />
         <FilterBar
+          className="filtros-dedo"
           filters={filters}
           sortOptions={[
             { value: "reciente", label: "Más recientes" },

@@ -28,6 +28,7 @@ import {
   type Pedido,
   usePedidos,
 } from "./modelo"
+import { cobroDe, MOTIVOS_NO, noRecibio, vueltoDe } from "./cobros"
 import { recogido } from "./vuelta"
 
 type Forma = "link" | "efectivo" | "yape" | "pos"
@@ -41,12 +42,16 @@ interface Conf {
   titulo: string
   filas: [string, ReactNode][]
   boton: string
-  hacer: () => void
+  hacer: (motivo?: string) => void
   peligro?: boolean
+  /** Si hay que decir por qué: «No se entregó» pide el motivo, y cada motivo dice qué pasa. */
+  motivos?: { valor: string; pasa: string }[]
 }
 const Confirma = createContext<(c: Conf) => void>(() => {})
 
 function HojaConfirmar({ c, onClose }: { c: Conf; onClose: () => void }) {
+  const [motivo, setMotivo] = useState<string | null>(null)
+  const pasa = c.motivos?.find((m) => m.valor === motivo)?.pasa
   return (
     <div className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40" role="presentation" onClick={onClose}>
       <div
@@ -65,7 +70,26 @@ function HojaConfirmar({ c, onClose }: { c: Conf; onClose: () => void }) {
               <dd className="min-w-0 text-right font-medium">{v}</dd>
             </div>
           ))}
+          {pasa ? (
+            <div className="flex items-start justify-between gap-3 px-3 py-2.5">
+              <dt className="shrink-0 text-muted-foreground">Qué pasa</dt>
+              <dd className="min-w-0 text-right font-medium">{pasa}</dd>
+            </div>
+          ) : null}
         </dl>
+        {c.motivos ? (
+          <>
+            <span id="motivo-no" className="text-xs font-medium">
+              ¿Qué pasó?
+            </span>
+            <RadioChips
+              aria-labelledby="motivo-no"
+              value={motivo ?? ""}
+              options={c.motivos.map((m) => ({ value: m.valor, label: m.valor }))}
+              onChange={setMotivo}
+            />
+          </>
+        ) : null}
         <div className="flex gap-2">
           <Button variant="outline" className="h-12 flex-1" onClick={onClose}>
             Volver
@@ -73,8 +97,9 @@ function HojaConfirmar({ c, onClose }: { c: Conf; onClose: () => void }) {
           <Button
             variant={c.peligro ? "destructive" : "default"}
             className="h-12 flex-[2] whitespace-nowrap"
+            disabled={!!c.motivos && !motivo}
             onClick={() => {
-              c.hacer()
+              c.hacer(motivo ?? undefined)
               onClose()
             }}
           >
@@ -99,7 +124,7 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
   const confirmar = useContext(Confirma)
   const k = cuentas(p)
   const [forma, setForma] = useState<Forma | null>(null)
-  const [recibi, setRecibi] = useState("")
+  const [recibi, setRecibi] = useState(p.pagaCon && vueltoDe(p) ? String(p.pagaCon) : "")
   const [foto, setFoto] = useState(false)
   const esperaTienda = p.pagos.some((x) => x.estado === "por_confirmar")
   const confirmado = k.falta === 0 && k.porConfirmar === 0
@@ -152,6 +177,11 @@ function Cobrar({ p, onClose }: { p: Pedido; onClose: () => void }) {
           {k.confirmado && !confirmado ? (
             <span className="text-xs text-muted-foreground">
               Ya pagó {money(k.confirmado)} antes
+            </span>
+          ) : null}
+          {vueltoDe(p) && !confirmado ? (
+            <span className="mt-1 block rounded-lg bg-warning-soft px-2 py-1 text-sm font-medium">
+              Paga con {money(p.pagaCon!)}: lleva vuelto de {money(vueltoDe(p))}
             </span>
           ) : null}
         </p>
@@ -438,7 +468,9 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
             {p.entrega.direccion}
           </span>
         </span>
-        {p.paso === "entregado" ? (
+        {p.rechazo ? (
+          <Badge variant="destructive">Vuelve a la tienda</Badge>
+        ) : p.paso === "entregado" ? (
           <Badge variant="success">Entregado</Badge>
         ) : pagado ? (
           <Badge variant="success">Pagado</Badge>
@@ -446,13 +478,24 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
           <Badge variant="warning">Cobrar {money(k.falta || k.porConfirmar)}</Badge>
         )}
       </span>
+      {vueltoDe(p) && !p.rechazo ? (
+        <span className="flex items-center gap-1.5 rounded-lg bg-warning-soft px-2 py-1 text-xs font-medium">
+          <Banknote className="size-3.5" aria-hidden />
+          Lleva vuelto de {money(vueltoDe(p))} · paga con {money(p.pagaCon!)}
+        </span>
+      ) : null}
+      {p.rechazo ? (
+        <span className="rounded-lg bg-destructive/10 px-2 py-1 text-xs">
+          {p.rechazo.motivo}. Tráelo de vuelta a la tienda y entrégalo con tu plata.
+        </span>
+      ) : null}
       {p.cambioDe && p.lineas.some((l) => l.vuelve) ? (
         <span className="rounded-lg bg-primary-soft px-2 py-1 text-xs text-primary-soft-foreground">
           Lleva {p.lineas.find((l) => !l.vuelve)?.variante} · recoge{" "}
           {p.lineas.find((l) => l.vuelve)?.variante}, con su foto
         </span>
       ) : null}
-      {p.paso === "en_camino" ? (
+      {p.paso === "en_camino" && !p.rechazo ? (
         <span className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" aria-label={`Llamar a ${n}`}>
             <Phone aria-hidden />
@@ -465,39 +508,53 @@ function Entrega({ p, onCobrar }: { p: Pedido; onCobrar: () => void }) {
             variant="outline"
             onClick={() =>
               confirmar({
-                titulo: "¿No estaba?",
+                titulo: "¿No se entregó?",
                 filas: [
                   ["A quién", `${nombreCorto(p)} · ${p.id}`],
                   ["Dónde", p.entrega.direccion],
-                  ["Qué pasa", "Vuelve contigo. Sofi le escribe para llevárselo mañana."],
                 ],
-                boton: "Sí, no estaba",
+                motivos: MOTIVOS_NO.map((m) => ({
+                  valor: m,
+                  pasa:
+                    m === MOTIVOS_NO[0]
+                      ? "Vuelve contigo. Sofi le escribe para llevárselo mañana."
+                      : `Lo traes de vuelta a la tienda. Sofi le pregunta si lo quiere otro día; ${cobroDe(rubro).viaje === "clienta" ? `el viaje (${money(p.entrega.envio)}) va a su saldo, como dice la política` : "el viaje lo paga la tienda"}.`,
+                })),
+                boton: "Sí, no se entregó",
                 peligro: true,
-                hacer: () =>
-              mover(
-                rubro,
-                p.id,
-                (x) => {
-                  x.paso = "por_salir"
-                  x.noEntregado = "No estaba: nadie abrió."
-                  x.entrega.dia = "Vie 28"
-                  avisar(
-                    x,
-                    "falla",
-                    `No te encontramos en casa, ${p.clienta.split(" ")[0]}. ¿Te lo llevamos mañana entre ${p.entrega.franja}?`,
+                hacer: (motivo) => {
+                  if (motivo && motivo !== MOTIVOS_NO[0]) {
+                    noRecibio(rubro, p, "Kevin", motivo)
+                    toast.info(`${nombreCorto(p)}: vuelve a la tienda contigo.`, {
+                      description: "Sofi ya le escribió. Entrégalo en la tienda con tu plata.",
+                    })
+                    return
+                  }
+                  mover(
+                    rubro,
+                    p.id,
+                    (x) => {
+                      x.paso = "por_salir"
+                      x.noEntregado = "No estaba: nadie abrió."
+                      x.entrega.dia = "Vie 28"
+                      avisar(
+                        x,
+                        "falla",
+                        `No te encontramos en casa, ${p.clienta.split(" ")[0]}. ¿Te lo llevamos mañana entre ${p.entrega.franja}?`,
+                      )
+                    },
+                    {
+                      actor: "repartidor",
+                      quien: "Kevin",
+                      texto: "«No estaba»: nadie abrió. Sofi le escribió para otro día.",
+                      paso: "por_salir",
+                    },
                   )
                 },
-                {
-                  actor: "repartidor",
-                  quien: "Kevin",
-                  texto: "«No estaba»: nadie abrió. Sofi le escribió para otro día.",
-                  paso: "por_salir",
-                },
-              ),
               })
             }
           >
-            No estaba
+            No se entregó
           </Button>
         </span>
       ) : null}
@@ -615,10 +672,12 @@ function App() {
       (p.vuelta.repartidor ?? "Kevin") === "Kevin" &&
       p.vuelta.dia === "Hoy",
   )
-  const efectivo = all
-    .flatMap((p) => p.pagos)
-    .filter((g) => g.medio === "efectivo" && g.quien === "Kevin" && g.cuando.startsWith("Hoy"))
-    .reduce((a, g) => a + g.monto, 0)
+  const hoy = all.flatMap((p) => p.pagos).filter((g) => g.quien === "Kevin" && g.cuando.startsWith("Hoy"))
+  const de = (m: Medio[]) => hoy.filter((g) => m.includes(g.medio)).reduce((a, g) => a + g.monto, 0)
+  const efectivo = de(["efectivo"])
+  const pos = de(["pos"])
+  const yape = de(["yape", "plin"])
+  const vuelto = mias.filter((x) => x.paso !== "entregado").reduce((a, x) => a + vueltoDe(x), 0)
   const p = cobrando ? all.find((x) => x.id === cobrando) : undefined
   return (
     <Confirma.Provider value={setConf}>
@@ -639,6 +698,12 @@ function App() {
             {R.store.name}
             <span className="font-normal text-muted-foreground">· {mias.length + recojos.length}</span>
           </span>
+          {vuelto ? (
+            <p className="flex items-center gap-2 rounded-xl bg-warning-soft px-3 py-2 text-sm">
+              <Banknote className="size-4 shrink-0" aria-hidden />
+              Sal con {money(vuelto)} en sencillo para los vueltos.
+            </p>
+          ) : null}
           {porSalir.length ? (
             <Button
               onClick={() =>
@@ -711,9 +776,14 @@ function App() {
           </div>
         </section>
       </div>
-      <div className="flex items-center justify-between border-t bg-card px-4 py-3 text-sm">
-        <span className="text-muted-foreground">Mi plata hoy · efectivo</span>
-        <b className="tabular-nums">{money(efectivo)}</b>
+      <div className="flex flex-col gap-0.5 border-t bg-card px-4 py-2.5 text-sm">
+        <span className="flex items-center justify-between">
+          <span className="text-muted-foreground">Mi plata hoy · entrego a Caja</span>
+          <b className="tabular-nums">{money(efectivo)}</b>
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Efectivo {money(efectivo)} · POS {money(pos)} · Yape o Plin {money(yape)}
+        </span>
       </div>
       {p ? <Cobrar p={p} onClose={() => setCobrando(null)} /> : null}
       {conf ? <HojaConfirmar c={conf} onClose={() => setConf(null)} /> : null}

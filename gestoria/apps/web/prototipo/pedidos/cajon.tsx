@@ -11,7 +11,18 @@ import {
   useIsMobile,
 } from "@odentia/ui"
 import { DetailDrawer, RadioChips } from "@odentia/ui-patterns"
-import { Bike, Camera, Check, CircleAlert, MoreHorizontal, PackageOpen, Repeat, UserRound } from "lucide-react"
+import {
+  Banknote,
+  Bike,
+  Camera,
+  Check,
+  CircleAlert,
+  MoreHorizontal,
+  PackageOpen,
+  Repeat,
+  Undo2,
+  UserRound,
+} from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { foto, RUBROS } from "../datos"
 import { elegirSolo, mostrarCobro, PasarHoja, pasar, SofiAvisa, textoAviso } from "../despachos/hojas"
@@ -34,6 +45,7 @@ import {
 } from "../despachos/semana"
 import { ir, useRuta } from "../ruta"
 import { AccionDrawer, empacar } from "./acciones"
+import { pagoAntes, useCobro, vueltoDe } from "./cobros"
 import { acciones, Bloque, Carrito, EntregaB, OrigenB, Pasos, queSigue, Saldo } from "./detalle"
 import { Ampliable, FotoMarcada, ImagenPago } from "./ejemplos"
 import { Botones, CajonProvider } from "./hoja"
@@ -44,6 +56,7 @@ import {
   cuentas,
   money,
   mover,
+  nuevoId,
   PASO,
   type Pedido,
   pedidosDe,
@@ -345,6 +358,7 @@ export function AccionCajon({
       </div>
       <CajonProvider value={{ botones, volver }}>{panel}</CajonProvider>
       {!persona && a === undefined && r ? <RecojoCorto e={e!} /> : null}
+      {(a === undefined || a === "empacar") && !r ? <PuertaB p={real} /> : null}
       {/* En escritorio, los botones van aquí, bajo la acción; en el celular, fijos al pie. */}
       {isMobile ? null : <div ref={setBotones} className="empty:hidden" />}
     </section>
@@ -446,6 +460,141 @@ export function AccionCajon({
         </div>
       </div>
     </DetailDrawer>
+  )
+}
+
+/* ---------- El pago contra entrega ---------- */
+
+/**
+ * En la puerta: lo que cobra el repartidor, con cuánto paga la clienta y el vuelto que lleva; si
+ * pagó antes con su link; o, si no lo recibió, qué pasa con el producto y con el viaje.
+ */
+function PuertaB({ p }: { p: Pedido }) {
+  const { rubro } = useRuta()
+  const pol = useCobro(rubro)
+  const k = cuentas(p)
+  const n = p.clienta.split(" ")[0]
+  const rep = p.entrega.repartidor ?? "El repartidor"
+  if (p.rechazo) {
+    const cargo = k.cargos
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-destructive/40 p-3 text-sm">
+        <b className="flex items-center gap-2">
+          <Undo2 className="size-4 text-destructive" aria-hidden />
+          No se entregó: {p.rechazo.motivo.toLowerCase()}
+        </b>
+        {p.rechazo.dijo ? <span className="text-muted-foreground">{n} dijo: «{p.rechazo.dijo}»</span> : null}
+        <dl className="flex flex-col divide-y rounded-lg border">
+          <div className="flex justify-between gap-3 px-3 py-2">
+            <dt className="text-muted-foreground">El producto</dt>
+            <dd className="text-right font-medium">
+              {p.rechazo.enTienda ? "Ya está en la tienda" : `Vuelve a la tienda con ${p.rechazo.quien}`}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3 px-3 py-2">
+            <dt className="text-muted-foreground">El viaje</dt>
+            <dd className="text-right font-medium">
+              {cargo ? `${money(cargo)} a su saldo (cargo propuesto)` : "Lo paga la tienda"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3 px-3 py-2">
+            <dt className="text-muted-foreground">Sofi</dt>
+            <dd className="text-right font-medium">Le preguntó si lo quiere otro día</dd>
+          </div>
+        </dl>
+        <span className="text-xs text-muted-foreground">
+          Según tu política de cobros: el viaje que no se entregó lo paga {pol.viaje === "clienta" ? "la clienta" : "la tienda"}.
+        </span>
+      </div>
+    )
+  }
+  if (p.paso === "anulado" || p.paso === "entregado") return null
+  if (p.reglaCobro) {
+    const dijo = [...p.chat].reverse().find((m) => m.de === "sofi")?.texto
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border p-3 text-sm">
+        <b className="flex items-center gap-2">
+          <Banknote className="size-4 text-primary" aria-hidden />
+          Pidió pagar al recibir
+        </b>
+        <span>
+          <b>La regla de la tienda:</b> {p.reglaCobro}
+        </span>
+        {dijo ? <span className="rounded-lg bg-muted px-2.5 py-1.5">Sofi: «{dijo}»</span> : null}
+        <span className="text-xs text-muted-foreground">
+          Sale cuando pague su link. Las zonas que aceptan pago al recibir están en Configuración › Cobros.
+        </span>
+      </div>
+    )
+  }
+  if (pagoAntes(p))
+    return (
+      <p className="flex items-start gap-2 rounded-xl bg-success-soft px-3 py-2.5 text-sm">
+        <Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+        <span>
+          <b>Era al recibir y pagó antes con su link.</b> Sofi le recordó el monto esta mañana y le ofreció pagar ya;
+          {` ${rep}`} ya no cobra en la puerta.
+        </span>
+      </p>
+    )
+  if (!k.alRecibir || !k.falta) return null
+  const vuelto = vueltoDe(p)
+  const hoy = p.entrega.dia === "Hoy"
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border p-3 text-sm">
+      <b className="flex items-center gap-2">
+        <Banknote className="size-4 text-primary" aria-hidden />
+        En la puerta
+      </b>
+      <dl className="flex flex-col divide-y rounded-lg border">
+        <div className="flex justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">{rep} cobra</dt>
+          <dd className="font-heading text-lg font-bold tabular-nums">{money(k.falta)}</dd>
+        </div>
+        {p.pagaCon ? (
+          <div className="flex justify-between gap-3 px-3 py-2">
+            <dt className="text-muted-foreground">{n} paga con</dt>
+            <dd className="font-medium tabular-nums">{money(p.pagaCon)} en efectivo</dd>
+          </div>
+        ) : null}
+        {vuelto ? (
+          <div className="flex justify-between gap-3 bg-warning-soft px-3 py-2">
+            <dt className="font-medium">Lleva vuelto de</dt>
+            <dd className="font-heading text-lg font-bold tabular-nums">{money(vuelto)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <span className="text-xs text-muted-foreground">
+        {p.pagaCon ? "Sofi le preguntó con cuánto paga al cerrar el pedido. " : ""}
+        {hoy
+          ? "Hoy a las 8 a. m. Sofi le recordó el monto y le ofreció pagar ya con su link, para no esperar el vuelto."
+          : "El día de la entrega, Sofi le recuerda el monto y le ofrece pagar ya con su link."}
+      </span>
+      <Button
+        variant="outline"
+        className="propuesta h-11 self-start"
+        onClick={() => {
+          mover(
+            rubro,
+            p.id,
+            (x) => {
+              x.pagos.push({
+                id: nuevoId("pg"),
+                medio: "link",
+                monto: cuentas(x).falta,
+                estado: "confirmado",
+                cuando: "Hoy · ahora",
+                quien: "la pasarela",
+              })
+            },
+            { actor: "pasarela", quien: "La pasarela", texto: "Pagó antes con su link. Ya no es al recibir." },
+          )
+          toast.success(`${n} pagó con su link: ${rep} ya no cobra en la puerta.`)
+        }}
+      >
+        Prototipo: {n} paga ya con su link
+      </Button>
+    </div>
   )
 }
 

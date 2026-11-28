@@ -139,3 +139,27 @@
     --notice-strip-h: 2.75rem;
   }
 }
+
+/*
+ * El FilterBar común, con el dedo: el buscador, cada filtro, su «×» y las opciones a 44 px. En la
+ * app va en un PR de shared (tablero «Para programar»); aquí se ajusta sin tocar shared/.
+ */
+@media (max-width: 767px) {
+  .filtros-dedo [data-filter-row="mobile"] input {
+    min-height: 44px;
+  }
+  .filtros-dedo [data-filter-row="mobile"] button {
+    min-height: 44px;
+  }
+  .filtros-dedo [data-filter-row="mobile"] .inline-flex.rounded-full.border {
+    height: 46px;
+  }
+  .filtros-dedo [data-filter-row="mobile"] button[aria-label^="Limpiar:"] {
+    width: 44px;
+    height: 44px;
+    margin-left: 0;
+  }
+  [role="listbox"] > button[role="option"] {
+    min-height: 44px;
+  }
+}
