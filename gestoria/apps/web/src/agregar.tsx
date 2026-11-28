@@ -462,7 +462,15 @@ export function AddFromPhotos({
         params: { id: store.id, productId },
       })
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "No se pudo guardar")
+      // Las fotos van en una carga de la tienda: si alguien la creó o la descartó desde «Cargar
+      // muchos», el servidor dice quién; aquí se dice dónde y cómo seguir.
+      setError(
+        problem instanceof ApiError && problem.code === "LOAD_CLOSED"
+          ? `Desde «Cargar muchos»: ${problem.message.replace(" Abre otra para seguir.", " Cierra y vuelve a elegir las fotos.")}`
+          : problem instanceof Error
+            ? problem.message
+            : "No se pudo guardar",
+      )
     } finally {
       setSaving(false)
     }
