@@ -241,17 +241,80 @@
       "breakpoints": true
     },
     {
-      "idx": 41,
+      "idx": 50,
       "version": "7",
-      "when": 1795809046528,
-      "tag": "0041_equipo_y_repartidores",
+      "when": 1795812740399,
+      "tag": "0050_el_perfil_de_la_clienta",
       "breakpoints": true
     },
     {
-      "idx": 42,
+      "idx": 51,
       "version": "7",
-      "when": 1795809055478,
-      "tag": "0042_reglas_equipo_y_repartidores",
+      "when": 1795812754479,
+      "tag": "0051_reglas_perfil_de_la_clienta",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795844732033,
+      "tag": "0052_el_link_libre",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795845272533,
+      "tag": "0053_los_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795845285532,
+      "tag": "0054_reglas_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795847291935,
+      "tag": "0055_entregas_por_distrito",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795847298948,
+      "tag": "0056_reglas_entregas",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795848512804,
+      "tag": "0057_lo_que_sabe",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795848520156,
+      "tag": "0058_reglas_lo_que_sabe",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795849083145,
+      "tag": "0059_equipo_y_repartidores",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795849090305,
+      "tag": "0060_reglas_equipo_y_repartidores",
       "breakpoints": true
     }
   ]

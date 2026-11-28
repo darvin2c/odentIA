@@ -198,9 +198,9 @@
     },
     {
       "id": "lo-que-debe-saber",
-      "que": "Pregunta algo que está en «Lo que debe saber»",
+      "que": "Pregunta algo que está en «Lo que sabe»",
       "turnos": ["¿Hasta qué hora atienden el sábado? ¿Puedo cambiar la talla si no me queda?"],
-      "espera": { "dice": ["7", "7 d[ií]as"] }
+      "espera": { "herramientas": ["leer_lo_que_sabe"], "dice": ["7", "7 d[ií]as"] }
     },
     {
       "id": "sumar-al-despacho",
@@ -358,6 +358,87 @@
         "Sí, confirmo así"
       ],
       "espera": { "herramientas": ["cotizar"], "pedido": "por_salir", "cedido_maximo": 0 }
+    },
+    {
+      "id": "baja-ya-no-me-mandes",
+      "que": "Ya aceptó y compró antes; pide que no le manden más: anota la baja y responde la frase fija, sin ofrecer nada",
+      "antes": [{ "dias": 30 }],
+      "permiso_antes": { "estado": "si", "dijo": "Sí, avísame cuando llegue algo" },
+      "turnos": ["ya no me mandes estas cosas porfa"],
+      "espera": {
+        "herramientas": ["anotar_baja"],
+        "dice_exacto": "Entendido. No te enviaremos más promociones. Los avisos de tus pedidos sí te seguirán llegando. Si algún día las quieres de nuevo, escríbeme «quiero promociones».",
+        "permiso": "baja",
+        "pedido": "ninguno",
+        "persona": false
+      }
+    },
+    {
+      "id": "no-es-baja-sin-plata",
+      "que": "Dice que ahora no tiene plata: no es una baja, no anota nada",
+      "antes": [{ "dias": 30 }],
+      "permiso_antes": { "estado": "si", "dijo": "Sí, avísame cuando llegue algo" },
+      "turnos": ["Ahora no tengo plata"],
+      "espera": { "no_herramientas": ["anotar_baja", "anotar_permiso"], "permiso": "si" }
+    },
+    {
+      "id": "no-es-baja-ya-te-pago",
+      "que": "«Para, ya te pago» en medio del pedido: no es una baja",
+      "antes": [{ "dias": 30 }],
+      "permiso_antes": { "estado": "si", "dijo": "Sí, avísame cuando llegue algo" },
+      "turnos": [
+        "Hola, quiero la sandalia negra en 37, la recojo en la tienda. Soy Lucía Paz",
+        "Para, ya te pago"
+      ],
+      "espera": { "no_herramientas": ["anotar_baja", "anotar_permiso"], "permiso": "si" }
+    },
+    {
+      "id": "no-es-baja-para-mi-hermana",
+      "que": "«Es para mi hermana»: no es una baja",
+      "antes": [{ "dias": 30 }],
+      "permiso_antes": { "estado": "si", "dijo": "Sí, avísame cuando llegue algo" },
+      "turnos": ["¿Tienen la sandalia beige en 36? Es para mi hermana"],
+      "espera": {
+        "herramientas": ["buscar_productos"],
+        "no_herramientas": ["anotar_baja", "anotar_permiso"],
+        "permiso": "si"
+      }
+    },
+    {
+      "id": "permiso-primera-compra",
+      "que": "Primera compra: ya armado el pedido le pregunta una sola vez si quiere novedades, y anota su sí",
+      "turnos": [
+        "Hola, quiero la zapatilla negra en 39",
+        "Para Surco, Av. Primavera 123. Soy Carla Mendoza",
+        "Sí, confirmo",
+        "Mándame el link",
+        "Sí, avísame porfa"
+      ],
+      "espera": {
+        "herramientas": ["armar_pedido", "anotar_permiso"],
+        "una_vez": ["(algo nuevo|novedades)"],
+        "no_antes": { "dice": "(algo nuevo|novedades)", "herramienta": "armar_pedido" },
+        "permiso": "si",
+        "pedido": "por_pagar"
+      }
+    },
+    {
+      "id": "permiso-ya-acepto",
+      "que": "Ya aceptó antes (primera compra): no le vuelve a preguntar",
+      "permiso_antes": { "estado": "si", "dijo": "Sí, avísame cuando llegue algo" },
+      "turnos": [
+        "Hola, quiero la zapatilla negra en 39",
+        "Para Surco, Av. Primavera 123. Soy Carla Mendoza",
+        "Sí, confirmo",
+        "Mándame el link"
+      ],
+      "espera": {
+        "herramientas": ["armar_pedido"],
+        "no_dice": ["(algo nuevo|novedades)"],
+        "no_herramientas": ["anotar_permiso", "anotar_baja"],
+        "permiso": "si",
+        "pedido": "por_pagar"
+      }
     }
   ]
 }

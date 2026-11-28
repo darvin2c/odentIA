@@ -24,10 +24,12 @@ import Acordeon from "../components/Acordeon.astro"
 import Chat from "../components/escenas/Chat.astro"
 import Mapa from "../components/escenas/Mapa.astro"
 import Venta from "../components/escenas/Venta.astro"
+import Boleta from "../components/escenas/Boleta.astro"
 import Base from "../layouts/Base.astro"
 import { faqLd, PREGUNTAS, RUBROS } from "../lib/contenido"
 import { cta, LOGIN_URL, SITE_URL } from "../lib/sitio"
 import "../styles/inicio.css"
+import "../styles/arm.css"
 
 const webp = (src: ImageMetadata, widths: number[]) => getImage({ src, widths, format: "webp" })
 const [pedidosW, clientaW, porConfirmarW, pagadoW] = await Promise.all([
@@ -83,14 +85,14 @@ const app = {
   operatingSystem: "Web",
   url: `${SITE_URL}/`,
   description:
-    "Vendedora con IA para tiendas que venden por WhatsApp, Instagram y Messenger: Sofi atiende, negocia sin bajar del precio mínimo y cobra antes de entregar.",
+    "El primer ARM para tiendas que venden por chat: agentes de IA que llevan la tienda de la venta a la entrega. Sofi atiende WhatsApp, Instagram y Messenger, negocia sin bajar del precio mínimo y cobra antes de entregar.",
   offers: { "@type": "Offer", price: "19", priceCurrency: "USD" },
 }
 ---
 <Base
   sofiPropia
-  title="gestorIA: vendedora con IA para tiendas por chat"
-  description="Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar. USD 19 al mes, que vuelven como saldo."
+  title="gestorIA: el primer ARM para tiendas que venden por chat"
+  description="De la venta a la entrega, en automático: Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu mínimo y cobra antes de entregar. Un solo plan: USD 19 al mes, que vuelven como saldo."
   ld={[app, faqLd(PREGUNTAS)]}
 >
   <!-- ============================================================ héroe -->
@@ -98,13 +100,13 @@ const app = {
     <div class="heroe__fondo" aria-hidden="true"><span class="heroe__luz"></span></div>
     <div class="marco heroe__marco">
       <div class="heroe__texto" data-heroe-texto>
-        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span>Para tiendas que venden por chat</p>
+        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span><a href="/arm">El primer ARM para tiendas que venden por chat</a></p>
         <h1 id="heroe-h" class="heroe__h">
-          <span class="linea"><span>Tu tienda vende</span></span>
-          <span class="linea"><span>por chat. Sofi</span></span>
-          <span class="linea"><span><span class="cur">cierra</span> la venta.</span></span>
+          <span class="linea"><span>De la venta</span></span>
+          <span class="linea"><span>a la entrega,</span></span>
+          <span class="linea"><span><span class="cur">en automático.</span></span></span>
         </h1>
-        <p class="heroe__bajada" data-entra>Sofi es la vendedora con IA de tu tienda. Atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar.</p>
+        <p class="heroe__bajada" data-entra>gestorIA es un ARM: agentes de IA que llevan tu tienda. Sofi vende y cobra en tu WhatsApp, Instagram y Messenger sin bajar de tu mínimo, y Argos cuida tu stock y a tus clientas. Tú solo empacas. Un solo plan, sin paquetes ni letra chica.</p>
         <div class="heroe__botones" data-entra>
           <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
           <a class="boton boton--fantasma" href="#venta">Mira cómo vende</a>
@@ -117,6 +119,19 @@ const app = {
       </div>
 
       <Chat />
+    </div>
+  </section>
+
+  <!-- ============================================================ la cuenta de un pedido -->
+  <section class="cuenta" id="cuenta" aria-labelledby="cuenta-h">
+    <div class="marco cuenta__marco">
+      <div class="cuenta__texto">
+        <p class="etiqueta">De la venta a la entrega</p>
+        <h2 id="cuenta-h" class="titulo-2">Saca la cuenta de un pedido: <span class="cur">el total lo hacemos nosotros.</span></h2>
+        <p class="bajada">Esta es la boleta de una venta de Calzados Rosa. Mira quién hizo cada paso: de los 8, a tu equipo le tocaron 2. Eso es un ARM.</p>
+        <a class="enlace cuenta__enlace" href="/arm">Qué es un ARM y en qué se diferencia de un CRM →</a>
+      </div>
+      <Boleta />
     </div>
   </section>
 
@@ -300,7 +315,7 @@ const app = {
       <article class="plan" data-plan>
         <p class="plan__rotulo">Tu tienda en gestorIA</p>
         <h2 id="precio-h" class="plan__precio"><span class="plan__moneda">USD</span><span class="plan__cifra" data-cuenta="19">19</span><span class="plan__mes">al mes</span></h2>
-        <p class="plan__saldo"><b>Vuelven como saldo.</b> De ahí sale el 1 % del total de cada venta completada (pagada y entregada), venga de donde venga. Lo que devuelves se descuenta.</p>
+        <p class="plan__saldo"><b>Y vuelven como saldo.</b> Te cobramos por lo que vendes: el 1 % de cada venta que cierras, y sale de ahí. ¿Te devuelven algo? Ese 1 % se descuenta.</p>
         <ul class="plan__lista">
           <li><Fragment set:html={check} />Sofi en WhatsApp, Instagram y Messenger</li>
           <li><Fragment set:html={check} />Tu catálogo con precio mínimo por producto</li>

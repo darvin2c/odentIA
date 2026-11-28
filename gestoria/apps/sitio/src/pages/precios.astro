@@ -23,8 +23,8 @@ const incluye = [
 ]
 const preguntas: Pregunta[] = [
   [
-    "¿Qué cuenta para el 1 %?",
-    "Cada venta completada, del pedido a la entrega, venga de donde venga: lo que vende Sofi en el chat, el catálogo, una campaña o lo que anota tu equipo. Cuenta cuando está pagada y entregada (o despachada por agencia), sobre el total con el envío, y lo que devuelves se descuenta.",
+    "¿De qué ventas sale el 1 %?",
+    "De todas las que cierras: las que vende Sofi en el chat, las del catálogo, las de una campaña o las que anota tu equipo. Se cobra cuando la venta está pagada y entregada (o despachada por agencia), sobre el total con el envío. Lo que te devuelven se descuenta.",
   ],
   [
     "¿Y si el 1 % pasa de USD 19?",
@@ -46,14 +46,14 @@ const check =
 ---
 <Base
   title="Precios de gestorIA: USD 19 al mes que vuelven como saldo"
-  description="Un plan: USD 19 al mes que vuelven a tu tienda como saldo, y de ahí el 1 % del total de cada venta completada. Pagas la diferencia solo si el saldo se acaba."
+  description="Te cobramos por lo que vendes: USD 19 al mes que vuelven a tu tienda como saldo y, de ahí, el 1 % de cada venta que cierras. Pagas la diferencia solo si el saldo se acaba."
   ld={[oferta, faqLd(preguntas)]}
 >
   <PaginaHeroe
     etiqueta="Precios"
-    titulo="USD 19 al mes,"
-    acento="que vuelven como saldo."
-    bajada="De ese saldo sale el 1 % del total de cada venta completada, venga de donde venga. Pagas la diferencia solo si el saldo se acaba. Lo que devuelves se descuenta."
+    titulo="Te cobramos por lo que vendes,"
+    acento="no por lo que prometemos."
+    bajada="USD 19 al mes que vuelven a tu tienda como saldo. De ahí sale el 1 % de cada venta que cierras, con el envío. ¿Te devuelven algo? Ese 1 % se descuenta. Pagas la diferencia solo si el saldo se acaba."
     humor="feliz"
     segundo={{ href: "/preguntas", label: "Ver las preguntas" }}
   />

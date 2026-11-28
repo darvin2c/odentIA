@@ -11,9 +11,9 @@
  * (la actual es `CLAVE`; la nueva no se guarda) y activar los dos pasos con el código
  * `CODIGO_TOTP`. `GET /__cuenta` dice lo que pidió la pantalla. Sin la red: ningún proveedor real.
  */
-import { createECDH, randomUUID } from "node:crypto"
+import { createECDH, randomBytes, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
-import { accountCopy, conversation, conversationMessage, storeMember } from "@gestoria/db"
+import { accountCopy, agentGap, conversation, conversationMessage, storeMember } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
 import { serve } from "@hono/node-server"
 import {
@@ -28,17 +28,20 @@ import { signMessage } from "@odentia/contract/signing"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { createApp } from "../apps/api/src/app.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
+import { fakeModel } from "../apps/api/src/sofi/modelo.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
 import {
   ACCOUNT_PORT,
   API_PORT,
   CLAVE,
   CODIGO_TOTP,
+  MP_PORT,
   PEOPLE,
   STORE_ID,
   WEB_PORT,
   type Who,
 } from "./entorno.js"
+import { fakeMercadoPago } from "./mercadopago-de-prueba.js"
 
 const ACCOUNT = `http://127.0.0.1:${ACCOUNT_PORT}`
 const WEB = `http://127.0.0.1:${WEB_PORT}`
@@ -122,17 +125,35 @@ const adminFetch: typeof fetch = async (input, init) => {
 }
 
 const contract = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
+// Cobros: un Mercado Pago de mentira (OAuth, el link y su pago) que avisa a este servidor.
+const mercadoPago = fakeMercadoPago({
+  port: MP_PORT,
+  notify: async (paymentId, notificationURL) => {
+    const url = new URL(notificationURL)
+    url.searchParams.set("data.id", paymentId)
+    url.searchParams.set("type", "payment")
+    await app.request(url.toString(), { method: "POST", body: "{}" })
+  },
+})
 const app = createApp({
   appDb: db.appDb,
   ownerDb: db.ownerDb,
   account: { url: ACCOUNT, eventsSecret: "", keys: createLocalJWKSet({ keys: [jwk] }) },
   webURL: WEB,
   link: {
-    adapters: defaultLinkAdapters(),
-    secretsKey: null,
+    adapters: { mercadopago: mercadoPago.adapter },
+    secretsKey: randomBytes(32),
     apiURL: `http://127.0.0.1:${API_PORT}`,
+    app: {
+      clientId: "app-e2e",
+      clientSecret: "secreto-e2e",
+      redirectURL: `${WEB}/mercadopago/vuelta`,
+    },
   },
   contract,
+  // «Probar a Sofi» con el modelo de desarrollo: responde por reglas, sin la red (ADR 0234: la
+  // prueba muestra «Por qué»). No mide nada de cómo vende.
+  model: fakeModel(),
   // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
@@ -208,6 +229,14 @@ const sofi = await answer(
   conv!.id,
 )
 if (sofi.status !== "apagada") throw new Error(`Sofi debía estar apagada: ${sofi.status}`)
+// Lo que Sofi no supo responder en ese chat, como lo anota al pasarlo a una persona (ADR 0234).
+await db.ownerDb.insert(agentGap).values({
+  storeId: STORE_ID,
+  conversationId: conv!.id,
+  question: "¿Tienen sandalias talla 38?",
+  questionKey: "tienen sandalias talla 38",
+  createdBy: "agente:sofi",
+})
 
 serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 
@@ -362,6 +391,7 @@ console.log(`gestoria-e2e: listo (servidor ${API_PORT}, cuenta ${ACCOUNT_PORT})`
 
 const stop = async () => {
   account.close()
+  mercadoPago.server.close()
   await db.stop()
   process.exit(0)
 }

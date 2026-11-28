@@ -56,7 +56,7 @@ la Ayuda. La tarjeta para instalar la app estaba en Pedidos, que dejó de ser la
 
 ## Consecuencias
 
-- Migraciones `0041_equipo_y_repartidores` y `0042_reglas_equipo_y_repartidores` (solo columnas y
+- Migraciones `0059_equipo_y_repartidores` y `0060_reglas_equipo_y_repartidores` (solo columnas y
   permisos de columnas nuevas en tablas que ya tienen sus reglas).
 - Cuando exista gestorIA Reparto, su invitación enlaza el mismo `store_courier` a la cuenta del
   repartidor, con el pago ya anotado.

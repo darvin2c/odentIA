@@ -5,6 +5,7 @@ import {
   MAX_DELIVERY_SLOTS,
   store,
   storeCourier,
+  storeDeliveryMethod,
   storeEvent,
   storeMember,
 } from "@gestoria/db"
@@ -104,6 +105,24 @@ export async function setDeliverySlots(
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     await tx.update(store).set({ deliverySlots: input.slots }).where(eq(store.id, storeId))
+    // Una franja que se quita sale también de las zonas que la tenían (Entregas).
+    const kept = new Set(input.slots.map(slotKey))
+    const methods = await tx
+      .select({ id: storeDeliveryMethod.id, zones: storeDeliveryMethod.zones })
+      .from(storeDeliveryMethod)
+      .where(eq(storeDeliveryMethod.storeId, storeId))
+    for (const method of methods)
+      if (method.zones.some((zone) => (zone.slots ?? []).some((s) => !kept.has(slotKey(s)))))
+        await tx
+          .update(storeDeliveryMethod)
+          .set({
+            zones: method.zones.map((zone) => ({
+              ...zone,
+              slots: (zone.slots ?? []).filter((s) => kept.has(slotKey(s))),
+            })),
+            updatedAt: new Date(),
+          })
+          .where(eq(storeDeliveryMethod.id, method.id))
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,

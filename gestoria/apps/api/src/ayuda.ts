@@ -74,6 +74,25 @@ export const HELP_SCREENS = {
       "devolución",
     ],
   },
+  clientes: {
+    label: "Clientes",
+    path: "/clientes",
+    opens: "ventas.atender",
+    purpose:
+      "Cada clienta con sus compras y lo que Argos sabe de ella (talla, distrito, cumpleaños, canal), con su fuente, para corregirlo, y si acepta promociones.",
+    terms: [
+      "clientes",
+      "clientas",
+      "ficha",
+      "talla",
+      "distrito",
+      "cumpleaños",
+      "corregir",
+      "promociones",
+      "baja",
+      "Argos",
+    ],
+  },
   catalogo: {
     label: "Catálogo",
     path: "/catalogo",
@@ -247,7 +266,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Quién es Sofi y qué hace sola?",
         a: [
           "Sofi es la vendedora de tu tienda. Responde con tu catálogo y tus precios, recomienda, negocia sin bajar del precio mínimo que pusiste y arma el pedido con lo que el cliente ya vio. Le dice cómo pagar y, si paga por link, el pedido queda pagado solo.",
-          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: pasa la conversación a una persona. Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Lo que no está en tu catálogo ni en «Lo que sabe», no lo inventa: pasa la conversación a una persona y la pregunta aparece en «Lo que aprendió». Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente: debajo de cada respuesta, «Por qué» dice qué usó. En una pantalla ancha la prueba está al lado, también mientras cambias algo; en el celular queda abajo, y el botón «Probar a Sofi» de arriba te lleva a ella. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
           "Probarla sirve al ajustarla: por eso la prueba quien cambia la configuración de la tienda.",
         ],
         needs: "configuracion",
@@ -267,8 +286,19 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "sofi-lo-que-sabe",
         q: "¿Cómo le enseño a Sofi lo que debe saber?",
         a: [
-          "En Configuración, en Sofi, «Cómo vende»: cómo se presenta, lo que debe saber (tu horario, los cambios de talla, cómo se cuida el producto) y si está encendida. Ahí también eliges los seguimientos que Argos le encarga, como recordar el pago a quien no pagó.",
-          "Lo cuenta tal cual. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+          "En Configuración, en Sofi, «Lo que sabe»: con «Agregar» escribes una pregunta como la haría una clienta («¿Hacen cambios?») y su respuesta. Sofi la lee cuando le preguntan eso y la cuenta así.",
+          "En «Lo que aprendió» ves lo que clientas preguntaron en tus chats y Sofi no supo: con «Responder» lo guardas en «Lo que sabe». En el celular, si hay preguntas por responder, una línea debajo de las pestañas dice cuántas y te lleva ahí. Nada se agrega solo. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+        ],
+        needs: "configuracion",
+        screen: "sofi",
+      },
+      {
+        id: "sofi-como-habla",
+        q: "¿Cómo elijo cómo habla Sofi y qué puede ofrecer?",
+        a: [
+          "En Configuración, en Sofi, cada parte tiene su «Cambiar». En «Cómo habla» eliges su tono viendo un ejemplo de cada uno (cercana, amable y formal o directa), si trata de tú o de usted, los emojis y cómo se presenta. En «Qué ofrece» marcas lo que puede ofrecer para cerrar: envío gratis, un descuento, un regalo o una rebaja si lleva dos.",
+          "En «Cuándo te pasa el chat» eliges si te lo pasa cuando la clienta está molesta o cuando el pedido pasa de un monto, y el horario de tu equipo: fuera de él, Sofi dice cuándo le responden y tú decides si sigue vendiendo. Con «Pausar» deja de atender y tus chats esperan a una persona; en pausa, ese botón dice «Encender» y la vuelve a poner a atender. Guardar un cambio no la enciende ni la pausa. Si otra persona cambió a Sofi mientras tenías un «Cambiar» abierto, al guardar te lo dice: ciérralo y vuelve a abrirlo para ver lo nuevo.",
+          "Lo que no se elige: ofrece una sola vez, a cambio de pagar en 24 horas, nunca baja del mínimo de cada producto y con pago al recibir no hay oferta.",
         ],
         needs: "configuracion",
         screen: "sofi",
@@ -444,7 +474,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "no-se-entrego",
         q: "¿Qué hago si un pedido volvió sin entregar?",
         a: [
-          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
+          "En Despachos, en «Más», o en el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo), cuándo va, en qué franja y quién lo lleva. Arriba te recuerda la regla de la tienda si la clienta no está y si es la primera vez que ese pedido no se entrega. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
           "Hasta que vuelva a salir, aparece primero en Despachos, en «No se entregó», con su motivo y lo que hay que cobrar.",
         ],
         needs: "entregas",
@@ -467,6 +497,44 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         ],
         needs: "configuracion",
         screen: "catalogo",
+      },
+    ],
+  },
+  {
+    id: "clientas",
+    title: "Clientas",
+    faqs: [
+      {
+        id: "lo-que-sabe-argos",
+        q: "¿De dónde saca Argos lo que sabe de una clienta?",
+        a: [
+          "En la ficha de cada clienta, «Lo que Argos sabe de ella»: su talla (o como se llame la medida en tu catálogo), su distrito, su cumpleaños, por dónde prefiere escribir, su Instagram y lo que le gusta. Nadie tiene que llenarlo: Argos lo anota solo, de sus compras y de lo que ella escribió en el chat.",
+          "Cada dato dice de dónde salió y cuándo: sus compras, la dirección de una entrega o lo que ella dijo, con sus palabras tal cual. Lo que ella no dijo, Argos no lo supone. Lo que no tiene claro, como dos tallas que compra por igual, lo usa igual y lo marca «Por confirmar»: no frena ninguna venta.",
+          "Lee cada conversación cuando ella deja de escribir un rato, nunca a media conversación, y no lee las de prueba. Tampoco junta fichas por el teléfono: si dos fichas son la misma clienta, lo decide una persona.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "corregir-dato",
+        q: "¿Cómo corrijo un dato de una clienta?",
+        a: [
+          "En su ficha, en «Lo que Argos sabe de ella», «Corregir» junto al dato. Lo que pones queda «Lo puso la tienda», con tu nombre, y Argos ya no lo cambia aunque ella diga otra cosa después.",
+          "Nada se borra: cada dato guarda su historial, con lo que anotó Argos antes y lo que corrigió la tienda. Si un dato está «Por confirmar», al corregirlo eliges el que es.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "no-quiere-promociones",
+        q: "¿Qué pasa si una clienta dice que no quiere promociones?",
+        a: [
+          "En su ficha, «Cuándo se le puede escribir» dice lo último que ella contestó sobre las «Promociones»: «Acepta», «Pidió que no le escriban» o «Sin permiso todavía». Sofi se lo pregunta en su primera compra y anota lo que ella responde, con sus palabras.",
+          "Si en el chat pide que no le escriban más, Sofi lo anota en ese momento y desde entonces no se le escriben promociones. Lo de sus pedidos, como el pago y la entrega, sigue igual.",
+          "Nadie del equipo puede decir por ella que sí: solo cambia si ella lo vuelve a escribir.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
       },
     ],
   },
@@ -508,7 +576,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo dejo que Sofi negocie el precio?",
         a: [
           "En el producto, «Precio y negociación»: pon el precio mínimo de venta. Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
-          "Sofi primero cuenta lo bueno del producto y ofrece algo solo cuando ve que puede perder la venta: una sola vez, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
+          "Sofi primero dice el precio completo y lo bueno del producto, y ofrece algo solo si después el cliente duda: dice que está caro, que lo va a pensar, que en otra tienda está más barato o pide rebaja. A quien solo pregunta el precio no le rebaja ni le regala el envío. Ofrece una sola vez, con como mucho la mitad de lo que hay entre tu precio y tu mínimo, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
           "Ahí también van los precios por cantidad y las promociones con sus fechas.",
         ],
         needs: "configuracion",
@@ -575,8 +643,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "tu-marca",
         q: "¿Cómo pongo mi logo y el color de mi marca?",
         a: [
-          "En Configuración, en Tu marca: el logo, el nombre que ve el cliente, la foto de portada, el nombre del link de tu tienda y el color. Te sugerimos colores de tu logo y de una foto de tu letrero; cualquier color vale, y los tonos para que se lea bien se calculan solos.",
-          "El color se ve en gestorIA para todo tu equipo. El nombre del link va sin tildes ni espacios, y algunos nombres están reservados.",
+          "En Configuración, en Tu marca: suelta tu logo en el recuadro o pégalo con Ctrl + V; si aún no tienes logo, también lo eliges con «Elegir imagen», y si ya tienes uno, lo cambias con «Cambiar». Con «Ajustar» lo recortas. Salen los colores de tu logo: toca uno, o usa «Otro color». Cualquier color vale; si no se lee bien, te lo dice y los botones usan un tono más oscuro.",
+          "También pones la portada, el nombre que ve la clienta y tu link, sin tildes ni espacios: al escribirlo te dice si está libre. Al lado (en el celular, «Ver cómo queda») ves cómo lo verá tu clienta. Nada se guarda hasta «Guardar»; si sales antes, te pregunta.",
         ],
         needs: "configuracion",
         screen: "marca",
@@ -585,7 +653,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Cobros, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Cobros, «Agregar otra forma de cobro» y eliges cómo te paga. Yape y Plin piden tu celular, a nombre de quién está y tu QR (lo sueltas o lo pegas con Ctrl+V). Ves cómo le llega el dato a la clienta: tu número, a nombre de quién y el monto. Tu QR queda guardado: Sofi lo enviará cuando el chat por WhatsApp esté conectado. La transferencia pide tu banco de la lista, la cuenta y el CCI, que se revisa con sus dígitos de control.",
+          "Lo que confirma una persona (Yape, Plin, la transferencia) espera a que alguien del equipo revise la captura; lo que se cobra al recibir lo confirma el repartidor. Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -594,8 +663,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Configuración, en Entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
-          "Ahí mismo, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin (como de 9 a 13 h). Son opcionales: un pedido sin franja sale igual.",
+          "En Configuración, en Entregas. Mientras no tienes zonas, eliges desde qué distrito despachas y «Usar la plantilla de Lima» (los 50 distritos de Lima y el Callao en 6 zonas, con precios de partida que cambias) o «Prefiero armarlas yo». Con las zonas ya hechas esos botones no están: los distritos se cambian en el mapa (tocas uno y eliges su zona o «No entrego ahí») o en la lista de cada zona, con «Editar», y una zona nueva (por ejemplo, solo para Lurín) con «Agregar zona». Un distrito está en una sola zona.",
+          "Cada zona, con «Editar»: su precio, cuándo llega (hoy antes de una hora, al día siguiente o en días fijos), sus franjas, si acepta pago al recibir y si tiene envío gratis. En «Reglas», desde qué compra es gratis, quién paga si la clienta no está y dónde se paga al recibir. Sofi cotiza con el distrito de la clienta.",
+          "El recojo y la agencia van en sus tarjetas («Agregar recojo», «Agregar agencia»). A una clienta de provincia, Sofi le nombra tus agencias, le dice lo que cobras por llevarlo y quién paga el flete, y le pide la ciudad, la agencia de destino y el nombre y DNI de quien recoge. Las franjas, en «Franjas de entrega», «Agregar franja» con su hora de inicio y de fin. Son opcionales: un pedido sin franja sale igual.",
         ],
         needs: "configuracion",
         screen: "entregas",
@@ -604,7 +674,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Configuración, en Cobros, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Cobros, «Conectar con Mercado Pago»: entras con la cuenta de la tienda y das permiso, sin copiar ninguna clave. El dinero de cada link llega directo a tu cuenta.",
+          "Empieza en modo prueba: «Probar con S/ 1» crea un link que pagas con la tarjeta de prueba de Mercado Pago, y ves cómo queda pagado solo. En modo prueba ningún pedido se cobra por link. Cuando te guste, «Cobrar de verdad» vuelve a pedir el permiso, esta vez para cobrar.",
+          "Si lo desconectas, los links ya enviados dejan de confirmarse solos: esos pagos los revisas tú.",
         ],
         needs: "configuracion",
         screen: "pagos",
