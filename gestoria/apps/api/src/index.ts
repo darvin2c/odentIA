@@ -6,6 +6,7 @@ import { runPushRound, webPushSender } from "./avisos.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
+import { renewPaymentLinks } from "./pasarela.js"
 import { readSecretsKey } from "./secretos.js"
 import { runArgos } from "./sofi/argos.js"
 import { modelFromEnv } from "./sofi/modelo.js"
@@ -21,10 +22,25 @@ if (!secretsKey)
   console.warn(
     "gestoria-api: sin GESTORIA_SECRETS_KEY y GESTORIA_API_URL no se puede conectar un link de pago.",
   )
+// La tienda conecta su Mercado Pago entrando a su cuenta: con la aplicación de gestorIA en Mercado
+// Pago. Vuelve a la app (`/mercadopago/vuelta`), la misma dirección registrada en la aplicación.
+const mercadoPagoApp =
+  env.GESTORIA_MERCADOPAGO_CLIENT_ID && env.GESTORIA_MERCADOPAGO_CLIENT_SECRET
+    ? {
+        clientId: env.GESTORIA_MERCADOPAGO_CLIENT_ID,
+        clientSecret: env.GESTORIA_MERCADOPAGO_CLIENT_SECRET,
+        redirectURL: new URL("/mercadopago/vuelta", env.GESTORIA_WEB_URL).toString(),
+      }
+    : null
+if (!mercadoPagoApp)
+  console.warn(
+    "gestoria-api: sin GESTORIA_MERCADOPAGO_CLIENT_ID y _CLIENT_SECRET no se puede conectar Mercado Pago.",
+  )
 const link = {
   adapters: defaultLinkAdapters(),
   secretsKey,
   apiURL: env.GESTORIA_API_URL ?? env.GESTORIA_WEB_URL,
+  app: mercadoPagoApp,
 }
 // El modelo de Sofi (B5). Sin clave, Sofi no responde y la pantalla lo dice.
 const model = modelFromEnv({ ...env, NODE_ENV: process.env.NODE_ENV })
@@ -67,13 +83,37 @@ async function review() {
 setTimeout(() => void review(), 60_000).unref()
 setInterval(() => void review(), HOUR).unref()
 
+// La pasarela de cada tienda (Cobros): cada hora renueva los tokens a los que les quedan menos de
+// 30 días (el de Mercado Pago dura 180). Un solo servidor a la vez.
+async function renewLinks() {
+  try {
+    const run = await withSessionLock(ownerDb, "gestoria_pasarela", () =>
+      renewPaymentLinks(ownerDb, link),
+    )
+    if (run?.failed)
+      console.warn(`gestoria-api: ${run.failed} pasarela(s) no se pudieron renovar; se reintenta`)
+  } catch (error) {
+    console.error("gestoria-api: la renovación de las pasarelas falló", error)
+  }
+}
+setTimeout(() => void renewLinks(), 120_000).unref()
+setInterval(() => void renewLinks(), HOUR).unref()
+
 // Argos (B5): cada 15 minutos mira las tiendas con Sofi encendida y le encarga los seguimientos.
 // Si hay dos servidores, corre en uno solo (candado de la base).
 async function argos() {
   try {
-    const run = await withSessionLock(ownerDb, "argos", () => runArgos(ownerDb, appDb))
+    // Con el mismo modelo de Sofi, solo para leer lo que dijo cada clienta (`sofi/perfilar.ts`).
+    const run = await withSessionLock(ownerDb, "argos", () =>
+      runArgos(ownerDb, appDb, new Date(), model),
+    )
     if (run?.written)
       console.log(`gestoria-api: Argos le encargó ${run.written} seguimiento(s) a Sofi`)
+    // Lo que cuesta leer queda aquí, en el registro de la vuelta: no se le cobra a la tienda.
+    if (run?.profiled || run?.profileCostMicros)
+      console.log(
+        `gestoria-api: Argos anotó ${run.profiled} dato(s) de clientas; leer costó USD ${(run.profileCostMicros / 1e6).toFixed(6)}`,
+      )
   } catch (error) {
     console.error("gestoria-api: Argos falló", error)
   }

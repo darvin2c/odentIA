@@ -313,6 +313,24 @@ export type PaymentTypeCode = (typeof PAYMENT_TYPE_CODES)[number]
 export const PAYMENT_COLLECTIONS = ["link", "comprobante", "al_recibir"] as const
 export type PaymentCollection = (typeof PAYMENT_COLLECTIONS)[number]
 
+/**
+ * Qué forma de cobro es, para pedir sus datos (lienzo «gestorIA · Configuración, de nuevo»,
+ * tablero 6): Yape y Plin con su celular, su titular y su QR; la transferencia con su banco, su
+ * cuenta y su CCI; el efectivo y el POS al recibir; el link (la pasarela) y «otro», con texto
+ * libre. El tipo de UN/CEFACT 4461 (`type_code`) sigue diciendo con qué se paga: cada forma lleva
+ * el suyo fijo, menos «otro».
+ */
+export const PAYMENT_KINDS = [
+  "yape",
+  "plin",
+  "transferencia",
+  "efectivo",
+  "pos",
+  "link",
+  "otro",
+] as const
+export type PaymentKind = (typeof PAYMENT_KINDS)[number]
+
 export const storePaymentMethod = pgTable(
   "store_payment_method",
   {
@@ -322,8 +340,21 @@ export const storePaymentMethod = pgTable(
     name: text("name").notNull(),
     typeCode: text("type_code").$type<PaymentTypeCode>().notNull(),
     collection: text("collection").$type<PaymentCollection>().notNull(),
-    /** Lo que Sofi le envía al cliente para pagar: el número, la cuenta, a nombre de quién. */
+    kind: text("kind").$type<PaymentKind>().notNull().default("otro"),
+    /**
+     * Lo que Sofi le envía al cliente para pagar: el número, la cuenta, a nombre de quién. En Yape,
+     * Plin y la transferencia lo arma el servidor con sus datos; en lo demás, lo escribe la tienda.
+     */
     details: text("details").notNull().default(""),
+    /** El celular de Yape o Plin, en E.164 (`+51987654321`). */
+    phone: text("phone"),
+    /** A nombre de quién está: la clienta lo compara antes de pagar. */
+    holder: text("holder"),
+    /** El banco de la transferencia: su código de entidad, los tres primeros números del CCI. */
+    bankCode: text("bank_code"),
+    accountNumber: text("account_number"),
+    /** El Código de Cuenta Interbancario: 20 números, con sus dígitos de control revisados. */
+    cci: text("cci"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -341,6 +372,37 @@ export const storePaymentMethod = pgTable(
       sql`${table.typeCode} <> '10' or ${table.collection} = 'al_recibir'`,
     ),
     check("store_payment_method_details_check", sql`char_length(${table.details}) <= 500`),
+    check("store_payment_method_kind_check", inList("kind", PAYMENT_KINDS)),
+    // Cada forma con su tipo de 4461 y su manera de confirmarse; «otro» elige los suyos.
+    check(
+      "store_payment_method_kind_type_check",
+      sql`case ${table.kind}
+        when 'yape' then ${table.typeCode} = '68' and ${table.collection} = 'comprobante'
+        when 'plin' then ${table.typeCode} = '68' and ${table.collection} = 'comprobante'
+        when 'transferencia' then ${table.typeCode} = '30' and ${table.collection} = 'comprobante'
+        when 'efectivo' then ${table.typeCode} = '10' and ${table.collection} = 'al_recibir'
+        when 'pos' then ${table.typeCode} = '48' and ${table.collection} = 'al_recibir'
+        when 'link' then ${table.collection} = 'link'
+        else ${table.collection} <> 'link' end`,
+    ),
+    // Yape y Plin, con su celular y su titular; la transferencia, con su banco, cuenta y titular.
+    check(
+      "store_payment_method_kind_data_check",
+      sql`(${table.kind} not in ('yape', 'plin') or (${table.phone} is not null and ${table.holder} is not null))
+        and (${table.kind} <> 'transferencia' or (${table.bankCode} is not null and ${table.accountNumber} is not null and ${table.holder} is not null))`,
+    ),
+    check("store_payment_method_phone_check", sql`${table.phone} ~ '^[+][1-9][0-9]{7,14}$'`),
+    check(
+      "store_payment_method_holder_check",
+      sql`char_length(btrim(${table.holder})) between 1 and 80`,
+    ),
+    check("store_payment_method_bank_check", sql`${table.bankCode} ~ '^[0-9]{3}$'`),
+    check(
+      "store_payment_method_account_check",
+      sql`${table.accountNumber} ~ '^[0-9][0-9 -]{4,28}[0-9]$'`,
+    ),
+    check("store_payment_method_cci_check", sql`${table.cci} ~ '^[0-9]{20}$'`),
+    unique("store_payment_method_store_id_key").on(table.storeId, table.id),
     foreignKey({
       name: "store_payment_method_store_id_fkey",
       columns: [table.storeId],
@@ -525,6 +587,35 @@ export const storeImage = pgTable(
       name: "store_image_store_id_fkey",
       columns: [table.storeId],
       foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * El QR de Yape o Plin de un medio de pago (tablero 6): la imagen tal como la baja la tienda de
+ * su app, en la base y mirada por su contenido (JPEG, PNG o WebP), una por medio. Se borra con él.
+ */
+export const storePaymentQr = pgTable(
+  "store_payment_qr",
+  {
+    storeId: uuid("store_id").notNull(),
+    methodId: uuid("method_id").notNull(),
+    contentType: text("content_type").$type<PhotoType>().notNull(),
+    content: bytea("content").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: "store_payment_qr_pkey", columns: [table.methodId] }),
+    check("store_payment_qr_type_check", inList("content_type", PHOTO_TYPES)),
+    check(
+      "store_payment_qr_size_check",
+      sql`octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+    ),
+    foreignKey({
+      name: "store_payment_qr_method_fkey",
+      columns: [table.storeId, table.methodId],
+      foreignColumns: [storePaymentMethod.storeId, storePaymentMethod.id],
     }).onDelete("cascade"),
   ],
 )
@@ -1391,8 +1482,20 @@ export const PAYMENT_LINK_PROVIDERS = ["mercadopago"] as const
 export type PaymentLinkProvider = (typeof PAYMENT_LINK_PROVIDERS)[number]
 
 /**
+ * El modo de la pasarela (tablero 6): «prueba» cobra con dinero de prueba (las credenciales de
+ * prueba del proveedor) y solo el link de S/ 1 de la tienda; «real» cobra los pedidos.
+ */
+export const PAYMENT_LINK_MODES = ["prueba", "real"] as const
+export type PaymentLinkMode = (typeof PAYMENT_LINK_MODES)[number]
+
+/**
  * La cuenta del proveedor del link de pago de la tienda, con sus credenciales cifradas
- * (`secretos.ts` de la API). Nunca vuelven al navegador: la pantalla solo sabe si está conectada.
+ * (`secretos.ts` de la API). Nunca vuelven al navegador: la pantalla solo sabe si está conectada,
+ * en qué modo y con qué cuenta (su correo a medias).
+ *
+ * Se conecta entrando a la cuenta del proveedor (OAuth): el token dura lo que dice el proveedor
+ * (`expires_at`; Mercado Pago, 180 días) y se renueva antes con el `refresh_token`. Si el
+ * proveedor avisa que la tienda quitó el permiso (y se comprueba), queda `revoked_at`.
  */
 export const storePaymentLink = pgTable(
   "store_payment_link",
@@ -1401,6 +1504,14 @@ export const storePaymentLink = pgTable(
     provider: text("provider").$type<PaymentLinkProvider>().notNull(),
     accessTokenEnc: text("access_token_enc").notNull(),
     webhookSecretEnc: text("webhook_secret_enc"),
+    refreshTokenEnc: text("refresh_token_enc"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    mode: text("mode").$type<PaymentLinkMode>().notNull().default("real"),
+    /** La cuenta en el proveedor (su número), para reconocer el aviso de que se desvinculó. */
+    providerUserId: text("provider_user_id"),
+    /** Cómo se reconoce la cuenta sin mostrarla entera: «ro…@gmail.com». */
+    accountLabel: text("account_label"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     /** Los últimos caracteres del token, para reconocer la cuenta sin mostrarla. */
     hint: text("hint").notNull(),
     connectedBy: text("connected_by").notNull(),
@@ -1408,12 +1519,83 @@ export const storePaymentLink = pgTable(
   },
   (table) => [
     check("store_payment_link_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_mode_check", inList("mode", PAYMENT_LINK_MODES)),
     check("store_payment_link_hint_check", sql`char_length(${table.hint}) between 1 and 8`),
+    check(
+      "store_payment_link_label_check",
+      sql`char_length(${table.accountLabel}) between 1 and 120`,
+    ),
+    index("store_payment_link_user_idx").on(table.provider, table.providerUserId),
     foreignKey({
       name: "store_payment_link_store_id_fkey",
       columns: [table.storeId],
       foreignColumns: [store.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * Un intento de conectar la pasarela entrando a la cuenta (OAuth): el `state` que viaja al
+ * proveedor (aquí solo su resumen SHA-256), quién lo empezó, en qué modo y el `code_verifier` de
+ * PKCE (RFC 7636). Vale 10 minutos, lo que vale el código del proveedor, y se usa una sola vez.
+ */
+export const storePaymentLinkAttempt = pgTable(
+  "store_payment_link_attempt",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    storeId: uuid("store_id").notNull(),
+    provider: text("provider").$type<PaymentLinkProvider>().notNull(),
+    mode: text("mode").$type<PaymentLinkMode>().notNull(),
+    verifier: text("verifier").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("store_payment_link_attempt_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_attempt_mode_check", inList("mode", PAYMENT_LINK_MODES)),
+    check("store_payment_link_attempt_hash_check", sql`${table.stateHash} ~ '^[0-9a-f]{64}$'`),
+    foreignKey({
+      name: "store_payment_link_attempt_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_payment_link_attempt_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/**
+ * El link de prueba de S/ 1 (tablero 6): se paga con la tarjeta de prueba del proveedor y, como un
+ * pedido, se da por pagado solo cuando el proveedor avisa y se le pregunta. No es un pedido: no
+ * mueve stock ni cuenta en Reportes.
+ */
+export const storePaymentLinkTrial = pgTable(
+  "store_payment_link_trial",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    provider: text("provider").$type<PaymentLinkProvider>().notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    url: text("url").notNull(),
+    ref: text("ref").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Lo que el proveedor dijo al preguntarle: cuándo entró, cuánto y con qué pago. */
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    paidCents: integer("paid_cents"),
+    paymentRef: text("payment_ref"),
+  },
+  (table) => [
+    check("store_payment_link_trial_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_trial_amount_check", sql`${table.amountCents} > 0`),
+    check("store_payment_link_trial_url_check", sql`${table.url} ~ '^https://'`),
+    foreignKey({
+      name: "store_payment_link_trial_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_payment_link_trial_store_idx").on(table.storeId, table.createdAt),
   ],
 )
 
@@ -1706,6 +1888,159 @@ export const stockRequest = pgTable(
       .on(table.variantId, table.conversationId)
       .where(sql`notified_at is null`),
     index("stock_request_store_idx").on(table.storeId, table.variantId),
+  ],
+)
+
+/*
+ * El perfil de la clienta (lienzo «Clientas bien perfiladas y Argos que hace el marketing solo»,
+ * decisiones 1 a 3). Argos anota solo lo que sabe de cada clienta, de sus chats, sus pedidos y cómo
+ * responde, y cada dato dice de dónde salió y cuándo. Lo que corrige la tienda queda «Lo puso la
+ * tienda» y Argos no lo vuelve a pisar: la base se lo niega. Nada se edita ni se borra: el
+ * historial de un dato son sus filas, y el valor de hoy es la última (o la última de la tienda).
+ */
+
+/**
+ * Lo que se sabe de ella. «medida» es la talla o el tono, según cómo llame la tienda a la primera
+ * opción de su catálogo (Talla, Tono, Medida): no hay columnas por rubro. «cumpleanos» es día y
+ * mes en ISO 8601 sin año (`--MM-DD`): el año no se pide.
+ */
+export const CUSTOMER_FACT_KEYS = [
+  "medida",
+  "distrito",
+  "cumpleanos",
+  "canal",
+  "instagram",
+  "gustos",
+] as const
+export type CustomerFactKey = (typeof CUSTOMER_FACT_KEYS)[number]
+
+/** De dónde salió: lo que dijo en un chat, sus pedidos, cómo responde o la tienda que lo corrigió. */
+export const CUSTOMER_FACT_SOURCES = ["chat", "pedido", "respuesta", "tienda"] as const
+export type CustomerFactSource = (typeof CUSTOMER_FACT_SOURCES)[number]
+
+export const customerFact = pgTable(
+  "customer_fact",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    customerId: uuid("customer_id").notNull(),
+    key: text("key").$type<CustomerFactKey>().notNull(),
+    value: text("value").notNull(),
+    source: text("source").$type<CustomerFactSource>().notNull(),
+    /** El mensaje de ella de donde salió (chat): su cita está en `quote`, tal cual. */
+    messageId: uuid("message_id"),
+    /** El pedido de donde salió (pedido): la talla que lleva, la dirección de la entrega. */
+    orderId: uuid("order_id"),
+    /** Lo que dijo, tal cual (chat) o el texto del pedido de donde salió (la dirección). */
+    quote: text("quote"),
+    /**
+     * Lo que Argos no tiene claro: usa `value` y estas son las otras posibilidades («Por
+     * confirmar»). No frena nada; se resuelve cuando la tienda elige una o ella lo dice.
+     */
+    alternatives: text("alternatives").array().notNull().default(sql`'{}'::text[]`),
+    /** Quien lo anotó: `agente:argos`, o la persona del equipo que lo corrigió. */
+    actorUserId: text("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("customer_fact_key_check", inList("key", CUSTOMER_FACT_KEYS)),
+    check("customer_fact_source_check", inList("source", CUSTOMER_FACT_SOURCES)),
+    check(
+      "customer_fact_value_check",
+      sql`char_length(btrim(${table.value})) between 1 and 120 and (${table.quote} is null or char_length(${table.quote}) between 1 and 300) and cardinality(${table.alternatives}) <= 4`,
+    ),
+    // Del chat, siempre con su mensaje y su cita; de un pedido, con su pedido.
+    check(
+      "customer_fact_origin_check",
+      sql`(${table.source} <> 'chat' or (${table.messageId} is not null and ${table.quote} is not null)) and (${table.source} <> 'pedido' or ${table.orderId} is not null)`,
+    ),
+    check(
+      "customer_fact_birthday_check",
+      sql`${table.key} <> 'cumpleanos' or ${table.value} ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'`,
+    ),
+    foreignKey({
+      name: "customer_fact_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    index("customer_fact_customer_idx").on(
+      table.storeId,
+      table.customerId,
+      table.key,
+      table.createdAt,
+    ),
+  ],
+)
+
+/**
+ * Si se le pueden escribir promociones (decisión del dueño: nunca a quien no aceptó o pidió la
+ * baja). Solo se agrega; el estado vigente es la última fila. Cada fila sale de un mensaje de
+ * ella, con su cita: Sofi pide el permiso en la primera compra («si» o «no») y anota la baja
+ * cuando dice «ya no me mandes». Una baja solo la deshace otro mensaje de ella.
+ */
+export const CONSENT_STATES = ["si", "no", "baja"] as const
+export type ConsentState = (typeof CONSENT_STATES)[number]
+
+export const customerConsent = pgTable(
+  "customer_consent",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** Nula si todavía no tiene ficha (escribió, pero no compró): vale para su conversación. */
+    customerId: uuid("customer_id"),
+    conversationId: uuid("conversation_id").notNull(),
+    /** Por dónde se le pueden escribir promociones: WhatsApp (Meta no deja escribir primero por otro). */
+    channel: text("channel").$type<ConversationChannel>().notNull(),
+    state: text("state").$type<ConsentState>().notNull(),
+    /** El mensaje de ella y lo que dijo, tal cual. */
+    messageId: uuid("message_id").notNull(),
+    quote: text("quote").notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("customer_consent_state_check", inList("state", CONSENT_STATES)),
+    check("customer_consent_channel_check", inList("channel", CONVERSATION_CHANNELS)),
+    check("customer_consent_quote_check", sql`char_length(btrim(${table.quote})) between 1 and 300`),
+    foreignKey({
+      name: "customer_consent_customer_fkey",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customer.storeId, customer.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "customer_consent_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+    index("customer_consent_customer_idx").on(table.storeId, table.customerId, table.createdAt),
+    index("customer_consent_conversation_idx").on(
+      table.storeId,
+      table.conversationId,
+      table.createdAt,
+    ),
+  ],
+)
+
+/**
+ * Hasta dónde leyó Argos cada conversación para anotar lo que dijo la clienta: así no vuelve a
+ * leer (ni a pagar) lo mismo. Lo escribe solo Argos.
+ */
+export const argosReading = pgTable(
+  "argos_reading",
+  {
+    storeId: uuid("store_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    /** El último mensaje leído (`conversation_message.seq`). */
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.conversationId] }),
+    foreignKey({
+      name: "argos_reading_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
   ],
 )
 

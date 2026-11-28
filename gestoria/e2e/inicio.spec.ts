@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Inicio y los primeros pasos en un navegador (lienzo «gestorIA como odentIA», tableros 5 y 16),
@@ -95,7 +95,10 @@ test("una tienda nueva abre en Inicio con sus primeros pasos, y la lista se va a
   const step = (title: string) => setup.getByRole("listitem").filter({ hasText: title })
   await expect(step("Datos de la tienda").getByText("Hecho", { exact: true })).toBeVisible()
   await expect(step("Conectar los chats").getByText("Muy pronto", { exact: true })).toBeVisible()
-  await expect(setup.getByText("1 de 6", { exact: true })).toBeVisible()
+  // Invitar al equipo no frena la venta: se ve como opcional y no se cuenta (la misma cuenta que
+  // «Lo que falta» de Configuración).
+  await expect(step("Invitar al equipo").getByText("Opcional", { exact: true })).toBeVisible()
+  await expect(setup.getByText("1 de 5", { exact: true })).toBeVisible()
   // Una tienda sin nada todavía no ve cifras en cero.
   await expect(page.getByRole("region", { name: "Las cifras de hoy" })).toHaveCount(0)
   await expect(page.getByText("Nada por ahora.")).toBeVisible()
@@ -105,7 +108,7 @@ test("una tienda nueva abre en Inicio con sus primeros pasos, y la lista se va a
   // «No lo necesito»: trabaja sola. El paso queda saltado, no hecho.
   await step("Invitar al equipo").getByRole("button", { name: "No lo necesito" }).click()
   await expect(step("Invitar al equipo").getByText("Saltado", { exact: true })).toBeVisible()
-  await expect(setup.getByText("2 de 6", { exact: true })).toBeVisible()
+  await expect(setup.getByText("1 de 5", { exact: true })).toBeVisible()
 
   // Cada paso abre su apartado y ofrece volver; se marca solo al guardar.
   await step("Medios de pago").getByRole("link", { name: "Agregar un medio" }).click()
@@ -121,7 +124,7 @@ test("una tienda nueva abre en Inicio con sus primeros pasos, y la lista se va a
   await expect(page).toHaveURL(/\/tiendas\/[^/]+\/?$/)
   await expect(step("Medios de pago").getByText("Hecho", { exact: true })).toBeVisible()
   await expect(step("Medios de pago").getByText("Yape", { exact: true })).toBeVisible()
-  await expect(setup.getByText("3 de 6", { exact: true })).toBeVisible()
+  await expect(setup.getByText("2 de 5", { exact: true })).toBeVisible()
 
   // A 390 px, lo hecho se junta en una línea y el paso que sigue queda abierto, con su botón.
   await page.setViewportSize(PHONE)
@@ -262,7 +265,7 @@ test.describe("«Te toca» en Calzados Rosa", () => {
 
     // «Ver y confirmar» abre el pedido con su captura: nunca se confirma a ciegas.
     await camila.getByRole("button", { name: "Ver y confirmar" }).click()
-    const sheet = page.getByRole("dialog", { name: /· Camila Ríos$/ })
+    const sheet = surface(page, /· Camila Ríos$/)
     await expect(sheet.getByRole("img", { name: "Captura del pago" })).toBeVisible()
     await shot(page, "inicio-ver-y-confirmar-escritorio")
     await sheet.getByRole("button", { name: "Confirmar pago" }).click()
@@ -273,9 +276,7 @@ test.describe("«Te toca» en Calzados Rosa", () => {
 
     // «Pasar a…» desde Inicio: el mismo diálogo de Despachos y Pedidos, con el pedido abierto.
     await martin.getByRole("button", { name: "Pasar a…" }).click()
-    await expect(
-      page.getByRole("alertdialog", { name: /^Pasar a… · \d+ Martín Vega/ }),
-    ).toBeVisible()
+    await expect(surface(page, /^Pasar a… · \d+ Martín Vega/)).toBeVisible()
     await page.keyboard.press("Escape")
 
     await page.setViewportSize(PHONE)

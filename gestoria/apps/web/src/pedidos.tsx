@@ -1,30 +1,33 @@
 import {
   Badge,
   Button,
-  Checkbox,
   Field,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
   Input,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
   toast,
 } from "@odentia/ui"
 import { Textarea } from "@odentia/ui/components/textarea"
 import {
+  addSubmitErrors,
   ConfirmDialog,
+  clearSubmitErrors,
+  DatePickerButton,
+  DetailDrawer,
   EmptyState,
+  ErrorState,
+  FormDrawer,
   PersonAvatar,
+  RadioChips,
   SubmitButton,
+  useAppForm,
+  useFormSurface,
   ViewTabs,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useSearch } from "@tanstack/react-router"
 import {
@@ -41,8 +44,10 @@ import {
   UserRound,
 } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { z } from "zod"
 import { InstallCard } from "./avisos"
 import { ExchangeAction, ExchangeLinks, RefundAction, RefundLines, ReturnLines } from "./cambios"
+import { MoneyInput } from "./campos"
 import { type DeliveryStep, DeliveryStepDialog, targetOf } from "./entregas"
 import { api } from "./lib/api"
 import {
@@ -74,20 +79,8 @@ import {
   when,
 } from "./lib/pedidos"
 import { type DeliveryMethod, money, moneyInput, type PaymentMethod, readMoney } from "./lib/tienda"
-import {
-  DateField,
-  FormAlert,
-  FormSheet,
-  fieldErrors,
-  MoneyField,
-  Photo,
-  ReceiptImage,
-  SelectField,
-  shrinkPhoto,
-  TextField,
-  useDirty,
-} from "./piezas"
-import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
+import { Photo, ReceiptImage, shrinkPhoto } from "./piezas"
+import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Pedidos» (lienzo B, tablero 5): qué falta cobrar y qué sale hoy. Una lista con filtros por
@@ -171,7 +164,7 @@ export function OrdersPage() {
         }))}
       />
       {list.isPending ? <p className="text-sm text-muted-foreground">Cargando pedidos…</p> : null}
-      {list.isError ? <ErrorBlock error={list.error} onRetry={() => void list.refetch()} /> : null}
+      {list.isError ? <ErrorState error={list.error} onRetry={() => void list.refetch()} /> : null}
       {list.data && orders.length === 0 ? (
         <EmptyState
           icon={filter === "hoy" ? Truck : ReceiptText}
@@ -260,7 +253,8 @@ export function OrdersPage() {
           </ul>
         </div>
       ) : null}
-      {open ? <OrderSheet orderId={open} onClose={() => setOpen(null)} /> : null}
+      {/* Otro pedido es otra superficie: lo tocado en el anterior no viaja al nuevo. */}
+      {open ? <OrderSheet key={open} orderId={open} onClose={() => setOpen(null)} /> : null}
       {adding ? (
         <NewOrderSheet
           onClose={() => setAdding(false)}
@@ -307,36 +301,30 @@ export function OrderSheet({ orderId, onClose }: { orderId: string; onClose: () 
   })
   const order = detail.data
   return (
-    <Sheet open onOpenChange={(next) => (next ? null : onClose())}>
-      <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl">
-        <SheetHeader className="pr-14">
-          <SheetTitle>
-            {order ? `Pedido ${order.number} · ${order.customerName}` : "Pedido"}
-          </SheetTitle>
-          <SheetDescription>
-            {order ? (
-              <span className="flex flex-wrap items-center gap-2">
-                <StateBadge order={order} />
-                {order.test ? <Badge variant="outline">Prueba</Badge> : null}
-                <span>
-                  {CHANNELS[order.channel].replace(/ \(.*\)$/, "")} · anotado el{" "}
-                  {when(order.createdAt)}
-                  {order.bySofi ? " · lo armó Sofi" : ""}
-                </span>
-              </span>
-            ) : (
-              "Cargando…"
-            )}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-          {detail.isError ? (
-            <ErrorBlock error={detail.error} onRetry={() => void detail.refetch()} />
-          ) : null}
-          {order ? <OrderBody order={order} /> : null}
-        </div>
-      </SheetContent>
-    </Sheet>
+    <DetailDrawer
+      open
+      size="xl"
+      title={order ? `Pedido ${order.number} · ${order.customerName}` : "Pedido"}
+      headerContent={
+        order ? (
+          <span className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <StateBadge order={order} />
+            {order.test ? <Badge variant="outline">Prueba</Badge> : null}
+            <span>
+              {CHANNELS[order.channel].replace(/ \(.*\)$/, "")} · anotado el {when(order.createdAt)}
+              {order.bySofi ? " · lo armó Sofi" : ""}
+            </span>
+          </span>
+        ) : null
+      }
+      isLoading={detail.isPending}
+      onClose={onClose}
+    >
+      {detail.isError ? (
+        <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
+      ) : null}
+      {order ? <OrderBody order={order} /> : null}
+    </DetailDrawer>
   )
 }
 
@@ -603,7 +591,9 @@ function NextStep({ order }: { order: OrderDetail }) {
       ? "El precio acordado venció: si sigue en pie, usa «Cambiar» para volver a acordarlo."
       : order.linkConnected
         ? "Falta que pague. Mándale el link de pago o anota su captura cuando llegue."
-        : "Falta que pague. Anota su captura cuando llegue.",
+        : order.linkTestMode
+          ? "Falta que pague. Mercado Pago está en modo prueba: este pedido se cobra con captura o al recibir."
+          : "Falta que pague. Anota su captura cuando llegue.",
     por_confirmar: "Revisa la cuenta de la tienda y confirma el pago, o di que no coincide.",
     por_salir: order.stockPending
       ? "Ya pagó, pero no alcanza el stock de lo que lleva: registra la entrada en el catálogo antes de que salga."
@@ -758,7 +748,11 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
                 No coincide
               </Button>
             </div>
-            {action.isError && !rejecting ? <FormAlert error={action.error} /> : null}
+            {action.isError && !rejecting && !undoing ? (
+              <p role="alert" className="text-sm text-danger">
+                {action.error.message}
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -914,12 +908,20 @@ function CollectActions({ order }: { order: OrderDetail }) {
       </div>
       {!order.linkConnected ? (
         <p className="text-xs text-muted-foreground">
-          {store.permissions.includes("configuracion")
-            ? "Para cobrar con link de pago, conéctalo en Pagos y entregas."
-            : "El link de pago se usa cuando el dueño lo conecte."}
+          {order.linkBroken
+            ? "Mercado Pago ya no deja cobrar con la cuenta de la tienda: hay que volver a conectarla en Configuración › Cobros."
+            : order.linkTestMode
+              ? "Mercado Pago está en modo prueba: con dinero de prueba no se cobra un pedido. Se pasa a «Cobrar de verdad» en Configuración › Cobros."
+              : store.permissions.includes("configuracion")
+                ? "Para cobrar con link de pago, conecta Mercado Pago en Configuración › Cobros."
+                : "El link de pago se usa cuando el Dueño lo conecte."}
         </p>
       ) : null}
-      <FormAlert error={link.error} />
+      {link.isError ? (
+        <p role="alert" className="text-sm text-danger">
+          {link.error.message}
+        </p>
+      ) : null}
       {capturing ? <ReceiptSheet order={order} onClose={() => setCapturing(false)} /> : null}
     </div>
   )
@@ -964,31 +966,23 @@ function OtherPayment({ order }: { order: OrderDetail }) {
 
 function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => void }) {
   const { store } = useStoreContext()
+  const cur = store.currency
   const queryClient = useQueryClient()
   const due = order.balance.dueCents
-  const [amount, setAmount] = useState(moneyInput(due || order.totalCents, store.currency))
   const methods = useMethodsFor(order, "comprobante")
-  const [methodId, setMethodId] = useState("")
-  const chosen = methodId || methods[0]?.id || ""
-  const [operation, setOperation] = useState("")
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [amountError, setAmountError] = useState<string | undefined>()
   const fileInput = useRef<HTMLInputElement>(null)
-  const dirty = useDirty({ amount, operation, file: file?.name })
-  useEffect(() => {
-    if (!file) return setPreview(null)
-    const next = URL.createObjectURL(file)
-    setPreview(next)
-    return () => URL.revokeObjectURL(next)
-  }, [file])
   const save = useMutation({
-    mutationFn: async (amountCents: number) => {
+    mutationFn: async (sent: {
+      amountCents: number
+      operation: string
+      methodId: string
+      file: File | null
+    }) => {
       const form = new FormData()
-      form.set("amountCents", String(amountCents))
-      form.set("operation", operation.trim())
-      if (chosen) form.set("methodId", chosen)
-      if (file) form.set("captura", await shrinkPhoto(file), "captura")
+      form.set("amountCents", String(sent.amountCents))
+      form.set("operation", sent.operation)
+      if (sent.methodId) form.set("methodId", sent.methodId)
+      if (sent.file) form.set("captura", await shrinkPhoto(sent.file), "captura")
       return api<{ order: OrderDetail }>(
         `/api/tiendas/${store.id}/pedidos/${order.id}/comprobante`,
         {
@@ -1004,94 +998,145 @@ function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => v
       onClose()
     },
   })
-  const submit = () => {
-    const cents = readMoney(amount, store.currency)
-    if (!cents) return setAmountError("Escribe el monto que se ve en la captura")
-    setAmountError(undefined)
-    save.mutate(cents)
-  }
-  const errors = fieldErrors(save.error)
+  const form = useAppForm({
+    // El medio del pedido llega con los de la tienda: sin tocar nada, el formulario lo toma.
+    defaultValues: {
+      methodId: methods[0]?.id ?? "",
+      amount: moneyInput(due || order.totalCents, cur),
+      operation: "",
+      file: null as File | null,
+    },
+    validators: {
+      onSubmit: z.object({
+        methodId: z.string(),
+        amount: z
+          .string()
+          .refine(
+            (text) => Boolean(readMoney(text, cur)),
+            "Escribe el monto que se ve en la captura",
+          ),
+        operation: z.string(),
+        file: z.custom<File | null>(),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({
+        amountCents: readMoney(value.amount, cur) ?? 0,
+        operation: value.operation.trim(),
+        methodId: value.methodId || methods[0]?.id || "",
+        file: value.file,
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: { amountCents: "amount", captura: "file" },
+  })
+  const file = useStore(form.store, (s) => s.values.file)
+  const [preview, setPreview] = useState<string | null>(null)
+  useEffect(() => {
+    if (!file) return setPreview(null)
+    const next = URL.createObjectURL(file)
+    setPreview(next)
+    return () => URL.revokeObjectURL(next)
+  }, [file])
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
       title={`Captura del pago · pedido ${order.number}`}
       description="Anota lo que se ve en la captura. Alguien que puede confirmar pagos revisa la cuenta y lo confirma."
+      submitLabel="Anotar captura"
       onClose={onClose}
-      onSubmit={submit}
-      dirty={dirty}
-      footer={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={save.isPending}>
-            Anotar captura
-          </SubmitButton>
-        </>
-      }
     >
       <FieldGroup>
         {methods.length > 1 ? (
-          <SelectField
-            label="Medio"
-            value={chosen}
-            onChange={setMethodId}
-            options={methods.map((m) => ({ value: m.id, label: m.name }))}
-            error={errors.methodId}
-          />
+          <form.AppField name="methodId">
+            {(field) => (
+              <field.SelectField
+                label="Medio"
+                options={methods.map((m) => ({ value: m.id, label: m.name }))}
+              />
+            )}
+          </form.AppField>
         ) : null}
-        <MoneyField
-          label="Monto"
-          currency={store.currency}
-          value={amount}
-          onChange={setAmount}
-          error={amountError ?? errors.amountCents}
-          help={
-            due < order.totalCents
-              ? `Falta cobrar ${money(due, store.currency)} de ${money(order.totalCents, store.currency)}.`
-              : `El total del pedido es ${money(order.totalCents, store.currency)}. Si paga una parte, anota lo que pagó.`
-          }
-          autoFocus
-        />
-        <TextField
-          label="Número de operación (opcional)"
-          value={operation}
-          onChange={setOperation}
-          maxLength={60}
-          error={errors.operation}
-        />
-        <Field>
-          <FieldLabel>Imagen de la captura (opcional)</FieldLabel>
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="sr-only"
-            tabIndex={-1}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-          {preview ? (
-            <img
-              src={preview}
-              alt="La captura elegida"
-              className="max-h-56 w-fit rounded-lg border object-contain"
-            />
-          ) : null}
-          <div className="flex gap-2">
-            <Button variant="outline" type="button" onClick={() => fileInput.current?.click()}>
-              {file ? "Elegir otra" : "Elegir la imagen"}
-            </Button>
-            {file ? (
-              <Button variant="ghost" type="button" onClick={() => setFile(null)}>
-                Quitar
-              </Button>
-            ) : null}
-          </div>
-          <FieldDescription>Queda guardada con el pedido para revisarla después.</FieldDescription>
-        </Field>
-        <FormAlert error={save.error} />
+        <form.AppField name="amount">
+          {(field) => (
+            <field.Control
+              label="Monto"
+              description={
+                due < order.totalCents
+                  ? `Falta cobrar ${money(due, cur)} de ${money(order.totalCents, cur)}.`
+                  : `El total del pedido es ${money(order.totalCents, cur)}. Si paga una parte, anota lo que pagó.`
+              }
+            >
+              {(control) => (
+                <MoneyInput
+                  control={control}
+                  currency={cur}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                  autoFocus
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="operation">
+          {(field) => <field.TextField label="Número de operación (opcional)" maxLength={60} />}
+        </form.AppField>
+        <form.AppField name="file">
+          {(field) => (
+            <field.Control
+              label="Imagen de la captura (opcional)"
+              description="Queda guardada con el pedido para revisarla después."
+            >
+              {(control) => (
+                <>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden
+                    onChange={(e) => field.handleChange(e.target.files?.[0] ?? null)}
+                  />
+                  {preview ? (
+                    <img
+                      src={preview}
+                      alt="La captura elegida"
+                      className="max-h-56 w-fit rounded-lg border object-contain"
+                    />
+                  ) : null}
+                  <div className="flex gap-2">
+                    <Button
+                      {...control.props}
+                      variant="outline"
+                      type="button"
+                      onClick={() => fileInput.current?.click()}
+                    >
+                      {field.state.value ? "Elegir otra" : "Elegir la imagen"}
+                    </Button>
+                    {field.state.value ? (
+                      <Button
+                        variant="ghost"
+                        type="button"
+                        onClick={() => {
+                          field.handleChange(null)
+                          if (fileInput.current) fileInput.current.value = ""
+                        }}
+                      >
+                        Quitar
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
 }
 
@@ -1353,6 +1398,78 @@ export interface OrderDraft {
   paymentMethodId?: string | null
 }
 
+/** Lo que se llena al anotar o cambiar un pedido. */
+interface OrderValues {
+  chosen: ChosenCustomer | null
+  customerName: string
+  customerPhone: string
+  channel: OrderChannel
+  lines: LineDraft[]
+  deliveryId: string
+  zone: string
+  deliveryCost: string
+  deliveryCharged: string
+  address: string
+  deliverOn: string
+  paymentId: string
+  notes: string
+}
+
+/**
+ * Lo que falta antes de mandarlo (el resto, como el precio mínimo o el stock, lo dice el servidor
+ * al calcular el resumen y al guardar).
+ */
+function orderSchema(editing: boolean, currency: string) {
+  return z
+    .object({
+      chosen: z.custom<ChosenCustomer | null>(),
+      customerName: z.string(),
+      customerPhone: z.string(),
+      channel: z.custom<OrderChannel>(),
+      lines: z.array(
+        z.object({
+          key: z.number(),
+          variantId: z.string(),
+          quantity: z.string(),
+          price: z.string(),
+          gift: z.boolean(),
+          before: z.string().optional(),
+        }),
+      ),
+      deliveryId: z.string(),
+      zone: z.string(),
+      deliveryCost: z.string(),
+      deliveryCharged: z.string(),
+      address: z.string(),
+      deliverOn: z.string(),
+      paymentId: z.string(),
+      notes: z.string(),
+    })
+    .superRefine((value, ctx) => {
+      const say = (path: (string | number)[], message: string) =>
+        ctx.addIssue({ code: "custom", path, message })
+      if (!editing && !value.chosen && !value.customerName.trim())
+        say(["customerName"], "Escribe el nombre de la clienta")
+      if (!value.lines.some((line) => line.variantId)) say(["lines"], "Agrega al menos un producto")
+      if (!value.deliveryId) say(["deliveryId"], "Elige cómo se entrega")
+      if (!editing && !value.paymentId) say(["paymentId"], "Elige cómo paga")
+      value.lines.forEach((line, i) => {
+        if (line.variantId && !(Number(line.quantity) >= 1))
+          say(["lines", i, "quantity"], "Al menos 1")
+        if (!line.gift && line.price.trim() && readMoney(line.price, currency) === null)
+          say(["lines", i, "price"], "Escribe un monto válido")
+      })
+    })
+}
+
+/** El nombre en el formulario de un dato que el servidor nombra como en el cuerpo. */
+const ORDER_FIELDS: Record<string, string> = {
+  deliveryMethodId: "deliveryId",
+  paymentMethodId: "paymentId",
+  deliveryListCents: "deliveryCost",
+  deliveryCents: "deliveryCharged",
+}
+
 /**
  * «Anotar un pedido» y, con `editing`, «Cambiar» uno que todavía no salió: el mismo formulario, con
  * lo que ya tiene. Al cambiar, la clienta, el canal y el medio de pago siguen siendo los suyos; el
@@ -1390,15 +1507,16 @@ export function NewOrderSheet({
   const deliveries = (lists.data?.deliveries ?? []).filter((d) => d.isActive)
   const payments = (lists.data?.payments ?? []).filter((p) => p.isActive)
 
-  const [chosen, setChosen] = useState<ChosenCustomer | null>(draft?.customer ?? null)
-  const [customerName, setCustomerName] = useState("")
-  const [customerPhone, setCustomerPhone] = useState("")
-  const [channel, setChannel] = useState<OrderChannel>(draft?.channel ?? "otro")
   const nextKey = useRef(editing ? editing.lines.length : draft?.lines?.length || 1)
-  // Al cambiar, una línea negociada guarda su precio acordado; la que iba a su precio, o la que
-  // cambia de variante, toma el de hoy.
-  const [lines, setLines] = useState<LineDraft[]>(() =>
-    editing
+  // Lo que trae al abrirse, una sola vez: el pedido que se cambia o lo de la ficha.
+  const [initial] = useState<OrderValues>(() => ({
+    chosen: draft?.customer ?? null,
+    customerName: "",
+    customerPhone: "",
+    channel: draft?.channel ?? "otro",
+    // Al cambiar, una línea negociada guarda su precio acordado; la que iba a su precio, o la que
+    // cambia de variante, toma el de hoy.
+    lines: editing
       ? editing.lines.map((l, i) => ({
           key: i,
           variantId: l.variantId,
@@ -1416,99 +1534,128 @@ export function NewOrderSheet({
             before: l.text,
           }))
         : [{ key: 0, variantId: "", quantity: "1", price: "", gift: false }],
-  )
-  const [deliveryId, setDeliveryId] = useState(
-    editing?.deliveryMethodId ?? draft?.deliveryMethodId ?? "",
-  )
-  const [zone, setZone] = useState(editing?.deliveryZone ?? draft?.zone ?? "")
-  const [deliveryCost, setDeliveryCost] = useState(
-    editing ? moneyInput(editing.deliveryListCents, cur) : "",
-  )
-  const [deliveryCharged, setDeliveryCharged] = useState(
-    editing && !editing.deliveryFreeByPolicy && editing.deliveryCents !== editing.deliveryListCents
-      ? moneyInput(editing.deliveryCents, cur)
-      : "",
-  )
-  const [address, setAddress] = useState(editing?.address ?? draft?.address ?? "")
-  const [deliverOn, setDeliverOn] = useState(
-    editing ? (editing.deliverOn ?? "") : storeToday(store.timeZone),
-  )
-  const [paymentId, setPaymentId] = useState(draft?.paymentMethodId ?? "")
-  const [notes, setNotes] = useState("")
-  const dirty = useDirty({
-    chosen,
-    customerName,
-    customerPhone,
-    lines,
-    deliveryId,
-    paymentId,
-    address,
-    notes,
+    deliveryId: editing?.deliveryMethodId ?? draft?.deliveryMethodId ?? "",
+    zone: editing?.deliveryZone ?? draft?.zone ?? "",
+    deliveryCost: editing ? moneyInput(editing.deliveryListCents, cur) : "",
+    deliveryCharged:
+      editing &&
+      !editing.deliveryFreeByPolicy &&
+      editing.deliveryCents !== editing.deliveryListCents
+        ? moneyInput(editing.deliveryCents, cur)
+        : "",
+    address: editing?.address ?? draft?.address ?? "",
+    deliverOn: editing ? (editing.deliverOn ?? "") : storeToday(store.timeZone),
+    paymentId: draft?.paymentMethodId ?? "",
+    notes: "",
+  }))
+
+  const create = useMutation({
+    mutationFn: (sentBody: unknown) =>
+      api<{ order: OrderDetail }>(
+        editing
+          ? `/api/tiendas/${store.id}/pedidos/${editing.id}/cambiar`
+          : `/api/tiendas/${store.id}/pedidos`,
+        { method: "POST", body: sentBody },
+      ),
+    onSuccess: async (data) => {
+      queryClient.setQueryData(["pedido", store.id, data.order.id], data.order)
+      await queryClient.invalidateQueries({ queryKey: ORDERS_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: ["para-vender", store.id] })
+      await queryClient.invalidateQueries({ queryKey: CUSTOMERS_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CUSTOMER_KEY(store.id) })
+      toast.success(
+        editing ? `Pedido ${data.order.number} cambiado` : `Pedido ${data.order.number} anotado`,
+      )
+      onCreated(data.order.id)
+    },
   })
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: orderSchema(Boolean(editing), cur) },
+    onSubmit: async ({ value }) => {
+      await create.mutateAsync(bodyOf(value).sentBody)
+    },
+  })
+  const values = useStore(form.store, (s) => s.values)
 
   // «Repetir pedido»: lo que ya no se vende o ya no está encendido queda por elegir, con lo que
-  // llevó la vez anterior a la vista.
+  // llevó la vez anterior a la vista. No cuenta como algo escrito.
   const repeating = Boolean(draft?.number)
   useEffect(() => {
     if (!repeating || !sellable.data) return
     const ids = new Set(sellable.data.variants.filter((v) => v.stock > 0).map((v) => v.id))
-    setLines((all) =>
-      all.map((l) => (l.variantId && !ids.has(l.variantId) ? { ...l, variantId: "" } : l)),
+    form.setFieldValue(
+      "lines",
+      form
+        .getFieldValue("lines")
+        .map((l) => (l.variantId && !ids.has(l.variantId) ? { ...l, variantId: "" } : l)),
+      { dontUpdateMeta: true },
     )
-  }, [repeating, sellable.data])
+  }, [repeating, sellable.data, form])
   useEffect(() => {
     if (!repeating || !lists.data) return
     const on = <T extends { id: string; isActive: boolean }>(rows: T[], id: string) =>
       rows.some((row) => row.id === id && row.isActive)
-    setDeliveryId((id) => (id && !on(lists.data.deliveries, id) ? "" : id))
-    setPaymentId((id) => (id && !on(lists.data.payments, id) ? "" : id))
-  }, [repeating, lists.data])
+    const deliveryId = form.getFieldValue("deliveryId")
+    if (deliveryId && !on(lists.data.deliveries, deliveryId))
+      form.setFieldValue("deliveryId", "", { dontUpdateMeta: true })
+    const paymentId = form.getFieldValue("paymentId")
+    if (paymentId && !on(lists.data.payments, paymentId))
+      form.setFieldValue("paymentId", "", { dontUpdateMeta: true })
+  }, [repeating, lists.data, form])
 
-  const delivery = deliveries.find((d) => d.id === deliveryId)
-  const payment = payments.find((p) => p.id === paymentId)
-  const [localErrors, setLocalErrors] = useState<Record<string, string>>({})
+  const delivery = deliveries.find((d) => d.id === values.deliveryId)
+  const payment = payments.find((p) => p.id === values.paymentId)
 
   const money_ = (text: string) => (text.trim() === "" ? null : readMoney(text, cur))
-  // Solo van las líneas con producto; `sent[i]` es la posición en pantalla de la línea i que se
-  // envía, para poner cada error y cada precio en su línea.
-  const sent = lines.flatMap((l, i) => (l.variantId ? [i] : []))
-  const body = {
-    // Con su ficha elegida, el pedido copia su nombre y su teléfono; si no, abre la suya.
-    customerId: chosen?.id ?? null,
-    customerName: chosen ? "" : customerName,
-    customerPhone: chosen ? (chosen.phone ?? "") : customerPhone,
-    channel,
-    address,
-    notes,
-    lines: sent.map((i) => {
-      const l = lines[i]!
-      return {
-        variantId: l.variantId,
-        quantity: Number(l.quantity) || 0,
-        unitCents: l.gift ? null : money_(l.price),
-        gift: l.gift,
-      }
-    }),
-    deliveryMethodId: deliveryId,
-    zone: delivery?.cost === "por_zona" ? zone || null : null,
-    deliveryListCents: delivery?.cost === "se_acuerda" ? money_(deliveryCost) : null,
-    deliveryCents: money_(deliveryCharged),
-    paymentMethodId: paymentId,
-    deliverOn: deliverOn || null,
+  /**
+   * Lo que se manda. Solo van las líneas con producto; `sent[i]` es la posición en pantalla de la
+   * línea i que se envía, para poner cada error y cada precio en su línea.
+   */
+  function bodyOf(v: OrderValues) {
+    const sent = v.lines.flatMap((l, i) => (l.variantId ? [i] : []))
+    const chosenDelivery = deliveries.find((d) => d.id === v.deliveryId)
+    const body = {
+      // Con su ficha elegida, el pedido copia su nombre y su teléfono; si no, abre la suya.
+      customerId: v.chosen?.id ?? null,
+      customerName: v.chosen ? "" : v.customerName,
+      customerPhone: v.chosen ? (v.chosen.phone ?? "") : v.customerPhone,
+      channel: v.channel,
+      address: v.address,
+      notes: v.notes,
+      lines: v.lines
+        .filter((l) => l.variantId)
+        .map((l) => ({
+          variantId: l.variantId,
+          quantity: Number(l.quantity) || 0,
+          unitCents: l.gift ? null : money_(l.price),
+          gift: l.gift,
+        })),
+      deliveryMethodId: v.deliveryId,
+      zone: chosenDelivery?.cost === "por_zona" ? v.zone || null : null,
+      deliveryListCents: chosenDelivery?.cost === "se_acuerda" ? money_(v.deliveryCost) : null,
+      deliveryCents: money_(v.deliveryCharged),
+      paymentMethodId: v.paymentId,
+      deliverOn: v.deliverOn || null,
+    }
+    // Lo que se manda al cambiar: lo que se puede cambiar, nada más.
+    const changeBody = {
+      lines: body.lines,
+      deliveryMethodId: body.deliveryMethodId,
+      zone: body.zone,
+      deliveryListCents: body.deliveryListCents,
+      deliveryCents: body.deliveryCents,
+      address: body.address,
+      deliverOn: body.deliverOn,
+    }
+    return { sent, body, sentBody: editing ? changeBody : body }
   }
-  // Lo que se manda al cambiar: lo que se puede cambiar, nada más.
-  const changeBody = {
-    lines: body.lines,
-    deliveryMethodId: body.deliveryMethodId,
-    zone: body.zone,
-    deliveryListCents: body.deliveryListCents,
-    deliveryCents: body.deliveryCents,
-    address: body.address,
-    deliverOn: body.deliverOn,
-  }
-  const sentBody = editing ? changeBody : body
+  const built = bodyOf(values)
+  const sent = built.sent
+  const sentBody = built.sentBody
   // El resumen lo calcula el servidor, con la misma regla que al guardar.
-  const ready = body.lines.length > 0 && deliveryId !== "" && (editing || paymentId !== "")
+  const ready =
+    built.body.lines.length > 0 && values.deliveryId !== "" && (editing || values.paymentId !== "")
   const quoteKey = JSON.stringify(sentBody)
   const [debounced, setDebounced] = useState(quoteKey)
   useEffect(() => {
@@ -1537,73 +1684,43 @@ export function NewOrderSheet({
     placeholderData: (previous) => previous,
   })
 
-  const create = useMutation({
-    mutationFn: () =>
-      api<{ order: OrderDetail }>(
-        editing
-          ? `/api/tiendas/${store.id}/pedidos/${editing.id}/cambiar`
-          : `/api/tiendas/${store.id}/pedidos`,
-        { method: "POST", body: sentBody },
-      ),
-    onSuccess: async (data) => {
-      queryClient.setQueryData(["pedido", store.id, data.order.id], data.order)
-      await queryClient.invalidateQueries({ queryKey: ORDERS_KEY(store.id) })
-      await queryClient.invalidateQueries({ queryKey: ["para-vender", store.id] })
-      await queryClient.invalidateQueries({ queryKey: CUSTOMERS_KEY(store.id) })
-      await queryClient.invalidateQueries({ queryKey: CUSTOMER_KEY(store.id) })
-      toast.success(
-        editing ? `Pedido ${data.order.number} cambiado` : `Pedido ${data.order.number} anotado`,
-      )
-      onCreated(data.order.id)
-    },
-  })
-  // Al cambiar algo, el error de guardar ya no vale: vuelve a mandar el resumen.
-  const resetCreate = create.reset
-  useEffect(() => {
-    if (quoteKey) resetCreate()
-  }, [quoteKey, resetCreate])
-  // Lo que el servidor dijo al guardar manda; si no, lo que dice el resumen. Los errores de
-  // `lines.N` vuelven a la línea de la pantalla.
-  const serverErrors = Object.fromEntries(
-    Object.entries(
-      create.error
-        ? fieldErrors(create.error)
-        : ((editing ? preview.data?.fields : quote.data?.fields) ?? {}),
-    ).map(([key, message]) => [
-      key.replace(/^lines\.(\d+)\./, (_, n: string) => `lines.${sent[Number(n)] ?? n}.`),
-      message,
-    ]),
-  )
-  const errors = { ...serverErrors, ...localErrors }
-  const quotedLine = (i: number) => q?.lines[sent.indexOf(i)]
-
-  const submit = () => {
-    const next: Record<string, string> = {}
-    if (!editing && !chosen && !customerName.trim())
-      next.customerName = "Escribe el nombre de la clienta"
-    if (body.lines.length === 0) next.lines = "Agrega al menos un producto"
-    if (!deliveryId) next.deliveryMethodId = "Elige cómo se entrega"
-    if (!editing && !paymentId) next.paymentMethodId = "Elige cómo paga"
-    lines.forEach((l, i) => {
-      if (l.variantId && !(Number(l.quantity) >= 1)) next[`lines.${i}.quantity`] = "Al menos 1"
-      if (!l.gift && l.price.trim() && money_(l.price) === null)
-        next[`lines.${i}.unitCents`] = "Escribe un monto válido"
-    })
-    setLocalErrors(next)
-    if (Object.keys(next).length === 0) create.mutate()
+  // Los errores de `lines.N` vuelven a la línea de la pantalla; los demás, a su campo.
+  const fieldOf = (key: string): string | undefined => {
+    const line = /^lines\.(\d+)\.(\w+)$/.exec(key)
+    if (line) {
+      const at = sent[Number(line[1])] ?? Number(line[1])
+      return `lines[${at}].${line[2] === "unitCents" ? "price" : line[2]}`
+    }
+    return ORDER_FIELDS[key]
   }
+  const surface = useFormSurface(form, { fieldMap: fieldOf })
 
-  const update = (key: number, patch: Partial<LineDraft>) =>
-    setLines((all) => all.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  // Lo que dice el resumen de un dato (un precio bajo el mínimo, la zona) se dice en su campo,
+  // como lo que dice el servidor al guardar; se va al corregirlo o cuando el resumen ya no lo dice.
+  const quoted = editing ? preview.data?.fields : quote.data?.fields
+  const shownQuote = useRef(new Set<string>())
+  // `fieldOf` cambia con cada línea; lo que manda es que llegó otro resumen.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega otro resumen
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    for (const [key, message] of Object.entries(quoted ?? {})) next[fieldOf(key) ?? key] = message
+    const gone = shownQuote.current
+    clearSubmitErrors(form, (name) => gone.has(name) && !(name in next))
+    if (Object.keys(next).length > 0) addSubmitErrors(form, next)
+    shownQuote.current = new Set(Object.keys(next))
+  }, [quoted, form])
+
   const q = editing ? undefined : quote.data?.quote
+  const quotedLine = (i: number) => q?.lines[sent.indexOf(i)]
   const absorbed = q ? q.deliveryListCents - q.deliveryCents : 0
   const change = editing ? preview.data : undefined
   const changeBalance = change?.balance
 
   return (
-    <FormSheet
+    <FormDrawer
+      {...surface}
       open
-      wide
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
       title={
         editing
           ? `Cambiar el pedido ${editing.number}`
@@ -1620,22 +1737,11 @@ export function NewOrderSheet({
               ? "Va a su ficha. Se arma con los mismos precios y límites que usa Sofi."
               : "Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
       }
+      submitLabel={editing ? "Guardar cambios" : "Anotar pedido"}
       onClose={onClose}
-      onSubmit={submit}
-      dirty={dirty}
-      footer={
-        <>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Cancelar
-          </Button>
-          <SubmitButton type="submit" pending={create.isPending}>
-            {editing ? "Guardar cambios" : "Anotar pedido"}
-          </SubmitButton>
-        </>
-      }
     >
       {sellable.isError || lists.isError ? (
-        <ErrorBlock error={sellable.error ?? lists.error} />
+        <ErrorState error={sellable.error ?? lists.error} />
       ) : null}
       <FieldGroup>
         {editing ? (
@@ -1646,249 +1752,319 @@ export function NewOrderSheet({
         ) : (
           <FieldSet>
             <FieldLegend>Clienta</FieldLegend>
-            {chosen ? (
+            {values.chosen ? (
               <ChosenCustomerRow
-                customer={chosen}
-                error={errors.customerId}
-                onChange={() => setChosen(null)}
+                customer={values.chosen}
+                onChange={() => form.setFieldValue("chosen", null)}
               />
             ) : (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <TextField
-                    label="Nombre"
-                    value={customerName}
-                    onChange={setCustomerName}
-                    maxLength={120}
-                    error={errors.customerName}
-                    autoFocus
-                  />
-                  <TextField
-                    label="Teléfono (opcional)"
-                    value={customerPhone}
-                    onChange={setCustomerPhone}
-                    maxLength={30}
-                    inputMode="text"
-                    placeholder="+51 987 654 321"
-                    error={errors.customerPhone}
-                  />
+                  <form.AppField name="customerName">
+                    {(field) => <field.TextField label="Nombre" maxLength={120} autoFocus />}
+                  </form.AppField>
+                  <form.AppField name="customerPhone">
+                    {(field) => (
+                      <field.TextField
+                        label="Teléfono (opcional)"
+                        maxLength={30}
+                        inputMode="text"
+                        placeholder="+51 987 654 321"
+                      />
+                    )}
+                  </form.AppField>
                 </div>
                 <CustomerMatches
-                  name={customerName}
-                  phone={customerPhone}
-                  onChoose={(customer) => {
+                  name={values.customerName}
+                  phone={values.customerPhone}
+                  onChoose={(customer) =>
                     // Si su ficha no tiene teléfono, el pedido lleva el que se escribió.
-                    setChosen({
+                    form.setFieldValue("chosen", {
                       ...customer,
-                      phone: customer.phone ?? (customerPhone.trim() || null),
+                      phone: customer.phone ?? (values.customerPhone.trim() || null),
                     })
-                    setLocalErrors(({ customerName: _, ...rest }) => rest)
-                  }}
+                  }
                 />
               </>
             )}
-            <SelectField
-              label="Por dónde llegó"
-              value={channel}
-              onChange={(v) => setChannel(v as OrderChannel)}
-              options={Object.entries(CHANNELS).map(([value, label]) => ({ value, label }))}
-            />
+            <form.AppField name="channel">
+              {(field) => (
+                <field.Group legend="Por dónde llegó">
+                  {(control) => (
+                    <RadioChips
+                      aria-label="Por dónde llegó"
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      onBlur={control.onBlur}
+                      value={field.state.value}
+                      onChange={(channel) => field.handleChange(channel)}
+                      options={(Object.keys(CHANNELS) as OrderChannel[]).map((value) => ({
+                        value,
+                        label: CHANNELS[value],
+                      }))}
+                    />
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
           </FieldSet>
         )}
 
-        <FieldSet>
-          <FieldLegend>Productos</FieldLegend>
-          {errors.lines ? <FieldError>{errors.lines}</FieldError> : null}
-          {lines.map((line, i) => {
-            const v = variants.find((x) => x.id === line.variantId)
-            const negotiable = v && v.floorUnitCents < v.autoUnitCents
-            return (
-              <div key={line.key} className="flex flex-col gap-3 rounded-lg border p-3">
-                <div className="flex items-start gap-2">
-                  <SelectField
-                    className="flex-1"
-                    label={`Producto ${i + 1}`}
-                    value={line.variantId}
-                    onChange={(variantId) => update(line.key, { variantId, price: "" })}
-                    error={errors[`lines.${i}.variantId`]}
-                    placeholder={sellable.isPending ? "Cargando el catálogo…" : "Elige el producto"}
-                    options={variants.map((x) => ({
-                      value: x.id,
-                      label: `${x.productName}${x.variantName === "Única" ? "" : ` · ${x.variantName}`} — ${money(x.autoUnitCents, cur)}${x.stock === 0 ? " · agotado" : ` · quedan ${x.stock}`}`,
-                      // Al cambiar se puede: se guarda y no sale hasta que entre.
-                      disabled: x.stock === 0 && !editing,
-                    }))}
-                  />
-                  {lines.length > 1 ? (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      className="mt-6"
-                      aria-label={`Quitar el producto ${i + 1}`}
-                      onClick={() => setLines((all) => all.filter((l) => l.key !== line.key))}
-                    >
-                      <Trash2 aria-hidden />
-                    </Button>
-                  ) : null}
-                </div>
-                {line.before ? (
-                  <p className="-mt-1 text-xs text-muted-foreground">
-                    La vez anterior: {line.before}.
-                    {line.variantId ? "" : " Ya no está a la venta o se agotó: elige otro."}
-                  </p>
-                ) : null}
-                <div className="grid gap-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
-                  <TextField
-                    label="Cantidad"
-                    value={line.quantity}
-                    onChange={(quantity) => update(line.key, { quantity })}
-                    inputMode="numeric"
-                    error={errors[`lines.${i}.quantity`]}
-                  />
-                  {line.gift ? (
-                    <p className="self-end pb-2 text-sm text-muted-foreground">
-                      Va de regalo: sale del margen de lo que compra.
-                    </p>
-                  ) : (
-                    <MoneyField
-                      label="Precio acordado por unidad"
-                      currency={cur}
-                      value={line.price}
-                      onChange={(price) => update(line.key, { price })}
-                      placeholder={
-                        v ? moneyInput(quotedLine(i)?.autoUnitCents ?? v.autoUnitCents, cur) : ""
-                      }
-                      error={errors[`lines.${i}.unitCents`]}
-                      help={
-                        v
-                          ? negotiable
-                            ? `Vacío: ${money(v.autoUnitCents, cur)}${v.promotion ? ` (${v.promotion})` : ""}. Se negocia hasta ${money(v.floorUnitCents, cur)}.`
-                            : `${money(v.autoUnitCents, cur)}${v.promotion ? ` (${v.promotion})` : ""}. No se negocia.`
-                          : undefined
-                      }
-                    />
-                  )}
-                </div>
-                <GiftCheck checked={line.gift} onChange={(gift) => update(line.key, { gift })} />
-              </div>
-            )
-          })}
-          <Button
-            variant="outline"
-            type="button"
-            className="self-start"
-            onClick={() =>
-              setLines((all) => [
-                ...all,
-                { key: nextKey.current++, variantId: "", quantity: "1", price: "", gift: false },
-              ])
-            }
-          >
-            <Plus aria-hidden />
-            Agregar otro producto
-          </Button>
-        </FieldSet>
+        <form.AppField name="lines" mode="array">
+          {(linesField) => (
+            <linesField.Group legend="Productos">
+              {() => (
+                <>
+                  {linesField.state.value.map((line, i) => {
+                    const v = variants.find((x) => x.id === line.variantId)
+                    const negotiable = v && v.floorUnitCents < v.autoUnitCents
+                    return (
+                      <div key={line.key} className="flex flex-col gap-3 rounded-lg border p-3">
+                        <div className="flex items-start gap-2">
+                          <form.AppField
+                            name={`lines[${i}].variantId`}
+                            listeners={{
+                              // Otra variante toma su precio de hoy.
+                              onChange: () => form.setFieldValue(`lines[${i}].price`, ""),
+                            }}
+                          >
+                            {(field) => (
+                              <field.SelectField
+                                className="flex-1"
+                                label={`Producto ${i + 1}`}
+                                placeholder={
+                                  sellable.isPending ? "Cargando el catálogo…" : "Elige el producto"
+                                }
+                                options={variants.map((x) => ({
+                                  value: x.id,
+                                  label: `${x.productName}${x.variantName === "Única" ? "" : ` · ${x.variantName}`} — ${money(x.autoUnitCents, cur)}${x.stock === 0 ? " · agotado" : ` · quedan ${x.stock}`}`,
+                                  // Al cambiar se puede: se guarda y no sale hasta que entre.
+                                  disabled: x.stock === 0 && !editing,
+                                }))}
+                              />
+                            )}
+                          </form.AppField>
+                          {linesField.state.value.length > 1 ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              type="button"
+                              className="mt-6"
+                              aria-label={`Quitar el producto ${i + 1}`}
+                              onClick={() => linesField.removeValue(i)}
+                            >
+                              <Trash2 aria-hidden />
+                            </Button>
+                          ) : null}
+                        </div>
+                        {line.before ? (
+                          <p className="-mt-1 text-xs text-muted-foreground">
+                            La vez anterior: {line.before}.
+                            {line.variantId ? "" : " Ya no está a la venta o se agotó: elige otro."}
+                          </p>
+                        ) : null}
+                        <div className="grid gap-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
+                          <form.AppField name={`lines[${i}].quantity`}>
+                            {(field) => <field.TextField label="Cantidad" inputMode="numeric" />}
+                          </form.AppField>
+                          {line.gift ? (
+                            <p className="self-end pb-2 text-sm text-muted-foreground">
+                              Va de regalo: sale del margen de lo que compra.
+                            </p>
+                          ) : (
+                            <form.AppField name={`lines[${i}].price`}>
+                              {(field) => (
+                                <field.Control
+                                  label="Precio acordado por unidad"
+                                  description={
+                                    v
+                                      ? negotiable
+                                        ? `Vacío: ${money(v.autoUnitCents, cur)}${v.promotion ? ` (${v.promotion})` : ""}. Se negocia hasta ${money(v.floorUnitCents, cur)}.`
+                                        : `${money(v.autoUnitCents, cur)}${v.promotion ? ` (${v.promotion})` : ""}. No se negocia.`
+                                      : undefined
+                                  }
+                                >
+                                  {(control) => (
+                                    <MoneyInput
+                                      control={control}
+                                      currency={cur}
+                                      value={field.state.value}
+                                      onChange={field.handleChange}
+                                      placeholder={
+                                        v
+                                          ? moneyInput(
+                                              quotedLine(i)?.autoUnitCents ?? v.autoUnitCents,
+                                              cur,
+                                            )
+                                          : ""
+                                      }
+                                    />
+                                  )}
+                                </field.Control>
+                              )}
+                            </form.AppField>
+                          )}
+                        </div>
+                        <form.AppField name={`lines[${i}].gift`}>
+                          {(field) => <field.CheckboxField label="De regalo" />}
+                        </form.AppField>
+                      </div>
+                    )
+                  })}
+                  <Button
+                    variant="outline"
+                    type="button"
+                    className="self-start"
+                    onClick={() =>
+                      linesField.pushValue({
+                        key: nextKey.current++,
+                        variantId: "",
+                        quantity: "1",
+                        price: "",
+                        gift: false,
+                      })
+                    }
+                  >
+                    <Plus aria-hidden />
+                    Agregar otro producto
+                  </Button>
+                </>
+              )}
+            </linesField.Group>
+          )}
+        </form.AppField>
 
         <FieldSet>
           <FieldLegend>Entrega</FieldLegend>
-          <SelectField
-            label="Forma de entrega"
-            value={deliveryId}
-            onChange={(id) => {
-              setDeliveryId(id)
-              setZone("")
-              setDeliveryCharged("")
+          <form.AppField
+            name="deliveryId"
+            listeners={{
+              onChange: () => {
+                form.setFieldValue("zone", "")
+                form.setFieldValue("deliveryCharged", "")
+              },
             }}
-            error={errors.deliveryMethodId}
-            placeholder="Elige cómo se entrega"
-            options={deliveries.map((d) => ({ value: d.id, label: d.name }))}
-          />
+          >
+            {(field) => (
+              <field.SelectField
+                label="Forma de entrega"
+                placeholder="Elige cómo se entrega"
+                options={deliveries.map((d) => ({ value: d.id, label: d.name }))}
+              />
+            )}
+          </form.AppField>
           {delivery?.cost === "por_zona" ? (
-            <SelectField
-              label="Zona"
-              value={zone}
-              onChange={(next) => {
-                setZone(next)
-                setDeliveryCharged("")
-              }}
-              error={errors.zone}
-              placeholder="Elige la zona"
-              options={delivery.zones.map((z) => ({
-                value: z.name,
-                label: `${z.name} — ${money(z.priceCents, cur)}`,
-              }))}
-            />
+            <form.AppField
+              name="zone"
+              listeners={{ onChange: () => form.setFieldValue("deliveryCharged", "") }}
+            >
+              {(field) => (
+                <field.SelectField
+                  label="Zona"
+                  placeholder="Elige la zona"
+                  options={delivery.zones.map((z) => ({
+                    value: z.name,
+                    label: `${z.name} — ${money(z.priceCents, cur)}`,
+                  }))}
+                />
+              )}
+            </form.AppField>
           ) : null}
           {delivery?.cost === "se_acuerda" ? (
-            <MoneyField
-              label="Cuánto cuesta el envío"
-              currency={cur}
-              value={deliveryCost}
-              onChange={setDeliveryCost}
-              error={errors.deliveryListCents}
-              help="Se acuerda con el cliente."
-            />
+            <form.AppField name="deliveryCost">
+              {(field) => (
+                <field.Control
+                  label="Cuánto cuesta el envío"
+                  description="Se acuerda con el cliente."
+                >
+                  {(control) => (
+                    <MoneyInput
+                      control={control}
+                      currency={cur}
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           ) : null}
           {delivery && (delivery.cost === "fijo" || delivery.cost === "por_zona") ? (
-            <MoneyField
-              label="Lo que paga de envío (opcional)"
-              currency={cur}
-              value={deliveryCharged}
-              onChange={setDeliveryCharged}
-              placeholder={q ? moneyInput(q.deliveryCents, cur) : ""}
-              error={errors.deliveryCents}
-              help={
-                delivery.maxDiscountCents
-                  ? `Vacío: lo que corresponde. Se puede rebajar hasta ${money(delivery.maxDiscountCents, cur)}, del margen.`
-                  : "Vacío: lo que corresponde. Este envío no se rebaja."
-              }
-            />
+            <form.AppField name="deliveryCharged">
+              {(field) => (
+                <field.Control
+                  label="Lo que paga de envío (opcional)"
+                  description={
+                    delivery.maxDiscountCents
+                      ? `Vacío: lo que corresponde. Se puede rebajar hasta ${money(delivery.maxDiscountCents, cur)}, del margen.`
+                      : "Vacío: lo que corresponde. Este envío no se rebaja."
+                  }
+                >
+                  {(control) => (
+                    <MoneyInput
+                      control={control}
+                      currency={cur}
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                      placeholder={q ? moneyInput(q.deliveryCents, cur) : ""}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_11rem]">
-            <TextField
-              label="Dirección (opcional)"
-              value={address}
-              onChange={setAddress}
-              maxLength={300}
-              error={errors.address}
-            />
-            <DateField
-              label="Día de entrega"
-              value={deliverOn}
-              onChange={setDeliverOn}
-              error={errors.deliverOn}
-            />
+            <form.AppField name="address">
+              {(field) => <field.TextField label="Dirección (opcional)" maxLength={300} />}
+            </form.AppField>
+            <form.AppField name="deliverOn">
+              {(field) => (
+                <field.Control label="Día de entrega">
+                  {(control) => (
+                    <DatePickerButton
+                      {...control.props}
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                      emptyLabel="Sin día"
+                      className="w-full"
+                    />
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           </div>
         </FieldSet>
 
         {editing ? null : (
           <FieldSet>
             <FieldLegend>Pago</FieldLegend>
-            <SelectField
-              label="Medio de pago"
-              value={paymentId}
-              onChange={setPaymentId}
-              error={errors.paymentMethodId}
-              placeholder="Elige cómo paga"
-              options={payments.map((p) => ({
-                value: p.id,
-                label:
-                  p.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery
-                    ? `${p.name} (esta entrega no acepta pago al recibir)`
-                    : p.name,
-                disabled:
-                  p.collection === "al_recibir" &&
-                  delivery !== undefined &&
-                  !delivery.acceptsPayOnDelivery,
-              }))}
-            />
-            {payment?.collection === "al_recibir" ? (
-              <FieldDescription>
-                Se cobra en la puerta: el pedido queda listo para salir.
-              </FieldDescription>
-            ) : null}
-            <TextField label="Nota (opcional)" value={notes} onChange={setNotes} maxLength={500} />
+            <form.AppField name="paymentId">
+              {(field) => (
+                <field.SelectField
+                  label="Medio de pago"
+                  placeholder="Elige cómo paga"
+                  description={
+                    payment?.collection === "al_recibir"
+                      ? "Se cobra en la puerta: el pedido queda listo para salir."
+                      : undefined
+                  }
+                  options={payments.map((p) => ({
+                    value: p.id,
+                    label:
+                      p.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery
+                        ? `${p.name} (esta entrega no acepta pago al recibir)`
+                        : p.name,
+                    disabled:
+                      p.collection === "al_recibir" &&
+                      delivery !== undefined &&
+                      !delivery.acceptsPayOnDelivery,
+                  }))}
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="notes">
+              {(field) => <field.TextField label="Nota (opcional)" maxLength={500} />}
+            </form.AppField>
           </FieldSet>
         )}
 
@@ -1983,38 +2159,32 @@ export function NewOrderSheet({
             <p className="text-sm text-warning">Revisa lo marcado arriba para ver el total.</p>
           )}
         </section>
-        <FormAlert error={create.error} />
       </FieldGroup>
-    </FormSheet>
+    </FormDrawer>
   )
 }
 
 /** La clienta elegida: el pedido usa su ficha. «Cambiar» vuelve a buscarla o a escribirla. */
 function ChosenCustomerRow({
   customer,
-  error,
   onChange,
 }: {
   customer: ChosenCustomer
-  error?: string
   onChange: () => void
 }) {
   return (
-    <Field data-invalid={error ? true : undefined}>
-      <div className="flex items-center gap-3 rounded-lg border p-3">
-        <PersonAvatar name={customer.name} className="size-9" decorative />
-        <span className="flex min-w-0 flex-1 flex-col text-sm">
-          <span className="truncate font-medium">{customer.name}</span>
-          <span className="text-xs text-muted-foreground">
-            {customer.phone ?? "Sin teléfono"} · el pedido va a su ficha
-          </span>
+    <div className="flex items-center gap-3 rounded-lg border p-3">
+      <PersonAvatar name={customer.name} className="size-9" decorative />
+      <span className="flex min-w-0 flex-1 flex-col text-sm">
+        <span className="truncate font-medium">{customer.name}</span>
+        <span className="text-xs text-muted-foreground">
+          {customer.phone ?? "Sin teléfono"} · el pedido va a su ficha
         </span>
-        <Button variant="ghost" size="sm" type="button" onClick={onChange}>
-          Cambiar
-        </Button>
-      </div>
-      {error ? <FieldError>{error}</FieldError> : null}
-    </Field>
+      </span>
+      <Button variant="ghost" size="sm" type="button" onClick={onChange}>
+        Cambiar
+      </Button>
+    </div>
   )
 }
 
@@ -2094,16 +2264,6 @@ function CustomerMatches({
           No está en Clientes: su ficha se abre al anotar el pedido.
         </FieldDescription>
       ) : null}
-    </div>
-  )
-}
-
-function GiftCheck({ checked, onChange }: { checked: boolean; onChange: (gift: boolean) => void }) {
-  const id = useId()
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <Checkbox id={id} checked={checked} onCheckedChange={(next) => onChange(Boolean(next))} />
-      <label htmlFor={id}>De regalo</label>
     </div>
   )
 }

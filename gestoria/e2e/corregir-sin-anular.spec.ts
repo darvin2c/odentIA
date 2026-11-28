@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
+import { ACCOUNT, API_PORT, choose, STORE_ID, surface, WEB, type Who } from "./entorno"
 
 /**
  * Un pedido se corrige sin anularlo, en un navegador (lienzo «gestorIA como odentIA», tableros 6
@@ -134,10 +134,10 @@ test("Andrea cambia a la 38 sin anular, pasa a mañana y se deshace su pago", as
 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
-  const sheet = page.getByRole("dialog", { name: `Pedido ${order.number} · Andrea Castillo` })
+  const sheet = surface(page, `Pedido ${order.number} · Andrea Castillo`)
   await expect(sheet).toBeVisible()
   await sheet.getByRole("button", { name: "Anotar captura del pago" }).click()
-  const capture = page.getByRole("dialog", { name: `Captura del pago · pedido ${order.number}` })
+  const capture = surface(page, `Captura del pago · pedido ${order.number}`)
   await capture.getByLabel("Monto").fill("139")
   await capture.getByRole("button", { name: "Anotar captura" }).click()
   await expect(capture).toHaveCount(0)
@@ -146,12 +146,12 @@ test("Andrea cambia a la 38 sin anular, pasa a mañana y se deshace su pago", as
 
   // «Cambiar»: el mismo pedido, con lo que ya tiene y sin cliente ni medio de pago.
   await sheet.getByRole("button", { name: "Cambiar", exact: true }).click()
-  const edit = page.getByRole("dialog", { name: `Cambiar el pedido ${order.number}` })
+  const edit = surface(page, `Cambiar el pedido ${order.number}`)
   await expect(edit).toBeVisible()
   await expect(edit.getByText(/Andrea Castillo · paga con Plin/)).toBeVisible()
   await expect(edit.getByLabel("Medio de pago")).toHaveCount(0)
-  await edit.getByLabel("Producto 1").selectOption(setup.t38)
-  await edit.getByLabel("Zona").selectOption("Callao")
+  await choose(edit.getByLabel("Producto 1"), /^Sandalia beige · 38 —/)
+  await choose(edit.getByLabel("Zona"), /^Callao —/)
   // Antes de guardar: el total nuevo, lo pagado y lo que falta, del mismo saldo.
   const summary = edit.locator("section[aria-live]")
   await expect(summary.getByText("Total nuevo")).toBeVisible()
@@ -173,7 +173,8 @@ test("Andrea cambia a la 38 sin anular, pasa a mañana y se deshace su pago", as
   // A 390 px: «Pasar a…» mañana, sin anular nada.
   await page.setViewportSize(PHONE)
   await sheet.getByRole("button", { name: "Pasar a…" }).click()
-  const move = page.getByRole("alertdialog")
+  // Abierto desde el pedido, que ya está en la columna: va en cajón.
+  const move = page.getByRole("dialog", { name: `Pasar a… · ${order.number} Andrea Castillo` })
   await move.getByRole("button", { name: "Mañana", exact: true }).click()
   await expect(move.getByRole("button", { name: "Mañana", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -220,10 +221,10 @@ test("Jorge no contestó: «No se entregó» lo vuelve a «Por salir» mañana",
 
   await page.setViewportSize(PHONE)
   await page.goto(`${BASE}/pedidos?pedido=${order.id}`)
-  const sheet = page.getByRole("dialog", { name: `Pedido ${order.number} · Jorge Paredes` })
+  const sheet = surface(page, `Pedido ${order.number} · Jorge Paredes`)
   await expect(sheet).toBeVisible()
   await sheet.getByRole("button", { name: "No se entregó" }).click()
-  const missed = page.getByRole("alertdialog")
+  const missed = page.getByRole("dialog", { name: `No se entregó · ${order.number} Jorge Paredes` })
   await expect(missed.getByRole("radio", { name: "No contestó" })).toBeChecked()
   await expect(missed.getByRole("button", { name: "Mañana" })).toHaveAttribute(
     "aria-pressed",

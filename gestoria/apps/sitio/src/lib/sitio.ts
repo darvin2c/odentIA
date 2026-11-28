@@ -98,7 +98,9 @@ export const SITE_MAP = {
     { label: "Cómo funciona", path: "/como-funciona", lista: true },
     { label: "Guías", path: "/guias", lista: false },
     { label: "Integraciones", path: "/integraciones", lista: false },
-    { label: "Comparar", path: "/comparar", lista: false },
+    { label: "Qué es un ARM", path: "/arm", lista: true },
+    { label: "ARM vs CRM", path: "/arm-vs-crm", lista: true },
+    { label: "ARM vs chatbot", path: "/arm-vs-chatbot", lista: true },
   ],
   empresa: [
     { label: "Precios", path: "/precios", lista: true },

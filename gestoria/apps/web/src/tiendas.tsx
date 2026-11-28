@@ -7,14 +7,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   toast,
 } from "@odentia/ui"
 import { brandColorCss } from "@odentia/ui/lib/brand-color"
@@ -23,10 +21,12 @@ import {
   type AppShellNavEntry,
   type AppShellNavItem,
   Brand,
+  ConfirmDialog,
   type CountryCode,
   CountrySelect,
   EmptyState,
   ErrorState,
+  FormDrawer,
   HeaderUtilitiesProvider,
   LoadingState,
   NoticeStrip,
@@ -36,10 +36,14 @@ import {
   PersonAvatar,
   type Place,
   PlaceSwitcher,
+  RadioChips,
   regionCountry,
   SideDockProvider,
   SideDockSlot,
+  type StripNotice,
   SubmitButton,
+  useAppForm,
+  useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
@@ -64,7 +68,6 @@ import {
 } from "lucide-react"
 import {
   createContext,
-  type FormEvent,
   type MouseEventHandler,
   type ReactNode,
   useContext,
@@ -72,8 +75,8 @@ import {
   useMemo,
   useState,
 } from "react"
+import { z } from "zod"
 import { HelpMenuItem, StoreHelpButton } from "./ayuda"
-import { DraftGuard } from "./borrador"
 import {
   ApiError,
   api,
@@ -88,8 +91,9 @@ import {
   type TeamMember,
 } from "./lib/api"
 import { device } from "./lib/avisos"
-import { configGroupsFor } from "./lib/configuracion"
+import { configEntryFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
+import { DraftGuard } from "./lib/draft-guard"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
@@ -146,23 +150,40 @@ function OpeningFailed({ error, onRetry }: { error: unknown; onRetry: () => void
   return (
     <div className="flex min-h-dvh items-center justify-center bg-canvas p-4">
       <div className="w-full max-w-md">
-        <ErrorBlock error={error} onRetry={onRetry} />
+        <ErrorState
+          error={error instanceof Error ? error : "No se pudo cargar"}
+          onRetry={onRetry}
+        />
       </div>
     </div>
   )
 }
 
 /**
- * La franja de soporte de gestorIA mirando la tienda (ADR 0219), con las palabras de las clínicas:
- * qué tienda, hasta cuándo y que no cambia nada. No se cierra; «Salir» termina solo esta mirada,
- * nunca la sesión (que es la misma de la administración). Sigue al permiso: cada medio minuto y al
- * vencer vuelve a preguntar, así lo que estaba a la vista no queda abierto después de que la
- * tienda la saca o de que se termina el tiempo.
+ * La franja de arriba de la tienda (`NoticeStrip`, una sola a la vista, la más grave primero),
+ * con lo de soporte de gestorIA (ADR 0219; lienzo «gestorIA · Configuración, de nuevo», decisión
+ * 10):
+ *
+ * - A soporte que mira: qué tienda, hasta cuándo y que no cambia nada. No se cierra; «Salir»
+ *   termina solo esta mirada, nunca la sesión (que es la misma de la administración). Sigue al
+ *   permiso: cada medio minuto y al vencer vuelve a preguntar, así lo que estaba a la vista no
+ *   queda abierto después de que la tienda la saca o de que se termina el tiempo.
+ * - A quien puede responderle (`equipo.gestionar`): el pedido de soporte para mirar la tienda, una
+ *   sola vez aquí y no en cada apartado, y quién mira ahora. Se responde en Equipo y repartidores.
  */
-function SupportStrip({ store }: { store: MyStore }) {
+function StoreStrip({ store }: { store: MyStore }) {
   const queryClient = useQueryClient()
-  const until = store.supportUntil ?? ""
+  const watching = store.supportUntil
+  const until = watching ?? ""
+  const answers = store.permissions.includes("equipo.gestionar")
+  const team = useQuery({
+    queryKey: ["equipo", store.id],
+    queryFn: () => api<Team>(`/api/tiendas/${store.id}/equipo`),
+    enabled: answers,
+    refetchInterval: answers ? 120_000 : false,
+  })
   useEffect(() => {
+    if (!watching) return
     const check = () => void queryClient.invalidateQueries({ queryKey: ["yo"] })
     const timer = window.setInterval(check, 30_000)
     const left = new Date(until).getTime() - Date.now()
@@ -171,31 +192,47 @@ function SupportStrip({ store }: { store: MyStore }) {
       window.clearInterval(timer)
       if (atEnd) window.clearTimeout(atEnd)
     }
-  }, [until, queryClient])
+  }, [watching, until, queryClient])
   const leave = useMutation({
     mutationFn: () => api(`/api/tiendas/${store.id}/soporte/salir`, { method: "POST" }),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ["yo"] }),
     onError: (error) => toast.error(error.message),
   })
-  return (
-    <NoticeStrip
-      label="Soporte de gestorIA"
-      notices={[
-        {
-          id: "soporte-mirando",
-          tone: "alarma",
-          message: stripMessage(store.name, until),
-          short: `Solo mirar · hasta ${atTime(until)}`,
-          action: {
-            label: "Salir",
-            onSelect: () => {
-              if (!leave.isPending) leave.mutate()
-            },
-          },
+  const notices: StripNotice[] = []
+  if (watching)
+    notices.push({
+      id: "soporte-mirando",
+      tone: "alarma",
+      message: stripMessage(store.name, until),
+      short: `Solo mirar · hasta ${atTime(until)}`,
+      action: {
+        label: "Salir",
+        onSelect: () => {
+          if (!leave.isPending) leave.mutate()
         },
-      ]}
-    />
-  )
+      },
+    })
+  const toTeam = `/tiendas/${store.id}/configuracion/equipo`
+  for (const row of team.data?.support ?? []) {
+    if (row.status === "por_aceptar")
+      notices.push({
+        id: `soporte-pide-${row.id}`,
+        tone: "aviso",
+        message: `${row.staffName} pide mirar tu tienda ${row.minutes} minutos. Solo mira: no cambia nada.`,
+        short: `Soporte pide mirar ${row.minutes} minutos`,
+        action: { label: "Revisar", to: toTeam },
+      })
+    else if (row.status === "vigente" && row.expiresAt)
+      notices.push({
+        id: `soporte-vigente-${row.id}`,
+        tone: "aviso",
+        message: `${row.staffName} ${row.usedAt ? "está mirando" : "puede mirar"} tu tienda hasta ${sentence(atTime(row.expiresAt))}`,
+        short: `Soporte mira hasta ${atTime(row.expiresAt)}`,
+        action: { label: "Ver", to: toTeam },
+      })
+  }
+  if (notices.length === 0) return null
+  return <NoticeStrip label="Soporte de gestorIA" notices={notices} LinkComponent={RouterLink} />
 }
 
 /**
@@ -299,7 +336,7 @@ export function Shell({
     : { tienda: store?.id ?? "" }
   return (
     <AppShell
-      notice={store?.supportUntil ? <SupportStrip store={store} /> : undefined}
+      notice={store ? <StoreStrip store={store} /> : undefined}
       items={items}
       LinkComponent={RouterLink}
       pathname={pathname}
@@ -363,12 +400,6 @@ export function Shell({
         </HeaderUtilitiesProvider>
       </SideDockProvider>
     </AppShell>
-  )
-}
-
-export function ErrorBlock({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  return (
-    <ErrorState error={error instanceof Error ? error : "No se pudo cargar"} onRetry={onRetry} />
   )
 }
 
@@ -526,121 +557,96 @@ export function NewStorePage() {
   )
 }
 
+const newStoreSchema = z.object({
+  name: z.string().trim().min(1, "Escribe el nombre de tu tienda").max(80, "Máximo 80 caracteres"),
+  currency: z.string().min(1, "Elige la moneda en que vendes"),
+  country: z.string().min(1, "Elige el país de tu tienda"),
+})
+
 function NewStoreForm() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currencies = useCurrencies()
-  const [name, setName] = useState("")
-  const [currency, setCurrency] = useState("PEN")
-  // El de la región del navegador, como en el teléfono: se cambia buscando en la lista.
-  const [country, setCountry] = useState<CountryCode>(regionCountry)
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const create = useMutation({
-    mutationFn: () =>
-      api<{ store: MyStore }>("/api/tiendas", {
+  const form = useAppForm({
+    // El país, el de la región del navegador, como en el teléfono: se cambia buscando en la lista.
+    defaultValues: { name: "", currency: "PEN", country: regionCountry() as string },
+    validators: { onSubmit: newStoreSchema },
+    onSubmit: async ({ value }) => {
+      const { store } = await api<{ store: MyStore }>("/api/tiendas", {
         method: "POST",
-        body: { name, currency, country },
-      }),
-    onSuccess: async ({ store }) => {
+        body: { name: value.name.trim(), currency: value.currency, country: value.country },
+      })
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
       await navigate({ to: "/tiendas/$id", params: { id: store.id } })
     },
-    onError: (error) => {
-      if (error instanceof ApiError && Object.keys(error.fields).length > 0) setErrors(error.fields)
-    },
   })
-
-  function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    if (!name.trim()) {
-      setErrors({ name: "Escribe el nombre de tu tienda" })
-      return
-    }
-    setErrors({})
-    create.mutate()
-  }
-
+  const surface = useFormSurface(form)
   return (
     <>
       <PageHeader
         title="Crea tu tienda"
         subtitle="Quedas como su dueño. Después invitas a tu equipo."
       />
-      <form noValidate onSubmit={onSubmit} className="max-w-md rounded-xl border bg-card p-5">
-        <FieldGroup className="gap-5">
-          <Field data-invalid={errors.name ? true : undefined}>
-            <FieldLabel htmlFor="store-name">Nombre de la tienda</FieldLabel>
-            <Input
+      <form
+        noValidate
+        onSubmit={surface.onSubmit}
+        className="flex max-w-md flex-col gap-5 rounded-xl border bg-card p-5"
+        aria-label="Crea tu tienda"
+      >
+        <form.AppField name="name">
+          {(field) => (
+            <field.TextField
+              label="Nombre de la tienda"
               id="store-name"
               autoFocus
               maxLength={80}
               placeholder="Por ejemplo, Calzados Rosa"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-invalid={errors.name ? true : undefined}
-              aria-describedby={errors.name ? "store-name-error" : "store-name-help"}
+              description="Como lo ven tus clientes."
             />
-            {errors.name ? (
-              <FieldError id="store-name-error">{errors.name}</FieldError>
-            ) : (
-              <FieldDescription id="store-name-help">Como lo ven tus clientes.</FieldDescription>
-            )}
-          </Field>
-          <Field data-invalid={errors.currency ? true : undefined}>
-            <FieldLabel htmlFor="currency">Moneda en que vendes</FieldLabel>
-            <select
+          )}
+        </form.AppField>
+        <form.AppField name="currency">
+          {(field) => (
+            <field.SelectField
+              label="Moneda en que vendes"
               id="currency"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              className="h-9 w-full rounded-md border border-input-border bg-input/30 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
-              aria-describedby="currency-help"
-            >
-              {currencies.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {errors.currency ? (
-              <FieldError>{errors.currency}</FieldError>
-            ) : (
-              <FieldDescription id="currency-help">
-                Todos tus precios y pedidos van en esta moneda.
-              </FieldDescription>
-            )}
-          </Field>
-          <Field data-invalid={errors.country ? true : undefined}>
-            <FieldLabel htmlFor="country">País de tu tienda</FieldLabel>
-            <CountrySelect
-              id="country"
-              value={country}
-              onChange={setCountry}
-              invalid={Boolean(errors.country)}
-              aria-describedby="country-help"
+              options={currencies.map((option) => ({ value: option.code, label: option.label }))}
+              description="Todos tus precios y pedidos van en esta moneda."
             />
-            {errors.country ? (
-              <FieldError>{errors.country}</FieldError>
-            ) : (
-              <FieldDescription id="country-help">
-                Con él te cobramos el plan con el impuesto que corresponde.
-              </FieldDescription>
-            )}
-          </Field>
-          {create.isError &&
-          !(create.error instanceof ApiError && Object.keys(create.error.fields).length > 0) ? (
-            <p role="alert" className="text-sm text-danger">
-              {create.error.message}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <SubmitButton type="submit" pending={create.isPending}>
-              Crear la tienda
-            </SubmitButton>
-            <Button variant="ghost" render={<Link to="/" />}>
-              Cancelar
-            </Button>
-          </div>
-        </FieldGroup>
+          )}
+        </form.AppField>
+        <form.AppField name="country">
+          {(field) => (
+            <field.Control
+              label="País de tu tienda"
+              id="country"
+              description="Con él te cobramos el plan con el impuesto que corresponde."
+            >
+              {(control) => (
+                <CountrySelect
+                  id={control.id}
+                  value={field.state.value as CountryCode}
+                  onChange={(next) => field.handleChange(next)}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        {surface.error ? (
+          <p role="alert" className="text-sm text-danger">
+            {surface.error}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <SubmitButton type="submit" pending={surface.isSubmitting}>
+            Crear la tienda
+          </SubmitButton>
+          <Button variant="ghost" render={<Link to="/" />}>
+            Cancelar
+          </Button>
+        </div>
       </form>
     </>
   )
@@ -713,8 +719,8 @@ function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
  * avisos al celular: no ve lo que no puede tocar). La Ayuda está en la cabecera.
  */
 function storeFooter(store: MyStore): AppShellNavItem[] {
-  // Abre el primer apartado que ve: a Ventas, sus avisos al celular, no «Datos de la tienda».
-  const first = configGroupsFor(store)[0]?.items[0]
+  // Abre en «Lo que falta» o, si no la ve, en lo primero suyo: a Ventas, sus avisos al celular.
+  const first = configEntryFor(store)
   return first
     ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
     : []
@@ -852,14 +858,13 @@ function NotYours({ me, id }: { me: Me; id: string }) {
 }
 
 /**
- * El encabezado de cada sección de la tienda (`PageHeader`) y, debajo, lo que soporte de
- * gestorIA pide o tiene abierto, para que el Dueño o un Administrador lo vea donde esté. En
- * Equipo ya se ve entero. Si se llegó desde los primeros pasos de Inicio, arriba va «Volver a
- * Inicio».
+ * El encabezado de cada sección de la tienda (`PageHeader`). Lo que soporte de gestorIA pide o
+ * tiene abierto va una sola vez, en la franja de arriba (`StoreStrip`), y se responde en Equipo y
+ * repartidores. Si se llegó desde los primeros pasos de Inicio, arriba va «Volver a Inicio».
  */
 export function StoreHeader(props: PageHeaderProps) {
   const { store } = useStoreContext()
-  const { pathname, search } = useLocation()
+  const { search } = useLocation()
   // Abierto desde los primeros pasos de Inicio (`?desde=inicio`): un toque para volver a la lista.
   const fromHome = (search as Record<string, unknown>).desde === "inicio"
   return (
@@ -875,17 +880,22 @@ export function StoreHeader(props: PageHeaderProps) {
         </Link>
       ) : null}
       <PageHeader {...props} />
-      {store.permissions.includes("equipo.gestionar") && !pathname.endsWith("/equipo") ? (
-        <SupportAccessPanel store={store} only="actual" />
-      ) : null}
     </>
   )
 }
 
-/** El equipo de la tienda (B1). */
+/** Equipo y repartidores (B1; lienzo «gestorIA · Configuración, de nuevo», tablero 3). */
 export function TeamPage() {
   const { store, meId } = useStoreContext()
   return <Team store={store} meId={meId} />
+}
+
+/** A quién se le puede dar una entrega (`couriersIn` de la API): el equipo y los de fuera. */
+interface CourierView {
+  id: string | null
+  userId: string | null
+  name: string
+  team: boolean
 }
 
 function Team({ store, meId }: { store: MyStore; meId: string }) {
@@ -895,24 +905,27 @@ function Team({ store, meId }: { store: MyStore; meId: string }) {
     queryFn: () => api<Team>(`/api/tiendas/${store.id}/equipo`),
   })
   const [inviting, setInviting] = useState(false)
+  // Lo de soporte que hay que responder o que está abierto va primero: ahí lleva la franja.
+  const supportNow = (team.data?.support ?? []).some(
+    (row) => row.status === "por_aceptar" || row.status === "vigente",
+  )
 
   return (
     <>
       <StoreHeader
-        title="Equipo"
-        subtitle="Quién atiende tu tienda y qué puede hacer."
+        title="Equipo y repartidores"
+        subtitle="Quién atiende tu tienda, qué puede hacer y quién reparte."
         primary={
           canManage
             ? { label: "Invitar", icon: <UserPlus aria-hidden />, onClick: () => setInviting(true) }
             : undefined
         }
       />
+      {team.data && supportNow ? <SupportAccessPanel store={store} /> : null}
       <section aria-label="Tu equipo" className="flex flex-col gap-4 rounded-xl border bg-card p-5">
-        {team.isPending ? (
-          <p className="text-sm text-muted-foreground">Cargando tu equipo…</p>
-        ) : null}
+        {team.isPending ? <LoadingState message="Cargando tu equipo" /> : null}
         {team.isError ? (
-          <ErrorBlock error={team.error} onRetry={() => void team.refetch()} />
+          <ErrorState error={team.error} onRetry={() => void team.refetch()} />
         ) : null}
         {team.data ? (
           <>
@@ -944,12 +957,58 @@ function Team({ store, meId }: { store: MyStore; meId: string }) {
             ) : null}
           </>
         ) : null}
-        {team.data && team.data.support.length > 0 ? (
-          <SupportAccessPanel store={store} only="todo" />
-        ) : null}
       </section>
-      {inviting ? <InviteDialog store={store} onClose={() => setInviting(false)} /> : null}
+      <Couriers store={store} />
+      {team.data && !supportNow && team.data.support.length > 0 ? (
+        <SupportAccessPanel store={store} />
+      ) : null}
+      {inviting ? <InviteForm store={store} onClose={() => setInviting(false)} /> : null}
     </>
+  )
+}
+
+/**
+ * Quién reparte: las personas del equipo que ya llevaron un pedido y los nombres de fuera que la
+ * tienda usó. Se eligen al despachar, en Despachos; un nombre nuevo se suma al escribirlo ahí.
+ */
+function Couriers({ store }: { store: MyStore }) {
+  const list = useQuery({
+    queryKey: ["pagos-y-entregas", store.id],
+    queryFn: () => api<{ couriers: CourierView[] }>(`/api/tiendas/${store.id}/pagos-y-entregas`),
+  })
+  const couriers = (list.data?.couriers ?? []).filter((courier) => !courier.team || courier.id)
+  return (
+    <section
+      aria-labelledby="repartidores"
+      className="flex flex-col gap-3 rounded-xl border bg-card p-5"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 id="repartidores" className="text-sm font-semibold">
+          Repartidores
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Se eligen al despachar un pedido, en Despachos. Alguien de fuera del equipo se suma al
+          escribir su nombre ahí.
+        </p>
+      </div>
+      {list.isPending ? <LoadingState message="Cargando los repartidores" /> : null}
+      {list.isError ? <ErrorState error={list.error} onRetry={() => void list.refetch()} /> : null}
+      {list.data ? (
+        couriers.length > 0 ? (
+          <ul className="flex flex-col divide-y">
+            {couriers.map((courier) => (
+              <li key={courier.id ?? courier.userId} className="flex items-center gap-3 py-2.5">
+                <PersonAvatar name={courier.name} />
+                <span className="min-w-0 flex-1 truncate font-medium">{courier.name}</span>
+                <Badge variant="outline">{courier.team ? "Del equipo" : "De fuera"}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">Todavía nadie llevó un pedido.</p>
+        )
+      ) : null}
+    </section>
   )
 }
 
@@ -961,11 +1020,11 @@ interface Team {
 
 /**
  * Soporte de gestorIA (ADR 0214 y 0219): lo que pide la administración para mirar la tienda y lo
- * que pasó. Dejarlo entrar, no hacerlo o sacarlo es del Dueño o un Administrador. En cada sección
- * de la tienda se ve lo que está pendiente o vigente («actual»); en Equipo, también quién miró,
+ * que pasó. Aquí se responde el pedido que la franja de arriba avisa en toda la tienda. Dejarlo
+ * entrar, no hacerlo o sacarlo es del Dueño o un Administrador; se ve también quién miró,
  * cuándo, quién lo aceptó y cómo terminó. Ventas solo ve quién mira y hasta cuándo.
  */
-function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | "todo" }) {
+function SupportAccessPanel({ store }: { store: MyStore }) {
   const queryClient = useQueryClient()
   const { meId } = useStoreContext()
   const canManage = store.permissions.includes("equipo.gestionar")
@@ -978,7 +1037,10 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
     mutationFn: ({ id, action }: { id: string; action: "aceptar" | "rechazar" | "quitar" }) =>
       api(`/api/tiendas/${store.id}/soporte/${id}/${action}`, { method: "POST" }),
     onSuccess: async (_, { action }) => {
-      await queryClient.invalidateQueries({ queryKey: ["equipo", store.id] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["equipo", store.id] }),
+        queryClient.invalidateQueries({ queryKey: ["configuracion-resumen", store.id] }),
+      ])
       toast.success(
         action === "aceptar"
           ? "Listo: soporte ya puede mirar tu tienda."
@@ -989,16 +1051,14 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
     },
     onError: (error) => toast.error(error.message),
   })
-  const rows = (team.data?.support ?? []).filter(
-    (row) => only === "todo" || row.status === "por_aceptar" || row.status === "vigente",
-  )
+  const rows = team.data?.support ?? []
   if (rows.length === 0) return null
   return (
     <section
-      aria-labelledby={`soporte-${only}`}
-      className={only === "todo" ? "flex flex-col gap-2" : "rounded-xl border bg-card p-4"}
+      aria-labelledby="soporte-gestoria"
+      className="flex flex-col gap-2 rounded-xl border bg-card p-5"
     >
-      <h2 id={`soporte-${only}`} className="text-sm font-semibold">
+      <h2 id="soporte-gestoria" className="text-sm font-semibold">
         Soporte de gestorIA
       </h2>
       <ul className="flex flex-col divide-y">
@@ -1023,10 +1083,8 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
                   </>
                 ) : null}
               </div>
-              {only === "todo" && row.status === "por_aceptar" ? (
-                <Badge variant="outline">Pide entrar</Badge>
-              ) : null}
-              {only === "todo" && row.status === "vigente" ? (
+              {row.status === "por_aceptar" ? <Badge variant="outline">Pide entrar</Badge> : null}
+              {row.status === "vigente" ? (
                 <Badge variant="outline">{row.usedAt ? "Mirando" : "Puede mirar"}</Badge>
               ) : null}
               {canManage && row.status === "por_aceptar" ? (
@@ -1085,10 +1143,12 @@ function MemberRow({
   const queryClient = useQueryClient()
   const [removing, setRemoving] = useState(false)
   const touchable = canManage && (member.role !== "owner" || store.role === "owner")
+  const roles = assignable(store)
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["equipo", store.id] }),
       queryClient.invalidateQueries({ queryKey: ["yo"] }),
+      queryClient.invalidateQueries({ queryKey: ["configuracion-resumen", store.id] }),
     ])
   const change = useMutation({
     mutationFn: (role: StoreRole) =>
@@ -1127,22 +1187,25 @@ function MemberRow({
       </div>
       {touchable ? (
         <div className="flex items-center gap-2">
-          <label className="sr-only" htmlFor={`rol-${member.userId}`}>
-            Rol de {member.name}
-          </label>
-          <select
-            id={`rol-${member.userId}`}
+          <Select
+            items={Object.fromEntries(roles.map((role) => [role, ROLES[role].name]))}
             value={member.role}
             disabled={change.isPending}
-            onChange={(e) => change.mutate(e.target.value as StoreRole)}
-            className="h-8 rounded-md border border-input-border bg-input/30 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+            onValueChange={(next) => {
+              if (next && next !== member.role) change.mutate(next as StoreRole)
+            }}
           >
-            {assignable(store).map((role) => (
-              <option key={role} value={role}>
-                {ROLES[role].name}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label={`Rol de ${member.name}`} className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {roles.map((role) => (
+                <SelectItem key={role} value={role} data-value={role}>
+                  {ROLES[role].name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button variant="ghost" size="sm" onClick={() => setRemoving(true)}>
             Quitar
           </Button>
@@ -1150,35 +1213,24 @@ function MemberRow({
       ) : (
         <Badge variant="outline">{ROLES[member.role].name}</Badge>
       )}
-      <Dialog open={removing} onOpenChange={(open) => (open ? null : setRemoving(false))}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>¿Quitar a {member.name} del equipo?</DialogTitle>
-            <DialogDescription>
-              {isMe
-                ? "Dejarás de ver esta tienda. Para volver, alguien del equipo tendrá que invitarte."
-                : "Deja de ver esta tienda. Su cuenta sigue igual y puedes invitarla otra vez."}
-            </DialogDescription>
-          </DialogHeader>
-          {remove.isError ? (
-            <p role="alert" className="text-sm text-danger">
-              {remove.error.message}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRemoving(false)}>
-              Cancelar
-            </Button>
-            <SubmitButton
-              variant="destructive"
-              pending={remove.isPending}
-              onClick={() => remove.mutate()}
-            >
-              Quitar del equipo
-            </SubmitButton>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={removing}
+        title={`¿Quitar a ${member.name} del equipo?`}
+        description={
+          isMe
+            ? "Dejarás de ver esta tienda. Para volver, alguien del equipo tendrá que invitarte."
+            : "Deja de ver esta tienda. Su cuenta sigue igual y puedes invitarla otra vez."
+        }
+        confirmLabel="Quitar del equipo"
+        variant="destructive"
+        pending={remove.isPending}
+        error={remove.isError ? remove.error.message : null}
+        onConfirm={() => remove.mutate()}
+        onClose={() => {
+          setRemoving(false)
+          remove.reset()
+        }}
+      />
     </li>
   )
 }
@@ -1295,129 +1347,101 @@ function PendingRow({
   )
 }
 
-function InviteDialog({ store, onClose }: { store: MyStore; onClose: () => void }) {
+const inviteSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .regex(/^\S+@\S+\.\S+$/, "Escribe un correo válido, como nombre@tienda.com"),
+  role: z.enum(["sales", "admin", "owner"]),
+})
+
+/**
+ * Invitar a alguien al equipo: su correo y su rol, en la columna lateral. Al crearla, el enlace
+ * para compartir (por WhatsApp o copiado), que vale 7 días.
+ */
+function InviteForm({ store, onClose }: { store: MyStore; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [email, setEmail] = useState("")
-  const [role, setRole] = useState<StoreRole>("sales")
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const invite = useMutation({
-    mutationFn: () =>
-      api<{ invitation: { id: string; email: string } }>(`/api/tiendas/${store.id}/invitaciones`, {
-        method: "POST",
-        body: { email, role },
-      }),
-    onSuccess: async () => {
+  const [done, setDone] = useState<{ id: string; email: string } | null>(null)
+  const roles = assignable(store)
+  const form = useAppForm({
+    defaultValues: { email: "", role: "sales" as StoreRole },
+    validators: { onSubmit: inviteSchema },
+    onSubmit: async ({ value }) => {
+      const { invitation } = await api<{ invitation: { id: string; email: string } }>(
+        `/api/tiendas/${store.id}/invitaciones`,
+        { method: "POST", body: { email: value.email.trim(), role: value.role } },
+      )
       await queryClient.invalidateQueries({ queryKey: ["equipo", store.id] })
-    },
-    onError: (error) => {
-      if (error instanceof ApiError && Object.keys(error.fields).length > 0) setErrors(error.fields)
+      await queryClient.invalidateQueries({ queryKey: ["configuracion-resumen", store.id] })
+      setDone(invitation)
     },
   })
-  const done = invite.data?.invitation
-
-  function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
-      setErrors({ email: "Escribe un correo válido, como nombre@tienda.com" })
-      return
-    }
-    setErrors({})
-    invite.mutate()
-  }
-
+  const surface = useFormSurface(form)
+  if (done)
+    return (
+      <Dialog open onOpenChange={(open) => (open ? null : onClose())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Comparte la invitación</DialogTitle>
+            <DialogDescription>
+              Envía este enlace a <strong className="text-foreground">{done.email}</strong>. Para
+              unirse, entra con ese mismo correo; si aún no tiene cuenta, la crea ahí mismo. Vale
+              por 7 días.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            readOnly
+            value={invitationLink(done.id)}
+            aria-label="Enlace de la invitación"
+            onFocus={(e) => e.target.select()}
+          />
+          <ShareLink link={invitationLink(done.id)} email={done.email} storeName={store.name} />
+          <DialogFooter>
+            <Button onClick={onClose}>Listo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
   return (
-    <Dialog open onOpenChange={(open) => (open ? null : onClose())}>
-      <DialogContent>
-        {done ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>Comparte la invitación</DialogTitle>
-              <DialogDescription>
-                Envía este enlace a <strong className="text-foreground">{done.email}</strong>. Para
-                unirse, entra con ese mismo correo; si aún no tiene cuenta, la crea ahí mismo. Vale
-                por 7 días.
-              </DialogDescription>
-            </DialogHeader>
-            <Input
-              readOnly
-              value={invitationLink(done.id)}
-              aria-label="Enlace de la invitación"
-              onFocus={(e) => e.target.select()}
-            />
-            <ShareLink link={invitationLink(done.id)} email={done.email} storeName={store.name} />
-            <DialogFooter>
-              <Button onClick={onClose}>Listo</Button>
-            </DialogFooter>
-          </>
-        ) : (
-          <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
-            <DialogHeader>
-              <DialogTitle>Invitar a tu equipo</DialogTitle>
-              <DialogDescription>
-                Escribe su correo y elige qué podrá hacer en {store.name}.
-              </DialogDescription>
-            </DialogHeader>
-            <FieldGroup className="gap-5">
-              <Field data-invalid={errors.email ? true : undefined}>
-                <FieldLabel htmlFor="invite-email">Correo</FieldLabel>
-                <Input
-                  id="invite-email"
-                  type="email"
-                  inputMode="email"
-                  autoFocus
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  aria-invalid={errors.email ? true : undefined}
-                  aria-describedby={errors.email ? "invite-email-error" : undefined}
-                />
-                {errors.email ? (
-                  <FieldError id="invite-email-error">{errors.email}</FieldError>
-                ) : null}
-              </Field>
-              <FieldSet>
-                <FieldLegend variant="label">Rol</FieldLegend>
-                <div className="flex flex-col gap-2">
-                  {assignable(store).map((option) => (
-                    <label
-                      key={option}
-                      className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 has-checked:border-primary has-checked:bg-primary-soft/40 has-focus-visible:ring-3 has-focus-visible:ring-ring/30"
-                    >
-                      <input
-                        type="radio"
-                        name="role"
-                        value={option}
-                        checked={role === option}
-                        onChange={() => setRole(option)}
-                        className="mt-1 accent-[var(--primary-fill)]"
-                      />
-                      <span className="flex flex-col">
-                        <span className="text-sm font-semibold">{ROLES[option].name}</span>
-                        <span className="text-sm text-muted-foreground">{ROLES[option].can}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                {errors.role ? <FieldError>{errors.role}</FieldError> : null}
-              </FieldSet>
-            </FieldGroup>
-            {invite.isError &&
-            !(invite.error instanceof ApiError && Object.keys(invite.error.fields).length > 0) ? (
-              <p role="alert" className="text-sm text-danger">
-                {invite.error.message}
-              </p>
-            ) : null}
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Cancelar
-              </Button>
-              <SubmitButton type="submit" pending={invite.isPending}>
-                Crear la invitación
-              </SubmitButton>
-            </DialogFooter>
-          </form>
+    <FormDrawer
+      {...surface}
+      open
+      title="Invitar a tu equipo"
+      description={`Escribe su correo y elige qué podrá hacer en ${store.name}.`}
+      onClose={onClose}
+      submitLabel="Crear la invitación"
+    >
+      <form.AppField name="email">
+        {(field) => (
+          <field.TextField
+            label="Correo"
+            id="invite-email"
+            type="email"
+            inputMode="email"
+            autoComplete="off"
+            autoFocus
+          />
         )}
-      </DialogContent>
-    </Dialog>
+      </form.AppField>
+      <form.AppField name="role">
+        {(field) => (
+          <field.Group legend="Rol" description={ROLES[field.state.value].can} id="invite-role">
+            {(control) => (
+              <RadioChips
+                id={control.id}
+                value={field.state.value}
+                options={roles.map((role) => ({ value: role, label: ROLES[role].name }))}
+                onChange={(next) => field.handleChange(next)}
+                onBlur={control.onBlur}
+                invalid={control.invalid}
+                aria-label="Rol"
+                aria-describedby={control.describedBy}
+              />
+            )}
+          </field.Group>
+        )}
+      </form.AppField>
+    </FormDrawer>
   )
 }
 

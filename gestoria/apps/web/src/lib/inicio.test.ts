@@ -7,7 +7,6 @@ import {
   longDay,
   type SetupFacts,
   sameText,
-  setupProgress,
   stepView,
   type ToDoItem,
 } from "./inicio"
@@ -44,7 +43,7 @@ describe("los primeros pasos", () => {
     expect(stepView("datos", "hecho", FACTS, STORE)).toEqual({
       title: "Datos de la tienda",
       detail: "Calzados Rosa · Perú · hora de Lima",
-      action: { label: "Revisar", path: "/configuracion" },
+      action: { label: "Revisar", path: "/configuracion/datos" },
     })
     expect(stepView("catalogo", "hecho", FACTS, STORE).detail).toBe("18 productos con su stock.")
     expect(stepView("pagos", "hecho", FACTS, STORE).detail).toBe("Yape, Plin y Efectivo al recibir")
@@ -59,18 +58,6 @@ describe("los primeros pasos", () => {
     const chats = stepView("chats", "pronto", FACTS, STORE)
     expect(chats.action).toBeNull()
     expect(chats.detail).toContain("Muy pronto")
-  })
-
-  it("cuenta lo hecho y lo saltado, de los pasos que cuentan", () => {
-    expect(
-      setupProgress([
-        { state: "hecho" },
-        { state: "hecho" },
-        { state: "falta" },
-        { state: "saltado" },
-        { state: "pronto" },
-      ]),
-    ).toEqual({ done: 3, total: 4 })
   })
 
   it("junta los nombres como se dicen", () => {

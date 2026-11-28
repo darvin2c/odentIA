@@ -9,10 +9,11 @@ import {
   storeDeliveryMethod,
   storeInvitation,
   storeMember,
+  storePaymentLink,
   storePaymentMethod,
   storeSetup,
 } from "@gestoria/db"
-import { and, asc, count, countDistinct, eq, gt, isNull, sql } from "drizzle-orm"
+import { and, asc, count, countDistinct, eq, gt, isNull, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -34,6 +35,13 @@ import { inStore, StoreError } from "./tiendas.js"
 export const SKIPPABLE_STEPS: readonly SetupStep[] = ["sofi", "equipo"]
 
 /**
+ * Los pasos que no frenan la venta: con o sin equipo se vende. Se muestran, pero no se cuentan
+ * como falta (ni en Inicio ni en «Lo que falta» de Configuración) y no impiden que la lista quede
+ * lista.
+ */
+const NOT_SELLING_STEPS: readonly SetupStep[] = ["equipo"]
+
+/**
  * Si ya se pueden conectar los chats. Mientras la Bandeja espera la app de Meta, no: el paso dice
  * «Muy pronto» y no cuenta para terminar. La entrega de la Bandeja lo enciende y dice cuándo un
  * canal queda conectado (`chats` de `SetupFacts`).
@@ -46,7 +54,10 @@ export interface SetupFacts {
   country: string | null
   /** Los productos con alguna variante con stock. */
   productsWithStock: number
-  /** Los medios de pago encendidos, por su nombre. */
+  /**
+   * Los medios de pago encendidos con los que se cobra, por su nombre. El link de pago sin pasarela
+   * conectada no cobra: no cuenta.
+   */
   payments: string[]
   /** Las formas de entrega encendidas, por su nombre. */
   deliveries: string[]
@@ -66,6 +77,8 @@ export interface SetupStepView {
   state: SetupStepState
   /** Se puede saltar con «No lo necesito». */
   skippable: boolean
+  /** Frena la venta mientras falta: se cuenta en «3 de 5». */
+  sells: boolean
 }
 
 function isDone(step: SetupStep, facts: SetupFacts): boolean | null {
@@ -100,16 +113,48 @@ export function setupSteps(facts: SetupFacts, skipped: readonly SetupStep[]): Se
           : skippable && skipped.includes(step)
             ? "saltado"
             : "falta"
-    return { step, state, skippable }
+    return { step, state, skippable, sells: !NOT_SELLING_STEPS.includes(step) }
   })
 }
 
-/** Lista: no falta ninguno (lo que todavía no se puede hacer no cuenta). */
+/** Lista: no falta nada que frene la venta (lo que todavía no se puede hacer no cuenta). */
 export function setupFinished(steps: readonly SetupStepView[]): boolean {
-  return steps.every((s) => s.state !== "falta")
+  return steps.every((s) => s.state !== "falta" || !s.sells)
 }
 
-async function factsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> {
+/**
+ * Los medios de pago encendidos con los que se cobra, y la pasarela si está conectada (solo con
+ * qué: sus llaves no salen de aquí). Un link de pago sin pasarela no cobra: no viene. Lo leen los
+ * primeros pasos y «Lo que falta» de Configuración (`configOverview`), así cuentan lo mismo.
+ */
+export async function chargingPaymentsIn(tx: Db, storeId: string) {
+  const [gateway] = await tx
+    .select({ provider: storePaymentLink.provider })
+    .from(storePaymentLink)
+    .where(eq(storePaymentLink.storeId, storeId))
+  const payments = await tx
+    .select({
+      name: storePaymentMethod.name,
+      typeCode: storePaymentMethod.typeCode,
+      collection: storePaymentMethod.collection,
+    })
+    .from(storePaymentMethod)
+    .where(
+      and(
+        eq(storePaymentMethod.storeId, storeId),
+        eq(storePaymentMethod.isActive, true),
+        gateway ? undefined : ne(storePaymentMethod.collection, "link"),
+      ),
+    )
+    .orderBy(asc(storePaymentMethod.createdAt))
+  return { payments, gateway: gateway ?? null }
+}
+
+/**
+ * Lo guardado en cada apartado que marca los pasos. También lo lee «Lo que falta» de
+ * Configuración (`configuracion.ts`): las dos listas miran lo mismo y no lo vuelven a contar.
+ */
+export async function setupFactsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> {
   const [shop] = await tx
     .select({ country: store.country })
     .from(store)
@@ -124,11 +169,7 @@ async function factsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> 
         gt(productVariant.stock, 0),
       ),
     )
-  const payments = await tx
-    .select({ name: storePaymentMethod.name })
-    .from(storePaymentMethod)
-    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-    .orderBy(asc(storePaymentMethod.createdAt))
+  const { payments } = await chargingPaymentsIn(tx, storeId)
   const deliveries = await tx
     .select({ name: storeDeliveryMethod.name })
     .from(storeDeliveryMethod)
@@ -179,7 +220,7 @@ async function factsIn(tx: Db, storeId: string, now: Date): Promise<SetupFacts> 
 export async function setupIn(tx: Db, storeId: string, now = new Date()) {
   const [saved] = await tx.select().from(storeSetup).where(eq(storeSetup.storeId, storeId))
   if (saved?.finishedAt) return null
-  const facts = await factsIn(tx, storeId, now)
+  const facts = await setupFactsIn(tx, storeId, now)
   const steps = setupSteps(facts, saved?.skipped ?? [])
   if (setupFinished(steps)) {
     await tx
@@ -192,6 +233,15 @@ export async function setupIn(tx: Db, storeId: string, now = new Date()) {
     return null
   }
   return { steps, facts }
+}
+
+/** Los pasos que la tienda dijo que no necesita («No lo necesito»). */
+export async function skippedStepsIn(tx: Db, storeId: string): Promise<SetupStep[]> {
+  const [saved] = await tx
+    .select({ skipped: storeSetup.skipped })
+    .from(storeSetup)
+    .where(eq(storeSetup.storeId, storeId))
+  return saved?.skipped ?? []
 }
 
 export const skipInput = z.object({
