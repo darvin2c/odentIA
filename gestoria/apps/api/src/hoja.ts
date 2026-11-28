@@ -436,7 +436,8 @@ export async function createPlanned(
     )
     .returning({ id: product.id, name: product.name })
   const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
-  // Cada producto nuevo empieza su historial con «Creó el producto», como el que se agrega solo.
+  // Cada producto nuevo empieza su historial con «Creó el producto», sin motivo, como el que se
+  // agrega solo: el motivo de la hoja o de la carga es el del stock que entra.
   if (created.length > 0)
     await tx.insert(productEvent).values(
       created.map((row) => ({
@@ -445,7 +446,7 @@ export async function createPlanned(
         actorUserId: person.userId,
         action: "creado" as const,
         changes: [],
-        reason,
+        reason: null,
       })),
     )
   const rows = products.flatMap((p) =>
