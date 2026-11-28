@@ -1,0 +1,19 @@
+Fotos de la tienda de ejemplo (Calzados Rosa), las del prototipo aprobado de la ficha del producto
+(rama darvin2c/gestoria-proto-producto, prototipo/public/fotos). Son de Wikimedia Commons,
+recortadas a cuadrado. Solo para desarrollo y demostraciones: nunca van a producción.
+
+blanca1.jpg, blanca2.jpg, negra1.jpg
+  Superga 2750 Canvas weiß (1) y (3), y Superga 2750 Microfiber schwarz (1)
+  SPERA.de Designerschuhe, Taschen und Accessoires · CC BY 2.0 (con fondo extendido a cuadrado)
+
+botin1.jpg, botin2.jpg
+  Ankle boot y Laced ankle boot · Danÿa · CC BY-SA 4.0
+
+dorada1.jpg
+  Sandalias doradas de mujer · Dorieo · CC BY-SA 4.0
+
+plataforma1.jpg
+  Tacones · Archivaldo · dominio público
+
+mocasin2.jpg
+  Black loafers · Normal Phobic · CC BY-SA 2.5

@@ -2,10 +2,12 @@ import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
 import { deliverOutbox, purgeOutbox, refreshStates, reviewStoreTeams } from "./acuerdo.js"
 import { createApp } from "./app.js"
+import { createS3Storage } from "./archivos.js"
 import { runPushRound, webPushSender } from "./avisos.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
+import { emptyMediaTrash, moveStoredPhotos } from "./medios.js"
 import { renewPaymentLinks } from "./pasarela.js"
 import { readSecretsKey } from "./secretos.js"
 import { runArgos } from "./sofi/argos.js"
@@ -48,6 +50,19 @@ if (!model)
   console.warn("gestoria-api: sin GESTORIA_OPENAI_API_KEY Sofi no responde (ni en la prueba).")
 // El acuerdo con la administración (B7): en la misma entrada de la cuenta, con su propio secreto.
 const contract = { url: env.GESTORIA_ACCOUNT_URL, secret: env.GESTORIA_CONTRACT_SECRET }
+// Las fotos y los videos del producto (ADR 0236): el bucket privado de gestorIA.
+const storage =
+  env.GESTORIA_S3_ENDPOINT && env.GESTORIA_S3_ACCESS_KEY && env.GESTORIA_S3_SECRET_KEY
+    ? createS3Storage({
+        endpoint: env.GESTORIA_S3_ENDPOINT,
+        region: env.GESTORIA_S3_REGION,
+        accessKeyId: env.GESTORIA_S3_ACCESS_KEY,
+        secretAccessKey: env.GESTORIA_S3_SECRET_KEY,
+        bucket: env.GESTORIA_S3_BUCKET,
+      })
+    : null
+if (!storage)
+  console.warn("gestoria-api: sin GESTORIA_S3_* no se suben fotos ni videos del producto.")
 const app = createApp({
   appDb,
   ownerDb,
@@ -57,6 +72,7 @@ const app = createApp({
   model,
   contract,
   vapidPublicKey: env.GESTORIA_VAPID_PUBLIC_KEY,
+  storage,
 })
 serve({ fetch: app.fetch, port: env.GESTORIA_PORT }, (info) => {
   console.log(`gestoria-api: escuchando en el puerto ${info.port}`)
@@ -174,3 +190,25 @@ if (env.GESTORIA_VAPID_PUBLIC_KEY && env.GESTORIA_VAPID_PRIVATE_KEY && env.GESTO
   }
   setInterval(() => void pushRound(), 20_000).unref()
 } else console.warn("gestoria-api: sin las claves VAPID, los avisos al celular no se envían.")
+
+// El almacenamiento (ADR 0236): cada minuto, en un solo servidor a la vez, pasa al bucket las
+// fotos que todavía están en la base y borra lo que la base anotó para borrar.
+if (storage) {
+  const media = async () => {
+    try {
+      const run = await withSessionLock(ownerDb, "gestoria_medios", async () => {
+        const moved = await moveStoredPhotos(ownerDb, storage)
+        const trash = await emptyMediaTrash(ownerDb, storage)
+        return { moved, trash }
+      })
+      if (run?.moved.moved || run?.moved.failed)
+        console.log(
+          `gestoria-api: ${run.moved.moved} foto(s) pasaron al almacenamiento${run.moved.failed ? `, ${run.moved.failed} no` : ""}`,
+        )
+    } catch (error) {
+      console.error("gestoria-api: el almacenamiento falló", error)
+    }
+  }
+  setTimeout(() => void media(), 15_000).unref()
+  setInterval(() => void media(), 60_000).unref()
+}

@@ -32,7 +32,7 @@ import {
   uuidOr404,
   variantPrices,
 } from "./pedidos.js"
-import { autoUnitCents, floorUnitCents, MAX_ORDER_CENTS } from "./precio.js"
+import { autoUnitCents, floorOf, MAX_ORDER_CENTS } from "./precio.js"
 import { balanceIn } from "./saldo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -330,7 +330,7 @@ async function priceExchange(
       quantity: take.quantity,
       listUnitCents: row.pricing.listUnitCents,
       autoUnitCents: auto,
-      floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
+      floorUnitCents: floorOf(row.pricing, auto),
     })
   })
   const prices = takePrices(takeLines, back)

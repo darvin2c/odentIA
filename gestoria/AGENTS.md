@@ -69,7 +69,61 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Ventas ve el catálogo y el stock (`catalogo.ver`), sin cambiarlos (`configuracion`); la API le
   da lo de la tienda que necesita para vender (`tienda.ver`), pero no ve Configuración. Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
   `costos.ver`: la API no se lo devuelve a Ventas.
-- Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
+- La hoja del catálogo llega en CSV o Excel (.xlsx), con las tallas en filas o en columnas
+  (`leer-hoja.ts`); todo pasa por la misma revisión (`planSheet`) y se guarda con `createPlanned`.
+
+## Las fotos y los videos (ADR 0236)
+
+- Van al bucket privado de gestorIA (`archivos.ts`, variables `GESTORIA_S3_*`), nunca a la base ni
+  al de las clínicas: la base guarda su carpeta (`object_key`). Una foto nueva no lleva `content`
+  (regla de la base); las de antes se mudan solas (`moveStoredPhotos`).
+- Subir pasa por el servidor (`medios.ts`): permiso, tipo por sus primeros bytes y tamaño (foto 8
+  MB; video 16 MB y 30 s, listo para WhatsApp según `video.ts`). La original se guarda tal cual;
+  las copias (miniatura, vitrina, WhatsApp) las arma `imagenes.ts`. El video no se rearma.
+- Ver es un enlace firmado que vence: la app (`catalogo.ver`), la vitrina pública
+  (`/vitrina/:link/:producto/medios`, solo lo que se ve en la web, nunca la original) y lo que
+  mandará Sofi cuando haya canal (`sofiMediaIn`, la copia de WhatsApp de la foto del color
+  pedido o, sin ella, la que es para todos; nunca la de otro color. Todavía ninguna herramienta la
+  llama).
+- La foto sin fondo es una propuesta (`cutout`), cada una en su carpeta (`cutout_id`); la original
+  no se borra nunca. Nadie borra un
+  archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
+  cascada) y el servidor la borra (`emptyMediaTrash`).
+- La pantalla (`apps/web/src/ficha/fotos.tsx`, `cargar.tsx`, `lib/medios.ts`) achica la foto y
+  prepara el video en el navegador (Mediabunny) antes de subirlo; sin almacenamiento
+  (`MEDIA_OFF`) lo dice con `ErrorState` y deja seguir. Reordenar es arrastrar o «Mover»/Alt y
+  flechas; la ★ de Sofi es la foto del color en la cuadrícula.
+- «Cargar muchos» (`cargas.ts`): una carga abierta con sus productos y sus fotos; nada pasa al
+  catálogo hasta «Crear», que guarda todo o nada y deja las fotos en su misma carpeta. Una carga
+  creada o descartada ya no cambia. El agente no ve las cargas ni toca videos.
+
+## La ficha del producto (lienzo «La ficha del producto»)
+
+- Las plantillas de los rubros son fijas en `apps/api/src/rubros.ts`; la tienda guarda solo lo que
+  ajusta (`store_template_field`). Los datos del rubro se validan contra esa plantilla, con «No
+  aplica». Lo que falta nunca frena una venta: es el nivel de `readinessOf`, calculado en la API.
+- Qué colores hay y su orden son los valores de la opción del color (`product.color_option`);
+  `product_color` guarda solo su hex y la foto que manda Sofi. No hay dos listas de colores.
+- «Tallas y stock» (`ficha.ts`, `saveGrid`) guarda todo de una vez: cambiar un nombre no rehace
+  la variante y el stock entra al kardex (subir es entrada; bajar o quitar con stock pide motivo).
+- El estado lo pone la tienda (encargo, cupo, preventa, liquidación, ya no se vende); disponible
+  y agotado salen del stock (`saleStateOf`). Por encargo, cupo o preventa se anota sin stock; lo
+  que ya no se vende no entra a un pedido nuevo. El cupo por día todavía no se cuenta.
+- El precio de revendedora, el combo, las promociones de un color o una talla y la liquidación
+  son opciones de `autoUnit`/`floorOf` en `precio.ts`; lo que Sofi puede ofrecer de cada producto
+  solo la frena a ella (`byAgent`). El simulador es `lowestQuote`: nunca otra cuenta.
+- Lo que Sofi no supo (`preguntas.ts`): Sofi solo anota la pregunta; Ventas responde y propone
+  guardarla; quien tiene `configuracion` la guarda en la ficha. Cada cambio de la ficha va al
+  historial (`product_event`), campo por campo, con la forma de `productPatch`.
+- La pantalla de la ficha (`apps/web/src/ficha/`) es una página completa que se guarda sola: un
+  borrador (`FichaStore` de `ficha/borrador.ts`) con deshacer y rehacer, que envía solo lo que
+  cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). Cada
+  celda de la cuadrícula va con el stock que vio la pantalla (`seenStock`): el servidor guarda la
+  diferencia sobre el stock de ahora (`saveGrid`), nunca un total que pise una venta, y dice lo
+  que se vendió mientras tanto (`meanwhile`); si baja el stock, espera el motivo sin frenar lo
+  demás. El margen se dibuja con el costo
+  que da el servidor solo con `costos.ver`; lo que cobraría Sofi es siempre `POST /simular`. Las
+  propuestas de la IA entran con `AiSuggestion`, nunca dibujadas a mano.
 
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 

@@ -19,7 +19,9 @@ import { seedDemoCustomers } from "./semilla-clientes.js"
 import { seedDemoPayments } from "./semilla-cobros.js"
 import { seedDemoDispatch } from "./semilla-despachos.js"
 import { seedDemoTeam } from "./semilla-equipo.js"
+import { seedDemoSheet } from "./semilla-ficha.js"
 import { seedDemoBrand } from "./semilla-marca.js"
+import { seedDemoMedia } from "./semilla-medios.js"
 import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoProfiles } from "./semilla-perfil.js"
 import {
@@ -36,7 +38,9 @@ import { receiveSupportRequest } from "./soporte.js"
  * demostraciones: nunca corre en producción ni en las pruebas. Cada entrega de gestorIA le suma
  * lo suyo (B2 sus conversaciones, B3 su configuración y su catálogo en `semilla-catalogo.ts`,
  * B4 sus pedidos, B5 Sofi y Argos en `semilla-sofi.ts`, Clientes en `semilla-clientes.ts` y
- * «Tu marca» en `semilla-marca.ts` y lo que cada persona elige recibir en el celular en
+ * «Tu marca» en `semilla-marca.ts`, la ficha del producto en `semilla-ficha.ts`, sus fotos y su
+ * video en el almacenamiento en `semilla-medios.ts` y lo que cada
+ * persona elige recibir en el celular en
  * `semilla-avisos.ts`). Inicio muestra su «Te toca» con eso mismo; para sus primeros pasos, la
  * demo suma una tienda que recién empieza, Tortas Carmen (`semilla-primeros-pasos.ts`).
  *
@@ -117,6 +121,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoExchanges(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPushChoices(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoDispatch(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoSheet(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoTeam(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSetupDone(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoNewStore(tx as unknown as Db)
@@ -374,6 +379,8 @@ if (isMain) {
     throw new Error("GESTORIA_DATABASE_URL es obligatoria para sembrar la tienda de ejemplo")
   const db = createOwnerDb(url, { max: 1 })
   await seedDemoStore(db, process.env.GESTORIA_SEMILLA_CORREO)
+  // Las fotos y el video, en el almacenamiento (ADR 0236): fuera de la transacción de la tienda.
+  console.log(`gestoria: ${await seedDemoMedia(db, DEMO_STORE_ID)}`)
   // El perfil de las clientas lo anotan Sofi, Argos y Lucía con sus reglas: con la base de la app.
   const appUrl = process.env.GESTORIA_APP_DATABASE_URL
   if (appUrl) await seedDemoProfiles(db, createAppDb(appUrl, { max: 1 }), DEMO_STORE_ID)

@@ -13,12 +13,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1131.0",
+    "@aws-sdk/s3-request-presigner": "3.1131.0",
     "@gestoria/db": "workspace:*",
     "@hono/node-server": "2.1.1",
     "@odentia/contract": "workspace:*",
     "drizzle-orm": "0.45.2",
+    "fflate": "0.8.2",
     "hono": "4.13.7",
     "jose": "6.2.12",
+    "sharp": "0.34.4",
     "tsx": "4.23.13",
     "web-push": "3.6.7",
     "zod": "4.6.2"
@@ -26,6 +30,7 @@
   "devDependencies": {
     "@types/node": "22.20.2",
     "@types/web-push": "3.6.4",
+    "testcontainers": "12.1.0",
     "typescript": "7.0.2",
     "vitest": "^3.2.7"
   }
