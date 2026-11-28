@@ -321,6 +321,33 @@ describe("las fotos en el almacenamiento", () => {
     ).toHaveLength(1)
   })
 
+  it("sin foto del color pedido, Sofi no manda la de otro color: la de todos o ninguna", async () => {
+    const ask = (color: string | null) =>
+      withAgent(db.appDb, SOFI_ACTOR, storeId, (tx) =>
+        sofiMediaIn(tx, storage, storeId, zapatilla, color),
+      )
+    // Las dos fotos son de la negra: la blanca no tiene foto, y no se manda la negra.
+    let media = await ask("blanca")
+    expect(media.photo).toBeNull()
+    // Un color que el producto no tiene tampoco recibe la foto de otro.
+    expect((await ask("roja")).photo).toBeNull()
+    // Con el color, la foto dice de qué color es; así Sofi dice el hecho.
+    expect((await ask("Negra")).photo).toMatchObject({ id: first, color: "negra" })
+    // Una foto sin color es para todos: esa sí va con la blanca, y dice que es de todos.
+    const up = await call(
+      "rosa",
+      "POST",
+      `${base}/productos/${zapatilla}/fotos`,
+      undefined,
+      photo(await jpeg(90, 90, 90)),
+    )
+    expect(up.status).toBe(201)
+    media = await ask("blanca")
+    expect(media.photo).toMatchObject({ id: up.json.photo.id, color: null })
+    expect((await call("rosa", "DELETE", `${base}/fotos/${up.json.photo.id}`)).status).toBe(204)
+    await emptyMediaTrash(db.ownerDb, storage)
+  })
+
   it("al quitarla, la base anota su carpeta y el servidor la borra", async () => {
     expect((await call("rosa", "DELETE", `${base}/fotos/${second}`)).status).toBe(204)
     const folder = `tiendas/${storeId}/productos/${zapatilla}/fotos/${second}`
@@ -532,6 +559,10 @@ describe("cargar muchos", () => {
     let detail = (await call("rosa", "GET", loadBase())).json
     expect(detail.items).toHaveLength(2)
     expect(detail.loosePhotos).toHaveLength(1)
+    // La carga dice quién la abrió, en la lista y en la carga: Mario sabe que es la de Rosa.
+    expect(detail.load).toMatchObject({ createdBy: "u-rosa", createdByName: "Rosa Quispe" })
+    const listed = (await call("mario", "GET", `${base}/cargas`)).json.loads
+    expect(listed[0]).toMatchObject({ id: loadId, state: "abierta", createdByName: "Rosa Quispe" })
     // «Juntar»: las dos fotos son de la misma zapatilla.
     const joined = await call(
       "rosa",
@@ -650,14 +681,23 @@ describe("cargar muchos", () => {
       .from(productPhoto)
       .where(eq(productPhoto.productId, made!.id))
     expect(photos).toHaveLength(2)
+    // Su historial empieza como el de cualquier producto: «Creó el producto», a nombre de Mario.
+    const history = (await call("rosa", "GET", `${base}/productos/${made!.id}/historial`)).json
+    expect(history.events).toEqual([
+      expect.objectContaining({ action: "creado", actorName: "Mario Huamán" }),
+    ])
     // La misma carpeta: nada se copió ni se anotó para borrar.
     expect(folders).toEqual(expect.arrayContaining(photos.map((p) => p.objectKey)))
     expect(
       await db.ownerDb.select().from(bulkLoadPhoto).where(eq(bulkLoadPhoto.loadId, loadId)),
     ).toEqual([])
     expect(await db.ownerDb.select().from(mediaTrash)).toEqual([])
-    // Ya creada, no cambia.
-    expect((await call("rosa", "POST", `${loadBase()}/crear`)).status).toBe(409)
+    // Ya creada, no cambia; a Rosa le dice que la pasó Mario.
+    const again = await call("rosa", "POST", `${loadBase()}/crear`)
+    expect(again.status).toBe(409)
+    expect(again.json.error.message).toBe(
+      "Mario Huamán ya pasó esta carga al catálogo: cambia cada producto en su página.",
+    )
     expect(
       (await call("rosa", "POST", `${loadBase()}/fotos`, undefined, photo(await jpeg(1, 1, 1, 64))))
         .status,
@@ -676,6 +716,8 @@ describe("cargar muchos", () => {
     )
     expect(up.status).toBe(201)
     expect((await call("rosa", "DELETE", `${base}/cargas/${other}`)).status).toBe(204)
+    const late = await call("rosa", "DELETE", `${base}/cargas/${other}`)
+    expect(late.json.error.message).toBe("Descartaste esta carga. Abre otra para seguir.")
     expect((await db.ownerDb.select().from(mediaTrash)).map((t) => t.objectKey)).toEqual([
       `tiendas/${storeId}/cargas/${other}/fotos/${up.json.photo.id}`,
     ])

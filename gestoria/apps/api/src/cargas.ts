@@ -14,7 +14,7 @@ import {
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Storage } from "./archivos.js"
-import { MAX_PRODUCTS, money, productInput, uuidOr404 } from "./catalogo.js"
+import { MAX_PRODUCTS, money, namesOf, productInput, uuidOr404 } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import {
   createPlanned,
@@ -43,26 +43,33 @@ import { inStore, StoreError } from "./tiendas.js"
 const loadFolder = (storeId: string, loadId: string, photoId: string) =>
   `tiendas/${storeId}/cargas/${loadId}/fotos/${photoId}`
 
-async function openLoadRow(tx: Db, storeId: string, loadId: string) {
+async function openLoadRow(tx: Db, person: Person, storeId: string, loadId: string) {
   uuidOr404(loadId, "Esa carga ya no está")
   const where = and(eq(bulkLoad.id, loadId), eq(bulkLoad.storeId, storeId))
   const [row] = await tx.select().from(bulkLoad).where(where)
   if (!row) throw new StoreError(404, "NOT_FOUND", "Esa carga ya no está")
-  const closed = (state: string) =>
-    new StoreError(
+  // La carga es de la tienda: si la cerró otra persona del equipo, se dice quién.
+  const closed = async (state: string, by: string | null) => {
+    const name = by && by !== person.userId ? (await namesOf(tx, [by])).get(by) : null
+    const who = name ?? (by && by !== person.userId ? "Otra persona del equipo" : null)
+    return new StoreError(
       409,
       "LOAD_CLOSED",
       state === "creada"
-        ? "Esta carga ya pasó al catálogo: cambia cada producto en su página."
-        : "Esta carga se descartó. Abre otra para seguir.",
+        ? `${who ? `${who} ya pasó` : "Ya pasaste"} esta carga al catálogo: cambia cada producto en su página.`
+        : `${who ? `${who} descartó` : "Descartaste"} esta carga. Abre otra para seguir.`,
     )
-  if (row.state !== "abierta") throw closed(row.state)
+  }
+  if (row.state !== "abierta") throw await closed(row.state, row.finishedBy)
   // Una a la vez: «Crear» no corre mientras otra persona cambia la carga. La regla de la base
   // solo deja tomar una carga abierta: si otra la cerró recién, no vuelve ninguna.
   const [locked] = await tx.select().from(bulkLoad).where(where).for("update")
   if (!locked) {
-    const [now] = await tx.select({ state: bulkLoad.state }).from(bulkLoad).where(where)
-    throw closed(now?.state ?? "descartada")
+    const [now] = await tx
+      .select({ state: bulkLoad.state, finishedBy: bulkLoad.finishedBy })
+      .from(bulkLoad)
+      .where(where)
+    throw await closed(now?.state ?? "descartada", now?.finishedBy ?? null)
   }
   return locked
 }
@@ -110,7 +117,10 @@ export async function openLoad(appDb: Db, person: Person, storeId: string) {
   })
 }
 
-/** Las cargas de la tienda, las abiertas primero, con cuántos productos y fotos tiene cada una. */
+/**
+ * Las cargas de la tienda, las abiertas primero, con cuántos productos y fotos tiene cada una, y
+ * quién la abrió: la carga es de la tienda, y la pantalla dice de quién es la que se abre.
+ */
 export async function storeLoads(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const rows = await tx.execute<{
@@ -127,11 +137,16 @@ export async function storeLoads(appDb: Db, person: Person, storeId: string) {
         (select count(*)::int from bulk_load_photo p where p.load_id = l.id) as photos
       from bulk_load l where l.store_id = ${storeId}
       order by (l.state = 'abierta') desc, l.created_at desc limit 30`)
+    const who = await namesOf(
+      tx,
+      [...rows].map((r) => r.created_by),
+    )
     return {
       loads: [...rows].map((r) => ({
         id: r.id,
         state: r.state,
         createdBy: r.created_by,
+        createdByName: who.get(r.created_by) ?? null,
         createdAt: new Date(r.created_at).toISOString(),
         createdProducts: r.created_products,
         items: r.items,
@@ -171,7 +186,8 @@ export async function loadDetail(
       .from(bulkLoadPhoto)
       .where(eq(bulkLoadPhoto.loadId, loadId))
       .orderBy(asc(bulkLoadPhoto.position), asc(bulkLoadPhoto.createdAt))
-    return { load, items, photos }
+    const who = await namesOf(tx, [load.createdBy])
+    return { load, items, photos, createdByName: who.get(load.createdBy) ?? null }
   })
   const photoView = async (p: (typeof data.photos)[number]) => ({
     id: p.id,
@@ -193,6 +209,8 @@ export async function loadDetail(
     load: {
       id: data.load.id,
       state: data.load.state,
+      createdBy: data.load.createdBy,
+      createdByName: data.createdByName,
       createdAt: data.load.createdAt,
       createdProducts: data.load.createdProducts,
     },
@@ -239,7 +257,7 @@ export async function addLoadPhoto(
 ) {
   if (!storage) throw new MediaOff()
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const [{ n }] = (await tx.execute<{ n: number }>(
       sql`select count(*)::int as n from bulk_load_photo where load_id = ${loadId}`,
     )) as unknown as [{ n: number }]
@@ -301,7 +319,7 @@ export async function moveLoadPhoto(
 ) {
   uuidOr404(photoId, "Esa foto ya no está en la carga")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const [photo] = await tx
       .select()
       .from(bulkLoadPhoto)
@@ -330,7 +348,7 @@ export async function removeLoadPhoto(
 ) {
   uuidOr404(photoId, "Esa foto ya no está en la carga")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const [row] = await tx
       .delete(bulkLoadPhoto)
       .where(and(eq(bulkLoadPhoto.id, photoId), eq(bulkLoadPhoto.loadId, loadId)))
@@ -459,7 +477,7 @@ export async function updateLoadItem(
   patch: z.infer<typeof loadItemPatch>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const item = await itemRow(tx, loadId, itemId)
     const [row] = await tx
       .update(bulkLoadItem)
@@ -479,7 +497,7 @@ export async function updateLoadItems(
   input: z.infer<typeof loadBulkPatch>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const items = await tx
       .select()
       .from(bulkLoadItem)
@@ -505,7 +523,7 @@ export async function joinLoadItems(
   from: string[],
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const target = await itemRow(tx, loadId, itemId)
     const others = from.filter((id) => id !== itemId)
     for (const id of others) await itemRow(tx, loadId, id)
@@ -537,7 +555,7 @@ export async function loadSheet(
   if (typeof source === "object" && !Array.isArray(source))
     return { added: 0, errors: [source] as SheetError[] }
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const { currency, names, skus } = await sheetContext(tx, storeId)
     // Los nombres de la carga también cuentan: dos productos no se llaman igual.
     const inLoad = await tx
@@ -611,7 +629,7 @@ export interface LoadError {
  */
 export async function createFromLoad(appDb: Db, person: Person, storeId: string, loadId: string) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     const items = (
       await tx
         .select()
@@ -739,7 +757,7 @@ export async function createFromLoad(appDb: Db, person: Person, storeId: string,
 /** «Descartar»: la carga se cierra sin pasar nada al catálogo; sus fotos se borran. */
 export async function discardLoad(appDb: Db, person: Person, storeId: string, loadId: string) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await openLoadRow(tx, storeId, loadId)
+    await openLoadRow(tx, person, storeId, loadId)
     await tx.delete(bulkLoadPhoto).where(eq(bulkLoadPhoto.loadId, loadId))
     await tx
       .update(bulkLoad)

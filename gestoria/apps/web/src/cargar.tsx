@@ -13,6 +13,7 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  ConfirmDialog,
   DataTable,
   DataTableSkeleton,
   EmptyState,
@@ -36,12 +37,14 @@ import {
   Merge,
   MoreHorizontal,
   Trash2,
+  Undo2,
   Upload,
 } from "lucide-react"
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { CATALOG_KEY } from "./catalogo"
 import { ApiError, api } from "./lib/api"
 import { isImageFile, MEDIA_OFF, preparePhoto } from "./lib/medios"
+import { when } from "./lib/pedidos"
 import { currencySymbol, moneyInput, readMoney } from "./lib/tienda"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
@@ -78,7 +81,14 @@ interface LoadItem {
 }
 
 interface LoadDetail {
-  load: { id: string; state: "abierta" | "creada" | "descartada"; createdProducts: number | null }
+  load: {
+    id: string
+    state: "abierta" | "creada" | "descartada"
+    createdProducts: number | null
+    createdBy: string
+    createdByName: string | null
+    createdAt: string
+  }
   items: LoadItem[]
   loosePhotos: LoadPhoto[]
   counts: { items: number; ready: number; doubts: number; withoutPrice: number }
@@ -520,9 +530,10 @@ function LoadView({
   sheet: Sheets
   onClosed: () => void
 }) {
-  const { store } = useStoreContext()
+  const { store, meId } = useStoreContext()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [discarding, setDiscarding] = useState(false)
   const detail = useQuery({
     queryKey: LOAD_KEY(store.id, loadId),
     queryFn: () => api<LoadDetail>(`/api/tiendas/${store.id}/cargas/${loadId}`),
@@ -577,15 +588,21 @@ function LoadView({
     mutationFn: () => api(base, { method: "DELETE" }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LOADS_KEY(store.id) })
+      setDiscarding(false)
       toast.success("Descartaste la carga: nada pasó al catálogo")
       onClosed()
     },
-    onError: (error) => toast.error(error.message),
   })
 
   const items = useMemo(
     () => (detail.data?.items ?? []).filter((i) => i.state !== "quitado"),
     [detail.data],
+  )
+  // «No crear este» no borra nada: el producto queda aparte, con «Volver a incluir».
+  const removed = (detail.data?.items ?? []).filter((i) => i.state === "quitado")
+  const everyPhoto = (detail.data?.items ?? []).reduce(
+    (n, i) => n + i.photos.length,
+    detail.data?.loosePhotos.length ?? 0,
   )
   const loose = detail.data?.loosePhotos ?? []
   // Las columnas no cambian con los datos: si cambiaran, cada fila se volvería a montar al
@@ -602,13 +619,23 @@ function LoadView({
       method: "PATCH",
       body: target === "nuevo" ? { newItem: true } : { itemId: target },
     })
-  const save = (itemId: string, body: Record<string, unknown>) => {
+  const save = (itemId: string, body: Record<string, unknown>, onSuccess?: () => void) => {
     setErrors(({ [itemId]: _, ...rest }) => rest)
     call.mutate(
       { path: `/productos/${itemId}`, method: "PATCH", body },
-      { onError: () => setReset((n) => n + 1) },
+      { onError: () => setReset((n) => n + 1), onSuccess },
     )
   }
+  const nameOf = (item: LoadItem) => (item.name.trim() ? `«${item.name.trim()}»` : "Este producto")
+  /** «No crear este», con «Deshacer» en el aviso y «Volver a incluir» abajo de la tabla. */
+  const leaveOut = (item: LoadItem) =>
+    save(item.id, { state: "quitado" }, () =>
+      toast.success(`${nameOf(item)} no se va a crear`, {
+        description: "Sigue abajo de la tabla, con «Volver a incluir».",
+        action: { label: "Deshacer", onClick: () => save(item.id, { state: item.state }) },
+      }),
+    )
+  const include = (item: LoadItem) => save(item.id, { state: "revisar" })
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: las acciones no cambian la forma de la tabla
   const columns = useMemo<ColumnDef<LoadItem>[]>(
@@ -761,10 +788,7 @@ function LoadView({
               <MoreHorizontal aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => save(row.original.id, { state: "quitado" })}
-              >
+              <DropdownMenuItem variant="destructive" onClick={() => leaveOut(row.original)}>
                 <Trash2 aria-hidden />
                 No crear este
               </DropdownMenuItem>
@@ -809,10 +833,33 @@ function LoadView({
           {
             label: "Descartar la carga",
             icon: <Trash2 aria-hidden />,
-            onSelect: () => discard.mutate(),
+            onSelect: () => setDiscarding(true),
             disabled: discard.isPending,
           },
         ]}
+      />
+      {detail.data ? <LoadOwner load={detail.data.load} meId={meId} /> : null}
+      <ConfirmDialog
+        open={discarding}
+        title="¿Descartar la carga?"
+        description={`${
+          detail.data && detail.data.load.createdBy !== meId
+            ? `Es la carga que abrió ${detail.data.load.createdByName ?? "otra persona del equipo"}. `
+            : ""
+        }Se borran ${everyPhoto === 1 ? "su foto" : `sus ${everyPhoto} fotos`} y ${
+          items.length + removed.length === 1
+            ? "su producto"
+            : `sus ${items.length + removed.length} productos`
+        } por crear, y nada pasa al catálogo. No se puede deshacer.`}
+        confirmLabel="Descartar la carga"
+        cancelLabel="Seguir con la carga"
+        pending={discard.isPending}
+        error={discard.isError ? discard.error.message : null}
+        onConfirm={() => discard.mutate()}
+        onClose={() => {
+          setDiscarding(false)
+          discard.reset()
+        }}
       />
       {upload.off ? (
         <ErrorState
@@ -898,7 +945,57 @@ function LoadView({
           </p>
         </>
       )}
+      {removed.length ? (
+        <section
+          aria-label="Lo que no se va a crear"
+          className="flex flex-col gap-2 rounded-xl border border-dashed bg-card p-3"
+        >
+          <span className="text-sm font-medium">
+            {removed.length === 1
+              ? "1 que no se va a crear"
+              : `${removed.length} que no se van a crear`}
+            <span className="font-normal text-muted-foreground">
+              {" "}
+              · «Crear» no los pasa al catálogo y sus fotos se borran
+            </span>
+          </span>
+          <ul className="flex flex-col gap-1.5">
+            {removed.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 text-sm [overflow-wrap:anywhere]">
+                  {item.name.trim() || "Sin nombre"}
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {item.photos.length === 1 ? "1 foto" : `${item.photos.length} fotos`}
+                  </span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={call.isPending}
+                  onClick={() => include(item)}
+                >
+                  <Undo2 aria-hidden />
+                  Volver a incluir
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </>
+  )
+}
+
+/** De quién es la carga abierta y desde cuándo: la carga es de la tienda, y se dice de quién es. */
+function LoadOwner({ load, meId }: { load: LoadDetail["load"]; meId: string }) {
+  const mine = load.createdBy === meId
+  return (
+    <p className="text-sm text-muted-foreground">
+      {mine
+        ? `Abriste esta carga el ${when(load.createdAt)}.`
+        : `Esta carga la abrió ${load.createdByName ?? "otra persona del equipo"} el ${when(load.createdAt)}. Lo que cambies, crees o descartes aquí es de esa carga.`}
+    </p>
   )
 }
 

@@ -189,6 +189,8 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
   const rows = page.getByRole("row").filter({ has: page.getByRole("checkbox") })
   // La cabecera también tiene su casilla: tres productos y la cabecera.
   await expect(rows).toHaveCount(4)
+  // Dice de quién es la carga abierta y desde cuándo.
+  await expect(page.getByText(/^Abriste esta carga el /)).toBeVisible()
   // Nada pasó al catálogo todavía.
   const before = (await json("GET", `${STORE}/catalogo`)).products.length
 
@@ -231,6 +233,23 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
   await page.setViewportSize(DESKTOP)
   expect((await json("GET", `${STORE}/catalogo`)).products.length).toBe(before)
 
+  // «No crear este» tiene vuelta: «Deshacer» en el aviso y «Volver a incluir» abajo.
+  const leaveOut = async () => {
+    await page.getByRole("button", { name: "Opciones de Sandalia de la carga" }).click()
+    await page.getByRole("menuitem", { name: "No crear este" }).click()
+    await expect(rows).toHaveCount(2)
+  }
+  await leaveOut()
+  await page.getByRole("button", { name: "Deshacer" }).click()
+  await expect(rows).toHaveCount(3)
+  await leaveOut()
+  const apart = page.getByRole("region", { name: "Lo que no se va a crear" })
+  await expect(apart).toContainText("Sandalia de la carga")
+  await shot(page, "pr4-cargar-no-crear-1440-claro")
+  await apart.getByRole("button", { name: "Volver a incluir" }).click()
+  await expect(rows).toHaveCount(3)
+  await expect(apart).toBeHidden()
+
   await page.getByRole("button", { name: "Crear 2 productos" }).click()
   await expect(page.getByText("Creaste 2 productos")).toBeVisible()
   await expect(page).toHaveURL(/\/catalogo$/)
@@ -244,4 +263,30 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
   expect(made.stock).toBe(6)
   const media = await json("GET", `${STORE}/productos/${made.id}/medios`)
   expect(media.photos).toHaveLength(2)
+  // Su historial empieza con «Creó el producto», como el que se agrega solo.
+  const history = await json("GET", `${STORE}/productos/${made.id}/historial`)
+  expect(history.events.map((e: { action: string }) => e.action)).toContain("creado")
+})
+
+test("«Descartar la carga» pregunta antes de borrar sus fotos", async ({ page }) => {
+  await as("rosa")
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/catalogo/cargar`)
+  await page
+    .locator('input[type="file"][accept="image/*"]:not([capture])')
+    .setInputFiles([await photo("IMG_9.jpg", 60, 120, 200)])
+  await expect(page.getByText("Subiste 1 foto")).toBeVisible({ timeout: 30_000 })
+  await page.getByRole("button", { name: "Más opciones" }).click()
+  await page.getByRole("menuitem", { name: "Descartar la carga" }).click()
+  const ask = page.getByRole("alertdialog", { name: "¿Descartar la carga?" })
+  await expect(ask).toContainText("Se borran su foto")
+  await shot(page, "pr4-cargar-descartar-1440-claro")
+  await ask.getByRole("button", { name: "Seguir con la carga" }).click()
+  await expect(ask).toBeHidden()
+  await expect(page.getByRole("textbox", { name: "Nombre" })).toHaveCount(1)
+  await page.getByRole("button", { name: "Más opciones" }).click()
+  await page.getByRole("menuitem", { name: "Descartar la carga" }).click()
+  await ask.getByRole("button", { name: "Descartar la carga" }).click()
+  await expect(page.getByText("Descartaste la carga: nada pasó al catálogo")).toBeVisible()
+  await expect(page.getByText("Suelta aquí todas tus fotos")).toBeVisible()
 })

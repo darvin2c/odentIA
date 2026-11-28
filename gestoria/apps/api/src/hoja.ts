@@ -2,6 +2,7 @@ import {
   type Db,
   type ProductOption,
   product,
+  productEvent,
   productVariant,
   stockMovement,
   store,
@@ -435,6 +436,18 @@ export async function createPlanned(
     )
     .returning({ id: product.id, name: product.name })
   const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
+  // Cada producto nuevo empieza su historial con «Creó el producto», como el que se agrega solo.
+  if (created.length > 0)
+    await tx.insert(productEvent).values(
+      created.map((row) => ({
+        storeId,
+        productId: row.id,
+        actorUserId: person.userId,
+        action: "creado" as const,
+        changes: [],
+        reason,
+      })),
+    )
   const rows = products.flatMap((p) =>
     p.variants.map((v) => ({
       planned: v,
