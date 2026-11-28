@@ -254,6 +254,8 @@ export interface ConfigOverview {
     type: DeliveryType
     cost: DeliveryCost
     zones: number
+    /** Cuántos distritos (UBIGEO) tienen sus zonas. */
+    districts: number
     acceptsPayOnDelivery: boolean
   }[]
   slots: number
@@ -542,6 +544,7 @@ export function configLines(
         (overview.paymentLink.state !== "conectada" || overview.paymentLink.mode !== "real")),
   }
   const zones = overview.deliveries.reduce((sum, d) => sum + d.zones, 0)
+  const districts = overview.deliveries.reduce((sum, d) => sum + (d.districts ?? 0), 0)
   const ownFleet = overview.deliveries.some((d) => d.type === "DeliveryModeOwnFleet")
   lines.entregas = {
     id: "entregas",
@@ -557,11 +560,13 @@ export function configLines(
     status:
       overview.deliveries.length === 0
         ? "Falta"
-        : zones > 0
-          ? plural(zones, "zona", "zonas")
-          : ownFleet
-            ? "Sin zonas"
-            : "Al día",
+        : districts > 0
+          ? `${plural(districts, "distrito", "distritos")} en ${plural(zones, "zona", "zonas")}`
+          : zones > 0
+            ? `${plural(zones, "zona", "zonas")} sin distritos`
+            : ownFleet
+              ? "Sin zonas"
+              : "Al día",
     pending: overview.deliveries.length === 0,
   }
   const { team } = overview
@@ -696,6 +701,21 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
       "plantilla",
       "lima",
     ],
+  },
+  {
+    text: "Mapa de distritos de Lima y el Callao",
+    section: "entregas",
+    terms: ["mapa", "distrito", "distritos", "lima", "callao", "ubigeo"],
+  },
+  {
+    text: "Si la clienta no está",
+    section: "entregas",
+    terms: ["no estaba", "viaje fallido", "reprogramar", "no contestó", "volver a llevar"],
+  },
+  {
+    text: "Hora de corte y días de entrega",
+    section: "entregas",
+    terms: ["corte", "hoy", "mañana", "días fijos", "plazo", "cuándo llega"],
   },
   { text: "Recojo en tienda", section: "entregas", terms: ["recojo", "recoger", "tienda"] },
   {

@@ -1,5 +1,6 @@
 import {
   type Db,
+  type DeliveryZone,
   orderRefund,
   type PaymentCollection,
   saleOrder,
@@ -13,6 +14,7 @@ import { z } from "zod"
 import { SOFI_ACTOR } from "./agente.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
+import { deliveryPriceOf, payOnDeliveryOf } from "./entregas.js"
 import {
   dayText,
   lockOrder,
@@ -344,16 +346,17 @@ async function priceExchange(
       ),
     )
   let listCents = 0
+  let zone: DeliveryZone | null = null
   if (!delivery?.isActive) fields.deliveryMethodId = "Esa forma de entrega ya no está encendida"
-  else if (delivery.cost === "fijo") listCents = delivery.priceCents ?? 0
-  else if (delivery.cost === "por_zona") {
-    const zone = delivery.zones.find((z) => z.name === input.zone)
-    if (!zone) fields.zone = "Elige la zona"
-    else listCents = zone.priceCents
-  } else if (delivery.cost === "se_acuerda") {
-    if (input.deliveryListCents === null)
-      fields.deliveryListCents = "Escribe cuánto cuesta el envío"
-    else listCents = input.deliveryListCents
+  else {
+    const price = deliveryPriceOf(delivery, {
+      zone: input.zone,
+      listCents: input.deliveryListCents,
+    })
+    if (price.ok) {
+      listCents = price.listCents
+      zone = price.zone
+    } else fields[price.field] = price.message
   }
   const totals = exchangeTotals(takes, back, {
     listCents,
@@ -378,7 +381,7 @@ async function priceExchange(
         .orderBy(asc(storePaymentMethod.createdAt))
     ).filter((m) => m.isActive)
     const usable = (m: (typeof methods)[number]) =>
-      m.collection !== "al_recibir" || delivery.acceptsPayOnDelivery
+      m.collection !== "al_recibir" || payOnDeliveryOf(delivery, zone)
     const chosen = input.paymentMethodId
       ? methods.find((m) => m.id === input.paymentMethodId)
       : // Lo que propone gestorIA: cobrar en la puerta, en el mismo viaje; si no se puede, el medio
@@ -408,7 +411,7 @@ async function priceExchange(
       takes,
       totals,
       delivery,
-      zone: delivery.cost === "por_zona" ? input.zone : null,
+      zone: zone?.name ?? null,
       payment,
     },
   }

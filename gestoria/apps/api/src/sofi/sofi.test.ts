@@ -638,6 +638,193 @@ describe("Sofi vende con las reglas de la tienda", () => {
   })
 })
 
+describe("el envío que dice Sofi", () => {
+  const deliver = async (body: Json) => {
+    const created = await call("rosa", "POST", `${base}/formas-de-entrega`, body)
+    expect(created.status).toBe(201)
+    return created.json.method.id as string
+  }
+
+  it("a provincia: nombra las agencias, dice que el flete se paga al recoger y pide el DNI, no la dirección", async () => {
+    const agencia = await deliver({
+      name: "Envío a provincia",
+      type: "ParcelService",
+      cost: "fijo",
+      priceCents: 800,
+      agencies: ["Shalom", "Olva Courier"],
+      freight: "al_recoger",
+      eta: "De 2 a 4 días",
+    })
+    const id = await newTest()
+    const args = { lineas: [{ variante_id: ids.t38, cantidad: 1 }], entrega_id: agencia }
+    const asked = await write(
+      id,
+      "Hola, soy de Huancayo, ¿me la mandan? ¿cuánto sería todo?",
+      use("ver_envio", () => ({ distrito: "Huancayo" })),
+      (r) => {
+        // Huancayo no es un distrito de Lima: no falla, ofrece la agencia.
+        const result = lastTool(r)
+        expect(result.ok).toBe(true)
+        expect(result.por_agencia).toEqual([
+          expect.objectContaining({
+            entrega_id: agencia,
+            agencias: "Shalom, Olva Courier",
+            llevarlo_a_la_agencia: "S/ 8",
+            flete: expect.stringContaining("al recoger"),
+            para_anotarlo: expect.stringContaining("DNI"),
+          }),
+        ])
+        return { toolCalls: [toolCall("cotizar", args)] }
+      },
+      (r) => {
+        const result = lastTool(r)
+        // El total es el del equipo, sin flete: el flete se paga en la agencia, y lo dice.
+        expect(result).toMatchObject({ ok: true, total: "S/ 137", envio: "S/ 8" })
+        expect(result.ojo).toContain("flete")
+        expect(result.por_agencia.agencias).toBe("Shalom, Olva Courier")
+        return {
+          content:
+            "Te la mando por Shalom u Olva Courier: llevarla a la agencia cuesta S/ 8, total S/ 137, y el flete lo pagas al recoger. ¿A qué agencia de Huancayo y el nombre y DNI de quien recoge?",
+        }
+      },
+    )
+    expect(lastSofi(asked).text).toContain("S/ 137")
+    // Sin el DNI no lo anota: lo pide.
+    const missing = await write(
+      id,
+      "Por Shalom, a nombre de María Pérez",
+      use("armar_pedido", () => ({
+        ...args,
+        nombre: "María Pérez",
+        agencia: "shalom",
+        destino: "Huancayo",
+        recoge_nombre: "María Pérez",
+      })),
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: false, problema: expect.stringContaining("DNI") })
+        return { content: "¿Me pasas el DNI de quien recoge?" }
+      },
+    )
+    expect(missing.conversation.orders).toEqual([])
+    // Una agencia que la tienda no tiene, tampoco.
+    await write(
+      id,
+      "Mejor por Marvisur, DNI 70123456",
+      use("armar_pedido", () => ({
+        ...args,
+        nombre: "María Pérez",
+        agencia: "Marvisur",
+        destino: "Huancayo",
+        recoge_nombre: "María Pérez",
+        recoge_dni: "70123456",
+      })),
+      (r) => {
+        expect(lastTool(r).problema).toContain("Shalom o Olva Courier")
+        return { content: "Esa no la tenemos: ¿Shalom u Olva Courier?" }
+      },
+    )
+    const done = await write(
+      id,
+      "Shalom entonces, DNI 70123456",
+      use("armar_pedido", () => ({
+        ...args,
+        nombre: "María Pérez",
+        agencia: "shalom",
+        destino: "Huancayo, agencia El Tambo",
+        recoge_nombre: "María Pérez",
+        recoge_dni: "70 123 456",
+      })),
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: true, total: "S/ 137" })
+        return { content: "Listo, anoté tu pedido por S/ 137." }
+      },
+    )
+    const [order] = await db.ownerDb
+      .select()
+      .from(saleOrder)
+      .where(eq(saleOrder.id, done.conversation.orders[0].id))
+    expect(order).toMatchObject({
+      totalCents: 13700,
+      address: "Recoge en Shalom, Huancayo, agencia El Tambo: María Pérez, DNI 70123456",
+    })
+  })
+
+  it("si la tienda cobra el flete antes, va en el total y lo dice; sin agencia, no inventa", async () => {
+    const antes = await deliver({
+      name: "Agencia con flete",
+      type: "ParcelService",
+      cost: "fijo",
+      priceCents: 800,
+      agencies: ["Shalom"],
+      freight: "antes",
+      freightCents: 2000,
+    })
+    const id = await newTest()
+    await write(
+      id,
+      "¿Y con el flete cuánto es a Cusco?",
+      use("cotizar", () => ({
+        lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+        entrega_id: antes,
+      })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result).toMatchObject({ ok: true, total: "S/ 157", envio: "S/ 28" })
+        expect(result.ojo).toBeUndefined()
+        expect(result.por_agencia).toMatchObject({
+          llevarlo_a_la_agencia: "S/ 8",
+          flete: expect.stringContaining("S/ 20"),
+        })
+        return { content: "Con el flete, S/ 157: S/ 8 por llevarla y S/ 20 de flete." }
+      },
+    )
+  })
+
+  it("en Lima, con lo que lleva: cuánto le falta para el envío gratis, y gratis sin decir antes un precio", async () => {
+    const zonas = await deliver({
+      name: "Reparto por zona",
+      type: "DeliveryModeOwnFleet",
+      cost: "por_zona",
+      freeFromCents: 20000,
+      zones: [{ name: "Centro", priceCents: 1000, districts: ["150116"] }],
+    })
+    const id = await newTest()
+    await write(
+      id,
+      "¿Cuánto es el envío a Lince?",
+      use("ver_envio", () => ({
+        distrito: "Lince",
+        lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+      })),
+      (r) => {
+        const [option] = lastTool(r).opciones as Json[]
+        expect(option).toMatchObject({
+          entrega_id: zonas,
+          precio_para_su_compra: "S/ 10",
+          para_envio_gratis: expect.stringContaining("S/ 71"),
+        })
+        return {
+          toolCalls: [
+            toolCall("ver_envio", {
+              distrito: "Lince",
+              lineas: [{ variante_id: ids.t38, cantidad: 2 }],
+            }),
+          ],
+        }
+      },
+      (r) => {
+        const [option] = lastTool(r).opciones as Json[]
+        // Con dos pares pasa de S/ 200: un solo precio, gratis, sin el de lista.
+        expect(option.precio_para_su_compra).toBe("gratis por el monto de su compra")
+        expect(option.precio).toBeUndefined()
+        expect(option.para_envio_gratis).toBeUndefined()
+        return { content: "A Lince te llega por S/ 10. Si sumas S/ 71 más, el envío es gratis." }
+      },
+    )
+    expect((await call("rosa", "DELETE", `${base}/formas-de-entrega/${zonas}`)).status).toBe(204)
+  })
+})
+
 describe("lo que escribe el cliente mientras Sofi responde", () => {
   it("lo responde después, con lo nuevo al final", async () => {
     const id = await newTest()

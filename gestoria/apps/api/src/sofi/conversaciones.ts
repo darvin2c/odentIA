@@ -139,6 +139,7 @@ const TOOL_WORDS: Record<string, string> = {
   armar_pedido: "Anotó el pedido",
   link_de_pago: "Pidió el link de pago",
   anotar_pago: "Anotó la captura",
+  ver_envio: "Miró el envío al distrito",
   ver_pedidos: "Miró los pedidos",
   avisar_cuando_vuelva: "Quedó en avisar cuando vuelva",
   pasar_a_persona: "La pasó a una persona",

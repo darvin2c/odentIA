@@ -1,6 +1,7 @@
 import {
   accountCopy,
   type Db,
+  type DeliveryZone,
   MAX_PHOTO_BYTES,
   ORDER_CHANNELS,
   ORDER_STATES,
@@ -33,6 +34,7 @@ import { imageType } from "./catalogo.js"
 import { customerForOrderIn, shownCustomerId } from "./clientes.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
+import { deliveryPriceOf, freeFromOf, payOnDeliveryOf } from "./entregas.js"
 import { storeClockIn } from "./hora.js"
 import type { LinkAdapters, LinkApp } from "./link-de-pago.js"
 import {
@@ -205,6 +207,12 @@ export const orderInput = z.object({
     .max(30, "Hasta 30 productos por pedido"),
   deliveryMethodId: z.uuid("Elige cómo se entrega"),
   zone: z.string().trim().max(60).nullable().default(null),
+  /** El distrito (UBIGEO del INEI): con envío por zona, manda sobre el nombre de la zona. */
+  district: z
+    .string()
+    .regex(/^[0-9]{6}$/, "Elige el distrito")
+    .nullable()
+    .default(null),
   /** Con «se acuerda en el chat»: cuánto cuesta el envío. */
   deliveryListCents: cents.nullable().default(null),
   /** Lo que paga de envío; null: lo que corresponde. */
@@ -289,6 +297,7 @@ export const changeInput = orderInput.pick({
   lines: true,
   deliveryMethodId: true,
   zone: true,
+  district: true,
   deliveryListCents: true,
   deliveryCents: true,
   address: true,
@@ -353,6 +362,8 @@ interface Priced {
     { productId: string; productName: string; variantName: string; sku: string }
   >
   delivery: typeof storeDeliveryMethod.$inferSelect
+  /** La zona del envío, si es por zona. */
+  zone: DeliveryZone | null
   /** Nulo al cambiar un pedido: su medio de pago no se vuelve a elegir. */
   payment: typeof storePaymentMethod.$inferSelect | null
 }
@@ -489,21 +500,24 @@ async function priceOrder(
       ),
     )
   let deliveryList = 0
+  let zone: DeliveryZone | null = null
   if (!delivery?.isActive) fields.deliveryMethodId = "Esa forma de entrega ya no está encendida"
-  else if (delivery.cost === "fijo") deliveryList = delivery.priceCents ?? 0
-  else if (delivery.cost === "por_zona") {
-    const zone = delivery.zones.find((z) => z.name === input.zone)
-    if (!zone) fields.zone = "Elige la zona"
-    else deliveryList = zone.priceCents
-  } else if (delivery.cost === "se_acuerda") {
-    if (input.deliveryListCents === null)
-      fields.deliveryListCents = "Escribe cuánto cuesta el envío"
-    else deliveryList = input.deliveryListCents
+  else {
+    const price = deliveryPriceOf(delivery, {
+      zone: input.zone,
+      district: input.district,
+      listCents: input.deliveryListCents,
+    })
+    if (price.ok) {
+      deliveryList = price.listCents
+      zone = price.zone
+    } else fields[price.field] = price.message
   }
+  const onDelivery = delivery ? payOnDeliveryOf(delivery, zone) : false
 
   let payment: typeof storePaymentMethod.$inferSelect | null = null
   if (change) {
-    if (change.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery)
+    if (change.collection === "al_recibir" && delivery && !onDelivery)
       fields.deliveryMethodId =
         "Esa forma de entrega no acepta pago al recibir, y este pedido se paga así"
   } else {
@@ -517,8 +531,10 @@ async function priceOrder(
         ),
       )
     if (!payment?.isActive) fields.paymentMethodId = "Ese medio de pago ya no está encendido"
-    else if (payment.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery)
-      fields.paymentMethodId = "Esa forma de entrega no acepta pago al recibir"
+    else if (payment.collection === "al_recibir" && delivery && !onDelivery)
+      fields.paymentMethodId = zone
+        ? `En «${zone.name}» no se paga al recibir`
+        : "Esa forma de entrega no acepta pago al recibir"
   }
 
   if (Object.keys(fields).length > 0 || !delivery || (!change && !payment))
@@ -528,7 +544,7 @@ async function priceOrder(
     {
       listCents: deliveryList,
       maxDiscountCents: delivery.cost === "se_acuerda" ? null : delivery.maxDiscountCents,
-      freeFromCents: delivery.freeFromCents,
+      freeFromCents: freeFromOf(delivery, zone),
       chargedCents: input.deliveryCents,
     },
     currency,
@@ -550,6 +566,7 @@ async function priceOrder(
         ]),
       ),
       delivery,
+      zone,
       payment,
     },
   }
@@ -562,9 +579,16 @@ async function priceOrder(
 export async function quoteOrderIn(tx: Db, storeId: string, input: OrderInput, today: string) {
   const { currency } = await storeRow(tx, storeId)
   const result = await priceOrder(tx, storeId, currency, input, today)
+  // La zona del envío y desde qué compra es gratis ahí: Sofi lo dice sin calcularlo.
   return result.ok
-    ? { quote: result.priced.quote, fields: {} as Record<string, string>, currency }
-    : { quote: null, fields: result.fields, currency }
+    ? {
+        quote: result.priced.quote,
+        fields: {} as Record<string, string>,
+        currency,
+        zone: result.priced.zone,
+        freeFromCents: freeFromOf(result.priced.delivery, result.priced.zone),
+      }
+    : { quote: null, fields: result.fields, currency, zone: null, freeFromCents: null }
 }
 
 /** El precio de un pedido sin guardarlo, para el resumen de «Anotar un pedido». */
@@ -706,7 +730,7 @@ export async function createOrderIn(
       Object.values(result.fields)[0] ?? "Revisa el pedido",
       result.fields,
     )
-  const { quote: q, variants, delivery } = result.priced
+  const { quote: q, variants, delivery, zone: pricedZone } = result.priced
   const payment = result.priced.payment!
   // El trato que ya venció no se renueva solo: quien arma el pedido vuelve a cotizar.
   const expiresAt = q.negotiated ? negotiatedUntil(now, options.priceExpiresAt) : null
@@ -738,7 +762,7 @@ export async function createOrderIn(
       deliveryMethodId: delivery.id,
       deliveryName: delivery.name,
       deliveryType: delivery.type,
-      deliveryZone: delivery.cost === "por_zona" ? input.zone : null,
+      deliveryZone: pricedZone?.name ?? null,
       deliveryListCents: q.deliveryListCents,
       deliveryCents: q.deliveryCents,
       deliveryFreeByPolicy: q.deliveryFreeByPolicy,
@@ -1965,7 +1989,7 @@ export async function changeOrderIn(
       Object.values(result.fields)[0] ?? "Revisa el pedido",
       result.fields,
     )
-  const { quote: q, variants, delivery } = result.priced
+  const { quote: q, variants, delivery, zone: pricedZone } = result.priced
   const before = await tx
     .select()
     .from(saleOrderLine)
@@ -1991,7 +2015,7 @@ export async function changeOrderIn(
       gift: priced.gift,
     }
   })
-  const zone = delivery.cost === "por_zona" ? input.zone : null
+  const zone = pricedZone?.name ?? null
   const changes = describeChange(
     {
       lines: before,

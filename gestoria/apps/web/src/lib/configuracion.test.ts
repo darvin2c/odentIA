@@ -122,6 +122,7 @@ const ROSA: ConfigOverview = {
       type: "DeliveryModeOwnFleet",
       cost: "por_zona",
       zones: 2,
+      districts: 12,
       acceptsPayOnDelivery: true,
     },
     {
@@ -129,6 +130,7 @@ const ROSA: ConfigOverview = {
       type: "OnSitePickup",
       cost: "gratis",
       zones: 0,
+      districts: 0,
       acceptsPayOnDelivery: false,
     },
     {
@@ -136,6 +138,7 @@ const ROSA: ConfigOverview = {
       type: "ParcelService",
       cost: "se_acuerda",
       zones: 0,
+      districts: 0,
       acceptsPayOnDelivery: false,
     },
   ],
@@ -302,7 +305,7 @@ describe("cómo está cada parte", () => {
     expect(named.pagos?.summary).toBe("Yape con captura · Efectivo al recibir")
     expect(lines.entregas).toMatchObject({
       summary: "Reparto en Lima · recojo en tienda · Shalom",
-      status: "2 zonas",
+      status: "12 distritos en 2 zonas",
       pending: false,
     })
     expect(lines.equipo).toMatchObject({

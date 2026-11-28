@@ -16,6 +16,7 @@ import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { conversationCustomerOrdersIn } from "../clientes.js"
 import { COLLECTION_RANK } from "../configuracion.js"
+import { deliveryPriceOf } from "../entregas.js"
 import { storeClockIn } from "../hora.js"
 import { chargesOrders, linkStateIn } from "../pasarela.js"
 import { type LinkDeps, pad } from "../pedidos.js"
@@ -25,6 +26,7 @@ import {
   type ConsentNow,
   consentIn,
   moneyText as formatMoney,
+  freightWords,
   newTrace,
   offeredIn,
   runTool,
@@ -82,7 +84,9 @@ CÓMO TRABAJAS
 - Antes de hablar de un producto, usa buscar_productos. Siempre das un número: «Cuesta S/ 129», o «desde S/ 89» si sus variantes cuestan distinto, y el exacto cuando elige.
 - Nunca ofreces una variante agotada (stock 0) ni un producto que no salió en buscar_productos. Si pide una agotada, lo dices, ofreces lo parecido que sí hay y ofreces avisarle cuando vuelva (avisar_cuando_vuelva).
 - Recomiendas: lo parecido si no hay lo que pide, y lo que combina cuando ya eligió, sin insistir.
-- Pides lo que falta de a poco: variante y cantidad, cómo lo recibe (forma de entrega y zona), la dirección si se envía y su nombre.
+- Pides lo que falta de a poco: variante y cantidad, cómo lo recibe (forma de entrega y zona) y su nombre. Con reparto, la dirección. Por agencia (provincia), nunca la dirección de calle: la ciudad, la agencia de destino y el nombre y DNI de quien recoge.
+- El precio del envío de su compra es el de cotizar (o el de ver_envio con sus lineas), no el de lista: nunca dices un precio y después «gratis» para el mismo envío. Si te llega para_envio_gratis, díselo una vez, con ese monto.
+- Por agencia: nombras las agencias de la tienda, lo que cuesta llevarlo a la agencia y quién paga el flete, tal como lo dicen tus herramientas. Si el flete se paga al recoger, lo dices claro y no das un monto de flete: no lo sabes.
 
 NEGOCIAR (vender es lo principal, y en una tienda chica la confianza es lo que vende)
 - Solo negocias productos con se_negocia: true. Los demás van a su precio: lo dices con amabilidad.
@@ -332,16 +336,31 @@ async function load(
     }
     const display = agent?.displayName?.trim() || `Sofi, de ${shop!.name}`
     const deliveryLines = deliveries.map((d) => {
+      // Lo que cobra la tienda sale de la regla del envío (con el flete, si lo cobra antes). Por
+      // zona, el pago al recibir y el envío gratis dependen de la zona: los dice ver_envio.
+      const price = deliveryPriceOf(d, { zone: null, listCents: null })
+      const zoned = d.cost === "por_zona"
       const cost =
-        d.cost === "gratis"
-          ? "gratis"
-          : d.cost === "fijo"
-            ? say(d.priceCents ?? 0)
-            : d.cost === "por_zona"
-              ? `por zona: ${d.zones.map((z) => `${z.name} ${say(z.priceCents)}`).join("; ")}`
-              : "se acuerda en el chat (pregunta a una persona si no lo sabes)"
-      const free = d.freeFromCents ? `; gratis desde ${say(d.freeFromCents)} de compra` : ""
-      return `- ${d.id} · ${d.name} (${DELIVERY_WORDS[d.type]}) · ${cost}${free}${d.eta ? ` · llega: ${d.eta}` : ""} · ${d.acceptsPayOnDelivery ? "acepta pago al recibir" : "no acepta pago al recibir"}${d.details ? ` · ${d.details}` : ""}`
+        d.cost === "se_acuerda"
+          ? "se acuerda en el chat (pregunta a una persona si no lo sabes)"
+          : zoned
+            ? `por zona (el distrito dice la zona: usa ver_envio): ${d.zones.map((z) => `${z.name} ${say(z.priceCents)}`).join("; ")}`
+            : price.ok && price.listCents > 0
+              ? say(price.listCents)
+              : "gratis"
+      const free =
+        !zoned && d.freeFromCents ? `; gratis desde ${say(d.freeFromCents)} de compra` : ""
+      const door = zoned
+        ? "pago al recibir según la zona (ver_envio)"
+        : d.acceptsPayOnDelivery
+          ? "acepta pago al recibir"
+          : "no acepta pago al recibir"
+      // Por agencia: con qué agencias y quién paga el flete (ver_envio dice qué pedirle).
+      const parcel =
+        d.type === "ParcelService"
+          ? `${d.agencies.length ? ` · agencias: ${d.agencies.join(", ")}` : ""} · flete: ${freightWords(d, d.freight === "antes" && d.freightCents ? say(d.freightCents) : null)}`
+          : ""
+      return `- ${d.id} · ${d.name} (${DELIVERY_WORDS[d.type]}) · ${cost}${free}${d.eta ? ` · llega: ${d.eta}` : ""} · ${door}${parcel}${d.details ? ` · ${d.details}` : ""}`
     })
     const paymentLines = payments.map(
       (p, i) =>

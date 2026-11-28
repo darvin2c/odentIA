@@ -85,6 +85,7 @@ import {
   updatePayment,
 } from "./cobros.js"
 import {
+  changeZone,
   configOverview,
   createDelivery,
   deleteDelivery,
@@ -92,6 +93,7 @@ import {
   deliveryPatch,
   paymentsAndDeliveries,
   updateDelivery,
+  zoneChange,
 } from "./configuracion.js"
 import {
   type AccountConfig,
@@ -103,6 +105,13 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
+import {
+  applyLimaTemplate,
+  deliveryRulesInput,
+  deliverySetup,
+  setDeliveryRules,
+  templateInput,
+} from "./entregas.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
@@ -617,10 +626,32 @@ export function createApp(deps: AppDeps) {
       method: await updateDelivery(deps.appDb, c.get("person"), id, methodId, patch),
     })
   })
+  // Una sola zona del reparto, sobre lo guardado ahora (lienzo de Configuración, tablero 7).
+  app.patch("/api/tiendas/:id/formas-de-entrega/:methodId/zonas", async (c) => {
+    const change = await bodyOf(c, zoneChange)
+    const { id, methodId } = c.req.param()
+    return c.json({
+      method: await changeZone(deps.appDb, c.get("person"), id, methodId, change),
+    })
+  })
   app.delete("/api/tiendas/:id/formas-de-entrega/:methodId", async (c) => {
     const { id, methodId } = c.req.param()
     await deleteDelivery(deps.appDb, c.get("person"), id, methodId)
     return c.body(null, 204)
+  })
+
+  // Entregas por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7).
+  app.get("/api/tiendas/:id/entregas", async (c) =>
+    c.json(await deliverySetup(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/entregas/reglas", async (c) => {
+    const input = await bodyOf(c, deliveryRulesInput)
+    return c.json(await setDeliveryRules(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  app.post("/api/tiendas/:id/entregas/plantilla-lima", async (c) => {
+    const input = await bodyOf(c, templateInput)
+    const method = await applyLimaTemplate(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ method })
   })
 
   // El catálogo (B3): productos, variantes, fotos, stock y la hoja.

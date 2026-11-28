@@ -274,6 +274,20 @@
       "when": 1795845285532,
       "tag": "0054_reglas_cobros",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795847291935,
+      "tag": "0055_entregas_por_distrito",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795847298948,
+      "tag": "0056_reglas_entregas",
+      "breakpoints": true
     }
   ]
 }
