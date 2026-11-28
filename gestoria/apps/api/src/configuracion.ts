@@ -397,7 +397,8 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
         products: Number(products?.n ?? 0),
         withStock: facts.productsWithStock,
       },
-      payments,
+      // Solo con qué se cobra: los datos de cobro no van al navegador.
+      payments: payments.map(({ name, typeCode, collection }) => ({ name, typeCode, collection })),
       paymentLink: paymentLink ? { provider: paymentLink.provider } : null,
       deliveries: deliveries.map(({ zones, ...delivery }) => ({
         ...delivery,

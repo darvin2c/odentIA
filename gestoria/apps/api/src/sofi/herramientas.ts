@@ -8,7 +8,6 @@ import {
   productVariant,
   saleOrder,
   stockRequest,
-  storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
 import { and, asc, eq, inArray, or } from "drizzle-orm"
@@ -31,6 +30,7 @@ import {
   variantPrices,
 } from "../pedidos.js"
 import { autoUnitCents, type Quote } from "../precio.js"
+import { chargingPaymentsIn } from "../primeros-pasos.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
@@ -475,20 +475,16 @@ function problemsOf(fields: Record<string, string>, input: OrderInput): string[]
 /* ------------------------------------------------------------------------ las acciones */
 
 async function paymentMethodFor(tx: Db, storeId: string, wanted: string | undefined) {
-  const methods = await tx
-    .select()
-    .from(storePaymentMethod)
-    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-    .orderBy(asc(storePaymentMethod.createdAt))
-  if (wanted) return methods.find((m) => m.id === wanted)?.id ?? wanted
-  const [linked] = await tx
-    .select({ provider: storePaymentLink.provider })
-    .from(storePaymentLink)
-    .where(eq(storePaymentLink.storeId, storeId))
-  // En el orden de cobro de la tienda; un link sin cuenta conectada no se ofrece.
-  const first = methods
-    .filter((m) => m.collection !== "link" || Boolean(linked))
-    .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])[0]
+  // El pedido de Sofi va con un medio con que se cobra (`chargingPaymentsIn`), el que pidió la
+  // clienta o el primero en el orden de cobro; uno que no está ahí no se acepta.
+  const { payments } = await chargingPaymentsIn(tx, storeId)
+  if (wanted) {
+    if (payments.some((m) => m.id === wanted)) return wanted
+    throw new ToolProblem("Ese medio de pago no cobra ahora: usa uno de MEDIOS DE PAGO")
+  }
+  const first = payments.sort(
+    (a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection],
+  )[0]
   if (!first)
     throw new ToolProblem("La tienda no tiene medios de pago encendidos: pásalo a una persona")
   return first.id

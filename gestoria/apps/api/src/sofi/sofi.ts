@@ -8,7 +8,6 @@ import {
   store,
   storeAgent,
   storeDeliveryMethod,
-  storePaymentLink,
   storePaymentMethod,
   withSessionLock,
 } from "@gestoria/db"
@@ -20,6 +19,7 @@ import { COLLECTION_RANK } from "../configuracion.js"
 import { storeClockIn } from "../hora.js"
 import { type LinkDeps, pad } from "../pedidos.js"
 import { NEGOTIATED_PRICE_MS } from "../precio.js"
+import { chargingPaymentsIn } from "../primeros-pasos.js"
 import { balancesIn } from "../saldo.js"
 import {
   bargainOf,
@@ -293,20 +293,10 @@ async function load(
       .from(storeDeliveryMethod)
       .where(and(eq(storeDeliveryMethod.storeId, storeId), eq(storeDeliveryMethod.isActive, true)))
       .orderBy(asc(storeDeliveryMethod.createdAt))
-    const [linked] = await tx
-      .select({ provider: storePaymentLink.provider })
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
-    const payments = (
-      await tx
-        .select()
-        .from(storePaymentMethod)
-        .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-        .orderBy(asc(storePaymentMethod.createdAt))
+    // Lo que ofrece: los mismos medios con que se cobra que cuenta Configuración.
+    const payments = (await chargingPaymentsIn(tx, storeId)).payments.sort(
+      (a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection],
     )
-      // Un link sin cuenta conectada no se puede cobrar: no se ofrece.
-      .filter((p) => p.collection !== "link" || Boolean(linked))
-      .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
     const orders = await tx
       .select()
       .from(saleOrder)

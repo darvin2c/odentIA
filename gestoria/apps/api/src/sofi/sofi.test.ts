@@ -424,6 +424,52 @@ describe("Sofi vende con las reglas de la tienda", () => {
     expect(kardex.json.stock).toBe(5)
   })
 
+  it("un link de pago sin pasarela no cobra: Sofi no lo ofrece ni arma un pedido con él", async () => {
+    const link = await call("rosa", "POST", `${base}/medios-de-pago`, {
+      name: "Link de pago",
+      typeCode: "68",
+      collection: "link",
+    })
+    expect(link.status).toBe(201)
+    const linkId = link.json.method.id as string
+    try {
+      const id = await newTest()
+      const args = {
+        lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+        entrega_id: ids.reparto,
+        envio_cobrado: 10,
+        pago_id: linkId,
+      }
+      await write(
+        id,
+        "La quiero con link, soy Carla, Av. Primavera 123",
+        (r) => {
+          // Lo que lee Sofi: el link no está entre los medios con que se cobra.
+          const facts = r.messages
+            .filter((m) => m.role === "system")
+            .map((m) => m.content)
+            .join(" ")
+          expect(facts).not.toContain(linkId)
+          expect(facts).toContain(ids.yape)
+          return { toolCalls: [toolCall("cotizar", args)] }
+        },
+        (r) => ({ content: `Te queda en ${lastTool(r).total}. ¿Lo confirmo?` }),
+      )
+      const sent = await write(
+        id,
+        "Sí, confirmo",
+        use("armar_pedido", () => ({ ...args, nombre: "Carla", direccion: "Av. Primavera 123" })),
+        (r) => {
+          expect(lastTool(r).problema).toContain("no cobra")
+          return { content: "Ese medio no está disponible: puedes pagar por Yape." }
+        },
+      )
+      expect(sent.conversation.orders).toEqual([])
+    } finally {
+      await call("rosa", "DELETE", `${base}/medios-de-pago/${linkId}`)
+    }
+  })
+
   it("no vende lo de otra tienda ni toca pedidos de otra conversación", async () => {
     const id = await newTest()
     const sent = await write(
