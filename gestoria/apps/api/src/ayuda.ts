@@ -568,7 +568,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Configuración, en Cobros, «Agregar otra forma de cobro» y eliges cómo te paga. Yape y Plin piden tu celular, a nombre de quién está y tu QR (lo sueltas o lo pegas con Ctrl+V); ves cómo le llega a la clienta. La transferencia pide tu banco de la lista, la cuenta y el CCI, que se revisa con sus dígitos de control.",
+          "En Configuración, en Cobros, «Agregar otra forma de cobro» y eliges cómo te paga. Yape y Plin piden tu celular, a nombre de quién está y tu QR (lo sueltas o lo pegas con Ctrl+V). Ves cómo le llega el dato a la clienta: tu número, a nombre de quién y el monto. Tu QR queda guardado: Sofi lo enviará cuando el chat por WhatsApp esté conectado. La transferencia pide tu banco de la lista, la cuenta y el CCI, que se revisa con sus dígitos de control.",
           "Lo que confirma una persona (Yape, Plin, la transferencia) espera a que alguien del equipo revise la captura; lo que se cobra al recibir lo confirma el repartidor. Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",

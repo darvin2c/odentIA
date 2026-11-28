@@ -1,6 +1,8 @@
 import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import {
+  addSubmitErrors,
+  clearSubmitErrors,
   EmptyState,
   ErrorState,
   FormDrawer,
@@ -23,7 +25,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react"
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ToggleField } from "./campos"
 import { api } from "./lib/api"
@@ -31,6 +33,8 @@ import {
   type Bank,
   cciCheck,
   cciDigits,
+  cciIssue,
+  cciReady,
   cciText,
   KINDS,
   type LinkStatus,
@@ -86,7 +90,7 @@ export function PaymentMethodsPage() {
         <CardHead
           id="cobros-persona"
           title="A tu número o al recibir"
-          hint="Sin comisión. Sofi los ofrece si la clienta no quiere el link."
+          hint="Sin pasarela de por medio. Sofi los ofrece si la clienta no quiere el link."
           pill={<Badge variant="warning">Los confirma una persona</Badge>}
         />
         {lists.isPending ? (
@@ -662,22 +666,25 @@ const KIND_OPTIONS = (Object.keys(KINDS) as Kind[]).map((kind) => ({
   label: KINDS[kind].name,
 }))
 
-const formSchema = z
-  .object({
-    kind: z.custom<Kind>(),
-    phone: z.string().nullable(),
-    holder: z.string(),
-    bankCode: z.string(),
-    accountNumber: z.string(),
-    cci: z.string(),
-    name: z.string(),
-    typeCode: z.custom<PaymentTypeCode>(),
-    collection: z.enum(["comprobante", "al_recibir"]),
-    details: z.string(),
-    isActive: z.boolean(),
-    qr: z.custom<QrChoice>(),
-  })
-  .superRefine((v, ctx) => {
+const formShape = z.object({
+  kind: z.custom<Kind>(),
+  phone: z.string().nullable(),
+  holder: z.string(),
+  bankCode: z.string(),
+  accountNumber: z.string(),
+  cci: z.string(),
+  name: z.string(),
+  typeCode: z.custom<PaymentTypeCode>(),
+  collection: z.enum(["comprobante", "al_recibir"]),
+  details: z.string(),
+  isActive: z.boolean(),
+  qr: z.custom<QrChoice>(),
+})
+type FormValues = z.infer<typeof formShape>
+
+/** Lo que falta o está mal, dicho en su campo al guardar (el CCI, contra la lista de bancos). */
+function formSchemaOf(banks: Bank[]) {
+  return formShape.superRefine((v, ctx) => {
     const need = (path: string, message: string) =>
       ctx.addIssue({ code: "custom", path: [path], message })
     if (v.kind === "yape" || v.kind === "plin") {
@@ -688,19 +695,18 @@ const formSchema = z
       if (!v.bankCode) need("bankCode", "Elige tu banco de la lista")
       if (!v.accountNumber.trim()) need("accountNumber", "Escribe el número de cuenta")
       if (!v.holder.trim()) need("holder", "Escribe a nombre de quién está la cuenta")
-      const check = cciCheck(v.cci)
-      if (check === "incompleto" || check === "numeros") need("cci", "El CCI tiene 20 números")
-      if (check === "control")
-        need("cci", "Revisa el CCI: algún número no coincide con sus dígitos de control")
+      const issue = cciIssue(v.cci, v.bankCode, banks)
+      if (issue) need("cci", issue)
     }
     if (v.kind === "otro" && !v.name.trim()) need("name", "Escribe cómo lo dirá Sofi")
   })
+}
 
 /** El QR elegido: una imagen nueva, quitar el que había, o dejarlo como está. */
 type QrChoice = { blob: Blob; url: string } | "quitar" | null
 
 /** Lo que va al servidor según la forma: solo sus datos. */
-function bodyOf(v: z.infer<typeof formSchema>) {
+function bodyOf(v: FormValues) {
   switch (v.kind) {
     case "yape":
     case "plin":
@@ -747,7 +753,7 @@ function PaymentForm({
   // Si se creó y falló después (subir el QR), el reintento cambia la misma: no crea otra.
   const created = useRef<string | null>(null)
   const save = useMutation({
-    mutationFn: async (value: z.infer<typeof formSchema>) => {
+    mutationFn: async (value: FormValues) => {
       const body = bodyOf(value)
       const id = method?.id ?? created.current
       const saved = id
@@ -772,6 +778,7 @@ function PaymentForm({
     },
   })
   const initialKind: Kind = method && method.kind !== "link" ? method.kind : "yape"
+  const schema = useMemo(() => formSchemaOf(banks), [banks])
   const form = useAppForm({
     defaultValues: {
       kind: initialKind,
@@ -792,7 +799,7 @@ function PaymentForm({
       isActive: method?.isActive ?? true,
       qr: null as QrChoice,
     },
-    validators: { onSubmit: formSchema },
+    validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       await save.mutateAsync(value)
       await queryClient.invalidateQueries({ queryKey: LISTS_KEY(storeId) })
@@ -804,6 +811,15 @@ function PaymentForm({
   const values = useStore(form.store, (s) => s.values)
   const kind = values.kind
   const wallet = kind === "yape" || kind === "plin"
+
+  // El CCI completo se juzga mientras se escribe (y al cambiar de banco), como error del campo: rojo
+  // y `aria-invalid`. Uno a medias se dice al salir del campo o al guardar.
+  useEffect(() => {
+    if (kind !== "transferencia" || !cciReady(values.cci)) return
+    const issue = cciIssue(values.cci, values.bankCode, banks)
+    if (issue) addSubmitErrors(form, { cci: issue })
+    else clearSubmitErrors(form, (name) => name === "cci")
+  }, [form, kind, values.cci, values.bankCode, banks])
 
   return (
     <FormDrawer
@@ -883,13 +899,10 @@ function PaymentForm({
                 Así lo recibe la clienta
               </span>
               <p className="text-sm">
-                {walletPreview(
-                  kind,
-                  values.phone,
-                  values.holder,
-                  money(14100, currency),
-                  values.qr !== "quitar" && Boolean(values.qr || method?.qrAt),
-                )}
+                {walletPreview(kind, values.phone, values.holder, money(14100, currency))}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Tu QR queda guardado: Sofi lo enviará cuando el chat por WhatsApp esté conectado.
               </p>
             </div>
           </>
@@ -916,14 +929,24 @@ function PaymentForm({
                 />
               )}
             </form.AppField>
-            <form.AppField name="cci">
+            <form.AppField
+              name="cci"
+              listeners={{
+                onBlur: ({ value }) => {
+                  const issue = cciIssue(value, form.getFieldValue("bankCode"), banks)
+                  if (issue) addSubmitErrors(form, { cci: issue })
+                },
+              }}
+            >
               {(field) => (
                 <field.TextField
                   label="CCI (opcional)"
                   inputMode="numeric"
                   maxLength={26}
                   placeholder="002 191 002345678012 53"
-                  description={<CciHint value={field.state.value} />}
+                  description={
+                    <CciHint value={field.state.value} bankCode={values.bankCode} banks={banks} />
+                  }
                 />
               )}
             </form.AppField>
@@ -1033,22 +1056,21 @@ function PaymentForm({
   )
 }
 
-/** Mientras se escribe: cuántos números faltan, o si los dígitos de control coinciden. */
-function CciHint({ value }: { value: string }) {
-  const check = cciCheck(value)
+/**
+ * La ayuda del CCI mientras se escribe: cuántos números lleva, o que está revisado. Lo que está mal
+ * no va aquí: es el error del campo (`cciIssue`).
+ */
+function CciHint({ value, bankCode, banks }: { value: string; bankCode: string; banks: Bank[] }) {
   const digits = cciDigits(value).length
-  if (check === "ok")
+  if (cciCheck(value) === "ok" && !cciIssue(value, bankCode, banks))
     return (
       <span className="inline-flex items-center gap-1 text-success">
         <Check aria-hidden className="size-3.5" />
         20 números, con sus dígitos de control revisados.
       </span>
     )
-  if (check === "control") return "Algún número no coincide con sus dígitos de control: revísalo."
-  if (check === "incompleto" && digits < 20)
+  if (digits > 0 && digits < 20)
     return `Llevas ${digits} de 20 números. Para que te transfieran desde otro banco.`
-  if (check === "incompleto") return "El CCI tiene 20 números: sobran algunos."
-  if (check === "numeros") return "El CCI lleva solo números."
   return "Para que te transfieran desde otro banco. Lo revisamos con sus dígitos de control."
 }
 

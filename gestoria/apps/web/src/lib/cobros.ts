@@ -135,18 +135,49 @@ export function cciCheck(text: string): CciCheck {
   return ok ? "ok" : "control"
 }
 
-/** Lo que dice la clienta que recibe el dato de Yape o Plin (la vista previa del formulario). */
+/**
+ * Lo que está mal en el CCI, dicho como error del campo (null si está bien o vacío): sus números,
+ * sus dígitos de control y que sea del banco elegido (sus 3 primeros números), lo mismo que
+ * revisa el servidor al guardar (`apps/api/src/cobros.ts`).
+ */
+export function cciIssue(text: string, bankCode: string, banks: Bank[]): string | null {
+  const check = cciCheck(text)
+  const digits = cciDigits(text).length
+  if (check === "vacio") return null
+  if (check === "numeros") return "El CCI lleva solo números."
+  if (check === "incompleto")
+    return digits < 20
+      ? `El CCI tiene 20 números: llevas ${digits}.`
+      : "El CCI tiene 20 números: sobran algunos."
+  if (check === "control") return "Algún número no coincide con sus dígitos de control: revísalo."
+  const chosen = banks.find((bank) => bank.code === bankCode)
+  const own = cciDigits(text).slice(0, 3)
+  if (chosen && own !== chosen.code)
+    return `Ese CCI es de ${banks.find((bank) => bank.code === own)?.short ?? "otro banco"}, no de ${chosen.short}: revisa el banco o el CCI.`
+  return null
+}
+
+/** El CCI ya se puede juzgar mientras se escribe: tiene sus 20 números, más, o algo que no es número. */
+export function cciReady(text: string): boolean {
+  const check = cciCheck(text)
+  return check === "numeros" || cciDigits(text).length >= 20
+}
+
+/**
+ * Lo que recibe la clienta con el dato de Yape o Plin (la vista previa del formulario). El QR no va:
+ * hoy ningún canal manda imágenes; se guarda y Sofi lo enviará cuando el chat por WhatsApp esté
+ * conectado.
+ */
 export function walletPreview(
   kind: "yape" | "plin",
   phone: string | null,
   holder: string,
   amount: string,
-  withQr: boolean,
 ): string {
   const verb = kind === "yape" ? "yapear" : "plinear"
   const who = holder.trim() ? ` (${holder.trim()})` : ""
   const number = phone ? phoneText(phone) : "tu número"
-  return `Puedes ${verb} ${amount} al ${number}${who}${withQr ? " o escanear este QR" : ""}. Mándame la captura y te confirmo.`
+  return `Puedes ${verb} ${amount} al ${number}${who}. Mándame la captura y te confirmo.`
 }
 
 /**

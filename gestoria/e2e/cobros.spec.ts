@@ -69,8 +69,17 @@ test("Yape con su QR y la transferencia con su CCI revisado", async ({ page }) =
     buffer: QR,
   })
   await expect(yape.getByRole("img", { name: "Tu QR" })).toBeVisible()
+  // El QR se guarda, pero la vista previa no lo promete: hoy ningún canal manda la imagen.
   await expect(
-    yape.getByText(/Puedes yapear S\/\s141 al 987 654 321 \(Rosa Quispe M\.\) o escanear este QR/),
+    yape.getByText(
+      /Puedes yapear S\/\s141 al 987 654 321 \(Rosa Quispe M\.\)\. Mándame la captura/,
+    ),
+  ).toBeVisible()
+  await expect(yape.getByText(/escanear/)).toHaveCount(0)
+  await expect(
+    yape.getByText(
+      "Tu QR queda guardado: Sofi lo enviará cuando el chat por WhatsApp esté conectado.",
+    ),
   ).toBeVisible()
   await shot(page, "cobros-yape-1440")
   await yape.getByRole("button", { name: "Guardar" }).click()
@@ -87,12 +96,25 @@ test("Yape con su QR y la transferencia con su CCI revisado", async ({ page }) =
   await transfer.getByRole("radio", { name: "Transferencia" }).click()
   await choose(transfer.getByLabel("Banco"), /BCP/)
   await transfer.getByLabel("Número de cuenta").fill("191-2345678-0-12")
-  await transfer.getByLabel("CCI (opcional)").fill("002 191 002345678012 55")
+  // Un CCI con un número mal: error del campo al completarlo, sin esperar a guardar.
+  const cci = transfer.getByLabel("CCI (opcional)")
+  await cci.fill("002 191 002345678012 55")
   await expect(transfer.getByText(/no coincide con sus dígitos de control/)).toBeVisible()
+  await expect(cci).toHaveAttribute("aria-invalid", "true")
   await transfer.getByLabel("A nombre de").fill("Rosa Quispe Mamani")
   await transfer.getByRole("button", { name: "Guardar" }).click()
   await expect(transfer).toBeVisible()
-  await transfer.getByLabel("CCI (opcional)").fill("002 191 002345678012 53")
+  // Un CCI de Interbank (con sus dígitos bien) en una cuenta del BCP: también se dice al escribirlo.
+  await cci.fill("003 200 003012345678 39")
+  await expect(
+    transfer.getByText("Ese CCI es de Interbank, no de BCP: revisa el banco o el CCI."),
+  ).toBeVisible()
+  await expect(cci).toHaveAttribute("aria-invalid", "true")
+  await expect(transfer.getByText("20 números, con sus dígitos de control revisados.")).toHaveCount(
+    0,
+  )
+  await cci.fill("002 191 002345678012 53")
+  await expect(cci).not.toHaveAttribute("aria-invalid", "true")
   await expect(
     transfer.getByText("20 números, con sus dígitos de control revisados."),
   ).toBeVisible()
