@@ -63,13 +63,24 @@ const PANEL_SIZES: Record<DetailPanelSize, { default: string; min: string; max: 
 }
 
 /**
+ * Los tamaños del detalle en cajón: los del panel y `split`, el de dos columnas
+ * (`DetailSplit`: lo que toca a un lado y el resto al otro). `split` no existe en
+ * `MasterDetail`: una tabla y dos columnas de detalle no caben juntas en la página.
+ */
+export type DetailDrawerSize = DetailPanelSize | "split"
+
+/**
  * Los mismos anchos, en px, cuando el detalle va en la columna del layout. Ahí
  * no hay máximo: se ensancha hasta donde la lista conserva `MASTER_MIN_WIDTH`.
+ * `split` pide el ancho de su cajón (68rem) y la columna lo recorta a lo que
+ * cabe: en una ventana justa queda angosta y su contenido se apila; con
+ * espacio (o ensanchándola) se ve en dos columnas.
  */
-export const DOCK_SIZES: Record<DetailPanelSize, SideColumnWidth> = {
+export const DOCK_SIZES: Record<DetailDrawerSize, SideColumnWidth> = {
   md: { initial: 384, min: 320 },
   lg: { initial: 512, min: 416 },
   xl: { initial: 640, min: 512 },
+  split: { initial: 1088, min: 512 },
 }
 /** Ancho que el detalle deja a la lista: el mínimo de la columna maestra. */
 export const MASTER_MIN_WIDTH = 512

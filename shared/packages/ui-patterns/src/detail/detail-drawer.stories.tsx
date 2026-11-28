@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react"
-import { DEMO_DETAIL_MENU_ITEMS, DemoDetailActions, DemoDetailBody } from "../story-fixtures.js"
+import { DEMO_DETAIL_MENU_ITEMS, DemoDetailActions, DemoDetailBody, DemoSplitBody } from "../story-fixtures.js"
 import { RowActions } from "../row-actions.js"
 import { DetailDrawer } from "./detail-drawer.js"
 
@@ -82,6 +82,24 @@ export const AccionesEnMenu: Story = {
       onClose={noop}
     >
       <DemoDetailBody />
+    </DetailDrawer>
+  ),
+}
+
+/**
+ * Dos columnas (`size="split"`, 68rem): el pedido a la izquierda y lo que toca a la derecha,
+ * con su imagen grande. En el teléfono y en una ventana angosta se apila, con lo que toca arriba.
+ */
+export const DosColumnas: Story = {
+  render: () => (
+    <DetailDrawer
+      open
+      size="split"
+      title="Brenda Choque · 0169"
+      description="Independencia · hoy · 2 a 6 p. m. · Jhon"
+      onClose={noop}
+    >
+      <DemoSplitBody />
     </DetailDrawer>
   ),
 }

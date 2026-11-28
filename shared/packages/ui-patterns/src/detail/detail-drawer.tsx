@@ -2,7 +2,7 @@ import { Drawer, DrawerContent, cn, useIsMobile } from "@odentia/ui"
 import * as React from "react"
 import { SideDockScopeProvider, useSideDockDraftGuard } from "../side-dock.js"
 import { DockedSurface, DraftSavedProvider, useDockDecision, useDraftSavedScope } from "../docked-surface.js"
-import { DOCK_SIZES, type DetailPanelSize } from "../master-detail.js"
+import { DOCK_SIZES, type DetailDrawerSize } from "../master-detail.js"
 import { useCloseGuard } from "../surface.js"
 import { DetailSurface } from "./detail-surface.js"
 import { type DetailContainerProps, DetailPanel } from "./detail-panel.js"
@@ -11,18 +11,24 @@ import { type DetailContainerProps, DetailPanel } from "./detail-panel.js"
  * Ancho del drawer por tamaño. `md` no fija nada: el drawer ya mide 24rem desde
  * `sm` (y 75% del viewport por debajo), el mismo ancho que el panel `md`. Los
  * demás replican los default de `MasterDetail` para que el detalle no cambie de
- * ancho al cruzar el corte de 1280px. Van literales porque Tailwind lee texto.
+ * ancho al cruzar el corte de 1280px. `split` es el de dos columnas (68rem, y
+ * nunca más que la ventana). Van literales porque Tailwind lee texto.
  */
-const DRAWER_WIDTH: Record<DetailPanelSize, string> = {
+const DRAWER_WIDTH: Record<DetailDrawerSize, string> = {
   md: "",
   lg: "data-[swipe-axis=x]:sm:[--drawer-content-width:min(32rem,calc(100vw-2rem))]",
   xl: "data-[swipe-axis=x]:sm:[--drawer-content-width:min(40rem,calc(100vw-2rem))]",
+  split: "data-[swipe-axis=x]:sm:[--drawer-content-width:min(68rem,calc(100vw-2rem))]",
 }
 
 export interface DetailDrawerProps extends DetailContainerProps {
   open: boolean
-  /** Ancho del panel de referencia: mantiene el tamaño al cruzar el corte. */
-  size?: DetailPanelSize
+  /**
+   * Ancho del panel de referencia: mantiene el tamaño al cruzar el corte.
+   * `split`: dos columnas (con `DetailSplit` adentro), que en la columna
+   * lateral angosta y en el teléfono se apilan.
+   */
+  size?: DetailDrawerSize
   /**
    * `false`: siempre cajón modal, aunque haya columna lateral (como en
    * `FormDrawer`). Para abrirlo encima de un diálogo: la columna lateral queda

@@ -137,6 +137,7 @@ export {
 } from "./loading-state.js"
 export { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
 export {
+  type DetailDrawerSize,
   type DetailMode,
   type DetailPanelSize,
   MasterDetail,
