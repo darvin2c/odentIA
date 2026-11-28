@@ -1647,7 +1647,7 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
       (
         await call("lucia", "POST", `${base}/conversaciones/${id}/pagar`, {
           orderId: cart.json.cart.id,
-          method: "Yape",
+          paymentMethodId: ids.yape,
         })
       ).status,
     ).toBe(403)
@@ -1661,7 +1661,7 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
     })
     const paid = await call("rosa", "POST", `${base}/conversaciones/${id}/pagar`, {
       orderId: cart.json.cart.id,
-      method: "Yape",
+      paymentMethodId: ids.yape,
     })
     expect(paid.status).toBe(200)
     expect(steps).toHaveLength(0)
@@ -1684,6 +1684,146 @@ describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6
     })
     expect(placed.status).toBe(201)
     expect(placed.json.cart).toMatchObject({ state: "por_pagar", bySofi: false })
+  })
+
+  it("la vitrina anuncia lo que vale para cada variante y su carrito cuesta lo que arma el servidor", async () => {
+    // Precio por cantidad para todo el producto y una promoción solo de la talla 39.
+    const set = await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
+      quantityPrices: [{ minQuantity: 2, unitPriceCents: 11000 }],
+      promotions: [
+        {
+          name: "Cyber",
+          percentOff: 30,
+          startsOn: "2020-01-01",
+          endsOn: "2099-12-08",
+          scope: { optionIndex: 1, optionValue: "39" },
+        },
+      ],
+    })
+    expect(set.status).toBe(200)
+    try {
+      const page = (await call("rosa", "GET", `${base}/productos/${lona.id}/vitrina`)).json
+      const variant = (key: string) =>
+        (page.product.variants as Json[]).find((v) => `${v.color},${v.size}` === key)!
+      expect(variant("negra,38")).toMatchObject({
+        priceCents: 11900,
+        promotion: null,
+        tiers: [{ minQuantity: 2, unitCents: 11000 }],
+      })
+      // La 39 con −30 % ya cuesta menos que «2 o más»: no se le anuncia; su fecha dice el mes.
+      expect(variant("negra,39")).toMatchObject({
+        priceCents: 8330,
+        tiers: [],
+        promotion: { percentOff: 30, until: "8 de diciembre" },
+      })
+      expect(page.product.quantityPrices).toBeUndefined()
+      // Con qué se paga ya: los medios de la tienda, nunca uno fijo.
+      expect(page.store.payNow).toEqual([expect.objectContaining({ id: ids.yape, name: "Yape" })])
+
+      // Dos negras 38: 2 × S/ 110 + S/ 10 de envío = S/ 230, lo mismo que arma «Pagar ahora».
+      const body = {
+        lines: [{ variantId: lona.negra38, quantity: 2 }],
+        deliveryMethodId: ids.reparto,
+      }
+      const quoted = await call("rosa", "POST", `${base}/vitrina/carrito/calcular`, body)
+      expect(quoted.status).toBe(200)
+      expect(quoted.json).toMatchObject({
+        problem: null,
+        quote: {
+          lines: [{ variantId: lona.negra38, quantity: 2, unitCents: 11000, listUnitCents: 11900 }],
+          subtotalCents: 22000,
+          deliveryCents: 1000,
+          totalCents: 23000,
+        },
+      })
+      // Cotizar es de quien prueba, como pagar.
+      expect((await call("lucia", "POST", `${base}/vitrina/carrito/calcular`, body)).status).toBe(
+        403,
+      )
+      const id = await newTest()
+      const placed = await call("rosa", "POST", `${base}/conversaciones/${id}/carrito`, body)
+      expect(placed.status).toBe(201)
+      expect(placed.json.cart.totalCents).toBe(quoted.json.quote.totalCents)
+    } finally {
+      await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
+        quantityPrices: [],
+        promotions: [],
+      })
+    }
+  })
+
+  it("un pedido de prueba no es una venta: no entra a Pedidos, lleva su numeración, no sale ni avisa", async () => {
+    const list = async () => (await call("lucia", "GET", `${base}/pedidos?filtro=abiertos`)).json
+    const before = await list()
+    const [lastReal] = await db.ownerDb
+      .select({ n: sql<number>`coalesce(max(${saleOrder.number}), 0)` })
+      .from(saleOrder)
+      .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.test, false)))
+    const id = await newTest()
+    const placed = await call("rosa", "POST", `${base}/conversaciones/${id}/carrito`, {
+      lines: [{ variantId: lona.negra38, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+    })
+    expect(placed.status).toBe(201)
+    const orderId = placed.json.cart.id as string
+    // Un medio que no es de la tienda no paga.
+    expect(
+      (
+        await call("rosa", "POST", `${base}/conversaciones/${id}/pagar`, {
+          orderId,
+          paymentMethodId: randomUUID(),
+        })
+      ).status,
+    ).toBe(400)
+    steps.push(say("¡Pago recibido! Te aviso por aquí cuando salga."))
+    const paid = await call("rosa", "POST", `${base}/conversaciones/${id}/pagar`, {
+      orderId,
+      paymentMethodId: ids.yape,
+    })
+    expect(paid.status).toBe(200)
+    expect(paid.json.cart).toMatchObject({ paid: true, state: "por_salir" })
+
+    // No entra a Pedidos ni a sus conteos.
+    const after = await list()
+    expect((after.orders as Json[]).map((o) => o.id)).not.toContain(orderId)
+    expect((after.orders as Json[]).some((o) => o.test)).toBe(false)
+    expect(after.counts).toEqual(before.counts)
+    for (const filter of ["para_entregar", "hoy", "por_pagar", "entregados"]) {
+      const rows = (await call("lucia", "GET", `${base}/pedidos?filtro=${filter}`)).json.orders
+      expect((rows as Json[]).some((o) => o.test)).toBe(false)
+    }
+
+    // Lleva su propia numeración: la próxima venta sigue a la última venta, no a la prueba.
+    const sale = await call("rosa", "POST", `${base}/pedidos`, {
+      customerName: "Carla Mendoza",
+      customerPhone: "+51 987 654 321",
+      channel: "whatsapp",
+      address: "Av. Primavera 123, Surco",
+      lines: [{ variantId: ids.medias, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+      paymentMethodId: ids.yape,
+    })
+    expect(sale.status).toBe(201)
+    expect(Number(sale.json.order.number)).toBe(Number(lastReal!.n) + 1)
+
+    // El servidor no lo deja salir, entregar ni avisar.
+    for (const [path, body] of [
+      ["salio", {}],
+      ["entregado", {}],
+      ["avisado", { text: "Tu pedido salió" }],
+    ] as const) {
+      const refused = await call("rosa", "POST", `${base}/pedidos/${orderId}/${path}`, body)
+      expect(refused.status, path).toBe(409)
+      expect(refused.json.error.code, path).toBe("TEST_ORDER")
+    }
+    const [order] = await db.ownerDb.select().from(saleOrder).where(eq(saleOrder.id, orderId))
+    expect(order).toMatchObject({ test: true, state: "por_salir" })
+    // Ni al anotarlo ni al pagarlo se le anotó un aviso a la clienta.
+    const notices = await db.ownerDb
+      .select()
+      .from(orderEvent)
+      .where(and(eq(orderEvent.orderId, orderId), eq(orderEvent.action, "aviso")))
+    expect(notices).toEqual([])
   })
 
   it("en una conversación de verdad no se paga de prueba", async () => {

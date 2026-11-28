@@ -263,6 +263,7 @@ import {
   newTestConversation,
   payTestOrder,
   placeTestOrder,
+  quoteTestCart,
   returnToSofi,
   saveAgentSettings,
   setAgentEnabled,
@@ -1557,6 +1558,12 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, testOrderInput)
     const { id, conversationId } = c.req.param()
     return c.json(await placeTestOrder(deps.appDb, c.get("person"), id, conversationId, input), 201)
+  })
+  // Lo que cuesta el carrito de la vitrina antes de pagar (aún sin conversación): la cuenta del
+  // servidor, la misma de «Pagar ahora».
+  app.post("/api/tiendas/:id/vitrina/carrito/calcular", async (c) => {
+    const input = await bodyOf(c, testOrderInput)
+    return c.json(await quoteTestCart(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
   app.post("/api/tiendas/:id/conversaciones/:conversationId/pagar", async (c) => {
     const input = await bodyOf(c, testPayInput)

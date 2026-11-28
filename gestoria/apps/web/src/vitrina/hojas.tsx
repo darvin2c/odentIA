@@ -1,9 +1,11 @@
 import { cn } from "@odentia/ui"
 import {
+  Banknote,
   Check,
   ChevronRight,
   Clock,
   CreditCard,
+  Link2,
   MessageCircle,
   Minus,
   Plus,
@@ -14,10 +16,11 @@ import { type ReactNode, useEffect, useRef, useState } from "react"
 import { money } from "../lib/tienda"
 import {
   type CartLine,
+  type CartQuote,
   clock,
   deliveryFrom,
-  localTotals,
   mediaFor,
+  type PaymentKind,
   type Showcase,
   type TestCart,
 } from "../lib/vitrina"
@@ -27,9 +30,21 @@ import { Logo } from "./marcos"
 /**
  * El carrito, el pago y el pedido de la vitrina (prototipo aprobado, `vitrina/tienda.tsx`, «Hojas»),
  * en una hoja dentro del celular. El carrito es el mismo del chat: el pedido que anotó Sofi con lo
- * acordado y su plazo, o lo que la clienta eligió en la vitrina. En la prueba, «Pagar ahora» no
- * cobra: lo dice en la hoja.
+ * acordado y su plazo, o lo que la clienta eligió en la vitrina. Lo que cuesta lo dice el servidor
+ * (`CartQuote`, la misma cuenta que «Pagar ahora»): la hoja no suma precios. En la prueba, «Pagar
+ * ahora» no cobra: lo dice en la hoja, y ofrece los medios de la tienda en su orden.
  */
+
+/** El ícono de cada tipo de medio de pago. */
+const PAY_ICON: Record<PaymentKind, typeof Smartphone> = {
+  yape: Smartphone,
+  plin: Smartphone,
+  transferencia: Banknote,
+  efectivo: Banknote,
+  pos: CreditCard,
+  link: Link2,
+  otro: CreditCard,
+}
 
 export type SheetKind = "carrito" | "pago" | "pedido"
 
@@ -98,9 +113,16 @@ export interface SheetsProps {
   /** La zona, si la entrega es por zona. */
   zone: string | null
   onZone: (zone: string) => void
+  /** Lo que cuesta lo elegido en la vitrina, según el servidor; null mientras no hay cotización. */
+  quote: CartQuote | null
+  /** Se está pidiendo la cotización. */
+  quoting: boolean
+  /** Lo que falta para cotizar o por qué no se pudo («Elige tu zona»). */
+  quoteProblem: string | null
   /** «Pagar ahora» del carrito: anota el pedido si todavía no hay y pasa a pagar. */
   onCheckout: () => void
-  onPay: (method: "Yape" | "Tarjeta") => void
+  /** Paga de prueba con uno de los medios de la tienda (su id). */
+  onPay: (paymentMethodId: string) => void
   busy: boolean
   error: string | null
   /** Ir al chat (la pestaña de WhatsApp de la prueba); solo si ya hay chat. */
@@ -117,14 +139,30 @@ export function Sheets(props: SheetsProps) {
   // En la vitrina se elige lo que tiene precio: lo que «se acuerda» se ve con Sofi en el chat.
   const options = page.store.deliveries.filter((d) => d.cost !== "se_acuerda")
   const delivery = options.find((d) => d.id === props.deliveryId) ?? options[0] ?? null
-  const local = localTotals(page, props.lines, delivery, props.zone)
   const needsZone = delivery?.cost === "por_zona" && !props.zone
   const open = order && order.state === "por_pagar" ? order : null
+  // Lo elegido en la vitrina, con el precio que da el servidor a cada línea (por cantidad, la
+  // promoción o el de revendedora): nada se calcula aquí.
+  const chosen = props.lines.flatMap((line) => {
+    const variant = page.product.variants.find((v) => v.id === line.variantId)
+    return variant ? [{ line, variant }] : []
+  })
+  const quote = props.quote
+  const quotedLine = (variantId: string) => quote?.lines.find((l) => l.variantId === variantId)
+  const free = quote?.deliveryCents === 0 && delivery?.cost !== "gratis"
+  const missingForFree =
+    quote &&
+    quote.freeFromCents != null &&
+    quote.deliveryCents &&
+    quote.subtotalCents < quote.freeFromCents
+      ? quote.freeFromCents - quote.subtotalCents
+      : null
+  const total = open ? open.totalCents : (quote?.totalCents ?? null)
   const dealLive = open?.deal && new Date(open.deal.expiresAt).getTime() > now ? open.deal : null
 
   if (sheet === "carrito")
     return (
-      <Sheet title="Tu carrito" onClose={close}>
+      <Sheet key="carrito" title="Tu carrito" onClose={close}>
         <h2>Tu carrito</h2>
         {link ? (
           <p className="fine" style={{ marginTop: -8 }}>
@@ -180,11 +218,12 @@ export function Sheets(props: SheetsProps) {
               </div>
             </div>
           ))
-        ) : local.priced.length === 0 ? (
+        ) : chosen.length === 0 ? (
           <p className="muted">Tu carrito está vacío.</p>
         ) : (
-          local.priced.map(({ line, variant }) => {
+          chosen.map(({ line, variant }) => {
             const photo = mediaFor(page, variant.color).photos[0]
+            const priced = quotedLine(line.variantId)
             return (
               <div key={line.variantId} className="it">
                 {photo ? <img src={photo.miniatura} alt="" /> : <span />}
@@ -194,7 +233,20 @@ export function Sheets(props: SheetsProps) {
                     {[variant.color, variant.size].filter(Boolean).join(", ") || "Única"}
                   </p>
                   <p className="disp" style={{ fontSize: 17, fontWeight: 700 }}>
-                    {m(variant.priceCents)}
+                    {priced ? (
+                      <>
+                        {m(priced.unitCents)}
+                        {priced.unitCents < priced.listUnitCents ? (
+                          <s className="fine" style={{ marginLeft: 6, fontWeight: 500 }}>
+                            {m(priced.listUnitCents)}
+                          </s>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>
+                        Calculando…
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="stepper">
@@ -238,15 +290,15 @@ export function Sheets(props: SheetsProps) {
             )
           })
         )}
-        {!open && local.missingForFree ? (
+        {!open && quote && missingForFree ? (
           <div className="flex flex-col gap-1.5">
             <p style={{ fontWeight: 600, fontSize: 14 }}>
-              Te faltan {m(local.missingForFree)} para el envío gratis
+              Te faltan {m(missingForFree)} para el envío gratis
             </p>
             <div className="freebar">
               <i
                 style={{
-                  width: `${Math.min(100, (local.subtotal / (local.subtotal + local.missingForFree)) * 100)}%`,
+                  width: `${Math.min(100, (quote.subtotalCents / (quote.subtotalCents + missingForFree)) * 100)}%`,
                 }}
               />
             </div>
@@ -284,7 +336,7 @@ export function Sheets(props: SheetsProps) {
                 <b>
                   {from === null
                     ? "Se acuerda"
-                    : from === 0 || (on && local.free)
+                    : from === 0 || (on && free)
                       ? "Gratis"
                       : `${d.cost === "por_zona" ? "desde " : ""}${m(from)}`}
                 </b>
@@ -307,10 +359,12 @@ export function Sheets(props: SheetsProps) {
             ))}
           </div>
         ) : null}
-        <div className="sum">
+        <div className="sum" aria-busy={!open && props.quoting ? true : undefined}>
           <div>
             <span>Productos</span>
-            <span>{m(open ? open.subtotalCents : local.subtotal)}</span>
+            <span>
+              {open ? m(open.subtotalCents) : quote ? m(quote.subtotalCents) : "Calculando…"}
+            </span>
           </div>
           {open?.discountCents ? (
             <div style={{ color: "var(--vv-ok)" }}>
@@ -325,19 +379,26 @@ export function Sheets(props: SheetsProps) {
                 ? open.deliveryCents
                   ? m(open.deliveryCents)
                   : "Gratis"
-                : !local.shippingKnown
-                  ? "Se acuerda"
-                  : local.shipping
-                    ? m(local.shipping)
-                    : "Gratis"}
+                : needsZone
+                  ? "Elige tu zona"
+                  : quote?.deliveryCents == null
+                    ? "Calculando…"
+                    : quote.deliveryCents
+                      ? m(quote.deliveryCents)
+                      : "Gratis"}
             </span>
           </div>
           <div className="t">
             <span>Total</span>
-            <b>{m(open ? open.totalCents : local.total)}</b>
+            {/* Sin cotización no hay total: nunca uno que después cambie. */}
+            <b>{total === null ? "—" : m(total)}</b>
           </div>
         </div>
-        {!open && needsZone ? <p className="hint">Elige tu zona</p> : null}
+        {!open && props.quoteProblem ? (
+          <p className="hint" role="status">
+            {props.quoteProblem}
+          </p>
+        ) : null}
         {props.error ? (
           <p className="hint" role="alert">
             {props.error}
@@ -346,42 +407,46 @@ export function Sheets(props: SheetsProps) {
         <button
           type="button"
           className="btn"
-          disabled={(!open && (local.priced.length === 0 || needsZone)) || props.busy}
+          disabled={(!open && (chosen.length === 0 || total === null)) || props.busy}
           onClick={props.onCheckout}
         >
-          Pagar ahora · {m(open ? open.totalCents : local.total)}
+          {total === null ? "Pagar ahora" : `Pagar ahora · ${m(total)}`}
         </button>
       </Sheet>
     )
 
   if (sheet === "pago" && open)
     return (
-      <Sheet title="Pagar" onClose={close}>
+      <Sheet key="pago" title="Pagar" onClose={close}>
         <h2>Pagar {m(open.totalCents)}</h2>
         <p className="muted">
           {page.store.name} · Pedido {open.number}
         </p>
+        {/* Los medios de la tienda para pagar ya, en su orden: los mismos que ofrece Sofi. */}
         <div className="gate">
-          {(
-            [
-              ["Yape", Smartphone],
-              ["Tarjeta", CreditCard],
-            ] as const
-          ).map(([method, Icon]) => (
-            <button
-              key={method}
-              type="button"
-              disabled={props.busy}
-              onClick={() => props.onPay(method)}
-            >
-              <Icon className="size-5" aria-hidden />
-              <span className="grow" style={{ textAlign: "left" }}>
-                Pagar con {method}
-              </span>
-              <ChevronRight className="size-4" aria-hidden />
-            </button>
-          ))}
+          {page.store.payNow.map((method) => {
+            const Icon = PAY_ICON[method.kind]
+            return (
+              <button
+                key={method.id}
+                type="button"
+                disabled={props.busy}
+                onClick={() => props.onPay(method.id)}
+              >
+                <Icon className="size-5" aria-hidden />
+                <span className="grow" style={{ textAlign: "left" }}>
+                  Pagar con {method.name}
+                </span>
+                <ChevronRight className="size-4" aria-hidden />
+              </button>
+            )
+          })}
         </div>
+        {page.store.payNow.length === 0 ? (
+          <p className="hint">
+            La tienda no tiene un medio para pagar ya: solo se paga al recibir.
+          </p>
+        ) : null}
         {props.error ? (
           <p className="hint" role="alert">
             {props.error}
@@ -395,7 +460,7 @@ export function Sheets(props: SheetsProps) {
 
   if (sheet === "pedido" && order)
     return (
-      <Sheet title="Tu pedido" onClose={close}>
+      <Sheet key="pedido" title="Tu pedido" onClose={close}>
         <div className="flex items-center gap-3" style={{ paddingRight: 48 }}>
           <Logo name={page.store.name} size={44} />
           <div>

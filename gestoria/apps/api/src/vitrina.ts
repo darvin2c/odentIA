@@ -13,6 +13,7 @@ import {
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from "drizzle-orm"
 import type { Storage } from "./archivos.js"
 import { colorsIn, productRow, type SaleState, saleStateOf } from "./catalogo.js"
+import { COLLECTION_RANK } from "./configuracion.js"
 import type { Person } from "./cuenta.js"
 import { storeClockIn } from "./hora.js"
 import { APP_LINK_SECONDS, PUBLIC_LINK_SECONDS, publicProduct, shownMediaIn } from "./medios.js"
@@ -68,7 +69,13 @@ export interface ShowcaseVariant {
   available: boolean
   /** Cuántas quedan, solo si son pocas; null si hay más o se vende sin stock. */
   left: number | null
-  promotion: { name: string; percentOff: number; endsOn: string } | null
+  /** La promoción de esta variante, con su último día en palabras («8 de diciembre»). */
+  promotion: { name: string; percentOff: number; endsOn: string; until: string } | null
+  /**
+   * El precio por cantidad de esta variante, con la misma regla del pedido (`autoUnitCents`): desde
+   * cuántas unidades del producto y a cuánto cada una. Solo lo que baja de su precio de una.
+   */
+  tiers: { minQuantity: number; unitCents: number }[]
 }
 
 /** La página del producto, dentro de la tienda (`db` ya filtra por ella). */
@@ -111,6 +118,7 @@ export async function showcaseIn(
   const shown: ShowcaseVariant[] = variants.map((v) => {
     const price = autoUnitCents(v.pricing, 1)
     const available = v.stock > 0 || v.sellsWithoutStock
+    const endsOn = promotions.find((p) => p.name === v.promotion)?.endsOn ?? today
     return {
       id: v.id,
       color: colorIndex === null ? null : (v.optionValues[colorIndex] ?? null),
@@ -124,9 +132,15 @@ export async function showcaseIn(
           ? {
               name: v.promotion,
               percentOff: v.pricing.percentOff,
-              endsOn: promotions.find((p) => p.name === v.promotion)?.endsOn ?? today,
+              endsOn,
+              until: dateWords(endsOn),
             }
           : null,
+      tiers: [...new Set(v.pricing.quantityPrices.map((q) => q.minQuantity))]
+        .filter((n) => n > 1)
+        .sort((a, b) => a - b)
+        .map((minQuantity) => ({ minQuantity, unitCents: autoUnitCents(v.pricing, minQuantity) }))
+        .filter((tier, i, all) => tier.unitCents < (all[i - 1]?.unitCents ?? price)),
     }
   })
   const stock = variants.reduce((n, v) => n + v.stock, 0)
@@ -193,11 +207,19 @@ export async function showcaseIn(
     .from(storeDeliveryMethod)
     .where(and(eq(storeDeliveryMethod.storeId, storeId), eq(storeDeliveryMethod.isActive, true)))
     .orderBy(asc(storeDeliveryMethod.createdAt))
-  const payments = await db
-    .select({ name: storePaymentMethod.name })
-    .from(storePaymentMethod)
-    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-    .orderBy(asc(storePaymentMethod.createdAt))
+  // En el orden en que cobra Sofi: link, captura y al final al recibir.
+  const payments = (
+    await db
+      .select({
+        id: storePaymentMethod.id,
+        name: storePaymentMethod.name,
+        kind: storePaymentMethod.kind,
+        collection: storePaymentMethod.collection,
+      })
+      .from(storePaymentMethod)
+      .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
+      .orderBy(asc(storePaymentMethod.createdAt))
+  ).sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
   const rubro = row.rubro ? RUBROS[row.rubro] : null
   const state: SaleState = saleStateOf(row.status, stock)
   return {
@@ -217,6 +239,10 @@ export async function showcaseIn(
         freeFromCents: d.freeFromCents,
       })),
       payments: payments.map((p) => p.name),
+      /** Con qué se paga ya, al tocar «Pagar ahora» (no lo que se paga al recibir). */
+      payNow: payments
+        .filter((p) => p.collection !== "al_recibir")
+        .map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
     },
     product: {
       id: row.id,
@@ -232,7 +258,6 @@ export async function showcaseIn(
       colors: colors.map((c) => ({ value: c.value, hex: c.hex, hex2: c.hex2 })),
       sizes: sizeIndex < 0 ? [] : row.options[sizeIndex]!.values,
       variants: shown,
-      quantityPrices: variants[0]?.pricing.quantityPrices ?? [],
       answers: answers.map((a) => ({ question: a.question, answer: a.answer! })),
       facts: template
         .map((field) => ({ label: field.label, value: valueText(field, row.rubroData[field.key]) }))

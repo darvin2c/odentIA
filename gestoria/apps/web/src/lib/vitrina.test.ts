@@ -3,11 +3,12 @@ import {
   bubble,
   clock,
   firstChoice,
-  localTotals,
   mediaFor,
+  promotionFor,
   type Showcase,
   shownPrice,
   swatch,
+  tierFor,
   variantOf,
 } from "./vitrina"
 
@@ -22,6 +23,7 @@ function page(over: Partial<Showcase["product"]> = {}): Showcase {
     available: true,
     left: null,
     promotion: null,
+    tiers: [],
     ...extra,
   })
   return {
@@ -42,6 +44,10 @@ function page(over: Partial<Showcase["product"]> = {}): Showcase {
         },
       ],
       payments: ["Yape", "Tarjeta con enlace"],
+      payNow: [
+        { id: "m1", name: "Yape", kind: "yape" },
+        { id: "m2", name: "Tarjeta con enlace", kind: "link" },
+      ],
     },
     product: {
       id: "p1",
@@ -66,11 +72,20 @@ function page(over: Partial<Showcase["product"]> = {}): Showcase {
         variant("blanca", "38"),
         variant("negra", "35", {
           priceCents: 9030,
-          promotion: { name: "Liquidación talla 35", percentOff: 30, endsOn: "2026-12-07" },
+          promotion: {
+            name: "Liquidación talla 35",
+            percentOff: 30,
+            endsOn: "2026-12-07",
+            until: "7 de diciembre",
+          },
         }),
-        variant("negra", "38", { priceCents: 11900, listCents: 11900, left: 2 }),
+        variant("negra", "38", {
+          priceCents: 11900,
+          listCents: 11900,
+          left: 2,
+          tiers: [{ minQuantity: 2, unitCents: 11000 }],
+        }),
       ],
-      quantityPrices: [],
       answers: [],
       facts: [{ label: "Cómo calza", value: "Normal" }],
       combina: [],
@@ -115,8 +130,9 @@ describe("la página del producto en la vitrina", () => {
       text: "En negra sí hay 35.",
       action: { label: "Ver en negra", color: "negra" },
     })
+    // La promoción de una sola talla se dice con su talla y con el mes, nunca para todo el color.
     expect(bubble(p, { color: "negra", size: null }).text).toBe(
-      "Liquidación talla 35: 30 % menos hasta el 7.",
+      "Liquidación talla 35: 30 % menos en la 35 hasta el 7 de diciembre.",
     )
     expect(bubble(p, { color: "blanca", size: null }).text).toBe("Cómo calza: normal.")
     expect(
@@ -132,18 +148,16 @@ describe("la página del producto en la vitrina", () => {
     )
   })
 
-  it("el carrito antes del pedido: el envío gratis desde el monto de la tienda", () => {
+  it("la insignia y el precio por cantidad, solo de lo que vale para la variante elegida", () => {
     const p = page()
-    const delivery = p.store.deliveries[0]!
-    const one = localTotals(p, [{ variantId: "negra-38", quantity: 1 }], delivery)
-    expect(one).toMatchObject({
-      subtotal: 11900,
-      shipping: 1000,
-      total: 12900,
-      missingForFree: 13100,
-    })
-    const three = localTotals(p, [{ variantId: "negra-38", quantity: 3 }], delivery)
-    expect(three).toMatchObject({ subtotal: 35700, shipping: 0, free: true, missingForFree: null })
+    // La 35 negra tiene la promoción; la 38 no, y sin talla no se promete para todo el color.
+    expect(promotionFor(p, { color: "negra", size: "35" })).toMatchObject({ sizes: null })
+    expect(promotionFor(p, { color: "negra", size: "38" })).toBeNull()
+    expect(promotionFor(p, { color: "negra", size: null })?.sizes).toEqual(["35"])
+    expect(promotionFor(p, { color: "blanca", size: null })).toBeNull()
+    // «2 o más» es de la variante: la 38 lo tiene; la 35 (con promoción) no.
+    expect(tierFor(p, { color: "negra", size: "38" })).toEqual({ minQuantity: 2, unitCents: 11000 })
+    expect(tierFor(p, { color: "negra", size: "35" })).toBeNull()
   })
 
   it("el reloj de lo acordado", () => {

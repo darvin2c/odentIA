@@ -1,6 +1,9 @@
 import type { SaleState } from "./ficha"
 import type { OrderState } from "./pedidos"
 
+/** El tipo de un medio de pago de la tienda (`PAYMENT_KINDS` de la base). */
+export type PaymentKind = "yape" | "plin" | "transferencia" | "efectivo" | "pos" | "link" | "otro"
+
 /**
  * La página de un producto en la vitrina (`apps/api/src/vitrina.ts`): solo lo vendible, como lo
  * da el servidor (la vista previa de la ficha y la página pública dan lo mismo). La pantalla
@@ -16,7 +19,10 @@ export interface ShowcaseVariant {
   listCents: number
   available: boolean
   left: number | null
-  promotion: { name: string; percentOff: number; endsOn: string } | null
+  /** La promoción de esta variante; `until` es su último día en palabras («8 de diciembre»). */
+  promotion: { name: string; percentOff: number; endsOn: string; until: string } | null
+  /** El precio por cantidad de esta variante (lo calcula el servidor con la regla del pedido). */
+  tiers: { minQuantity: number; unitCents: number }[]
 }
 
 export interface ShowcasePhoto {
@@ -55,6 +61,8 @@ export interface Showcase {
     link: string | null
     deliveries: ShowcaseDelivery[]
     payments: string[]
+    /** Con qué se paga ya al tocar «Pagar ahora», en el orden de la tienda. */
+    payNow: { id: string; name: string; kind: PaymentKind }[]
   }
   product: {
     id: string
@@ -70,7 +78,6 @@ export interface Showcase {
     colors: { value: string; hex: string | null; hex2: string | null }[]
     sizes: string[]
     variants: ShowcaseVariant[]
-    quantityPrices: { minQuantity: number; unitPriceCents: number }[]
     answers: { question: string; answer: string }[]
     facts: { label: string; value: string }[]
     combina: {
@@ -94,6 +101,19 @@ export interface Choice {
 export interface CartLine {
   variantId: string
   quantity: number
+}
+
+/**
+ * Lo que cuesta el carrito de la vitrina antes de pagar, como lo cotiza el servidor
+ * (`POST /api/tiendas/:id/vitrina/carrito/calcular`, la misma cuenta de «Pagar ahora»). Sin zona
+ * elegida, el envío y el total son null: la pantalla no los adivina.
+ */
+export interface CartQuote {
+  lines: { variantId: string; quantity: number; unitCents: number; listUnitCents: number }[]
+  subtotalCents: number
+  deliveryCents: number | null
+  totalCents: number | null
+  freeFromCents: number | null
 }
 
 /** El carrito de la prueba en el servidor: el pedido de la conversación (Sofi o la vitrina). */
@@ -200,8 +220,38 @@ export function initials(name: string): string {
     .toUpperCase()
 }
 
-/** El día de una fecha ISO como se dice («el 7»). */
-const dayOf = (iso: string) => Number(iso.split("-")[2] ?? 0)
+/** Las variantes del color elegido (todas, si no hay color). */
+const ofColor = (page: Showcase, color: string | null) =>
+  page.product.variants.filter((v) => color === null || v.color === null || same(v.color, color))
+
+/**
+ * La promoción que vale para lo elegido: la de la variante, si ya eligió la talla; sin talla, solo
+ * si todo el color la tiene. `sizes` dice en qué tallas vale cuando no es de todo el color (para
+ * decirlo sin prometerla en las demás); la insignia sobre la foto va solo si vale para todo.
+ */
+export function promotionFor(
+  page: Showcase,
+  choice: Choice,
+): { promotion: NonNullable<ShowcaseVariant["promotion"]>; sizes: string[] | null } | null {
+  const exact = variantOf(page, choice)
+  if (exact) return exact.promotion ? { promotion: exact.promotion, sizes: null } : null
+  const mine = ofColor(page, choice.color)
+  const promoted = mine.filter((v) => v.promotion)
+  const first = promoted[0]?.promotion
+  if (!first) return null
+  const all =
+    promoted.length === mine.length && promoted.every((v) => v.promotion?.name === first.name)
+  if (all) return { promotion: first, sizes: null }
+  const sizes = promoted
+    .filter((v) => v.promotion?.name === first.name && v.size)
+    .map((v) => v.size as string)
+  return { promotion: first, sizes: [...new Set(sizes)] }
+}
+
+/** «2 o más: S/ 110 cada uno»: el primer escalón de la variante elegida (o del precio que se ve). */
+export function tierFor(page: Showcase, choice: Choice) {
+  return shownPrice(page, choice)?.tiers[0] ?? null
+}
 
 /**
  * Lo que dice Sofi junto a la foto, en la vitrina: lo que hay en su talla, la promoción o un dato
@@ -235,18 +285,22 @@ export function bubble(
       }
   }
   if (product.stateText) return { text: `${product.stateText}.`, action: null }
-  const promoted = product.variants.find(
-    (v) =>
-      v.promotion && (choice.color === null || v.color === null || same(v.color, choice.color)),
-  )
-  if (promoted?.promotion) {
-    const { name, percentOff, endsOn } = promoted.promotion
-    return { text: `${name}: ${percentOff} % menos hasta el ${dayOf(endsOn)}.`, action: null }
+  const promo = promotionFor(page, choice)
+  if (promo) {
+    const { name, percentOff, until } = promo.promotion
+    const where = promo.sizes?.length
+      ? ` en ${promo.sizes.length === 1 ? "la" : "las"} ${listOf(promo.sizes)}`
+      : ""
+    return { text: `${name}: ${percentOff} % menos${where} hasta el ${until}.`, action: null }
   }
   const fact = product.facts[0]
   if (fact) return { text: `${fact.label}: ${fact.value.toLowerCase()}.`, action: null }
   return { text: `Pregúntame lo que quieras de ${product.name.toLowerCase()}.`, action: null }
 }
+
+/** «35, 36 y 37». */
+const listOf = (items: string[]) =>
+  items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items.at(-1)}`
 
 /** Lo que cuesta llegar con una forma de entrega, antes de saber la zona: el menor. */
 export function deliveryFrom(d: ShowcaseDelivery): number | null {
@@ -254,38 +308,6 @@ export function deliveryFrom(d: ShowcaseDelivery): number | null {
   if (d.cost === "fijo") return d.priceCents ?? 0
   if (d.cost === "por_zona" && d.zones.length) return Math.min(...d.zones.map((z) => z.priceCents))
   return null
-}
-
-/** Las cuentas del carrito de la vitrina, antes de que haya pedido (el servidor cobra lo suyo). */
-export function localTotals(
-  page: Showcase,
-  lines: CartLine[],
-  delivery: ShowcaseDelivery | null,
-  zone: string | null = null,
-) {
-  const priced = lines.flatMap((line) => {
-    const variant = page.product.variants.find((v) => v.id === line.variantId)
-    return variant ? [{ line, variant, cents: variant.priceCents * line.quantity }] : []
-  })
-  const subtotal = priced.reduce((n, p) => n + p.cents, 0)
-  const zoned = delivery?.zones.find((z) => z.name === zone)
-  const base = zoned ? zoned.priceCents : delivery ? deliveryFrom(delivery) : null
-  const free = delivery?.freeFromCents != null && subtotal >= delivery.freeFromCents
-  const shipping = free ? 0 : (base ?? 0)
-  return {
-    priced,
-    subtotal,
-    shipping,
-    /** El envío se acuerda en el chat: no se suma. */
-    shippingKnown: base !== null,
-    free,
-    total: subtotal + shipping,
-    missingForFree:
-      delivery?.freeFromCents != null && subtotal < delivery.freeFromCents
-        ? delivery.freeFromCents - subtotal
-        : null,
-    count: lines.reduce((n, l) => n + l.quantity, 0),
-  }
 }
 
 /** Lo que falta para que venza lo acordado, como un reloj («23:59:55»). */

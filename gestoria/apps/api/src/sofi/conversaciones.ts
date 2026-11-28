@@ -3,11 +3,13 @@ import {
   conversationMessage,
   customerConsent,
   type Db,
+  type PaymentKind,
   product,
   productVideo,
   saleOrder,
   saleOrderLine,
   storeAgent,
+  storeDeliveryMethod,
   storeEvent,
   storePaymentMethod,
 } from "@gestoria/db"
@@ -21,7 +23,7 @@ import type { Person } from "../cuenta.js"
 import { formatMoney } from "../dinero.js"
 import { momentWords, storeClockIn } from "../hora.js"
 import { APP_LINK_SECONDS, sofiMediaIn } from "../medios.js"
-import { createOrderIn, orderInput, pad, payTestOrderIn } from "../pedidos.js"
+import { createOrderIn, orderInput, pad, payTestOrderIn, quoteOrderIn } from "../pedidos.js"
 import { can, type StoreSeat } from "../permisos.js"
 import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
@@ -706,43 +708,9 @@ export async function placeTestOrder(
         "ORDER_OPEN",
         "Ya hay un pedido por pagar en esta conversación: págalo, o pídele a Sofi que lo cambie.",
       )
-    const methods = (
-      await tx
-        .select()
-        .from(storePaymentMethod)
-        .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-    )
-      // «Pagar ahora» es pagar ya: no el pago al recibir.
-      .filter((m) => m.collection !== "al_recibir")
-      .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
-    if (!methods[0])
-      throw new StoreError(
-        409,
-        "NO_PAYMENT",
-        "La tienda no tiene un medio para pagar ya (link o captura): solo se paga al recibir",
-      )
-    const parsed = orderInput.safeParse({
-      customerName: "Clienta de prueba",
-      customerPhone: "",
-      channel: "otro",
-      address: "",
-      notes: "Desde la vitrina, en «Probar como clienta»",
-      lines: input.lines.map((l) => ({
-        variantId: l.variantId,
-        quantity: l.quantity,
-        unitCents: null,
-        gift: false,
-      })),
-      deliveryMethodId: input.deliveryMethodId,
-      zone: input.zone ?? null,
-      deliveryListCents: null,
-      deliveryCents: null,
-      paymentMethodId: methods[0].id,
-    })
-    if (!parsed.success)
-      throw new StoreError(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "No vale")
+    const { order } = await vitrinaOrderIn(tx, storeId, input)
     const { today } = await storeClockIn(tx, storeId)
-    await createOrderIn(tx, storeId, person.userId, parsed.data, {
+    await createOrderIn(tx, storeId, person.userId, order, {
       conversationId,
       today,
       test: true,
@@ -751,11 +719,134 @@ export async function placeTestOrder(
   })
 }
 
+/** Los medios para pagar ya (link o captura, nunca al recibir), en el orden en que cobra Sofi. */
+export async function payNowMethodsIn(tx: Db, storeId: string) {
+  return (
+    await tx
+      .select()
+      .from(storePaymentMethod)
+      .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
+      .orderBy(asc(storePaymentMethod.createdAt))
+  )
+    .filter((m) => m.collection !== "al_recibir")
+    .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])
+}
+
+/**
+ * El pedido que arma el carrito de la vitrina de la prueba, como lo arma «Pagar ahora»: lo que
+ * eligió la clienta, su entrega y el primer medio para pagar ya. Para cotizar una entrega por zona
+ * sin zona elegida (`anyZone`), se usa la primera solo para el precio de lo que lleva: el envío
+ * queda por elegir.
+ */
+async function vitrinaOrderIn(
+  tx: Db,
+  storeId: string,
+  input: z.infer<typeof testOrderInput>,
+  options: { anyZone?: boolean } = {},
+) {
+  const methods = await payNowMethodsIn(tx, storeId)
+  if (!methods[0])
+    throw new StoreError(
+      409,
+      "NO_PAYMENT",
+      "La tienda no tiene un medio para pagar ya (link o captura): solo se paga al recibir",
+    )
+  let zone = input.zone ?? null
+  let zoneMissing = false
+  if (!zone && options.anyZone) {
+    const [delivery] = await tx
+      .select({ cost: storeDeliveryMethod.cost, zones: storeDeliveryMethod.zones })
+      .from(storeDeliveryMethod)
+      .where(
+        and(
+          eq(storeDeliveryMethod.id, input.deliveryMethodId),
+          eq(storeDeliveryMethod.storeId, storeId),
+        ),
+      )
+    if (delivery?.cost === "por_zona" && delivery.zones[0]) {
+      zone = delivery.zones[0].name
+      zoneMissing = true
+    }
+  }
+  const parsed = orderInput.safeParse({
+    customerName: "Clienta de prueba",
+    customerPhone: "",
+    channel: "otro",
+    address: "",
+    notes: "Desde la vitrina, en «Probar como clienta»",
+    lines: input.lines.map((l) => ({
+      variantId: l.variantId,
+      quantity: l.quantity,
+      unitCents: null,
+      gift: false,
+    })),
+    deliveryMethodId: input.deliveryMethodId,
+    zone,
+    deliveryListCents: null,
+    deliveryCents: null,
+    paymentMethodId: methods[0].id,
+  })
+  if (!parsed.success)
+    throw new StoreError(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "No vale")
+  return { order: parsed.data, zoneMissing }
+}
+
+/**
+ * Lo que cuesta el carrito de la vitrina de la prueba antes de pagar: la misma cuenta del pedido
+ * que arma «Pagar ahora» (`quoteOrderIn`: el precio por cantidad, las promociones, el de
+ * revendedora y el envío gratis de su zona). La pantalla no calcula nada: muestra esto. Si falta
+ * algo (la zona), lo dice y no da un total.
+ */
+export async function quoteTestCart(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof testOrderInput>,
+) {
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const { order, zoneMissing } = await vitrinaOrderIn(tx, storeId, input, { anyZone: true })
+    const { today } = await storeClockIn(tx, storeId)
+    const q = await quoteOrderIn(tx, storeId, order, today)
+    if (!q.quote) return { quote: null, problem: Object.values(q.fields)[0] ?? "Revisa el carrito" }
+    const { quote } = q
+    return {
+      quote: {
+        lines: quote.lines.map((line, i) => ({
+          variantId: input.lines[i]!.variantId,
+          quantity: line.quantity,
+          unitCents: line.unitCents,
+          listUnitCents: line.listUnitCents,
+        })),
+        subtotalCents: quote.subtotalCents,
+        /** Sin zona elegida, el envío y el total quedan por saber. */
+        deliveryCents: zoneMissing ? null : quote.deliveryCents,
+        totalCents: zoneMissing ? null : quote.totalCents,
+        freeFromCents: zoneMissing ? null : q.freeFromCents,
+      },
+      problem: zoneMissing ? "Elige tu zona" : null,
+    }
+  })
+}
+
 export const testPayInput = z.object({
   orderId: z.uuid(),
-  /** Con qué paga en la vitrina de la prueba: solo cambia lo que se anota. */
-  method: z.enum(["Yape", "Tarjeta"]),
+  /** Con qué medio de la tienda paga en la vitrina de la prueba: solo cambia lo que se anota. */
+  paymentMethodId: z.uuid("Elige con qué pagas"),
 })
+
+/**
+ * Cómo se dice cada tipo de medio en el aviso a Sofi: palabras fijas, nunca el nombre que escribió
+ * la tienda (lo que escribe la tienda no va como instrucción).
+ */
+const KIND_WORDS: Record<PaymentKind, string> = {
+  yape: "Yape",
+  plin: "Plin",
+  transferencia: "una transferencia",
+  efectivo: "efectivo",
+  pos: "tarjeta",
+  link: "el link de pago",
+  otro: "uno de los medios de la tienda",
+}
 
 /**
  * «Pagar ahora» de la prueba: el pago se simula (no se cobra), el pedido queda pagado y Sofi le
@@ -785,7 +876,13 @@ export async function payTestOrder(
         ),
       )
     if (!order) throw new StoreError(404, "NOT_FOUND", "Ese pedido no es de esta conversación")
-    const done = await payTestOrderIn(tx, storeId, person.userId, order.id, input.method)
+    // Solo un medio de la tienda para pagar ya, encendido: los mismos que ofrece la hoja de pago.
+    const method = (await payNowMethodsIn(tx, storeId)).find((m) => m.id === input.paymentMethodId)
+    if (!method)
+      throw new StoreError(400, "VALIDATION_ERROR", "Ese medio de pago ya no está encendido", {
+        paymentMethodId: "Ese medio de pago ya no está encendido",
+      })
+    const done = await payTestOrderIn(tx, storeId, person.userId, order.id, method.name)
     const lines = await tx
       .select({
         name: saleOrderLine.productName,
@@ -794,13 +891,13 @@ export async function payTestOrder(
       })
       .from(saleOrderLine)
       .where(eq(saleOrderLine.orderId, order.id))
-    return { ...done, currency: order.currency, lines }
+    return { ...done, currency: order.currency, lines, kind: method.kind }
   })
   const bought = paid.lines
     .map((l) => `${l.quantity} × ${l.name}${l.variant === "Única" ? "" : ` ${l.variant}`}`)
     .join(", ")
   const result = await answer(sofi, storeId, conversationId, {
-    text: `La clienta acaba de pagar el pedido ${paid.number} (${formatMoney(paid.totalCents, paid.currency)}) con ${input.method}: ${bought}. Confírmale en una frase que el pago llegó y que le avisas cuando salga, sin prometer un día que no sabes. Si lo que compró tiene «combina» en buscar_productos, ofrécele una sola vez ese producto como un pedido aparte, a su precio o con tu oferta del margen y su plazo; no cambies el pedido pagado ni digas que va en el mismo envío.`,
+    text: `La clienta acaba de pagar el pedido ${paid.number} (${formatMoney(paid.totalCents, paid.currency)}) con ${KIND_WORDS[paid.kind]}: ${bought}. Confírmale en una frase que el pago llegó y que le avisas cuando salga, sin prometer un día que no sabes. Si lo que compró tiene «combina» en buscar_productos, ofrécele una sola vez ese producto como un pedido aparte, a su precio o con tu oferta del margen y su plazo; no cambies el pedido pagado ni digas que va en el mismo envío.`,
   })
   return {
     conversation: await conversationView(sofi.appDb, person, storeId, conversationId, sofi.storage),

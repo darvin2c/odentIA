@@ -8,9 +8,11 @@ import {
   clock,
   deliveryFrom,
   mediaFor,
+  promotionFor,
   type Showcase,
   shownPrice,
   swatch,
+  tierFor,
   tint,
   variantOf,
 } from "../lib/vitrina"
@@ -86,9 +88,9 @@ function Gallery({ page, choice }: { page: Showcase; choice: Choice }) {
     track.current?.scrollTo({ left: 0 })
     setIndex(0)
   }, [choice.color])
-  const promo = page.product.variants.find(
-    (v) => v.promotion && (choice.color === null || v.color === choice.color),
-  )?.promotion
+  // La insignia solo si la promoción vale para lo elegido (la talla, o todo el color).
+  const promoFor = promotionFor(page, choice)
+  const promo = promoFor && !promoFor.sizes ? promoFor.promotion : null
   return (
     <div className="gal" style={{ backgroundColor: tint(color?.hex ?? null) }}>
       <div
@@ -326,8 +328,9 @@ function Deliveries({ page }: { page: Showcase }) {
         )
       })}
       {free?.freeFromCents ? (
+        // El nombre va como lo escribió la tienda («Reparto en Lima»): nunca en minúsculas.
         <p className="fine">
-          Desde {money(free.freeFromCents, currency)}, {free.name.toLowerCase()} es gratis.
+          {free.name}: gratis desde {money(free.freeFromCents, currency)}.
         </p>
       ) : null}
     </section>
@@ -347,7 +350,8 @@ export function ProductPhone(props: ProductPageProps) {
     if (count > previous.current) setPulse((v) => v + 1)
     previous.current = count
   }, [count])
-  const tier = product.quantityPrices[0]
+  // El precio por cantidad de la variante elegida, sobre su propio precio (lo calcula el servidor).
+  const tier = tierFor(page, choice)
   return (
     <div className="vv" style={{ ...brandStyle(store.color), height: "100%" }}>
       <div style={{ position: "absolute", inset: 0, overflowY: "auto", scrollbarWidth: "none" }}>
@@ -384,7 +388,7 @@ export function ProductPhone(props: ProductPageProps) {
             {product.stateText ? <p className="sold">{product.stateText}</p> : null}
             {tier ? (
               <span className="tier" style={{ alignSelf: "flex-start" }}>
-                {tier.minQuantity} o más: {money(tier.unitPriceCents, store.currency)} cada uno
+                {tier.minQuantity} o más: {money(tier.unitCents, store.currency)} cada uno
               </span>
             ) : null}
           </div>
@@ -536,9 +540,8 @@ export function ProductWeb({ page, choice, onChoose, onWant, cart }: ProductPage
   useEffect(() => setSelected(0), [choice.color])
   const current = thumbs[selected] ?? thumbs[0]
   const color = product.colors.find((c) => c.value === choice.color)
-  const promo = product.variants.find(
-    (v) => v.promotion && (choice.color === null || v.color === choice.color),
-  )?.promotion
+  const promoFor = promotionFor(page, choice)
+  const promo = promoFor && !promoFor.sizes ? promoFor.promotion : null
   const count = cart?.count ?? 0
   return (
     <div className="vv vvw" style={brandStyle(store.color)}>
