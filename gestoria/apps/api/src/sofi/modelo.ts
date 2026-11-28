@@ -1,3 +1,5 @@
+import { devModel } from "./modelo-de-desarrollo.js"
+
 /**
  * El modelo que escribe por Sofi (paso B5). Es el mismo proveedor y el mismo modelo que usan las
  * clínicas (OpenAI, `gpt-6-luna`), pero gestorIA no importa su código (ADR 0203): aquí va lo
@@ -219,42 +221,12 @@ export function toolCall(name: string, args: Record<string, unknown>): ToolCall 
 }
 
 /**
- * El modelo de desarrollo (`GESTORIA_LLM_MODEL=fake`): sin red ni costo. Busca en el catálogo lo
- * que escribió el cliente y contesta con lo que devolvió la búsqueda. Sirve para ver la pantalla
- * de prueba en local; no vende ni negocia, y no cuenta como medición.
+ * El modelo de desarrollo (`GESTORIA_LLM_MODEL=fake`): sin red ni costo, por reglas fijas con las
+ * herramientas de verdad (`modelo-de-desarrollo.ts`). Sirve para ver la prueba en local y en los
+ * recorridos; no cuenta como medición.
  */
 export function fakeModel(): ChatModel {
-  return {
-    name: "fake",
-    async complete(request) {
-      const last = request.messages.at(-1)
-      if (last?.role === "user") {
-        return {
-          content: null,
-          toolCalls: [toolCall("buscar_productos", { texto: last.content.slice(0, 120) })],
-          usage: NO_USAGE,
-        }
-      }
-      if (last?.role === "tool") {
-        const found = JSON.parse(last.content) as {
-          productos?: {
-            nombre: string
-            precio: string
-            variantes: { opciones: string; stock: number }[]
-          }[]
-        }
-        const first = found.productos?.[0]
-        const content = first
-          ? `Tenemos ${first.nombre}: ${first.precio}. Quedan ${first.variantes
-              .filter((v) => v.stock > 0)
-              .map((v) => v.opciones)
-              .join(", ")}. ¿Cuál te gusta?`
-          : "No encontré eso en el catálogo. ¿Me cuentas qué buscas?"
-        return { content, toolCalls: [], usage: NO_USAGE }
-      }
-      return { content: "¿En qué te ayudo?", toolCalls: [], usage: NO_USAGE }
-    },
-  }
+  return devModel()
 }
 
 export interface ModelEnv {

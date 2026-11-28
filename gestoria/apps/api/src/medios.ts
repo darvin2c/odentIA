@@ -624,7 +624,10 @@ export interface SofiMedia {
   id: string
   /** Para WhatsApp: `image/jpeg` o `video/mp4`, dentro de sus límites (5 MB y 16 MB). */
   mimeType: string
-  url: string
+  /** El enlace firmado (una hora); null sin almacenamiento configurado (`MEDIA_OFF`). */
+  url: string | null
+  /** El color de la foto o del video, como está en la ficha; null si es de todo el producto. */
+  color: string | null
   /** Lo que muestra el video («Puesta, caminando»). */
   label: string | null
   durationMs: number | null
@@ -634,7 +637,8 @@ export interface SofiMedia {
  * Qué foto y qué video manda Sofi (decisión 9): si la clienta pide un color, la foto elegida de
  * ese color (la que dice «★»), si no la primera de ese color; sin color o sin foto del color, la
  * primera del producto. El video, el del color o, si no tiene, el del producto. Lee con el
- * mismo `tx` de la herramienta de Sofi, ya dentro de la tienda.
+ * mismo `tx` de la herramienta de Sofi (`mandar_foto`), ya dentro de la tienda. Sin
+ * almacenamiento elige igual y no firma: la pantalla dice que no hay dónde verlas.
  */
 export async function sofiMediaIn(
   tx: Db,
@@ -643,7 +647,6 @@ export async function sofiMediaIn(
   productId: string,
   colorValue?: string | null,
 ): Promise<{ photo: SofiMedia | null; video: SofiMedia | null }> {
-  if (!storage) return { photo: null, video: null }
   const colors = await tx
     .select({ id: productColor.id, value: productColor.value, photoId: productColor.photoId })
     .from(productColor)
@@ -671,16 +674,21 @@ export async function sofiMediaIn(
     .where(and(eq(productVideo.productId, productId), eq(productVideo.storeId, storeId)))
   const video =
     (color && videos.find((v) => v.colorId === color.id)) || videos.find((v) => v.colorId === null)
+  const colorName = (id: string | null) => colors.find((c) => c.id === id)?.value ?? null
   return {
     photo: chosen
       ? {
           kind: "foto",
           id: chosen.id,
           mimeType: COPY_TYPE.whatsapp,
-          url: await storage.signedUrl(
-            copyKey(chosen.objectKey!, "whatsapp", chosen),
-            PUBLIC_LINK_SECONDS,
-          ),
+          url: storage
+            ? await storage.signedUrl(
+                copyKey(chosen.objectKey!, "whatsapp", chosen),
+                PUBLIC_LINK_SECONDS,
+              )
+            : null,
+          color:
+            colorName(chosen.colorId) ?? colors.find((c) => c.photoId === chosen.id)?.value ?? null,
           label: null,
           durationMs: null,
         }
@@ -690,7 +698,10 @@ export async function sofiMediaIn(
           kind: "video",
           id: video.id,
           mimeType: "video/mp4",
-          url: await storage.signedUrl(`${video.objectKey}/video`, PUBLIC_LINK_SECONDS),
+          url: storage
+            ? await storage.signedUrl(`${video.objectKey}/video`, PUBLIC_LINK_SECONDS)
+            : null,
+          color: colorName(video.colorId),
           label: video.label || null,
           durationMs: video.durationMs,
         }
@@ -699,7 +710,7 @@ export async function sofiMediaIn(
 }
 
 /** La tienda y el producto de la vitrina pública: el link vigente y un producto que se ve en la web. */
-async function publicProduct(ownerDb: Db, link: string, slugOrId: string) {
+export async function publicProduct(ownerDb: Db, link: string, slugOrId: string) {
   if (!/^[a-z0-9-]{3,63}$/.test(link) || !/^[a-z0-9-]{1,80}$/.test(slugOrId)) return null
   const isId = z.uuid().safeParse(slugOrId).success
   const [row] = await ownerDb
@@ -720,19 +731,19 @@ async function publicProduct(ownerDb: Db, link: string, slugOrId: string) {
 }
 
 /**
- * Las fotos y los videos que ve la clienta en la web de la tienda (`<tienda>.gestoria24.com/<producto>`):
- * solo de un producto que se ve en la web, con enlaces firmados de una hora. Sin el permiso de
- * nadie: es lo público de la tienda, y nada más (ni la original ni la propuesta sin fondo).
+ * Las fotos y los videos que ve la clienta de un producto, con enlaces firmados que vencen en
+ * `seconds`: la copia de la vitrina y la miniatura, nunca la original ni la propuesta sin fondo.
+ * La vitrina pública (con el dueño de la base, ya filtrada por su tienda) y la vista previa de la
+ * ficha (dentro de la tienda) leen lo mismo.
  */
-export async function publicMedia(
-  ownerDb: Db,
-  storage: Storage | null | undefined,
-  link: string,
-  slugOrId: string,
+export async function shownMediaIn(
+  db: Db,
+  storage: Storage,
+  storeId: string,
+  productId: string,
+  seconds: number,
 ) {
-  const found = storage ? await publicProduct(ownerDb, link, slugOrId) : null
-  if (!found || !storage) return null
-  const photos = await ownerDb
+  const photos = await db
     .select({
       id: productPhoto.id,
       colorId: productPhoto.colorId,
@@ -743,22 +754,18 @@ export async function publicMedia(
       cutoutId: productPhoto.cutoutId,
     })
     .from(productPhoto)
-    .where(
-      and(eq(productPhoto.productId, found.productId), eq(productPhoto.storeId, found.storeId)),
-    )
+    .where(and(eq(productPhoto.productId, productId), eq(productPhoto.storeId, storeId)))
     .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
-  const colors = await ownerDb
+  const colors = await db
     .select({ id: productColor.id, value: productColor.value })
     .from(productColor)
-    .where(eq(productColor.productId, found.productId))
+    .where(and(eq(productColor.productId, productId), eq(productColor.storeId, storeId)))
   const colorName = (id: string | null) => colors.find((c) => c.id === id)?.value ?? null
-  const videos = await ownerDb
+  const videos = await db
     .select()
     .from(productVideo)
-    .where(
-      and(eq(productVideo.productId, found.productId), eq(productVideo.storeId, found.storeId)),
-    )
-  const sign = (key: string) => storage.signedUrl(key, PUBLIC_LINK_SECONDS)
+    .where(and(eq(productVideo.productId, productId), eq(productVideo.storeId, storeId)))
+  const sign = (key: string) => storage.signedUrl(key, seconds)
   return {
     photos: await Promise.all(
       photos
@@ -782,8 +789,24 @@ export async function publicMedia(
         poster: await sign(`${v.objectKey}/poster`),
       })),
     ),
-    expiresAt: new Date(Date.now() + PUBLIC_LINK_SECONDS * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + seconds * 1000).toISOString(),
   }
+}
+
+/**
+ * Las fotos y los videos que ve la clienta en la web de la tienda (`<tienda>.gestoria24.com/<producto>`):
+ * solo de un producto que se ve en la web, con enlaces firmados de una hora. Sin el permiso de
+ * nadie: es lo público de la tienda, y nada más (ni la original ni la propuesta sin fondo).
+ */
+export async function publicMedia(
+  ownerDb: Db,
+  storage: Storage | null | undefined,
+  link: string,
+  slugOrId: string,
+) {
+  const found = storage ? await publicProduct(ownerDb, link, slugOrId) : null
+  if (!found || !storage) return null
+  return shownMediaIn(ownerDb, storage, found.storeId, found.productId, PUBLIC_LINK_SECONDS)
 }
 
 /**

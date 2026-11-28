@@ -1,5 +1,6 @@
 import {
   accountCopy,
+  conversation,
   type Db,
   MAX_PHOTO_BYTES,
   MAX_PRODUCT_KEYWORDS,
@@ -28,7 +29,19 @@ import {
   storeEvent,
   storeTemplateField,
 } from "@gestoria/db"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm"
 import { z } from "zod"
 import { isAgent } from "./agente.js"
 import type { Person } from "./cuenta.js"
@@ -565,7 +578,7 @@ export async function namesOf(tx: Db, ids: (string | null)[]): Promise<Map<strin
 }
 
 /** Los colores del producto, en el orden de su opción, con cómo se ven y su foto. */
-async function colorsIn(tx: Db, row: typeof product.$inferSelect) {
+export async function colorsIn(tx: Db, row: typeof product.$inferSelect) {
   if (row.colorOption === null) return []
   const values = row.options[row.colorOption]?.values ?? []
   const looks = await tx.select().from(productColor).where(eq(productColor.productId, row.id))
@@ -633,8 +646,19 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
         .where(inArray(product.id, otherIds))
     : []
   const questionRows = await tx
-    .select()
+    .select({
+      ...getTableColumns(productQuestion),
+      // Las de «Probar a Sofi»: quedan en la ficha, pero no van a «Te toca».
+      test: sql<boolean>`coalesce(${conversation.channel} = 'prueba', false)`,
+    })
     .from(productQuestion)
+    .leftJoin(
+      conversation,
+      and(
+        eq(conversation.id, productQuestion.conversationId),
+        eq(conversation.storeId, productQuestion.storeId),
+      ),
+    )
     .where(eq(productQuestion.productId, productId))
     .orderBy(desc(productQuestion.askedAt))
     .limit(100)
@@ -710,6 +734,7 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
       saveRequested: q.saveRequested,
       savedBy: q.savedBy ? (who.get(q.savedBy) ?? null) : null,
       savedAt: q.savedAt,
+      test: q.test,
     })),
     readiness: readinessOf({
       listPriceCents: row.listPriceCents,

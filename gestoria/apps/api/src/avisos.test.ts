@@ -10,6 +10,7 @@ import {
   type OrderStep,
   orderPush,
   pushTopic,
+  questionsPush,
   subscribeInput,
 } from "./avisos.js"
 
@@ -28,15 +29,28 @@ const step = (over: Partial<OrderStep>): OrderStep => ({
 
 describe("a cada rol lo suyo", () => {
   it("Ventas recibe lo que resuelve; el Dueño y el Administrador, además lo de dinero", () => {
-    expect(kindsFor("sales")).toEqual(["pagos", "chats", "no_entregado", "sofi_pedido"])
-    expect(kindsFor("admin")).toEqual(["pagos", "chats", "no_entregado", "sofi_pedido", "dinero"])
+    expect(kindsFor("sales")).toEqual([
+      "pagos",
+      "chats",
+      "no_entregado",
+      "sofi_pedido",
+      "preguntas",
+    ])
+    expect(kindsFor("admin")).toEqual([
+      "pagos",
+      "chats",
+      "no_entregado",
+      "sofi_pedido",
+      "dinero",
+      "preguntas",
+    ])
     expect(kindsFor("owner")).toEqual(kindsFor("admin"))
     // Soporte de gestorIA no es del equipo: no recibe nada.
     expect(kindsFor("support")).toEqual([])
   })
 
   it("sin elegir, a Ventas no le llegan los pedidos de Sofi; al Dueño, todo", () => {
-    expect([...activeKinds("sales", null)]).toEqual(["pagos", "chats", "no_entregado"])
+    expect([...activeKinds("sales", null)]).toEqual(["pagos", "chats", "no_entregado", "preguntas"])
     expect([...activeKinds("owner", null)]).toEqual(kindsFor("owner"))
   })
 
@@ -47,6 +61,22 @@ describe("a cada rol lo suyo", () => {
 })
 
 describe("lo que dice cada aviso", () => {
+  it("lo que Sofi no supo: la pregunta y de qué producto, o cuántas esperan", () => {
+    expect(questionsPush([])).toBeNull()
+    expect(
+      questionsPush([{ question: "¿Destiñe al lavarla?", product: "Zapatilla de lona" }]),
+    ).toEqual({
+      title: "Sofi no supo: «¿Destiñe al lavarla?»",
+      body: "Zapatilla de lona",
+    })
+    expect(
+      questionsPush([
+        { question: "¿Destiñe?", product: "Zapatilla" },
+        { question: "¿Es de cuero?", product: "Botín" },
+      ])?.title,
+    ).toBe("2 preguntas esperan respuesta")
+  })
+
   it("una captura: quién, con qué y cuánto, y lleva a confirmarla", () => {
     const push = orderPush(step({ detail: { monto: 8500, medio: "Yape", moneda: "PEN" } }), "PEN")
     expect(push).toMatchObject({ kind: "pagos", urgency: "high" })

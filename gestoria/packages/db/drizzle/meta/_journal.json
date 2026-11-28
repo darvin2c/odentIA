@@ -281,6 +281,20 @@
       "when": 1795818550939,
       "tag": "0039_reglas_fotos_y_videos",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795827483052,
+      "tag": "0040_lo_que_sofi_no_supo_avisa",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795827486971,
+      "tag": "0041_reglas_lo_que_sofi_no_supo",
+      "breakpoints": true
     }
   ]
 }

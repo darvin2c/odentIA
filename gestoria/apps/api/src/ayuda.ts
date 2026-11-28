@@ -234,7 +234,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "te-toca",
         q: "¿Qué me toca hacer hoy?",
         a: [
-          "En Inicio, «Te toca»: lo que hay que hacer ahora, hoy y sin apuro, cada línea con su botón. Un pago por confirmar se abre con «Ver y confirmar», que muestra la captura junto al pedido; un pedido que no se entregó se mueve con «Pasar a…»; dos fichas que quizá son la misma clienta se miran con «Comparar»; un pedido pagado al que le falta stock, con «Ver pedido», y el efectivo cobrado en la puerta que nadie recibió todavía, con «Ir a Caja» (lo ve quien ve Caja).",
+          "En Inicio, «Te toca»: lo que hay que hacer ahora, hoy y sin apuro, cada línea con su botón. Un pago por confirmar se abre con «Ver y confirmar», que muestra la captura junto al pedido; un pedido que no se entregó se mueve con «Pasar a…»; dos fichas que quizá son la misma clienta se miran con «Comparar»; un pedido pagado al que le falta stock, con «Ver pedido»; lo que Sofi no supo de un producto, con «Responder», y el efectivo cobrado en la puerta que nadie recibió todavía, con «Ir a Caja» (lo ve quien ve Caja).",
           "Arriba van las cifras del día, con la hora de la tienda: «Cobrado hoy», «Por confirmar», «Falta cobrar» y «Sale hoy», que abre Despachos. Lo que está por confirmar no se suma a lo que falta cobrar. Los montos del día los ve quien puede ver Reportes; quien atiende ve lo que le toca, sin los totales.",
         ],
         needs: "ventas.atender",
@@ -261,7 +261,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Quién es Sofi y qué hace sola?",
         a: [
           "Sofi es la vendedora de tu tienda. Responde con tu catálogo y tus precios, recomienda, negocia sin bajar del precio mínimo que pusiste y arma el pedido con lo que el cliente ya vio. Le dice cómo pagar y, si paga por link, el pedido queda pagado solo.",
-          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: pasa la conversación a una persona. Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: si es de un producto, te lo pregunta en «Te toca» y sigue vendiendo; si no, pasa la conversación a una persona. Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», o desde la ficha de un producto con «Probar como clienta», escribiendo como si fueras una clienta. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
           "Probarla sirve al ajustarla: por eso la prueba quien cambia la configuración de la tienda.",
         ],
         needs: "configuracion",
@@ -617,10 +617,32 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "sofi-no-supo",
         q: "Sofi no supo responder algo de un producto, ¿cómo se lo enseño?",
         a: [
-          "En la ficha, en «Lo que Sofi no supo», escribe la respuesta. Desde ahí Sofi la usa la próxima vez y queda en «Preguntas respondidas».",
-          "Quien atiende y no cambia la ficha la propone con «Proponer la respuesta»; quien cambia la ficha la deja con «Guardar en la ficha».",
+          "Cuando la ficha no dice algo, Sofi no lo inventa: le dice a la clienta que no lo tiene confirmado, que le pregunta a la tienda y le escribe, y sigue vendiendo. No promete una hora. La pregunta llega a Inicio, en «Te toca»: si varias clientas preguntan lo mismo, es una sola línea.",
+          "Tócala con «Responder»: escribe la respuesta una vez. Con «Que Sofi se lo diga», Sofi se la escribe a cada clienta que preguntó; con «Guardarlo en la ficha», queda en «Preguntas respondidas» y Sofi la usa la próxima vez.",
+          "Quien atiende y no cambia la ficha la propone para la ficha; quien cambia la ficha la guarda, también desde la ficha, en «Lo que Sofi no supo», con «Guardar en la ficha». Lo que preguntaste en una prueba queda solo en la ficha.",
         ],
         needs: "ventas.atender",
+        screen: "catalogo",
+      },
+      {
+        id: "probar-como-clienta",
+        q: "¿Cómo veo lo que vive la clienta con un producto?",
+        a: [
+          "En la ficha, en la línea de Sofi, «Probar como clienta». Al lado (en el celular, abajo) se abre el celular de la clienta: «WhatsApp» es el chat con Sofi y «Vitrina» es la página del producto por link. Es la misma Sofi de un chat de verdad, con tu ficha de ahora: pregunta, pide la negra, «¿Me haces precio?» o «Lo voy a pensar».",
+          "El carrito es el mismo en el chat y en la vitrina, con lo que acordaste con Sofi y hasta cuándo vale. «Pagar ahora» simula el pago: dice «Pago de prueba: no se cobra». Después del pago, Sofi te escribe una vez y, si algo combina, te lo ofrece aparte.",
+          "Abajo, «Qué usó Sofi» dice de qué dato de la ficha salió cada respuesta y lo que todavía no sabe, con «Completar». La prueba no mueve el stock, no cobra, no avisa y no cuenta en Reportes. Con «Empezar de nuevo» arrancas otra.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "vista-previa",
+        q: "¿Cómo se ve mi producto en la vitrina y en la web?",
+        a: [
+          "En la ficha, «Vista previa», arriba a la derecha. En «Celular» ves la página del producto en la vitrina por link y cómo lo manda Sofi por WhatsApp cuando lo piden; en «Web», la misma página en una computadora, con el color de «Tu marca».",
+          "Sale de la ficha de ahora: fotos, colores, tallas que hay, precio y promoción. Nunca muestra el mínimo, el costo ni lo que Sofi puede ofrecer. En la web pública solo está si «Se muestra en tu catálogo» está encendido.",
+        ],
+        needs: "catalogo.ver",
         screen: "catalogo",
       },
       {
@@ -721,7 +743,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo me entero de un pago o de una entrega aunque gestorIA esté cerrada?",
         a: [
           "Instala gestorIA en tu celular y activa los avisos: en Pedidos, la tarjeta «Recibe los avisos en este celular» te guía, o en Configuración, en Avisos al celular, «Activar en este celular». No cuesta nada. En iPhone, primero agrégala a la pantalla de inicio desde Safari y ábrela desde ese ícono.",
-          "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre lo que toca resolver, y el siguiente del mismo tipo reemplaza al anterior.",
+          "Te llega lo que tu rol puede resolver: los pagos por confirmar, los chats que esperan a una persona, lo que Sofi no supo de un producto, lo que no se entregó y, si lo eliges, los pedidos que armó Sofi; a quien ve Reportes, también lo de dinero. Cada aviso abre lo que toca resolver, y el siguiente del mismo tipo reemplaza al anterior.",
           "En Avisos al celular eliges qué te llega, y vale en todos tus celulares. «Apagar en este celular» los apaga solo en ese celular; al cerrar sesión también se apagan en él.",
         ],
         needs: "avisos.recibir",

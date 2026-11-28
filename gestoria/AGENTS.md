@@ -68,8 +68,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   las copias (miniatura, vitrina, WhatsApp) las arma `imagenes.ts`. El video no se rearma.
 - Ver es un enlace firmado que vence: la app (`catalogo.ver`), la vitrina pública
   (`/vitrina/:link/:producto/medios`, solo lo que se ve en la web, nunca la original) y lo que
-  mandará Sofi cuando haya canal (`sofiMediaIn`, la copia de WhatsApp de la foto del color
-  pedido; todavía ninguna herramienta la llama).
+  manda Sofi (`sofiMediaIn`, la copia de WhatsApp de la foto del color pedido o el video; la
+  elige su herramienta `mandar_foto`, y sin almacenamiento elige igual y no firma).
 - La foto sin fondo es una propuesta (`cutout`), cada una en su carpeta (`cutout_id`); la original
   no se borra nunca. Nadie borra un
   archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
@@ -97,9 +97,16 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El precio de revendedora, el combo, las promociones de un color o una talla y la liquidación
   son opciones de `autoUnit`/`floorOf` en `precio.ts`; lo que Sofi puede ofrecer de cada producto
   solo la frena a ella (`byAgent`). El simulador es `lowestQuote`: nunca otra cuenta.
-- Lo que Sofi no supo (`preguntas.ts`): Sofi solo anota la pregunta; Ventas responde y propone
-  guardarla; quien tiene `configuracion` la guarda en la ficha. Cada cambio de la ficha va al
-  historial (`product_event`), campo por campo, con la forma de `productPatch`.
+- Lo que Sofi no supo (`preguntas.ts`, ADR 0237): Sofi solo anota la pregunta (`anotar_pregunta`);
+  va a «Te toca» (iguales del mismo producto, una línea) y al celular, salvo las de la prueba, que
+  quedan solo en la ficha. Ventas responde (una vez para todas, `answerQuestions`) y propone
+  guardarla; quien tiene `configuracion` la guarda. «Que Sofi se lo diga» le escribe a cada clienta
+  por su tubería (`tellAnswer`), sin prometer una hora. Cada cambio de la ficha va al historial
+  (`product_event`), campo por campo, con la forma de `productPatch`.
+- La página del producto en la vitrina (`vitrina.ts`, `apps/web/src/vitrina/`) es una pieza: la
+  vista previa de la ficha y «Probar como clienta» la usan y la usará el catálogo por link. Da
+  solo lo vendible (ni costo, ni mínimo, ni lo que Sofi puede ofrecer, ni códigos, ni el stock
+  exacto: «quedan pocas» hasta 3); la ruta pública, solo si `web_visible`.
 - La pantalla de la ficha (`apps/web/src/ficha/`) es una página completa que se guarda sola: un
   borrador (`FichaStore` de `ficha/borrador.ts`) con deshacer y rehacer, que envía solo lo que
   cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). La
@@ -150,7 +157,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   montos del día son de `reportes.ver`; no se crea un permiso para ellos.
 - «Te toca» (`apps/api/src/inicio.ts`) vive solo en Inicio: cada línea, para quien puede
   resolverla, con su único botón y la operación de siempre (el pedido con su captura, «Pasar a…»,
-  «Comparar»). Una línea que depende de una pantalla que no existe va en `waiting` y no se dibuja.
+  «Comparar», «Responder» lo que Sofi no supo). Una línea que depende de una pantalla que no existe va en `waiting` y no se dibuja.
 - Los primeros pasos (`primeros-pasos.ts`) se marcan con lo guardado en cada apartado, nunca a
   mano; `store_setup` guarda solo lo saltado y cuándo quedó lista, y la lista no vuelve. Se saltan
   solo los pasos que no aplican a toda tienda (`SKIPPABLE_STEPS`). Los ve quien tiene
@@ -262,6 +269,15 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
+- «Probar como clienta» (ficha, ADR 0237) es esa misma conversación de prueba, nunca un panel
+  aparte: el chat y la vitrina con el mismo carrito (el pedido de la conversación), la oferta con
+  plazo y «Pagar ahora», que se simula (`payTestOrderIn`) y lo dice. Lo que la tienda le pide decir
+  (que pagó, una respuesta) va como aviso de sistema (`StoreNotice`), nunca como mensaje de la
+  clienta. Lo que llega con el mensaje de la clienta (`detail.desde`, `detail.carrito`) son datos.
+- Sofi lee la ficha (`sofi/ficha.ts`): los datos del rubro, el estado con lo que dice en cada uno,
+  las preguntas guardadas, los colores con su foto, el video y lo que puede ofrecer de ese
+  producto. Lo que la ficha no dice no lo afirma: lo deja a la tienda. «Qué usó Sofi» sale de lo
+  que leyó y está en lo que escribió (`usedIn`), no del modelo.
 - Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
   fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
 - Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
@@ -337,7 +353,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   mirado al enviar. Un tipo nuevo suma su fuente y su permiso ahí, y su respuesta en la Ayuda.
 - No es otra bandeja: avisa lo nuevo de los pedidos (`order_event`, cursor por persona y tienda) y
   de los chats que esperan, y abre la pantalla que lo resuelve. Se anota antes de enviar y nunca
-  se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan.
+  se reintenta. Lo de la misma persona y lo de «Probar a Sofi» no avisan. Lo que Sofi no supo
+  es su tipo (`preguntas`, con `questions_seen` como cursor), para quien atiende.
 - La tarjeta para instalar y activar (`InstallCard`) va en la pantalla de entrada de la tienda.
 
 ## La web pública (B8)

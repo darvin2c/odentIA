@@ -2779,6 +2779,55 @@ export async function receiveLinkNotice(
   })
 }
 
+/**
+ * «Pagar ahora» en «Probar como clienta» (la vitrina de la prueba): el pago de un pedido de prueba,
+ * como si el link de pago lo hubiera aprobado. No se cobra nada ni se mueve el stock (`trySale` no
+ * toca un pedido de prueba), y no avisa ni cuenta en Reportes, Argos ni el uso: el pedido es `test`.
+ * El cobro de verdad por la vitrina llega con su propia entrega.
+ */
+export async function payTestOrderIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  orderId: string,
+  methodLabel: string,
+) {
+  uuidOr404(orderId)
+  const order = await lockOrder(tx, storeId, orderId)
+  if (!order.test) throw new StoreError(409, "NOT_A_TEST", "Así solo se paga un pedido de prueba")
+  if (order.state !== "por_pagar") throw stateError(order)
+  if (order.priceExpiresAt && order.priceExpiresAt.getTime() <= Date.now())
+    throw new StoreError(
+      409,
+      "PRICE_EXPIRED",
+      "Lo acordado venció: el pedido vuelve a su precio. Pídele a Sofi que lo cotice de nuevo.",
+    )
+  const { currency } = await storeRow(tx, storeId)
+  const method = await methodFor(tx, storeId, order, "link")
+  await tx.insert(orderPayment).values({
+    storeId,
+    orderId,
+    kind: "link",
+    status: "confirmado",
+    amountCents: order.totalCents,
+    methodName: `${methodLabel} (prueba)`.slice(0, 80),
+    methodType: method.methodType,
+    note: "Pago de prueba: no se cobró",
+    reviewedAt: new Date(),
+  })
+  await trySale(tx, order, actorUserId)
+  await setState(tx, order, "por_salir")
+  await logEvent(tx, storeId, orderId, actorUserId, "pago_link", {
+    monto: order.totalCents,
+    prueba: true,
+  })
+  await notifyCustomer(tx, order, actorUserId, currency, "pago_confirmado", {
+    paidCents: order.totalCents,
+    dueCents: 0,
+  })
+  return { number: pad(order.number), totalCents: order.totalCents }
+}
+
 /* ----------------------------------------------- conectar el link de pago (configuración) */
 
 export const linkConnectionInput = z.object({

@@ -1,5 +1,5 @@
-import { type Db, product, productQuestion } from "@gestoria/db"
-import { and, desc, eq, isNull, or } from "drizzle-orm"
+import { conversation, type Db, product, productQuestion } from "@gestoria/db"
+import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm"
 import { z } from "zod"
 import { detailIn, forRole, logProductEvent, namesOf, productRow, uuidOr404 } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
@@ -11,8 +11,10 @@ import { inStore, StoreError } from "./tiendas.js"
  * clienta queda en el producto y se responde una vez. Ventas responde (`ventas.atender`) y puede
  * proponer que la respuesta se guarde en la ficha; el Dueño o el Administrador (`configuracion`)
  * la guardan, y desde ahí Sofi la usa la próxima vez. Sofi solo anota la pregunta: la base no la
- * deja responder ni guardar (`0035_reglas_la_ficha_del_producto.sql`). La herramienta de Sofi que
- * la anota y la línea de «Te toca» llegan con su propio cambio.
+ * deja responder ni guardar (`0035_reglas_la_ficha_del_producto.sql`); la anota con su herramienta
+ * `anotar_pregunta`. Las que esperan van a «Te toca» de Inicio (`questionLinesIn`): varias iguales
+ * del mismo producto son una línea, y se responden de una vez (`answerQuestions`). Las de «Probar a
+ * Sofi» quedan en la ficha, pero no van a «Te toca» ni avisan.
  */
 
 const questionText = z
@@ -105,13 +107,86 @@ export const answerInput = z.object({
   answer: answerText,
   /** Guardarla en la ficha: lo hace quien cambia el catálogo; Ventas solo lo propone. */
   save: z.boolean().default(false),
+  /** «Que Sofi se lo diga»: Sofi le escribe la respuesta a cada clienta que preguntó. */
+  tell: z.boolean().default(false),
+})
+
+export const groupAnswerInput = answerInput.extend({
+  /** Las preguntas iguales del mismo producto: la línea de «Te toca» («3 clientas»). */
+  ids: z.array(z.uuid()).min(1).max(50),
 })
 
 /**
- * Responde una pregunta. Con `save`, quien cambia el catálogo la deja en la ficha; Ventas la deja
- * propuesta, y el Dueño o el Administrador la aceptan con «Guardar». Una ya guardada solo la
- * cambia quien cambia el catálogo.
+ * Responde una pregunta, o varias iguales del mismo producto de una vez (la línea de «Te toca»).
+ * Con `save`, quien cambia el catálogo la deja en la ficha (una sola vez, en la primera); Ventas
+ * la deja propuesta, y el Dueño o el Administrador la aceptan con «Guardar». Una ya guardada solo
+ * la cambia quien cambia el catálogo. Devuelve a quién decírselo (las conversaciones que
+ * preguntaron), para «Que Sofi se lo diga».
  */
+export async function answerQuestions(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof groupAnswerInput>,
+) {
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx, role) => {
+    const ids = [...new Set(input.ids)]
+    const rows = await tx
+      .select()
+      .from(productQuestion)
+      .where(and(eq(productQuestion.storeId, storeId), inArray(productQuestion.id, ids)))
+      .orderBy(asc(productQuestion.askedAt))
+      .for("update")
+    if (rows.length !== ids.length)
+      throw new StoreError(404, "NOT_FOUND", "Esa pregunta ya no está")
+    const productId = rows[0]!.productId
+    if (rows.some((row) => row.productId !== productId))
+      throw new StoreError(400, "VALIDATION_ERROR", "Son preguntas de productos distintos")
+    const editor = can(role, "configuracion")
+    if (rows.some((row) => row.savedAt) && !editor)
+      throw new StoreError(
+        403,
+        "FORBIDDEN",
+        "Esa respuesta ya está en la ficha: la cambia quien cambia el catálogo",
+      )
+    const now = new Date()
+    // En la ficha queda una sola: la que ya estaba guardada, o la primera.
+    const keeper = rows.find((row) => row.savedAt) ?? rows[0]!
+    for (const row of rows) {
+      const mine = row.id === keeper.id
+      // Quien cambia el catálogo la deja en la ficha (o la mantiene, si ya estaba).
+      const saved = mine && editor && (input.save || row.savedAt !== null)
+      await tx
+        .update(productQuestion)
+        .set({
+          answer: input.answer,
+          answeredBy: person.userId,
+          answeredAt: now,
+          saveRequested: mine && input.save && !editor,
+          savedBy: saved ? person.userId : null,
+          savedAt: saved ? now : null,
+        })
+        .where(eq(productQuestion.id, row.id))
+      if (saved)
+        await logProductEvent(tx, storeId, productId, person.userId, "pregunta", [
+          { field: "question", from: row.savedAt ? row.answer : null, to: input.answer },
+          { field: "questionId", from: row.id, to: row.id },
+        ])
+    }
+    const told = new Map<string, string>()
+    for (const row of rows)
+      if (row.conversationId && !told.has(row.conversationId))
+        told.set(row.conversationId, row.question)
+    return {
+      product: forRole(await detailIn(tx, storeId, productId), role),
+      tell: input.tell
+        ? [...told].map(([conversationId, question]) => ({ conversationId, question }))
+        : [],
+    }
+  })
+}
+
+/** Responde una pregunta de la ficha (la misma regla que la línea de «Te toca»). */
 export async function answerQuestion(
   appDb: Db,
   person: Person,
@@ -119,36 +194,99 @@ export async function answerQuestion(
   questionId: string,
   input: z.infer<typeof answerInput>,
 ) {
-  return inStore(appDb, person, storeId, "ventas.atender", async (tx, role) => {
-    const row = await questionRow(tx, storeId, questionId)
-    const editor = can(role, "configuracion")
-    if (row.savedAt && !editor)
-      throw new StoreError(
-        403,
-        "FORBIDDEN",
-        "Esa respuesta ya está en la ficha: la cambia quien cambia el catálogo",
-      )
-    const now = new Date()
-    // Quien cambia el catálogo la deja en la ficha (o la mantiene, si ya estaba).
-    const saved = editor && (input.save || row.savedAt !== null)
-    await tx
-      .update(productQuestion)
-      .set({
-        answer: input.answer,
-        answeredBy: person.userId,
-        answeredAt: now,
-        saveRequested: input.save && !editor,
-        savedBy: saved ? person.userId : null,
-        savedAt: saved ? now : null,
-      })
-      .where(eq(productQuestion.id, questionId))
-    if (saved)
-      await logProductEvent(tx, storeId, row.productId, person.userId, "pregunta", [
-        { field: "question", from: row.savedAt ? row.answer : null, to: input.answer },
-        { field: "questionId", from: questionId, to: questionId },
-      ])
-    return forRole(await detailIn(tx, storeId, row.productId), role)
-  })
+  uuidOr404(questionId, "Esa pregunta ya no está")
+  return answerQuestions(appDb, person, storeId, { ...input, ids: [questionId] })
+}
+
+/** Una pregunta en palabras sueltas, sin tildes ni signos: así dos iguales son una sola línea. */
+export function questionKey(question: string): string {
+  return question
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9ñ]+/g, " ")
+    .trim()
+}
+
+/** Una línea de «Te toca» de lo que Sofi no supo: la pregunta, de qué producto y quién espera. */
+export interface QuestionLine {
+  productId: string
+  product: string
+  question: string
+  /** Las preguntas iguales de esa línea: se responden juntas. */
+  ids: string[]
+  /** Cuántas clientas la hicieron (sus conversaciones). */
+  people: number
+  /** El nombre de la primera que preguntó, si lo dio. */
+  customer: string | null
+  askedAt: Date
+  /** Ventas ya la respondió y propone guardarla: la guarda quien cambia la ficha. */
+  proposed: { id: string; answer: string } | null
+}
+
+/**
+ * Lo que Sofi no supo y espera respuesta, para «Te toca»: de conversaciones de verdad (las de
+ * «Probar a Sofi» quedan solo en la ficha), juntas las iguales del mismo producto. Con
+ * `proposals`, también lo que Ventas propuso guardar, para quien cambia la ficha.
+ */
+export async function questionLinesIn(
+  tx: Db,
+  storeId: string,
+  proposals: boolean,
+): Promise<QuestionLine[]> {
+  const rows = await tx
+    .select({
+      id: productQuestion.id,
+      productId: productQuestion.productId,
+      product: product.name,
+      question: productQuestion.question,
+      answer: productQuestion.answer,
+      saveRequested: productQuestion.saveRequested,
+      conversationId: productQuestion.conversationId,
+      customer: conversation.customerName,
+      askedAt: productQuestion.askedAt,
+    })
+    .from(productQuestion)
+    .innerJoin(product, eq(product.id, productQuestion.productId))
+    .innerJoin(
+      conversation,
+      and(
+        eq(conversation.id, productQuestion.conversationId),
+        eq(conversation.storeId, productQuestion.storeId),
+      ),
+    )
+    .where(
+      and(
+        eq(productQuestion.storeId, storeId),
+        ne(conversation.channel, "prueba"),
+        proposals
+          ? or(isNull(productQuestion.answer), eq(productQuestion.saveRequested, true))
+          : isNull(productQuestion.answer),
+      ),
+    )
+    .orderBy(asc(productQuestion.askedAt))
+    .limit(300)
+  const lines = new Map<string, QuestionLine & { conversations: Set<string> }>()
+  for (const row of rows) {
+    const proposed = row.answer !== null && row.saveRequested
+    const key = `${row.productId}|${proposed ? `p:${row.id}` : questionKey(row.question)}`
+    const line = lines.get(key) ?? {
+      productId: row.productId,
+      product: row.product,
+      question: row.question,
+      ids: [],
+      people: 0,
+      customer: row.customer,
+      askedAt: row.askedAt,
+      proposed: proposed ? { id: row.id, answer: row.answer! } : null,
+      conversations: new Set<string>(),
+    }
+    line.ids.push(row.id)
+    if (row.conversationId) line.conversations.add(row.conversationId)
+    line.people = line.conversations.size
+    lines.set(key, line)
+  }
+  return [...lines.values()].map(({ conversations: _, ...line }) => line)
 }
 
 export const saveInput = z.object({

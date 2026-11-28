@@ -8,23 +8,30 @@
  */
 import { randomUUID } from "node:crypto"
 import {
+  conversation,
   conversationMessage,
   orderEvent,
+  productColor,
+  productPhoto,
+  productQuestion,
   saleOrder,
   store,
   storeAgent,
+  storeLink,
   storeMember,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import { and, eq, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { withAgent } from "../agente.js"
 import { createApp } from "../app.js"
 import { runArgos } from "./argos.js"
+import { tellAnswer } from "./conversaciones.js"
 import type { ChatModel, ChatRequest, ModelReply } from "./modelo.js"
 import { toolCall } from "./modelo.js"
 import { amountsIn, claimsPaid } from "./revisar.js"
-import { SOFI_FALLBACK } from "./sofi.js"
+import { answer, SOFI_FALLBACK } from "./sofi.js"
 
 const ACCOUNT = "https://api.gestoria.test"
 const WEB = "https://app.gestoria.test"
@@ -722,5 +729,452 @@ describe("Argos le encarga a Sofi lo de rutina", () => {
       .set({ enabled: false })
       .where(and(eq(storeAgent.storeId, storeId)))
     expect((await runArgos(db.ownerDb, db.appDb)).stores).toBe(0)
+  })
+})
+
+/* ------------------------------------------------------------------ la ficha del producto */
+
+describe("Sofi con la ficha del producto (lienzo «La ficha del producto», PR 6)", () => {
+  const lona = { id: "", blanca: "", negra: "", negra38: "", fotoBlanca: "", fotoNegra: "" }
+
+  beforeAll(async () => {
+    const created = await call("rosa", "POST", `${base}/productos`, {
+      name: "Zapatilla de lona",
+      category: "Zapatillas",
+      description: "Zapatilla de lona para el día a día. Suela gruesa.",
+      listPriceCents: 11900,
+      minPriceCents: 9900,
+      options: [
+        { name: "Color", values: ["blanca", "negra"] },
+        { name: "Talla", values: ["38", "39"] },
+      ],
+    })
+    expect(created.status).toBe(201)
+    lona.id = created.json.product.id
+    const patched = await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
+      rubro: "calzado",
+      rubroData: { horma: "Normal", material: "Lona" },
+      web: { visible: true, slug: "zapatilla-de-lona" },
+      offers: { delivery: true, discount: false, secondUnit: false, gift: "Medias tobilleras" },
+    })
+    expect(patched.status).toBe(200)
+    const variants = patched.json.product.variants as Json[]
+    lona.negra38 = variants.find((v) => v.optionValues.join() === "negra,38")!.id
+    await call("rosa", "POST", `${base}/variantes/${lona.negra38}/movimientos`, {
+      kind: "entrada",
+      quantity: 2,
+    })
+    // Los colores con su hex y una foto de cada uno: la de la negra es la que manda Sofi.
+    const [blanca, negra] = await db.ownerDb
+      .insert(productColor)
+      .values([
+        { storeId, productId: lona.id, value: "blanca", hex: "#ffffff" },
+        { storeId, productId: lona.id, value: "negra", hex: "#1f1f1f" },
+      ])
+      .returning({ id: productColor.id })
+    lona.blanca = blanca!.id
+    lona.negra = negra!.id
+    const photo = (colorId: string, position: number) => ({
+      storeId,
+      productId: lona.id,
+      position,
+      contentType: "image/jpeg" as const,
+      objectKey: `tiendas/${storeId}/productos/${lona.id}/fotos/${randomUUID()}`,
+      colorId,
+      createdBy: "u-rosa",
+    })
+    const [fotoBlanca, fotoNegra] = await db.ownerDb
+      .insert(productPhoto)
+      .values([photo(lona.blanca, 0), photo(lona.negra, 1)])
+      .returning({ id: productPhoto.id })
+    lona.fotoBlanca = fotoBlanca!.id
+    lona.fotoNegra = fotoNegra!.id
+    await db.ownerDb
+      .update(productColor)
+      .set({ photoId: lona.fotoNegra })
+      .where(eq(productColor.id, lona.negra))
+    await call("rosa", "POST", `${base}/productos/${lona.id}/preguntas`, {
+      question: "¿Se puede lavar en lavadora?",
+      answer: "Sí, en ciclo suave y con agua fría.",
+    })
+    await db.ownerDb
+      .insert(storeLink)
+      .values({ name: "calzadosrosa", storeId, createdBy: "u-rosa" })
+      .onConflictDoNothing()
+    await db.ownerDb
+      .update(storeAgent)
+      .set({ enabled: true })
+      .where(eq(storeAgent.storeId, storeId))
+  })
+
+  /** Lo que devolvió buscar_productos de la zapatilla de lona. */
+  const lonaIn = (r: ChatRequest) =>
+    (lastTool(r).productos as Json[]).find((p) => p.nombre === "Zapatilla de lona")!
+
+  it("lee los datos del rubro, lo que la tienda respondió, los colores y lo que puede ofrecer", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "¿Cómo calza la de lona?",
+      use("buscar_productos", () => ({ texto: "zapatilla de lona" })),
+      (r) => {
+        const found = lonaIn(r)
+        expect(found.datos).toEqual([
+          { dato: "Cómo calza", valor: "Normal" },
+          { dato: "Material", valor: "Lona" },
+        ])
+        expect(found.la_ficha_no_dice).toContain("Cómo se limpia")
+        expect(found.preguntas_respondidas).toEqual([
+          {
+            pregunta: "¿Se puede lavar en lavadora?",
+            respuesta: "Sí, en ciclo suave y con agua fría.",
+          },
+        ])
+        expect(found.colores).toEqual([
+          { color: "blanca", foto: true },
+          { color: "negra", foto: true },
+        ])
+        // Solo lo que la tienda deja ofrecer de este producto: ni soles ni la 2.ª unidad.
+        expect(found.puede_ofrecer).toEqual([
+          "envío gratis o más barato",
+          "un regalo: Medias tobilleras",
+        ])
+        expect(found.estado).toBeUndefined()
+        return { content: "Calza normal: pide tu talla de siempre." }
+      },
+    )
+    // «Qué usó Sofi»: lo que leyó y está en lo que escribió.
+    expect(lastSofi(sent).used).toContainEqual({ label: "Cómo calza: normal", target: "datos" })
+  })
+
+  it("cada estado dice lo suyo, y lo que ya no se vende no sale", async () => {
+    await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
+      status: { kind: "encargo", days: 5 },
+    })
+    const id = await newTest()
+    await write(
+      id,
+      "¿Tienes la de lona?",
+      use("buscar_productos", () => ({ texto: "zapatilla de lona" })),
+      (r) => {
+        expect(lonaIn(r).estado).toContain("te la consigo en 5 días")
+        return { content: "No la tengo ahora: te la consigo en 5 días." }
+      },
+    )
+    await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
+      status: { kind: "no_se_vende" },
+    })
+    await write(
+      id,
+      "¿Y la de lona?",
+      use("buscar_productos", () => ({ texto: "zapatilla de lona" })),
+      (r) => {
+        expect(
+          (lastTool(r).productos as Json[]).some((p) => p.nombre === "Zapatilla de lona"),
+        ).toBe(false)
+        return { toolCalls: [toolCall("mandar_foto", { producto_id: lona.id })] }
+      },
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: false })
+        return { content: "Esa ya no la tenemos. ¿Te muestro la urbana?" }
+      },
+    )
+    await call("rosa", "PATCH", `${base}/productos/${lona.id}`, { status: null })
+  })
+
+  it("manda la foto del color que pide (no la primera), y sin video lo dice", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "¿Tienes la negra en 38?",
+      use("buscar_productos", () => ({ texto: "zapatilla de lona negra" })),
+      () => ({ toolCalls: [toolCall("mandar_foto", { producto_id: lona.id, color: "Negra" })] }),
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: true, manda: "la foto", color: "negra" })
+        return { toolCalls: [toolCall("mandar_foto", { producto_id: lona.id, video: true })] }
+      },
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: false })
+        return { content: "Sí: la negra 38 está a S/ 119 y me quedan 2. Te mando su foto." }
+      },
+    )
+    const message = lastSofi(sent)
+    expect(message.media).toEqual([
+      expect.objectContaining({ kind: "foto", id: lona.fotoNegra, color: "negra" }),
+    ])
+    expect(message.used).toContainEqual({ label: "Stock negra 38: 2", target: "stock" })
+    expect(message.used).toContainEqual({ label: "Foto de «negra»", target: "fotos" })
+  })
+
+  it("lo que no supo: lo deja a la tienda y sigue; lo de la prueba no va a «Te toca»", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "¿Destiñe al lavarla?",
+      use("buscar_productos", () => ({ texto: "zapatilla de lona" })),
+      () => ({
+        toolCalls: [
+          toolCall("anotar_pregunta", { producto_id: lona.id, pregunta: "¿Destiñe al lavarla?" }),
+        ],
+      }),
+      (r) => {
+        expect(lastTool(r).ok).toBe(true)
+        return {
+          content:
+            "No lo tengo confirmado. Le pregunto a la tienda y te escribo. ¿En qué talla la buscas?",
+        }
+      },
+    )
+    expect(lastSofi(sent).missed).toEqual([
+      { productId: lona.id, question: "¿Destiñe al lavarla?" },
+    ])
+    const [asked] = await db.ownerDb
+      .select()
+      .from(productQuestion)
+      .where(eq(productQuestion.conversationId, id))
+    expect(asked).toMatchObject({ askedBy: "agente:sofi", answer: null, productId: lona.id })
+    const home = await call("rosa", "GET", `${base}/inicio`)
+    expect(home.json.toDo.filter((t: Json) => t.kind === "pregunta")).toEqual([])
+    // En la ficha sí queda, marcada como de una prueba.
+    const sheet = await call("rosa", "GET", `${base}/productos/${lona.id}`)
+    expect(sheet.json.product.questions).toContainEqual(
+      expect.objectContaining({ question: "¿Destiñe al lavarla?", test: true }),
+    )
+  })
+
+  it("en chats de verdad: dos iguales son una línea de «Te toca»; se responde una vez, Sofi se lo dice y queda en la ficha", async () => {
+    const deps = {
+      appDb: db.appDb,
+      lockDb: db.ownerDb,
+      model,
+      link: { adapters: {}, secretsKey: null, apiURL: SERVER } as never,
+    }
+    const chats: string[] = []
+    for (const name of ["Carla", "Valeria"]) {
+      const [conv] = await db.ownerDb
+        .insert(conversation)
+        .values({ storeId, channel: "whatsapp", createdBy: "u-rosa", customerName: name })
+        .returning({ id: conversation.id })
+      await db.ownerDb.insert(conversationMessage).values({
+        storeId,
+        conversationId: conv!.id,
+        author: "cliente",
+        text: "¿destiñe al lavarla?",
+        actorUserId: "u-rosa",
+      })
+      steps.push(
+        use("anotar_pregunta", () => ({ producto_id: lona.id, pregunta: "¿Destiñe al lavarla?" })),
+        say("No lo tengo confirmado. Le pregunto a la tienda y te escribo."),
+      )
+      expect((await answer(deps, storeId, conv!.id)).status).toBe("respondio")
+      chats.push(conv!.id)
+    }
+    const home = await call("lucia", "GET", `${base}/inicio`)
+    const lines = home.json.toDo.filter((t: Json) => t.kind === "pregunta")
+    expect(lines).toEqual([
+      expect.objectContaining({
+        question: "¿Destiñe al lavarla?",
+        product: "Zapatilla de lona",
+        people: 2,
+        customer: "Carla",
+        proposed: null,
+      }),
+    ])
+    // Sofi no responde por la tienda: la base no se lo deja.
+    const changed = await withAgent(db.appDb, "agente:sofi", storeId, (tx) =>
+      tx
+        .update(productQuestion)
+        .set({ answer: "No destiñe", answeredBy: "agente:sofi", answeredAt: new Date() })
+        .where(eq(productQuestion.productId, lona.id))
+        .returning({ id: productQuestion.id }),
+    ).catch(() => [])
+    expect(changed).toEqual([])
+    // Ventas responde las dos de una vez y propone guardarla; el Dueño la guarda.
+    const answered = await call("lucia", "POST", `${base}/preguntas/respuesta`, {
+      ids: lines[0].ids,
+      answer: "No destiñe. Lávala a mano con agua fría.",
+      save: true,
+      tell: false,
+    })
+    expect(answered.status).toBe(200)
+    const proposed = (await call("rosa", "GET", `${base}/inicio`)).json.toDo.filter(
+      (t: Json) => t.kind === "pregunta",
+    )
+    expect(proposed).toEqual([
+      expect.objectContaining({
+        proposed: expect.objectContaining({ answer: "No destiñe. Lávala a mano con agua fría." }),
+      }),
+    ])
+    expect(
+      (await call("lucia", "GET", `${base}/inicio`)).json.toDo.filter(
+        (t: Json) => t.kind === "pregunta",
+      ),
+    ).toEqual([])
+    const saved = await call(
+      "rosa",
+      "POST",
+      `${base}/preguntas/${proposed[0].proposed.id}/guardar`,
+      {},
+    )
+    expect(saved.status).toBe(200)
+    expect(
+      saved.json.product.questions.filter((q: Json) => q.savedAt).map((q: Json) => q.answer),
+    ).toContain("No destiñe. Lávala a mano con agua fría.")
+    // «Que Sofi se lo diga»: le escribe a cada una por la misma tubería, con la revisión de siempre.
+    steps.push((r) => {
+      const last = r.messages.at(-1)!
+      expect(last.role).toBe("system")
+      expect((last as { content: string }).content).toContain("AVISO DE LA TIENDA")
+      return { content: "Te cuento: no destiñe. Lávala a mano con agua fría." }
+    }, say("Te cuento: no destiñe. Lávala a mano con agua fría."))
+    const told = await tellAnswer(
+      deps,
+      storeId,
+      chats.map((conversationId) => ({ conversationId, question: "¿Destiñe al lavarla?" })),
+      "No destiñe. Lávala a mano con agua fría.",
+    )
+    expect(told.told).toBe(2)
+    expect(steps).toHaveLength(0)
+    // La próxima vez, Sofi la lee de la ficha.
+    const id = await newTest()
+    await write(
+      id,
+      "¿Destiñe?",
+      use("buscar_productos", () => ({ texto: "zapatilla de lona" })),
+      (r) => {
+        expect(lonaIn(r).preguntas_respondidas).toContainEqual({
+          pregunta: "¿Destiñe al lavarla?",
+          respuesta: "No destiñe. Lávala a mano con agua fría.",
+        })
+        return { content: "No destiñe. Lávala a mano con agua fría." }
+      },
+    )
+  })
+
+  it("«Probar como clienta»: el mismo carrito, el pago de prueba (no cobra) y Sofi escribe una vez después", async () => {
+    const id = await newTest()
+    const args = { lineas: [{ variante_id: lona.negra38, cantidad: 1 }], entrega_id: ids.reparto }
+    // Llega desde el producto, con su carrito de la vitrina: Sofi lo lee como dato.
+    steps.push(
+      (r) => {
+        const facts = (r.messages[1] as { content: string }).content
+        expect(facts).toContain("LLEGÓ DESDE EL LINK DE: «Zapatilla de lona»")
+        expect(facts).toContain("1 × Zapatilla de lona negra 38")
+        return { toolCalls: [toolCall("cotizar", args)] }
+      },
+      (r) => ({ content: `Te queda en ${lastTool(r).total}. ¿Lo confirmo?` }),
+    )
+    const first = await call("rosa", "POST", `${base}/conversaciones/${id}/cliente`, {
+      text: "Quiero pagar lo de mi carrito",
+      desde: lona.id,
+      carrito: [{ variantId: lona.negra38, quantity: 1 }],
+    })
+    expect(first.status).toBe(200)
+    await write(
+      id,
+      "Sí, confirmo",
+      use("armar_pedido", () => ({ ...args, nombre: "Carla" })),
+      (r) => {
+        expect(lastTool(r).ok).toBe(true)
+        return { content: `¡Listo! Tu pedido quedó anotado: ${lastTool(r).total}.` }
+      },
+    )
+    const cart = await call("rosa", "GET", `${base}/conversaciones/${id}/carrito`)
+    expect(cart.json.cart).toMatchObject({ state: "por_pagar", bySofi: true, paid: false })
+    // Con un pedido por pagar, la vitrina no arma otro: se paga ese.
+    const again = await call("rosa", "POST", `${base}/conversaciones/${id}/carrito`, {
+      lines: [{ variantId: lona.negra38, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+    })
+    expect(again.status).toBe(409)
+    // Ventas no prueba; el pago simulado es de quien prueba.
+    expect(
+      (
+        await call("lucia", "POST", `${base}/conversaciones/${id}/pagar`, {
+          orderId: cart.json.cart.id,
+          method: "Yape",
+        })
+      ).status,
+    ).toBe(403)
+    const before = (await call("rosa", "GET", `${base}/variantes/${lona.negra38}/kardex`)).json
+      .stock
+    steps.push((r) => {
+      const last = r.messages.at(-1) as { role: string; content: string }
+      expect(last.role).toBe("system")
+      expect(last.content).toContain("acaba de pagar")
+      return { content: "¡Pago recibido! Te aviso por aquí cuando salga." }
+    })
+    const paid = await call("rosa", "POST", `${base}/conversaciones/${id}/pagar`, {
+      orderId: cart.json.cart.id,
+      method: "Yape",
+    })
+    expect(paid.status).toBe(200)
+    expect(steps).toHaveLength(0)
+    expect(paid.json.cart).toMatchObject({ paid: true, state: "por_salir" })
+    expect(lastSofi(paid).notice).toBe(true)
+    expect(lastSofi(paid).text).toContain("Pago recibido")
+    // No mueve el stock ni cuenta en Reportes.
+    expect((await call("rosa", "GET", `${base}/variantes/${lona.negra38}/kardex`)).json.stock).toBe(
+      before,
+    )
+    const [order] = await db.ownerDb
+      .select()
+      .from(saleOrder)
+      .where(eq(saleOrder.id, cart.json.cart.id))
+    expect(order).toMatchObject({ test: true, state: "por_salir" })
+    // Después del pago, la vitrina arma otro pedido de prueba con lo que eligió ahí.
+    const placed = await call("rosa", "POST", `${base}/conversaciones/${id}/carrito`, {
+      lines: [{ variantId: lona.negra38, quantity: 1 }],
+      deliveryMethodId: ids.reparto,
+    })
+    expect(placed.status).toBe(201)
+    expect(placed.json.cart).toMatchObject({ state: "por_pagar", bySofi: false })
+  })
+
+  it("en una conversación de verdad no se paga de prueba", async () => {
+    const [conv] = await db.ownerDb
+      .insert(conversation)
+      .values({ storeId, channel: "whatsapp", createdBy: "u-rosa" })
+      .returning({ id: conversation.id })
+    const response = await call("rosa", "GET", `${base}/conversaciones/${conv!.id}/carrito`)
+    expect(response.status).toBe(409)
+  })
+
+  it("la vitrina pública da solo lo vendible, y solo si se ve en la web", async () => {
+    const response = await app.request(`${SERVER}/vitrina/calzadosrosa/zapatilla-de-lona`)
+    expect(response.status).toBe(200)
+    const text = await response.text()
+    const page = JSON.parse(text) as Json
+    expect(page.product).toMatchObject({ name: "Zapatilla de lona", visible: true })
+    expect(page.product.colors).toEqual([
+      { value: "blanca", hex: "#ffffff", hex2: null },
+      { value: "negra", hex: "#1f1f1f", hex2: null },
+    ])
+    const negra38 = (page.product.variants as Json[]).find((v) => v.id === lona.negra38)
+    // Quedan pocas: se dice cuántas; nunca el stock de las demás ni el mínimo.
+    expect(negra38).toMatchObject({ color: "negra", size: "38", available: true })
+    expect(page.product.answers).toContainEqual(
+      expect.objectContaining({ question: "¿Se puede lavar en lavadora?" }),
+    )
+    for (const secret of [
+      "minPriceCents",
+      "offerGift",
+      "Medias tobilleras",
+      "lastCostCents",
+      'stock"',
+      "Destiñe",
+      "barcode",
+      "u-rosa",
+    ])
+      expect(text, secret).not.toContain(secret)
+    await call("rosa", "PATCH", `${base}/productos/${lona.id}`, {
+      web: { visible: false, slug: "zapatilla-de-lona" },
+    })
+    expect((await app.request(`${SERVER}/vitrina/calzadosrosa/zapatilla-de-lona`)).status).toBe(404)
+    // La vista previa de la ficha la ve el equipo, también Ventas, aunque no esté en la web.
+    const preview = await call("lucia", "GET", `${base}/productos/${lona.id}/vitrina`)
+    expect(preview.status).toBe(200)
+    expect(preview.json.product.visible).toBe(false)
+    expect(JSON.stringify(preview.json)).not.toContain("minPriceCents")
   })
 })

@@ -1,5 +1,6 @@
 import {
   conversation,
+  conversationMessage,
   type Db,
   product,
   productColor,
@@ -10,7 +11,7 @@ import {
   productVariant,
   storeTemplateField,
 } from "@gestoria/db"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, ne } from "drizzle-orm"
 import { RUBROS } from "./rubros.js"
 
 /**
@@ -19,7 +20,8 @@ import { RUBROS } from "./rubros.js"
  * rubro, los colores con su hex y su foto, un estado de cada tipo que pone la tienda, el precio de
  * revendedora, una promoción solo de una talla y otra solo de un color, el combo y lo que Sofi
  * puede ofrecer, el paquete para la agencia, los códigos, las preguntas respondidas y sin
- * responder, y un poco de historial. Solo para desarrollo y demostraciones; se agrega una vez.
+ * responder (una, de dos clientas, en «Te toca»), una conversación de «Probar como clienta» y un
+ * poco de historial. Solo para desarrollo y demostraciones; se agrega una vez.
  */
 
 const OWNER = "semilla-rosa"
@@ -187,7 +189,10 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
   // La primera y la tercera son de la blanca (la primera es la que manda Sofi); la segunda, de la negra.
   for (const photo of [photos[0], photos[2]])
     if (photo)
-      await tx.update(productPhoto).set({ colorId: blanca!.id }).where(eq(productPhoto.id, photo.id))
+      await tx
+        .update(productPhoto)
+        .set({ colorId: blanca!.id })
+        .where(eq(productPhoto.id, photo.id))
   if (photos[1])
     await tx
       .update(productPhoto)
@@ -236,21 +241,25 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
     },
   ])
 
-  // Lo que Sofi no supo: una sin responder, una que Lucía propuso guardar y una ya en la ficha.
-  const [chat] = await tx
+  // Lo que Sofi no supo: una sin responder (de dos clientas: una sola línea en «Te toca»), una que
+  // Lucía propuso guardar y una ya en la ficha. Son de chats de verdad: los de prueba no van a
+  // «Te toca».
+  const chats = await tx
     .select({ id: conversation.id })
     .from(conversation)
-    .where(and(eq(conversation.storeId, storeId)))
-    .limit(1)
+    .where(and(eq(conversation.storeId, storeId), ne(conversation.channel, "prueba")))
+    .orderBy(asc(conversation.createdAt))
+    .limit(2)
+  const chat = chats[0]
   await tx.insert(productQuestion).values([
-    {
+    ...chats.map((c, i) => ({
       storeId,
       productId: zapatilla,
-      conversationId: chat?.id ?? null,
-      question: "¿La zapatilla destiñe al lavarla?",
+      conversationId: c.id,
+      question: "¿Destiñe al lavarla?",
       askedBy: "agente:sofi",
-      askedAt: daysAgo(0),
-    },
+      askedAt: new Date(Date.now() - (i + 1) * 7 * 60_000),
+    })),
     {
       storeId,
       productId: zapatilla,
@@ -277,6 +286,8 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
     },
   ])
 
+  await seedTestChat(tx, storeId, zapatilla)
+
   // Un poco de historial: quién cambió qué.
   await tx.insert(productEvent).values([
     { storeId, productId: zapatilla, actorUserId: OWNER, action: "creado", createdAt: daysAgo(8) },
@@ -297,4 +308,123 @@ export async function seedDemoSheet(tx: Db, storeId: string): Promise<void> {
       createdAt: daysAgo(6),
     },
   ])
+}
+
+/**
+ * Una conversación de «Probar como clienta» con la zapatilla, como queda después de probarla: la
+ * clienta pide la negra en 38 y Sofi manda su foto, con el precio y lo que queda de verdad; después
+ * pregunta algo que la ficha no dice y Sofi se lo deja a la tienda. Es de prueba: no va a «Te toca».
+ */
+async function seedTestChat(tx: Db, storeId: string, zapatilla: string) {
+  const variants = await tx
+    .select({
+      id: productVariant.id,
+      values: productVariant.optionValues,
+      stock: productVariant.stock,
+      priceCents: productVariant.priceCents,
+    })
+    .from(productVariant)
+    .where(eq(productVariant.productId, zapatilla))
+  const negra = variants.find((v) => v.values[0] === "negra" && v.values[1] === "38")
+  const [row] = await tx
+    .select({ listPriceCents: product.listPriceCents })
+    .from(product)
+    .where(eq(product.id, zapatilla))
+  const [look] = await tx
+    .select({ photoId: productColor.photoId })
+    .from(productColor)
+    .where(and(eq(productColor.productId, zapatilla), eq(productColor.value, "negra")))
+  if (!negra || !row) return
+  const price = `S/ ${Math.round((negra.priceCents ?? row.listPriceCents) / 100)}`
+  const [test] = await tx
+    .insert(conversation)
+    .values({
+      storeId,
+      channel: "prueba",
+      createdBy: OWNER,
+      createdAt: daysAgo(0),
+      updatedAt: daysAgo(0),
+    })
+    .returning({ id: conversation.id })
+  const at = (minutes: number) => new Date(Date.now() - minutes * 60_000)
+  await tx.insert(conversationMessage).values([
+    {
+      storeId,
+      conversationId: test!.id,
+      author: "cliente",
+      text: "¿Tienes la negra en 38?",
+      actorUserId: OWNER,
+      detail: { desde: zapatilla },
+      createdAt: at(12),
+    },
+    {
+      storeId,
+      conversationId: test!.id,
+      author: "sofi",
+      text: `¡Hola! Soy Sofi, de Calzados Rosa. Sí: la zapatilla urbana negra 38 está a ${price} y me quedan ${negra.stock}. ¿Te la envío o la recoges?`,
+      delivery: "prueba",
+      actorUserId: "agente:sofi",
+      detail: {
+        tools: [
+          { name: "buscar_productos", ok: true },
+          { name: "mandar_foto", ok: true },
+        ],
+        ...(look?.photoId
+          ? {
+              medios: [
+                {
+                  kind: "foto",
+                  id: look.photoId,
+                  productId: zapatilla,
+                  product: "Zapatilla urbana",
+                  color: "negra",
+                  label: null,
+                },
+              ],
+            }
+          : {}),
+        usados: [
+          { label: `Stock negra 38: ${negra.stock}`, target: "stock" },
+          { label: "Foto de «negra»", target: "fotos" },
+        ],
+        modelo: "fake",
+      },
+      createdAt: at(12),
+    },
+    {
+      storeId,
+      conversationId: test!.id,
+      author: "cliente",
+      text: "¿Tiene plantilla de memoria?",
+      actorUserId: OWNER,
+      detail: { desde: zapatilla },
+      createdAt: at(10),
+    },
+    {
+      storeId,
+      conversationId: test!.id,
+      author: "sofi",
+      text: "No lo tengo confirmado. Le pregunto a la tienda y te escribo. Mientras, ¿en qué talla la buscas?",
+      delivery: "prueba",
+      actorUserId: "agente:sofi",
+      detail: {
+        tools: [
+          { name: "buscar_productos", ok: true },
+          { name: "anotar_pregunta", ok: true },
+        ],
+        no_supo: [{ productId: zapatilla, question: "¿Tiene plantilla de memoria?" }],
+        usados: [],
+        modelo: "fake",
+      },
+      createdAt: at(10),
+    },
+  ])
+  await tx.insert(productQuestion).values({
+    storeId,
+    productId: zapatilla,
+    conversationId: test!.id,
+    question: "¿Tiene plantilla de memoria?",
+    askedBy: "agente:sofi",
+    askedAt: at(10),
+  })
 }

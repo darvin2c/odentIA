@@ -194,6 +194,8 @@ import {
   addSavedQuestion,
   answerInput,
   answerQuestion,
+  answerQuestions,
+  groupAnswerInput,
   openQuestions,
   savedQuestionInput,
   saveInput,
@@ -210,8 +212,14 @@ import {
   conversationView,
   customerMessageInput,
   newTestConversation,
+  payTestOrder,
+  placeTestOrder,
   returnToSofi,
   saveAgentSettings,
+  tellAnswer,
+  testCart,
+  testOrderInput,
+  testPayInput,
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
@@ -239,6 +247,7 @@ import {
   storeSummary,
   storeTeam,
 } from "./tiendas.js"
+import { previewShowcase, publicShowcase } from "./vitrina.js"
 
 export interface AppDeps {
   /** El rol de la aplicación: todo pedido de una persona, dentro de las reglas de su tienda. */
@@ -325,6 +334,28 @@ export function createApp(deps: AppDeps) {
   }
   const app = new Hono<Env>()
   const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
+  // Sofi (B5): la misma tubería para una conversación de verdad, la prueba y sus avisos.
+  const sofi = {
+    appDb: deps.appDb,
+    lockDb: deps.ownerDb,
+    model: deps.model ?? null,
+    link,
+    storage: deps.storage ?? null,
+  }
+  /**
+   * «Que Sofi se lo diga»: Sofi le escribe a cada clienta que preguntó. Corre después de responder
+   * (cada una llama al modelo): si falla, la respuesta ya quedó guardada y se ve en el registro.
+   */
+  const tellLater = (
+    storeId: string,
+    told: { conversationId: string; question: string }[],
+    answer: string,
+  ) => {
+    if (told.length === 0) return
+    void tellAnswer(sofi, storeId, told, answer).catch((error) =>
+      console.error("gestoria-api: Sofi no pudo decir la respuesta", error),
+    )
+  }
 
   app.use("*", requestId())
   app.use(
@@ -470,6 +501,23 @@ export function createApp(deps: AppDeps) {
     // Menos que lo que valen los enlaces: lo guardado nunca trae uno vencido.
     c.header("cache-control", "public, max-age=300")
     return c.json(media)
+  })
+
+  // La página pública de un producto (`<tienda>.gestoria24.com/<producto>`): solo lo vendible de un
+  // producto que se ve en la web. Sin cuenta: es lo público de la tienda.
+  app.get("/vitrina/:link/:producto", async (c) => {
+    const page = await publicShowcase(
+      deps.ownerDb,
+      deps.storage,
+      c.req.param("link"),
+      c.req.param("producto"),
+    )
+    c.header("access-control-allow-origin", "*")
+    c.header("x-content-type-options", "nosniff")
+    if (!page)
+      return c.json(errorBody(c, "NOT_FOUND", "Ese producto no está en la web de la tienda"), 404)
+    c.header("cache-control", "public, max-age=300")
+    return c.json(page)
   })
 
   // Todo lo de /api pide el token de la cuenta y una copia activa.
@@ -868,9 +916,17 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/preguntas/:questionId/respuesta", async (c) => {
     const input = await bodyOf(c, answerInput)
     const { id, questionId } = c.req.param()
-    return c.json({
-      product: await answerQuestion(deps.appDb, c.get("person"), id, questionId, input),
-    })
+    const done = await answerQuestion(deps.appDb, c.get("person"), id, questionId, input)
+    tellLater(id, done.tell, input.answer)
+    return c.json({ product: done.product, told: done.tell.length })
+  })
+  // La línea de «Te toca»: varias preguntas iguales del mismo producto, de una vez.
+  app.post("/api/tiendas/:id/preguntas/respuesta", async (c) => {
+    const input = await bodyOf(c, groupAnswerInput)
+    const id = c.req.param("id")
+    const done = await answerQuestions(deps.appDb, c.get("person"), id, input)
+    tellLater(id, done.tell, input.answer)
+    return c.json({ product: done.product, told: done.tell.length })
   })
   app.post("/api/tiendas/:id/preguntas/:questionId/guardar", async (c) => {
     const input = await bodyOf(c, saveInput)
@@ -1143,7 +1199,6 @@ export function createApp(deps: AppDeps) {
   })
 
   // Sofi (B5): lo que pone el dueño y la conversación de prueba.
-  const sofi = { appDb: deps.appDb, lockDb: deps.ownerDb, model: deps.model ?? null, link }
   app.get("/api/tiendas/:id/sofi", async (c) =>
     c.json(
       await agentSettings(deps.appDb, c.get("person"), c.req.param("id"), Boolean(sofi.model)),
@@ -1161,7 +1216,13 @@ export function createApp(deps: AppDeps) {
   app.get("/api/tiendas/:id/conversaciones/:conversationId", async (c) => {
     const { id, conversationId } = c.req.param()
     return c.json({
-      conversation: await conversationView(deps.appDb, c.get("person"), id, conversationId),
+      conversation: await conversationView(
+        deps.appDb,
+        c.get("person"),
+        id,
+        conversationId,
+        deps.storage,
+      ),
     })
   })
   const testsBy = new Map<string, { since: number; count: number }>()
@@ -1181,6 +1242,35 @@ export function createApp(deps: AppDeps) {
       )
     if (testsBy.size > 10_000) testsBy.clear()
     return c.json(await writeAsCustomer(sofi, c.get("person"), id, conversationId, input))
+  })
+  // «Probar como clienta»: el carrito de la vitrina (el mismo del chat), su pedido y el pago de
+  // prueba (no se cobra). Solo en una conversación de prueba.
+  app.get("/api/tiendas/:id/conversaciones/:conversationId/carrito", async (c) => {
+    const { id, conversationId } = c.req.param()
+    return c.json(await testCart(deps.appDb, c.get("person"), id, conversationId))
+  })
+  app.post("/api/tiendas/:id/conversaciones/:conversationId/carrito", async (c) => {
+    const input = await bodyOf(c, testOrderInput)
+    const { id, conversationId } = c.req.param()
+    return c.json(await placeTestOrder(deps.appDb, c.get("person"), id, conversationId, input), 201)
+  })
+  app.post("/api/tiendas/:id/conversaciones/:conversationId/pagar", async (c) => {
+    const input = await bodyOf(c, testPayInput)
+    const { id, conversationId } = c.req.param()
+    // Después del pago escribe Sofi (llama al modelo): cuenta en el mismo tope de la prueba.
+    const seen = testsBy.get(id)
+    if (seen && Date.now() - seen.since <= TEST_WINDOW_MS && ++seen.count > MAX_TEST_MESSAGES)
+      throw new StoreError(
+        429,
+        "TOO_MANY",
+        "Muchos mensajes de prueba seguidos. Espera unos minutos y sigue.",
+      )
+    return c.json(await payTestOrder(sofi, c.get("person"), id, conversationId, input))
+  })
+  // La vista previa de la ficha: la página del producto en la vitrina, aunque no se vea en la web.
+  app.get("/api/tiendas/:id/productos/:productId/vitrina", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await previewShowcase(deps.appDb, deps.storage, c.get("person"), id, productId))
   })
   app.post("/api/tiendas/:id/conversaciones/:conversationId/devolver", async (c) => {
     const { id, conversationId } = c.req.param()

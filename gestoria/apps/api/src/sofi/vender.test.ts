@@ -4,7 +4,9 @@
  * ofrecer, y lo que no puede decir para vender («hablé con la tienda», «te la separo»).
  */
 import { describe, expect, it } from "vitest"
-import { offeredIn, offerProblem } from "./herramientas.js"
+import { questionKey } from "../preguntas.js"
+import { dateWords, statusWords, valueText } from "./ficha.js"
+import { offeredIn, offerProblem, usedIn } from "./herramientas.js"
 import { claimsInvented } from "./revisar.js"
 import { customerStory, offerOf } from "./sofi.js"
 
@@ -98,6 +100,12 @@ describe("lo que no dice para vender", () => {
     expect(claimsInvented("Te la separo hasta mañana")).toBe(true)
   })
 
+  it("«Le pregunto a la tienda y te escribo» sí: es lo que va a hacer, no algo que ya pasó", () => {
+    expect(claimsInvented("No lo tengo confirmado. Le pregunto a la tienda y te escribo.")).toBe(
+      false,
+    )
+  })
+
   it("«te consigo» y el plazo sí", () => {
     expect(
       claimsInvented(
@@ -124,5 +132,78 @@ describe("lo que le ofreció en un turno", () => {
   it("sin un total dicho, cuenta lo que menos cede; sin negociar, nada", () => {
     expect(offeredIn(trace, [1000])).toBe(1000)
     expect(offeredIn({ offers: [] }, [12900])).toBeNull()
+  })
+})
+
+describe("lo que lee de la ficha", () => {
+  it("cada dato del rubro en palabras, con su unidad", () => {
+    expect(
+      valueText({ key: "horma", label: "Cómo calza", type: "opcion", needed: true }, "Normal"),
+    ).toBe("Normal")
+    expect(
+      valueText(
+        {
+          key: "plantilla",
+          label: "Largo de la plantilla",
+          type: "por_talla",
+          unit: "cm",
+          needed: false,
+        },
+        { "37": 23.5, "38": 24 },
+      ),
+    ).toBe("37: 23,5 cm; 38: 24 cm")
+    expect(
+      valueText(
+        {
+          key: "medidas",
+          label: "Medidas",
+          type: "tabla",
+          columns: ["Pecho", "Largo"],
+          unit: "cm",
+          needed: true,
+        },
+        { M: [50, null] },
+      ),
+    ).toBe("M: Pecho 50 cm")
+    expect(
+      valueText({ key: "x", label: "X", type: "texto", needed: false }, { noAplica: true }),
+    ).toBe("No aplica")
+    expect(valueText({ key: "x", label: "X", type: "texto", needed: false }, undefined)).toBeNull()
+    expect(dateWords("2026-12-05")).toBe("5 de diciembre")
+    expect(dateWords("2028-06")).toBe("junio de 2028")
+  })
+
+  it("cada estado con lo que dice Sofi; disponible no dice nada", () => {
+    const row = { status: null, statusDays: null, statusPerDay: null, statusDate: null }
+    expect(statusWords(row)).toBeNull()
+    expect(statusWords({ ...row, status: "encargo", statusDays: 5 })).toContain(
+      "te la consigo en 5 días",
+    )
+    expect(statusWords({ ...row, status: "cupo", statusPerDay: 3 })).toContain(
+      "No confirmes que hay cupo",
+    )
+    expect(statusWords({ ...row, status: "preventa", statusDate: "2026-12-05" })).toContain(
+      "Llega el 5 de diciembre",
+    )
+    expect(statusWords({ ...row, status: "liquidacion" })).toContain("precio final")
+  })
+
+  it("qué usó: lo que leyó y está en lo que escribió", () => {
+    const facts = [
+      { label: "Cómo calza: normal", target: "datos", words: ["normal"] },
+      { label: "Stock negra 38: 2", target: "stock", words: ["negra", "38", "2"] },
+      { label: "Stock blanca 38: 0", target: "stock", words: ["blanca", "38", "0"] },
+      { label: "Foto de «negra»", target: "fotos", words: [] },
+    ]
+    expect(usedIn({ facts }, "Calza normal. La negra 38: me quedan 2.")).toEqual([
+      { label: "Cómo calza: normal", target: "datos" },
+      { label: "Stock negra 38: 2", target: "stock" },
+      { label: "Foto de «negra»", target: "fotos" },
+    ])
+  })
+
+  it("dos preguntas iguales, sin tildes ni signos, son una sola", () => {
+    expect(questionKey("¿Destiñe al lavarla?")).toBe(questionKey("destine al lavarla"))
+    expect(questionKey("¿Destiñe?")).not.toBe(questionKey("¿Se encoge?"))
   })
 })

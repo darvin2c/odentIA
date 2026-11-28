@@ -130,10 +130,13 @@ describe("la pantalla donde está", () => {
     expect(owner.title).toBe("Pedidos")
     expect(owner.suggestions).toHaveLength(3)
     // A Ventas no se le sugiere lo que no puede hacer, aunque abra la pantalla: del catálogo, solo
-    // responder lo que Sofi no supo.
+    // responder lo que Sofi no supo y ver la vista previa.
     expect(helpScreenView("sales", "/catalogo")).toEqual({
       title: "Catálogo",
-      suggestions: ["Sofi no supo responder algo de un producto, ¿cómo se lo enseño?"],
+      suggestions: [
+        "Sofi no supo responder algo de un producto, ¿cómo se lo enseño?",
+        "¿Cómo se ve mi producto en la vitrina y en la web?",
+      ],
     })
     expect(helpScreenView("sales", "/")).toEqual({
       title: "Inicio",

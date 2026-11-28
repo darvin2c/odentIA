@@ -73,6 +73,12 @@ export const PUSH_KIND_INFO: Record<
     needs: "reportes.ver",
     byDefault: () => true,
   },
+  preguntas: {
+    label: "Lo que Sofi no supo",
+    hint: "Cuando una clienta pregunta algo que la ficha no dice.",
+    needs: "ventas.atender",
+    byDefault: () => true,
+  },
 }
 
 /** Lo que un rol puede recibir, en el orden en que se muestra. */
@@ -394,6 +400,15 @@ export function chatsPush(fresh: { customerName: string | null; reason: string |
   }
 }
 
+/** Lo que dice el aviso de lo que Sofi no supo: la pregunta más nueva, o cuántas si son varias. */
+export function questionsPush(fresh: { question: string; product: string }[]) {
+  const [first] = fresh
+  if (!first) return null
+  if (fresh.length > 1)
+    return { title: `${fresh.length} preguntas esperan respuesta`, body: "Responder en Inicio" }
+  return { title: `Sofi no supo: «${first.question.slice(0, 80)}»`, body: first.product }
+}
+
 /**
  * El `Topic` de un tipo en una tienda: sin datos de la persona y dentro de lo que acepta el
  * servicio de push (32 caracteres de base64url).
@@ -438,9 +453,11 @@ export async function collectPushes(ownerDb: Db, now: Date = new Date()): Promis
       kinds: string[] | null
       lastEventSeq: string | null
       chatsSeen: string[] | null
+      questionsSeen: string[] | null
     }>(sql`select m.store_id as "storeId", m.user_id as "userId", m.role, s.name as "storeName",
         s.currency, (c.store_id is not null) as "hasChoice", c.kinds,
-        c.last_event_seq::text as "lastEventSeq", c.chats_seen as "chatsSeen"
+        c.last_event_seq::text as "lastEventSeq", c.chats_seen as "chatsSeen",
+        c.questions_seen as "questionsSeen"
       from store_member m join store s on s.id = m.store_id
         left join push_choice c on c.store_id = m.store_id and c.user_id = m.user_id
       where m.user_id in (${sql.join(
@@ -514,18 +531,29 @@ export async function collectPushes(ownerDb: Db, now: Date = new Date()): Promis
         order by updated_at desc limit 50`)
       const waitingIds = waiting.map((chat) => chat.id)
       const chatsArray = sql`${`{${waitingIds.join(",")}}`}::uuid[]`
+      // Lo que Sofi no supo y espera respuesta, de conversaciones de verdad (la prueba no avisa).
+      const asked = await tx.execute<{ id: string; question: string; product: string }>(sql`
+        select q.id, q.question, p.name as product
+        from product_question q
+          join product p on p.id = q.product_id
+          join conversation c on c.store_id = q.store_id and c.id = q.conversation_id
+        where q.store_id = ${seat.storeId} and q.answer is null and c.channel <> 'prueba'
+        order by q.asked_at desc limit 50`)
+      const askedArray = sql`${`{${asked.map((q) => q.id).join(",")}}`}::uuid[]`
 
       // La primera vez: desde aquí. Lo que ya estaba no se avisa. También si todos sus celulares
       // son nuevos: quien los apagó y vuelve a activarlos semanas después no recibe lo de antes,
       // porque mientras no tuvo ninguno el sistema no avanzó su cursor.
       const startsNow = devicesOf(seat.userId).every((device) => !device.welcomedAt)
       if (!seat.hasChoice || seat.lastEventSeq === null || startsNow) {
-        await tx.execute(sql`insert into push_choice (store_id, user_id, last_event_seq, chats_seen)
+        await tx.execute(sql`insert into push_choice
+            (store_id, user_id, last_event_seq, chats_seen, questions_seen)
           values (${seat.storeId}, ${seat.userId},
             (select coalesce(max(seq), 0) from order_event where store_id = ${seat.storeId}),
-            ${chatsArray})
+            ${chatsArray}, ${askedArray})
           on conflict (store_id, user_id) do update
-            set last_event_seq = excluded.last_event_seq, chats_seen = excluded.chats_seen`)
+            set last_event_seq = excluded.last_event_seq, chats_seen = excluded.chats_seen,
+              questions_seen = excluded.questions_seen`)
         continue
       }
 
@@ -597,12 +625,32 @@ export async function collectPushes(ownerDb: Db, now: Date = new Date()): Promis
           "high",
         )
 
+      // Lo que Sofi no supo y no estaba la vez anterior. Lo que ya estaba la primera vez que mira
+      // esto (`questions_seen` nulo, de antes de este aviso) no se avisa.
+      const known = seat.questionsSeen === null ? null : new Set(seat.questionsSeen)
+      const questions = known ? questionsPush(asked.filter((q) => !known.has(q.id))) : null
+      if (questions && kinds.has("preguntas"))
+        send(
+          seat.userId,
+          {
+            ...questions,
+            body: `${questions.body}${where}`,
+            tag: `preguntas:${seat.storeId}`,
+            // «Te toca» de Inicio, donde se responde.
+            href: `/tiendas/${seat.storeId}`,
+          },
+          pushTopic("preguntas", seat.storeId),
+          6 * HOUR,
+          "normal",
+        )
+
       const lastSeq = steps.at(-1)?.seq ?? seat.lastEventSeq
       await tx
         .update(pushChoice)
         .set({
           lastEventSeq: sql`${lastSeq}::bigint`,
           chatsSeen: sql`${chatsArray}`,
+          questionsSeen: sql`${askedArray}`,
         })
         .where(and(eq(pushChoice.storeId, seat.storeId), eq(pushChoice.userId, seat.userId)))
     }

@@ -2504,8 +2504,16 @@ export const storeSetup = pgTable(
  * - `no_entregado`: una entrega que volvió sin entregarse.
  * - `sofi_pedido`: un pedido que armó Sofi.
  * - `dinero`: lo de dinero de toda la tienda (un pago por link que entró).
+ * - `preguntas`: lo que Sofi no supo de un producto y una clienta espera (va a «Te toca»).
  */
-export const PUSH_KINDS = ["pagos", "chats", "no_entregado", "sofi_pedido", "dinero"] as const
+export const PUSH_KINDS = [
+  "pagos",
+  "chats",
+  "no_entregado",
+  "sofi_pedido",
+  "dinero",
+  "preguntas",
+] as const
 export type PushKind = (typeof PUSH_KINDS)[number]
 
 /**
@@ -2562,6 +2570,8 @@ export const pushChoice = pgTable(
      */
     lastEventSeq: bigint("last_event_seq", { mode: "number" }),
     chatsSeen: uuid("chats_seen").array(),
+    /** Lo que Sofi no supo y ya se avisó (`product_question.id`): lo escribe el sistema. */
+    questionsSeen: uuid("questions_seen").array(),
   },
   (table) => [
     primaryKey({ name: "push_choice_pkey", columns: [table.storeId, table.userId] }),
