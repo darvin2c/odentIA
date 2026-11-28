@@ -74,6 +74,25 @@ export const HELP_SCREENS = {
       "devolución",
     ],
   },
+  clientes: {
+    label: "Clientes",
+    path: "/clientes",
+    opens: "ventas.atender",
+    purpose:
+      "Cada clienta con sus compras y lo que Argos sabe de ella (talla, distrito, cumpleaños, canal), con su fuente, para corregirlo, y si acepta promociones.",
+    terms: [
+      "clientes",
+      "clientas",
+      "ficha",
+      "talla",
+      "distrito",
+      "cumpleaños",
+      "corregir",
+      "promociones",
+      "baja",
+      "Argos",
+    ],
+  },
   catalogo: {
     label: "Catálogo",
     path: "/catalogo",
@@ -467,6 +486,44 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         ],
         needs: "configuracion",
         screen: "catalogo",
+      },
+    ],
+  },
+  {
+    id: "clientas",
+    title: "Clientas",
+    faqs: [
+      {
+        id: "lo-que-sabe-argos",
+        q: "¿De dónde saca Argos lo que sabe de una clienta?",
+        a: [
+          "En la ficha de cada clienta, «Lo que Argos sabe de ella»: su talla (o como se llame la medida en tu catálogo), su distrito, su cumpleaños, por dónde prefiere escribir, su Instagram y lo que le gusta. Nadie tiene que llenarlo: Argos lo anota solo, de sus compras y de lo que ella escribió en el chat.",
+          "Cada dato dice de dónde salió y cuándo: sus compras, la dirección de una entrega o lo que ella dijo, con sus palabras tal cual. Lo que ella no dijo, Argos no lo supone. Lo que no tiene claro, como dos tallas que compra por igual, lo usa igual y lo marca «Por confirmar»: no frena ninguna venta.",
+          "Lee cada conversación cuando ella deja de escribir un rato, nunca a media conversación, y no lee las de prueba. Tampoco junta fichas por el teléfono: si dos fichas son la misma clienta, lo decide una persona.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "corregir-dato",
+        q: "¿Cómo corrijo un dato de una clienta?",
+        a: [
+          "En su ficha, en «Lo que Argos sabe de ella», «Corregir» junto al dato. Lo que pones queda «Lo puso la tienda», con tu nombre, y Argos ya no lo cambia aunque ella diga otra cosa después.",
+          "Nada se borra: cada dato guarda su historial, con lo que anotó Argos antes y lo que corrigió la tienda. Si un dato está «Por confirmar», al corregirlo eliges el que es.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
+      },
+      {
+        id: "no-quiere-promociones",
+        q: "¿Qué pasa si una clienta dice que no quiere promociones?",
+        a: [
+          "En su ficha, «Cuándo se le puede escribir» dice lo último que ella contestó sobre las «Promociones»: «Acepta», «Pidió que no le escriban» o «Sin permiso todavía». Sofi se lo pregunta en su primera compra y anota lo que ella responde, con sus palabras.",
+          "Si en el chat pide que no le escriban más, Sofi lo anota en ese momento y desde entonces no se le escriben promociones. Lo de sus pedidos, como el pago y la entrega, sigue igual.",
+          "Nadie del equipo puede decir por ella que sí: solo cambia si ella lo vuelve a escribir.",
+        ],
+        needs: "ventas.atender",
+        screen: "clientes",
       },
     ],
   },
