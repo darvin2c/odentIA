@@ -268,7 +268,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo le enseño a Sofi lo que debe saber?",
         a: [
           "En Configuración, en Sofi, «Lo que sabe»: con «Agregar» escribes una pregunta como la haría una clienta («¿Hacen cambios?») y su respuesta. Sofi la lee cuando le preguntan eso y la cuenta así.",
-          "En «Lo que aprendió» ves lo que clientas preguntaron en tus chats y Sofi no supo: con «Responder» lo guardas en «Lo que sabe». Nada se agrega solo. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
+          "En «Lo que aprendió» ves lo que clientas preguntaron en tus chats y Sofi no supo: con «Responder» lo guardas en «Lo que sabe». En el celular, si hay preguntas por responder, una línea debajo de las pestañas dice cuántas y te lleva ahí. Nada se agrega solo. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
         ],
         needs: "configuracion",
         screen: "sofi",
