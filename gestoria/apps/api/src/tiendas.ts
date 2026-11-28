@@ -512,10 +512,22 @@ export async function inviteToStore(
           "FORBIDDEN",
           "Solo el dueño puede corregir la invitación de un dueño",
         )
-      await tx
+      // Solo si sigue pendiente: dos correcciones a la vez, o una aceptación en medio, no dejan
+      // dos vivas ni anulan una ya aceptada.
+      const revoked = await tx
         .update(storeInvitation)
         .set({ revokedAt: now, revokedBy: person.userId })
-        .where(eq(storeInvitation.id, input.replaces))
+        .where(
+          and(
+            eq(storeInvitation.id, input.replaces),
+            eq(storeInvitation.storeId, storeId),
+            isNull(storeInvitation.acceptedAt),
+            isNull(storeInvitation.revokedAt),
+          ),
+        )
+        .returning({ id: storeInvitation.id })
+      if (revoked.length === 0)
+        throw new StoreError(404, "NOT_FOUND", "La invitación que corriges ya no está")
       await tx.insert(storeEvent).values({
         storeId,
         actorUserId: person.userId,
@@ -575,7 +587,10 @@ export async function inviteToStore(
       actorUserId: person.userId,
       action: "invitacion.creada",
       subject: input.email,
-      detail: { role: input.role, ...(pending ? { replaces: pending.id } : {}) },
+      detail: {
+        role: input.role,
+        ...((input.replaces ?? pending?.id) ? { replaces: input.replaces ?? pending?.id } : {}),
+      },
     })
     return {
       id,

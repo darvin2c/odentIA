@@ -47,7 +47,8 @@ import { StoreHeader, useStoreContext } from "./tiendas"
  * «Plan y pagos» (lienzo B, paso B7; lienzo «gestorIA · Configuración, de nuevo», tablero 10): lo
  * que la administración dice de la tienda, de arriba abajo: lo que se debe y cuándo vence, el saldo
  * usado y el tope, cada pedido que cuenta (cuando el acuerdo lo mande), lo que se cobró y los
- * pagos. Nada se calcula aquí que la administración no mande. Solo el
+ * pagos. Nada se suma ni se calcula aquí: solo lo que falta de un cobro y lo que queda del saldo,
+ * restando las dos cifras que manda la administración. Solo el
  * Dueño (el plan, decisión 7). Se pregunta desde la Ayuda de arriba, como en toda la tienda. Si
  * la administración no responde, se ve lo último que se supo y de cuándo es: la tienda sigue
  * funcionando igual.
@@ -296,7 +297,7 @@ function ToPay({ state, connected }: { state: Known; connected: boolean }) {
         <p className="text-sm text-muted-foreground">
           {state.charges.length === 0
             ? "Todavía no tienes cobros."
-            : "Tus cobros están pagados: los ves más abajo, en «Lo que se te cobró»."}
+            : "Tus cobros anteriores los ves más abajo, en «Lo que se te cobró»."}
         </p>
       </section>
     )
