@@ -2,8 +2,9 @@ import { Button, toast } from "@odentia/ui"
 import { AiSuggestion, PageNotice } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Sparkles } from "lucide-react"
+import { useState } from "react"
 import { Swatch } from "./ficha/piezas"
-import { api } from "./lib/api"
+import { ApiError, api } from "./lib/api"
 import {
   applyProposal,
   type ColorValue,
@@ -27,10 +28,15 @@ interface Photo {
   urls: { miniatura: string } | null
 }
 
+/** Lo que queda escrito cuando «Juntar con IA» no encuentra qué juntar: un resultado, no un error. */
+export const NOTHING_TO_JOIN = "No encontré fotos del mismo producto para juntar."
+
 /** «Juntar con IA» y «Completar con IA» de un producto de la carga. */
 export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
+  // Sin grupos, el resultado queda fijo junto a la tabla hasta que se vuelva a pedir.
+  const [groupNote, setGroupNote] = useState<string | null>(null)
   const key = LOAD_PROPOSALS_KEY(store.id, loadId)
   const done = (data: LoadProposals, what: string) => {
     queryClient.setQueryData(key, data)
@@ -42,16 +48,21 @@ export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
       api<LoadProposals>(`/api/tiendas/${store.id}/cargas/${loadId}/ia/juntar`, {
         method: "POST",
       }),
+    onMutate: () => setGroupNote(null),
     onSuccess: (data) => {
       const n = data.proposals.filter((p) => p.kind === "juntar").length
-      done(
-        data,
-        n
-          ? `La IA propone juntar ${n} ${n === 1 ? "grupo" : "grupos"} de fotos`
-          : "La IA no vio fotos del mismo producto",
-      )
+      if (n) done(data, `La IA propone juntar ${n} ${n === 1 ? "grupo" : "grupos"} de fotos`)
+      else {
+        queryClient.setQueryData(key, data)
+        void queryClient.invalidateQueries({ queryKey: ["ia-tope", store.id] })
+        setGroupNote(NOTHING_TO_JOIN)
+      }
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "NOTHING_TO_GROUP")
+        setGroupNote(NOTHING_TO_JOIN)
+      else toast.error(error.message)
+    },
   })
   const complete = useMutation({
     mutationFn: (itemId: string) =>
@@ -84,7 +95,7 @@ export function useLoadIa(loadId: string, refreshLoad: () => Promise<unknown>) {
     },
     onError: (error) => toast.error(error.message),
   })
-  return { group, complete, decide, all }
+  return { group, complete, decide, all, groupNote }
 }
 
 const LABEL: Record<string, string> = {
@@ -118,7 +129,13 @@ export function LoadIaPanel({
       later: proposals.filter((p) => p.itemId === item.id && p.waitsForProduct),
     }))
     .filter((x) => x.list.length || x.later.length)
-  if (!groups.length && !byItem.length && !(cap && !cap.available) && look?.state !== "fallo")
+  if (
+    !groups.length &&
+    !byItem.length &&
+    !(cap && !cap.available) &&
+    look?.state !== "fallo" &&
+    !ia.groupNote
+  )
     return null
   const busy = ia.decide.isPending || ia.all.isPending
   return (
@@ -127,6 +144,14 @@ export function LoadIaPanel({
         <PageNotice tone="aviso" label="La IA no mira ahora">
           {cap.message}
         </PageNotice>
+      ) : null}
+      {ia.groupNote && !groups.length ? (
+        <p
+          role="status"
+          className="rounded-xl border bg-card px-3 py-2 text-sm text-muted-foreground"
+        >
+          {ia.groupNote}
+        </p>
       ) : null}
       {look?.state === "fallo" && look.failure ? (
         <PageNotice tone="aviso" label="La IA no pudo mirar">

@@ -367,10 +367,19 @@ export function AddFromPhotos({
   const fieldOf = (p: Proposal) => template?.fields.find((f) => f.key === keyOf(p.field))
   const labelOf = (p: Proposal) =>
     p.kind === "palabras" ? "Cómo la buscan" : (fieldOf(p)?.label ?? p.reason)
-  const acceptAll = () =>
+  // Después de «Mirar las fotos» y de «Aplicar todos», el foco va al primer resultado (el nombre),
+  // no al principio de la página: lo que lo tenía (el botón, la barra) ya no está.
+  const focusFirst = () => requestAnimationFrame(() => document.getElementById(ids.name)?.focus())
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al llegar a lo propuesto
+  useEffect(() => {
+    if (step === "propuesta") focusFirst()
+  }, [step])
+  const acceptAll = () => {
     setDecided((now) =>
       Object.fromEntries([...Object.entries(now), ...undecided.map((p) => [p.id, "usar"])]),
     )
+    focusFirst()
+  }
 
   async function save() {
     if (!target) return

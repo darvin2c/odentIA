@@ -82,6 +82,8 @@ test("«Agregar desde fotos»: la IA propone, el precio lo pone la persona y se 
   // Lo propuesto va punteado, con ✦ y «Usar»; el precio, vacío: lo pone la persona.
   const name = drawer.getByLabel("Nombre", { exact: true })
   await expect(name).toHaveValue("Zapatilla de lona", { timeout: 30_000 })
+  // El foco va al primer resultado, no al principio de la página.
+  await expect(name).toBeFocused()
   await expect(drawer.getByLabel("Categoría", { exact: true })).toHaveValue("Zapatillas")
   await expect(drawer.getByText(/La IA propone \d+ cosas y pregunta lo que no ve/)).toBeVisible()
   await expect(drawer.getByRole("listitem").filter({ hasText: /^negra/ })).toBeVisible()
@@ -93,6 +95,8 @@ test("«Agregar desde fotos»: la IA propone, el precio lo pone la persona y se 
   await fit.getByRole("button", { name: "Normal" }).click()
   await expect(fit.getByText(/Respondiste «Normal»/)).toBeVisible()
   await drawer.getByRole("button", { name: "Aplicar todos" }).click()
+  // La barra se va con «Aplicar todos»: el foco no cae al principio, va al nombre.
+  await expect(name).toBeFocused()
   await name.fill("Zapatilla de lona negra")
   await drawer.getByLabel("Precio").fill("129")
   await drawer.getByLabel(/Tallas/).fill("38 a 40")
@@ -118,6 +122,13 @@ test("«Agregar desde fotos»: la IA propone, el precio lo pone la persona y se 
     rubroData: { horma: "Normal", material: "Lona" },
   })
   expect(sheet.product.colors).toMatchObject([{ value: "negra", hex: "#1f1f1f" }])
+  // Lo que Rosa respondió (cómo calza) queda a su nombre, no como «Propuesta de la IA».
+  const { events } = await json("GET", `${STORE}/productos/${productId}/historial`)
+  const answered = (events as { changes: unknown; reason: string | null }[]).find((e) =>
+    JSON.stringify(e.changes).includes("Normal"),
+  )
+  expect(answered).toMatchObject({ reason: null })
+  expect(events.map((e: { action: string }) => e.action)).toContain("creado")
 })
 
 test("en la ficha, «Completar» vuelve a mirar y pregunta lo que falta", async ({ page }) => {
@@ -181,6 +192,15 @@ test("«Cargar muchos»: «Juntar con IA» propone y Rosa confirma el grupo", as
   await expect
     .poll(async () => (await json("GET", `${STORE}/cargas/${load.id}`)).items.length)
     .toBe(2)
+  // Sin nada más que juntar, lo dice y queda escrito, en neutro: no es un error que se va.
+  await page.getByRole("button", { name: "Juntar con IA" }).click()
+  const none = page.getByRole("status").filter({
+    hasText: "No encontré fotos del mismo producto para juntar.",
+  })
+  await expect(none).toBeVisible({ timeout: 30_000 })
+  await page.waitForTimeout(6_000)
+  await expect(none).toBeVisible()
+  await shot(page, "ia-8-juntar-sin-grupos-1440")
   await json("DELETE", `${STORE}/cargas/${load.id}`)
 })
 
