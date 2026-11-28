@@ -3,6 +3,7 @@
  * cede una cotización frente a lo que la tienda deja ofrecer.
  */
 import { describe, expect, it } from "vitest"
+import { bargainOf, isObjection } from "./herramientas.js"
 import {
   DEFAULT_CHOICES,
   daysWords,
@@ -122,5 +123,56 @@ describe("lo que Sofi lee de cómo habla y de lo que no puede dar", () => {
     expect(nothing).toContain("sin abrir con «¡Sí!» ni «¡Claro!»")
     // Y la regla de negociar dice lo mismo para cualquier pedido que no puede dar.
     expect(SOFI_RULES).toContain("sin abrir con «¡Sí!» ni «¡Claro!»")
+  })
+})
+
+describe("la duda de la clienta, antes de ofrecer (Sofi no regala el precio)", () => {
+  it("preguntar el precio no es una duda; «caro», «lo pienso» u otra tienda sí", () => {
+    for (const asks of [
+      "¿Cuánto cuesta la zapatilla blanca?",
+      "¿cuál es el precio?",
+      "¿y el envío a Surco cuánto es?",
+      "La quiero en 38",
+      // Preguntas de todos los días que no son una duda por el precio.
+      "¿La tienes en otra talla?",
+      "¿Tienen la de caña baja?",
+      "¿El envío es gratis?",
+      "¿Llega en menos de 3 días?",
+      "Es para regalo",
+      "No sé si me queda",
+      "No encontré mi talla",
+      "¿Me pasas un presupuesto?",
+      "¿Tienen crema para la cara?",
+    ])
+      expect(isObjection(asks), asks).toBe(false)
+    for (const doubts of [
+      "Uy, está caro",
+      "¿me lo dejas en 110?",
+      "mmm lo voy a pensar",
+      "¿tienen descuento?",
+      "En otra tienda está más barato",
+      "¿me regalas el envío?",
+      "¿Y si me bajas 10 soles?",
+    ])
+      expect(isObjection(doubts), doubts).toBe(true)
+  })
+
+  it("la duda cuenta solo después de oír un precio", () => {
+    const early = bargainOf(
+      [
+        { author: "cliente", text: "Está caro todo aquí" },
+        { author: "sofi", text: "Cuesta S/ 129." },
+      ],
+      "PEN",
+    )
+    expect(early).toEqual({ pricesSaid: [12900], objection: null })
+    const late = bargainOf(
+      [
+        { author: "sofi", text: "Cuesta S/ 129." },
+        { author: "cliente", text: "Uy, está caro" },
+      ],
+      "PEN",
+    )
+    expect(late.objection).toBe("Uy, está caro")
   })
 })

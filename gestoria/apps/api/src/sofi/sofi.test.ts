@@ -132,6 +132,22 @@ async function write(conversationId: string, text: string, ...script: Step[]) {
   return sent.json as { conversation: Json; result: Json }
 }
 
+/** Sofi ya le dijo el precio completo y lo que tiene el producto (antes de eso no ofrece nada). */
+async function heardPrice(conversationId: string) {
+  await write(
+    conversationId,
+    "¿Cuánto cuesta la zapatilla blanca?",
+    use("buscar_productos", () => ({ texto: "zapatilla blanca" })),
+    say("Cuesta S/ 129: es la que más sale, no se pela y la plantilla es acolchada."),
+  )
+}
+
+/** Y después la clienta dudó por el precio: recién ahí Sofi puede ofrecer algo. */
+async function heardPriceAndDoubted(conversationId: string) {
+  await heardPrice(conversationId)
+  await write(conversationId, "Uy, está caro", say("Es de las que más duran: no se pela."))
+}
+
 const lastSofi = (view: Json) =>
   [...(view.conversation.messages as Json[])].reverse().find((m) => m.author === "sofi")!
 
@@ -334,6 +350,7 @@ describe("Sofi vende con las reglas de la tienda", () => {
       entrega_id: ids.reparto,
       envio_cobrado: 0,
     }
+    await heardPriceAndDoubted(id)
     // Sin resumen previo, no lo arma.
     const early = await write(
       id,
@@ -451,6 +468,7 @@ describe("Sofi vende con las reglas de la tienda", () => {
       entrega_id: ids.reparto,
       envio_cobrado: 0,
     }
+    await heardPriceAndDoubted(id)
     await write(
       id,
       "La quiero, soy Diana",
@@ -501,6 +519,105 @@ describe("Sofi vende con las reglas de la tienda", () => {
   })
 
   // Al final: arma un pedido, y los de arriba cuentan los números desde el 0001.
+  it("a quien solo pregunta el precio no le rebaja ni le regala el envío", async () => {
+    const id = await newTest()
+    const free = { lineas: [{ variante_id: ids.t38, cantidad: 1 }], entrega_id: ids.reparto }
+    // Todavía no le dijo el precio: cotizar no deja ceder nada.
+    const asked = await write(
+      id,
+      "¿Cuánto cuesta la zapatilla blanca en 38?",
+      use("buscar_productos", () => ({ texto: "zapatilla blanca 38" })),
+      use("cotizar", () => ({ ...free, envio_cobrado: 0 })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(false)
+        expect(result.problemas[0]).toContain("precio completo")
+        return {
+          toolCalls: [
+            toolCall("cotizar", { ...free, lineas: [{ ...free.lineas[0], precio_unitario: 119 }] }),
+          ],
+        }
+      },
+      (r) => {
+        expect(lastTool(r).ok).toBe(false)
+        return { content: "Cuesta S/ 129: es la que más sale y la plantilla es acolchada." }
+      },
+    )
+    expect(lastSofi(asked).basis.why).toContain(
+      "No ofreció nada: antes le tocaba decir el precio completo y lo que tiene el producto.",
+    )
+    // Ya oyó el precio, pero no dudó ni pidió rebaja: tampoco.
+    const plain = await write(
+      id,
+      "Ok, ¿y el envío a Surco cuánto es?",
+      use("cotizar", () => ({ ...free, envio_cobrado: 0 })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(false)
+        expect(result.problemas[0]).toContain("no dudó")
+        return { toolCalls: [toolCall("cotizar", free)] }
+      },
+      (r) => ({ content: `El envío es S/ 10: te queda en ${lastTool(r).total}.` }),
+    )
+    expect(lastSofi(plain).text).toBe("El envío es S/ 10: te queda en S/ 139.")
+    expect(lastSofi(plain).basis.why).toContain(
+      "No ofreció nada: la clienta no dudó ni pidió rebaja después de oír el precio.",
+    )
+    const [said] = await db.ownerDb
+      .select({ detail: conversationMessage.detail })
+      .from(conversationMessage)
+      .where(
+        and(
+          eq(conversationMessage.conversationId, id),
+          eq(conversationMessage.author, "sofi"),
+          sql`(${conversationMessage.detail} -> 'oferta') is not null`,
+        ),
+      )
+    expect(said).toBeUndefined()
+  })
+
+  it("la primera oferta cede como mucho la mitad de lo que hay sobre el mínimo", async () => {
+    const id = await newTest()
+    await heardPrice(id)
+    const line = (precio: number) => ({
+      lineas: [{ variante_id: ids.t38, cantidad: 1, precio_unitario: precio }],
+      entrega_id: ids.reparto,
+    })
+    // S/ 129 con mínimo S/ 100: hay S/ 29 para ceder; la primera vez, hasta S/ 14.50.
+    const first = await write(
+      id,
+      "Está caro, ¿me lo dejas en 100?",
+      use("cotizar", () => line(100)),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(false)
+        expect(result.problemas[0]).toContain("mitad")
+        return { toolCalls: [toolCall("cotizar", line(115))] }
+      },
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(true)
+        return { content: `Te la dejo en ${result.total} si lo pagas hoy.` }
+      },
+    )
+    expect(lastSofi(first).basis.why).toEqual(
+      expect.arrayContaining([
+        "Ofreció porque la clienta dijo «Está caro, ¿me lo dejas en 100?», después de oír el precio.",
+        "Era su primera oferta: cedió como mucho la mitad de lo que hay sobre tu mínimo.",
+      ]),
+    )
+    // Insiste: la oferta es una sola y no se mejora (lo que queda no se usa).
+    await write(
+      id,
+      "¿Y en 110?",
+      use("cotizar", () => line(110)),
+      (r) => {
+        expect(lastTool(r).problemas[0]).toContain("no se mejora")
+        return { content: "Lo que te consigo es S/ 125 si lo pagas hoy." }
+      },
+    )
+  })
+
   it("la oferta llega una vez, con la hora exacta, no se mejora y el pedido vence a esa hora", async () => {
     const id = await newTest()
     const args = {
@@ -509,6 +626,7 @@ describe("Sofi vende con las reglas de la tienda", () => {
       envio_cobrado: 0,
     }
     let deadline = ""
+    await heardPrice(id)
     const offered = await write(
       id,
       "Mmm, lo voy a pensar",
@@ -907,6 +1025,7 @@ describe("lo que elige la tienda, lo que sabe y lo que aprendió (ADR 0234)", ()
   it("lo que la tienda apaga, cotizar no lo deja ofrecer; y la compra grande la pasa a una persona", async () => {
     await saveSofi(settings({ offerShipping: false, handoffOverCents: 20000 }))
     const id = await newTest()
+    await heardPrice(id)
     const sent = await write(
       id,
       "Lo voy a pensar",

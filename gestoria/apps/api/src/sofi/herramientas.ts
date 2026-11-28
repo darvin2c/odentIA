@@ -30,7 +30,7 @@ import {
   quoteOrderIn,
   variantPrices,
 } from "../pedidos.js"
-import { autoUnitCents } from "../precio.js"
+import { autoUnitCents, type Quote } from "../precio.js"
 import { type Balance, balanceIn, balancesIn } from "../saldo.js"
 import { StoreError } from "../tiendas.js"
 import type { ToolDef } from "./modelo.js"
@@ -41,7 +41,7 @@ import {
   offerKindsOf,
   offerNotAllowed,
 } from "./opciones.js"
-import { percentsIn } from "./revisar.js"
+import { amountsIn, percentsIn } from "./revisar.js"
 import { noteGapIn } from "./saber.js"
 
 /**
@@ -86,6 +86,8 @@ export interface TurnTrace {
   read: { id: string; question: string }[]
   /** La pregunta que no supo responder, si la anotó al pasar el chat a una persona. */
   gap: string | null
+  /** Por qué cotizar no la dejó ofrecer nada (`bargainProblem`): lo dice «Por qué». */
+  withheld: Withheld | null
 }
 
 export function newTrace(): TurnTrace {
@@ -99,6 +101,7 @@ export function newTrace(): TurnTrace {
     refused: [],
     read: [],
     gap: null,
+    withheld: null,
   }
 }
 
@@ -152,6 +155,106 @@ export function offerProblem(
   return null
 }
 
+/**
+ * Lo que la conversación ya tiene para negociar: los importes que Sofi o el equipo dijeron antes
+ * de este turno y la duda de la clienta después de oír un precio. Sale de los mensajes, no de lo
+ * que el modelo diga que pasó.
+ */
+export interface Bargain {
+  pricesSaid: number[]
+  /** El mensaje de la clienta con su duda (precio, «lo pienso», otra tienda); null si no dudó. */
+  objection: string | null
+}
+
+/**
+ * Una duda de la clienta que abre la puerta a una oferta: el precio («caro», «¿me lo dejas en
+ * 110?», «descuento», «envío gratis»), «lo voy a pensar» o otra tienda. Preguntar el precio no es
+ * una duda. Si no la reconoce, Sofi vende a su precio: errar por no ofrecer no regala nada.
+ */
+const OBJECTIONS = [
+  // «caro», «está cara»; no «crema para la cara».
+  /\b(caro|caros|caras|carito|carita)\b|\b(muy|esta|bien|algo|un poco|medio|mas) cara\b/,
+  /\b(rebaj|descuent|dscto|dcto|ofert|promo|yapa|ganga)/,
+  // «¿me lo bajas?», «bájale»; no «caña baja».
+  /\bbaj(as|ar|arme|ame|amelo|amela|ale|arias)\b/,
+  /mas barat|mas economic|ultimo precio|precio final|mejor precio|buen precio|cuanto menos/,
+  /\b(dejas|deja|dejarias|das|darias|pones) (en|a) \d/,
+  /\b(un poco|algo|un toque) menos\b/,
+  // Pedir el envío gratis, no preguntar si lo es («¿el envío es gratis?»).
+  /\b(regalas|regalame|regalarias|me das|dame|ponme|hazme) (el )?envio\b|\bcon envio gratis\b/,
+  /\blo (pienso|pensare|veo|consulto)\b|\b(voy a|dejame|tengo que|lo voy a) pensar(lo)?\b|\bpensarlo\b/,
+  /otra tienda|otro lado|otro sitio|en otra (tienda|parte|web)|me sale mas barat|esta mas barat|encontre .*(barat|menos)/,
+  /\bno me alcanza\b|\bmi presupuesto\b/,
+]
+
+export const isObjection = (text: string) => {
+  const words = plain(text)
+  return OBJECTIONS.some((pattern) => pattern.test(words))
+}
+
+/** Lo que la conversación tiene para negociar, en orden: la duda cuenta si vino después de un precio. */
+export function bargainOf(history: { author: string; text: string }[], currency: string): Bargain {
+  const pricesSaid: number[] = []
+  let objection: string | null = null
+  for (const message of history) {
+    if (message.author !== "cliente") pricesSaid.push(...amountsIn(message.text, currency))
+    else if (pricesSaid.length > 0 && isObjection(message.text))
+      objection = message.text.trim().replace(/\s+/g, " ").slice(0, 120)
+  }
+  return { pricesSaid, objection }
+}
+
+export type Withheld = "sin_precio" | "sin_duda" | "mitad"
+
+/**
+ * Lo que la herramienta frena aunque el modelo lo intente («Sofi no regala el precio»), además de
+ * la oferta única (`offerProblem`) y el mínimo (`precio.ts`), que no cambian:
+ * - nada se cede antes de que Sofi le haya dicho el precio completo de lo que lleva;
+ * - nada se cede a quien no dudó ni pidió rebaja después de oír el precio;
+ * - la primera oferta de la conversación cede como mucho la mitad del margen sobre los mínimos.
+ *   Lo demás no se usa después: la oferta es una sola y no se mejora.
+ */
+export function bargainProblem(
+  bargain: Bargain,
+  offer: SofiOffer | null,
+  priced: Pick<Quote, "negotiated" | "lines" | "marginCents" | "marginUsedCents">,
+): { reason: Withheld; words: string } | null {
+  if (!priced.negotiated) return null
+  // Con su oferta ya hecha (vigente: lo mira `offerProblem` antes), el precio y la duda ya
+  // pasaron por aquí; aunque se salgan de lo que se lee del historial, la oferta se cumple.
+  if (offer) return null
+  // Cada producto, por su precio (de lista, con su promoción o por cantidad) o lo de todos juntos.
+  const sold = priced.lines.filter((line) => !line.gift)
+  const said = (cents: number) => bargain.pricesSaid.includes(cents)
+  const heard =
+    said(sold.reduce((sum, line) => sum + line.autoUnitCents * line.quantity, 0)) ||
+    sold.every(
+      (line) =>
+        said(line.autoUnitCents) ||
+        said(line.listUnitCents) ||
+        said(line.autoUnitCents * line.quantity),
+    )
+  if (!heard)
+    return {
+      reason: "sin_precio",
+      words:
+        "Todavía no le dijiste el precio completo de lo que lleva ni lo que tiene el producto: dilo primero, a su precio, sin ofrecer nada. Solo si después duda, puedes ofrecer.",
+    }
+  if (!bargain.objection)
+    return {
+      reason: "sin_duda",
+      words:
+        "La clienta no dudó ni pidió rebaja después de oír el precio: véndelo a su precio, sin ofrecer nada (ni el envío). Ofreces solo si dice «lo pienso», compara con otra tienda o insiste por el precio.",
+    }
+  if (priced.marginUsedCents * 2 > priced.marginCents)
+    return {
+      reason: "mitad",
+      words:
+        "Es tu primera oferta en esta conversación: cede como mucho la mitad de lo que se puede ceder (primera_oferta_cede_hasta). Ofrece algo más chico.",
+    }
+  return null
+}
+
 export interface SofiToolContext {
   appDb: Db
   storeId: string
@@ -171,6 +274,8 @@ export interface SofiToolContext {
   offer: SofiOffer | null
   /** Hasta cuándo vale lo que ofrezca ahora: el plazo de su oferta, o 24 horas desde ahora. */
   offerDeadline: Date
+  /** Lo que la conversación tiene para negociar (`bargainOf`). */
+  bargain: Bargain
   /** Lo que eligió la tienda (`opciones.ts`). */
   choices: AgentChoices
   /** «Lo que sabe»: su número corto («p1») y la respuesta, que lee con leer_lo_que_sabe. */
@@ -615,6 +720,11 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
       await collectionOf(tx, ctx.storeId, input.paymentMethodId),
     )
     if (problem) return { ok: false, problemas: [problem] }
+    const held = bargainProblem(ctx.bargain, ctx.offer, q)
+    if (held) {
+      ctx.trace.withheld = held.reason
+      return { ok: false, problemas: [held.words] }
+    }
     // Lo que la tienda no deja ofrecer (ADR 0234) no se cotiza: Sofi no lo puede decir.
     const kinds = offerKindsOf(q, ctx.choices)
     const refused = offerNotAllowed(kinds, ctx.choices)
@@ -653,6 +763,10 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
       // Para que negocie, no para decirlo: no entran en lo que puede escribir (revela el mínimo).
       margen_usado: formatMoney(q.marginUsedCents, ctx.currency),
       margen_que_queda: formatMoney(q.marginCents - q.marginUsedCents, ctx.currency),
+      // La primera oferta, como mucho la mitad (`bargainProblem`); para negociar, no para decirlo.
+      ...(ctx.offer
+        ? {}
+        : { primera_oferta_cede_hasta: formatMoney(Math.floor(q.marginCents / 2), ctx.currency) }),
       ...(q.negotiated
         ? {
             plazo: `Si lo paga hasta ${momentWords(ctx.timeZone, ctx.offerDeadline, ctx.now)}. Dilo con esa hora exacta: es a cambio de pagar en ese plazo.`,
@@ -674,6 +788,11 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
       await collectionOf(tx, ctx.storeId, input.paymentMethodId),
     )
     if (problem) return { ok: false, problemas: [problem] }
+    const held = bargainProblem(ctx.bargain, ctx.offer, priced.quote)
+    if (held) {
+      ctx.trace.withheld = held.reason
+      return { ok: false, problemas: [held.words] }
+    }
     const refused = offerNotAllowed(offerKindsOf(priced.quote, ctx.choices), ctx.choices)
     if (refused) return { ok: false, problemas: [notAllowedWords(refused, ctx.choices)] }
     // Las compras grandes las atiende la tienda, si así lo eligió: Sofi pasa el chat.

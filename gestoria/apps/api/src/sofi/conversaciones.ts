@@ -15,6 +15,7 @@ import { storeClockIn } from "../hora.js"
 import { pad } from "../pedidos.js"
 import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
+import type { Withheld } from "./herramientas.js"
 import {
   choicesInput,
   choicesOf,
@@ -242,6 +243,15 @@ const TOOL_WORDS: Record<string, string> = {
   leer_lo_que_sabe: "Leyó «Lo que sabe»",
 }
 
+/** Por qué no ofreció nada aunque lo intentó (`bargainProblem`), en palabras de la tienda. */
+const HELD_WORDS: Record<Withheld, string> = {
+  sin_precio:
+    "No ofreció nada: antes le tocaba decir el precio completo y lo que tiene el producto.",
+  sin_duda: "No ofreció nada: la clienta no dudó ni pidió rebaja después de oír el precio.",
+  mitad:
+    "Quiso ceder más de la mitad de lo que hay sobre tu mínimo en su primera oferta, y no la dejó.",
+}
+
 const strings = (value: unknown) =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []
 
@@ -261,6 +271,12 @@ export function whyOf(detail: Record<string, unknown>): string[] {
     why.push(
       `Ofreció de tu lista: ${offered.map((k) => OFFER_NAMES[k]).join(" y ")}, sin bajar de tu mínimo.`,
     )
+  if (typeof detail.objecion === "string")
+    why.push(`Ofreció porque la clienta dijo «${detail.objecion}», después de oír el precio.`)
+  if (detail.primera === true)
+    why.push("Era su primera oferta: cedió como mucho la mitad de lo que hay sobre tu mínimo.")
+  if (typeof detail.sin_oferta === "string" && detail.sin_oferta in HELD_WORDS)
+    why.push(HELD_WORDS[detail.sin_oferta as Withheld])
   const refused = strings(detail.no_dejo).filter((k): k is OfferKind => k in OFFER_NAMES)
   if (refused.length)
     why.push(

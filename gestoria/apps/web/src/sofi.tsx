@@ -598,9 +598,10 @@ function WhatSheOffers({ overview }: { overview: SofiOverview }) {
           <Lightbulb aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p>
             <span className="font-medium">Siempre igual, no se cambia: </span>
-            ofrece una sola vez, a cambio de pagar dentro de 24 horas, con la hora exacta. Nunca
-            baja del mínimo de cada producto (lo pones en Catálogo). Con pago al recibir, no hay
-            oferta.
+            primero dice el precio completo, y ofrece solo si la clienta duda después de oírlo. Una
+            sola vez, con como mucho la mitad de lo que hay sobre tu mínimo, a cambio de pagar
+            dentro de 24 horas, con la hora exacta. Nunca baja del mínimo de cada producto (lo pones
+            en Catálogo). Con pago al recibir, no hay oferta.
           </p>
         </div>
       </Panel>

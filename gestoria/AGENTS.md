@@ -217,7 +217,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   (`PUT …/sofi/estado`, `setAgentEnabled`), que no cambia esa versión: guardar opciones nunca
   enciende ni pausa a Sofi.
 - Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
-  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (ADR 0224). Lo frena la herramienta, no solo el prompt (`bargainProblem` de
+  `sofi/herramientas.ts`, en cotizar y armar_pedido): nada se cede antes de que Sofi haya dicho el
+  precio completo de lo que lleva, ni sin una duda de la clienta después de oírlo (`isObjection`;
+  preguntar el precio no es una duda), y la primera oferta cede como mucho la mitad del margen
+  sobre los mínimos. «Por qué» dice la duda que abrió la oferta o por qué no ofreció. Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
   (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).

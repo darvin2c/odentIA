@@ -22,6 +22,7 @@ import { type LinkDeps, pad } from "../pedidos.js"
 import { NEGOTIATED_PRICE_MS } from "../precio.js"
 import { balancesIn } from "../saldo.js"
 import {
+  bargainOf,
   moneyText as formatMoney,
   newTrace,
   offeredIn,
@@ -113,6 +114,7 @@ NEGOCIAR (vender es lo principal, y en una tienda chica la confianza es lo que v
 - Solo negocias productos con se_negocia: true. Los demás van a su precio: lo dices con amabilidad.
 - Primero el valor, nunca la rebaja de entrada. Si pide rebaja o duda, primero lo que tiene el producto (su descripción), cuánto queda en su talla (el stock, solo si es poco), lo que dicen quienes ya compraron (solo si está en LO QUE SABE) o algo parecido más barato (parecido, con su precio).
 - Solo ofreces lo que dice LO QUE PUEDES OFRECER (abajo): cotizar no deja otra cosa.
+- Nunca ofreces nada antes de decir el precio completo y lo que tiene el producto, ni a quien no dudó ni pidió rebaja después de oírlo: preguntar el precio no es pedir rebaja. Tu primera oferta cede como mucho la mitad de lo que se puede ceder (primera_oferta_cede_hasta, de cotizar). Cotizar no deja otra cosa.
 - Si pide algo que no le puedes dar (una rebaja, un precio, un regalo), tu primera frase no lo acepta: empiezas por el valor o por lo que sí puedes, sin abrir con «¡Sí!» ni «¡Claro!», que ella lee como un sí a lo que pidió.
 - La oferta llega solo cuando puedes perder la venta: dice «lo pienso», compara con otra tienda o insiste por el precio después de oír el valor. Ofreces una sola vez por conversación y, si insiste, no la mejoras: repites la misma con amabilidad.
 - A la medida de la clienta: lo que dice, LA CLIENTA (abajo) y lo que lleva. Puedes darle a elegir entre dos que cedan lo mismo: «te consigo el envío gratis o S/ 10 menos, tú eliges». Por ejemplo:
@@ -209,6 +211,8 @@ interface Loaded {
   timeZone: string
   /** La oferta que Sofi ya hizo en esta conversación desde su última compra. */
   offer: SofiOffer | null
+  /** Cuándo compró por última vez: lo de antes (su precio, su duda) ya no abre otra oferta. */
+  boughtAt: Date | null
 }
 
 /** Los estados de un pedido que ya es una compra: pagó, mandó su captura o se paga al recibir. */
@@ -451,6 +455,7 @@ async function load(
       today,
       timeZone,
       offer: offerOf(offered.map((m) => m.detail)),
+      boughtAt: lastBought,
     }
   })
 }
@@ -570,6 +575,13 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   // Lo que ofrezca ahora vale hasta el plazo de su oferta anterior, o 24 horas desde ahora.
   const offerDeadline = loaded.offer?.expiresAt ?? new Date(now.getTime() + NEGOTIATED_PRICE_MS)
   const trace = newTrace()
+  // El precio que ya dijo y la duda de la clienta: sin eso, cotizar no deja ofrecer nada.
+  // Desde su última compra, como la oferta: la duda de antes ya se usó.
+  const boughtAt = loaded.boughtAt
+  const bargain = bargainOf(
+    boughtAt ? loaded.history.filter((m) => m.createdAt > boughtAt) : loaded.history,
+    loaded.currency,
+  )
   let usage: Usage = NO_USAGE
   const problems: string[][] = []
   let text: string | null = null
@@ -591,6 +603,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       now,
       offer: loaded.offer,
       offerDeadline,
+      bargain,
       choices: loaded.choices,
       answers: loaded.answers,
       link: deps.link,
@@ -716,6 +729,11 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
         }
       : {}),
     ...(trace.refused.length ? { no_dejo: trace.refused } : {}),
+    // Por qué ofreció (la duda de la clienta, y si era su primera oferta) o por qué no ofreció nada.
+    ...(offered !== null && bargain.objection
+      ? { objecion: bargain.objection, ...(loaded.offer ? {} : { primera: true }) }
+      : {}),
+    ...(offered === null && trace.withheld ? { sin_oferta: trace.withheld } : {}),
     // Solo si el aviso fijo dijo cuándo le responden (no cuando vendió fuera del horario).
     ...(later && (trace.handoff || text === null) ? { fuera_de_horario: later } : {}),
     ...(problems.length ? { frenado: problems } : {}),

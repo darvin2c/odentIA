@@ -514,7 +514,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo dejo que Sofi negocie el precio?",
         a: [
           "En el producto, «Precio y negociación»: pon el precio mínimo de venta. Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
-          "Sofi primero cuenta lo bueno del producto y ofrece algo solo cuando ve que puede perder la venta: una sola vez, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
+          "Sofi primero dice el precio completo y lo bueno del producto, y ofrece algo solo si después el cliente duda: dice que está caro, que lo va a pensar, que en otra tienda está más barato o pide rebaja. A quien solo pregunta el precio no le rebaja ni le regala el envío. Ofrece una sola vez, con como mucho la mitad de lo que hay entre tu precio y tu mínimo, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
           "Ahí también van los precios por cantidad y las promociones con sus fechas.",
         ],
         needs: "configuracion",
