@@ -92,7 +92,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   anota lo que costó) y sus propuestas, `ai_proposal` (campo, valor, por qué, estado propuesta /
   usada / cambiada / descartada, quién y cuándo). Pedir, usar, cambiar, descartar y «Aplicar
   todos» es `configuracion`; ver, `catalogo.ver` (las de una carga, `configuracion`). Sofi y
-  Argos no las ven (`0041_reglas_ia_de_fotos.sql`).
+  Argos no las ven (`0062_reglas_ia_de_fotos.sql`).
 - Usar una propuesta pasa por la operación de siempre (`updateProductIn`, `saveGridIn`,
   `updatePhotoIn`; en la carga, `applyItem` y `joinPhotosIn`), con «Propuesta de la IA» en el
   historial. En un producto de una carga solo se usan el nombre, la categoría, la descripción y
