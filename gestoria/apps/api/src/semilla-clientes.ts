@@ -84,7 +84,7 @@ export async function seedDemoCustomers(tx: Db, storeId: string): Promise<void> 
       orderInput.parse({
         channel: "whatsapp",
         deliveryMethodId: reparto,
-        zone: "Surco y Miraflores",
+        zone: "Centro y Lima Moderna",
         paymentMethodId: yape,
         ...input,
       }),

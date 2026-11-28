@@ -29,7 +29,7 @@ import {
   seedDemoNewStore,
   seedDemoSetupDone,
 } from "./semilla-primeros-pasos.js"
-import { seedDemoSofi } from "./semilla-sofi.js"
+import { seedDemoSofi, seedDemoSofiKnows } from "./semilla-sofi.js"
 import { receiveSupportRequest } from "./soporte.js"
 
 /**
@@ -115,6 +115,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoPartPayment(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCorrections(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoSofiKnows(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCustomers(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoExchanges(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPushChoices(tx as unknown as Db, DEMO_STORE_ID)
@@ -307,7 +308,7 @@ async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<
               userId: guestId,
               replies: [
                 {
-                  body: "En Sofi, en «Cómo vende»: escríbelo en «Lo que debe saber» y guarda. Sofi lo cuenta tal cual.",
+                  body: "En Sofi, en «Cuándo te pasa el chat»: elige los días y las horas de tu equipo con «Cambiar». Sofi lo dice y, fuera de ese horario, dice cuándo le responden.",
                   at: at(-2),
                 },
               ],

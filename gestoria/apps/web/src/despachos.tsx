@@ -36,6 +36,7 @@ import {
 } from "./lib/despachos"
 import { dayName, nextDay, storeToday } from "./lib/pedidos"
 import { money } from "./lib/tienda"
+import { agencySite } from "./lib/zonas"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
@@ -268,7 +269,21 @@ function DeliveryRow({ delivery: d, today }: { delivery: Delivery; today: string
         </span>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
           <span>{wayText(d)}</span>
-          {parcel && d.agency && d.tracking ? <span>N.º {d.tracking}</span> : null}
+          {parcel && d.agency && d.tracking ? (
+            agencySite(d.agency) ? (
+              <a
+                className="underline"
+                href={agencySite(d.agency) ?? ""}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`N.º ${d.tracking}: seguir en la web de ${d.agency}`}
+              >
+                N.º {d.tracking}
+              </a>
+            ) : (
+              <span>N.º {d.tracking}</span>
+            )
+          ) : null}
           {parcel && d.state === "en_camino" && !d.tracking ? <span>sin n.º de envío</span> : null}
           {!pickup ? <span>{d.courierName ?? "Sin repartidor"}</span> : null}
           {d.late && d.deliverOn ? (

@@ -82,6 +82,13 @@ export interface DeliverySlot {
 export const MAX_DELIVERY_SLOTS = 8
 
 /**
+ * Quién paga el viaje cuando la clienta no estuvo: la primera vez la tienda y el siguiente ella,
+ * siempre ella, o siempre la tienda.
+ */
+export const FAILED_TRIPS = ["primera_tienda", "clienta", "tienda"] as const
+export type FailedTrip = (typeof FAILED_TRIPS)[number]
+
+/**
  * Una tienda (decisión 8: una persona puede tener o atender varias y elige al entrar). Vende
  * en una sola moneda, la que elige al crearla (decisión 9), con su código ISO 4217.
  */
@@ -116,6 +123,13 @@ export const store = pgTable(
      * 540–780). Un pedido sin franja sale igual. El pedido copia la suya: cambiarlas no lo toca.
      */
     deliverySlots: jsonb("delivery_slots").$type<DeliverySlot[]>().notNull().default([]),
+    /**
+     * Entregas (lienzo «gestorIA · Configuración, de nuevo», tablero 7): el distrito desde el que
+     * salen los pedidos, por su código UBIGEO del INEI (seis cifras), y quién paga el viaje que
+     * no se pudo entregar (decisión 6: la primera vez lo asume la tienda; el siguiente, la clienta).
+     */
+    shipFrom: text("ship_from"),
+    failedTrip: text("failed_trip").$type<FailedTrip>().notNull().default("primera_tienda"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -135,6 +149,11 @@ export const store = pgTable(
       "store_delivery_slots_check",
       sql`jsonb_typeof(${table.deliverySlots}) = 'array' and jsonb_array_length(${table.deliverySlots}) <= ${sql.raw(String(MAX_DELIVERY_SLOTS))}`,
     ),
+    check(
+      "store_ship_from_check",
+      sql`${table.shipFrom} is null or ${table.shipFrom} ~ '^[0-9]{6}$'`,
+    ),
+    check("store_failed_trip_check", inList("failed_trip", FAILED_TRIPS)),
     check(
       "store_time_zone_check",
       sql`char_length(${table.timeZone}) <= 64 and ${table.timeZone} ~ '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$'`,
@@ -434,10 +453,42 @@ export type DeliveryType = (typeof DELIVERY_TYPES)[number]
 export const DELIVERY_COSTS = ["gratis", "fijo", "por_zona", "se_acuerda"] as const
 export type DeliveryCost = (typeof DELIVERY_COSTS)[number]
 
+/** Cuándo llega lo de una zona: hoy si pide antes de la hora de corte, al día siguiente o en días fijos. */
+export const ZONE_LEADS = ["hoy", "manana", "dias"] as const
+export type ZoneLead = (typeof ZONE_LEADS)[number]
+
+/**
+ * Una zona de reparto (tablero 7): sus distritos por su código UBIGEO del INEI (un distrito está
+ * en una sola zona por tienda), su precio, cuándo llega (con la hora de corte en la zona horaria
+ * de la tienda, en minutos desde las 00:00), los días fijos (ISO 8601: 1 lunes … 7 domingo), sus
+ * franjas (de las de la tienda), si acepta pago al recibir y si le alcanza el envío gratis.
+ */
 export interface DeliveryZone {
   name: string
   priceCents: number
+  districts: string[]
+  lead: ZoneLead
+  cutoff: number | null
+  weekdays: number[]
+  slots: DeliverySlot[]
+  payOnDelivery: boolean
+  freeShipping: boolean
 }
+
+/** El horario del recojo: días (ISO 8601) y de qué hora a qué hora, en minutos desde las 00:00. */
+export interface OpeningHours {
+  days: number[]
+  opens: number
+  closes: number
+}
+
+/** En cuánto está listo para recoger. */
+export const READY_IN = ["1h", "2h", "dia_siguiente"] as const
+export type ReadyIn = (typeof READY_IN)[number]
+
+/** El flete de la agencia: lo paga la clienta al recoger, o la tienda lo cobra antes. */
+export const FREIGHTS = ["al_recoger", "antes"] as const
+export type Freight = (typeof FREIGHTS)[number]
 
 export const storeDeliveryMethod = pgTable(
   "store_delivery_method",
@@ -462,6 +513,13 @@ export const storeDeliveryMethod = pgTable(
      */
     maxDiscountCents: integer("max_discount_cents"),
     freeFromCents: integer("free_from_cents"),
+    /** Recojo en tienda: su horario y en cuánto está listo. */
+    openingHours: jsonb("opening_hours").$type<OpeningHours[]>().notNull().default([]),
+    readyIn: text("ready_in").$type<ReadyIn>(),
+    /** Por agencia: con cuáles («Shalom», «Olva Courier») y quién paga el flete. */
+    agencies: jsonb("agencies").$type<string[]>().notNull().default([]),
+    freight: text("freight").$type<Freight>(),
+    freightCents: integer("freight_cents"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -489,6 +547,15 @@ export const storeDeliveryMethod = pgTable(
     check(
       "store_delivery_method_deal_amounts_check",
       sql`(${table.maxDiscountCents} is null or ${table.maxDiscountCents} > 0) and (${table.freeFromCents} is null or ${table.freeFromCents} > 0)`,
+    ),
+    check(
+      "store_delivery_method_pickup_check",
+      sql`jsonb_typeof(${table.openingHours}) = 'array' and jsonb_array_length(${table.openingHours}) <= 7 and (${table.readyIn} is null or ${inList("ready_in", READY_IN)})`,
+    ),
+    // El flete cobrado antes lleva su monto; si no, no hay monto.
+    check(
+      "store_delivery_method_agency_check",
+      sql`jsonb_typeof(${table.agencies}) = 'array' and jsonb_array_length(${table.agencies}) <= 10 and (${table.freight} is null or ${inList("freight", FREIGHTS)}) and ((${table.freight} = 'antes') = (${table.freightCents} is not null)) and (${table.freightCents} is null or ${table.freightCents} > 0)`,
     ),
     check(
       "store_delivery_method_texts_check",
@@ -1370,7 +1437,7 @@ export const storeTemplateField = pgTable(
 
 /**
  * Lo que Sofi no supo de un producto (decisión 11): la pregunta de la clienta y su conversación, y
- * la respuesta de la tienda. Sofi solo la anota (`0056_reglas_la_ficha_del_producto.sql`). Ventas
+ * la respuesta de la tienda. Sofi solo la anota (`0060_reglas_la_ficha_del_producto.sql`). Ventas
  * responde y puede pedir que se guarde en la ficha (`save_requested`); el Dueño o el Administrador
  * la guardan (`saved_at`), y desde ahí Sofi la usa. Una persona también anota en la ficha una
  * pregunta ya respondida, sin conversación.
@@ -2295,6 +2362,24 @@ export const customerEvent = pgTable(
  */
 
 /** Lo que el dueño deja escrito para Sofi (tablero 8, «Lo que pone el dueño»). */
+/** Cómo habla Sofi (tablero 8 de «Configuración, de nuevo»): se elige, nunca se escribe. */
+export const AGENT_TONES = ["cercana", "formal", "directa"] as const
+export type AgentTone = (typeof AGENT_TONES)[number]
+export const AGENT_ADDRESSES = ["tu", "usted"] as const
+export type AgentAddress = (typeof AGENT_ADDRESSES)[number]
+export const AGENT_EMOJIS = ["ninguno", "pocos"] as const
+export type AgentEmojis = (typeof AGENT_EMOJIS)[number]
+
+/**
+ * El horario del equipo: los días (ISO 8601, 1 = lunes … 7 = domingo) y las horas, en la zona de
+ * la tienda (`store.time_zone`), «HH:MM».
+ */
+export interface TeamHours {
+  days: number[]
+  from: string
+  to: string
+}
+
 export const storeAgent = pgTable(
   "store_agent",
   {
@@ -2303,8 +2388,28 @@ export const storeAgent = pgTable(
     enabled: boolean("enabled").notNull().default(false),
     /** El nombre con que saluda; nulo: «Sofi, de <tienda>». */
     displayName: text("display_name"),
-    /** «Lo que debe saber»: horario, cambios de talla, cuidados. Lo cuenta tal cual. */
+    /**
+     * El texto libre de antes («Lo que debe saber»). Ya no se lee: pasó a «Lo que sabe»
+     * (`store_agent_answer`) al migrar. Se borra en un cambio siguiente.
+     */
     knowledge: text("knowledge").notNull().default(""),
+    tone: text("tone").$type<AgentTone>().notNull().default("cercana"),
+    address: text("address").$type<AgentAddress>().notNull().default("tu"),
+    emojis: text("emojis").$type<AgentEmojis>().notNull().default("pocos"),
+    /** Lo que puede ofrecer para cerrar una venta; todo sale del mismo margen (ADR 0224). */
+    offerShipping: boolean("offer_shipping").notNull().default(true),
+    offerDiscount: boolean("offer_discount").notNull().default(true),
+    offerGift: boolean("offer_gift").notNull().default(true),
+    /** Una rebaja solo si lleva dos o más (para quien duda entre dos). */
+    offerSecond: boolean("offer_second").notNull().default(false),
+    /** Pasa el chat a una persona si la clienta está molesta. */
+    handoffUpset: boolean("handoff_upset").notNull().default(true),
+    /** Pasa el chat a una persona si el pedido pasa de este total; nulo: nunca por el monto. */
+    handoffOverCents: integer("handoff_over_cents"),
+    /** El horario del equipo; nulo: no lo dijo, y Sofi no dice cuándo responde una persona. */
+    teamHours: jsonb("team_hours").$type<TeamHours>(),
+    /** Fuera del horario sigue vendiendo; si no, la conversación espera a una persona. */
+    afterHoursSells: boolean("after_hours_sells").notNull().default(true),
     /** Los seguimientos que Argos le encarga (decisión 5); cada uno se apaga aparte. */
     followPayment: boolean("follow_payment").notNull().default(true),
     followThanks: boolean("follow_thanks").notNull().default(true),
@@ -2317,6 +2422,10 @@ export const storeAgent = pgTable(
     check(
       "store_agent_texts_check",
       sql`(${table.displayName} is null or char_length(btrim(${table.displayName})) between 1 and 60) and char_length(${table.knowledge}) <= 2000`,
+    ),
+    check(
+      "store_agent_choices_check",
+      sql`${inList("tone", AGENT_TONES)} and ${inList("address", AGENT_ADDRESSES)} and ${inList("emojis", AGENT_EMOJIS)} and (${table.handoffOverCents} is null or ${table.handoffOverCents} > 0)`,
     ),
     foreignKey({
       name: "store_agent_store_id_fkey",
@@ -2466,6 +2575,88 @@ export const stockRequest = pgTable(
       .on(table.variantId, table.conversationId)
       .where(sql`notified_at is null`),
     index("stock_request_store_idx").on(table.storeId, table.variantId),
+  ],
+)
+
+/**
+ * «Lo que sabe» Sofi (tablero 8 de «Configuración, de nuevo»): preguntas y respuestas que escribe
+ * la tienda. Sofi ve las preguntas y lee la respuesta que necesita (`leer_lo_que_sabe`): son
+ * datos, nunca instrucciones. Solo las escribe una persona (`0040_reglas_lo_que_sabe.sql`).
+ */
+export const storeAgentAnswer = pgTable(
+  "store_agent_answer",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "store_agent_answer_texts_check",
+      sql`char_length(btrim(${table.question})) between 3 and 200 and char_length(btrim(${table.answer})) between 1 and 1000`,
+    ),
+    foreignKey({
+      name: "store_agent_answer_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_agent_answer_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/** Cómo se cerró una pregunta de «Lo que aprendió»: la tienda la respondió o la quitó. */
+export const AGENT_GAP_OUTCOMES = ["respondida", "quitada"] as const
+export type AgentGapOutcome = (typeof AGENT_GAP_OUTCOMES)[number]
+
+/**
+ * «Lo que aprendió» (decisión 8): una pregunta que Sofi no supo responder en una conversación de
+ * verdad. La anota Sofi al pasar el chat a una persona; solo propone: lo que la tienda responde
+ * va a «Lo que sabe», nada se agrega solo. Se agrupa por su clave (la pregunta sin tildes ni
+ * signos). La de «Probar a Sofi» no se anota.
+ */
+export const agentGap = pgTable(
+  "agent_gap",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    question: text("question").notNull(),
+    questionKey: text("question_key").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    outcome: text("outcome").$type<AgentGapOutcome>(),
+    answerId: uuid("answer_id"),
+    closedBy: text("closed_by"),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "agent_gap_texts_check",
+      sql`char_length(btrim(${table.question})) between 3 and 200 and char_length(${table.questionKey}) between 1 and 200`,
+    ),
+    check(
+      "agent_gap_closed_check",
+      sql`(${table.outcome} is null) = (${table.closedAt} is null) and (${table.outcome} is null) = (${table.closedBy} is null) and (${table.outcome} is null or ${inList("outcome", AGENT_GAP_OUTCOMES)})`,
+    ),
+    foreignKey({
+      name: "agent_gap_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "agent_gap_answer_fkey",
+      columns: [table.answerId],
+      foreignColumns: [storeAgentAnswer.id],
+    }).onDelete("set null"),
+    uniqueIndex("agent_gap_open_uidx")
+      .on(table.conversationId, table.questionKey)
+      .where(sql`outcome is null`),
+    index("agent_gap_store_idx").on(table.storeId, table.questionKey),
   ],
 )
 

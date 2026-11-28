@@ -122,6 +122,7 @@ const ROSA: ConfigOverview = {
       type: "DeliveryModeOwnFleet",
       cost: "por_zona",
       zones: 2,
+      districts: 12,
       acceptsPayOnDelivery: true,
     },
     {
@@ -129,6 +130,7 @@ const ROSA: ConfigOverview = {
       type: "OnSitePickup",
       cost: "gratis",
       zones: 0,
+      districts: 0,
       acceptsPayOnDelivery: false,
     },
     {
@@ -136,6 +138,7 @@ const ROSA: ConfigOverview = {
       type: "ParcelService",
       cost: "se_acuerda",
       zones: 0,
+      districts: 0,
       acceptsPayOnDelivery: false,
     },
   ],
@@ -147,7 +150,7 @@ const ROSA: ConfigOverview = {
     names: ["Lucía Torres", "Mario Huamán", "Rosa Quispe"],
     supportAsks: 1,
   },
-  sofi: { enabled: true, tried: false },
+  sofi: { enabled: true, tried: false, toAnswer: 0 },
   plan: {
     name: "Emprende",
     status: "activa",
@@ -173,7 +176,7 @@ const CARMEN: ConfigOverview = {
   deliveries: [],
   slots: 0,
   team: { members: 1, invitations: 0, couriers: [], names: ["Carmen Huanca"], supportAsks: 0 },
-  sofi: { enabled: false, tried: false },
+  sofi: { enabled: false, tried: false, toAnswer: 0 },
   plan: null,
 }
 
@@ -302,7 +305,7 @@ describe("cómo está cada parte", () => {
     expect(named.pagos?.summary).toBe("Yape con captura · Efectivo al recibir")
     expect(lines.entregas).toMatchObject({
       summary: "Reparto en Lima · recojo en tienda · Shalom",
-      status: "2 zonas",
+      status: "12 distritos en 2 zonas",
       pending: false,
     })
     expect(lines.equipo).toMatchObject({
