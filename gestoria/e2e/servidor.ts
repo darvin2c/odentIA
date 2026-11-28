@@ -184,12 +184,11 @@ const app = createApp({
   contract,
   // «Probar a Sofi» con el modelo de desarrollo: responde por reglas, sin la red (ADR 0234: la
   // prueba muestra «Por qué»). No mide nada de cómo vende.
-  model: fakeModel(),
+  model,
   // Los avisos al celular (tablero 15): una clave pública VAPID de prueba, para que la pantalla los
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
   storage,
-  model,
   // La IA de fotos, con el modelo de desarrollo: sin red, responde lo grabado para las fotos de la
   // demo y del banco (`ia-fotos-muestra.ts`). Nunca un proveedor real.
   photosModel: fakePhotosModel(),
