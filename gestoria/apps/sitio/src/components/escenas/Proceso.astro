@@ -15,19 +15,22 @@ type Estado = {
   tu?: string
   argos?: string
   cara?: "atenta" | "decidida" | "feliz"
+  /** Lo que dice Sofi en su globito al llegar a este estado. */
+  dice: string
 }
 const estados: Estado[] = [
-  { estado: "Escribe la clienta", sofi: "Atiende al instante", cara: "atenta" },
-  { estado: "Cotizado", sofi: "Muestra el valor y ofrece una vez", cara: "decidida" },
-  { estado: "Pedido anotado", sofi: "Anota el pedido y pide el pago", cara: "atenta" },
+  { estado: "Escribe la clienta", sofi: "Atiende al instante", cara: "atenta", dice: "¡Hola, Andrea!" },
+  { estado: "Cotizado", sofi: "Muestra el valor y ofrece una vez", cara: "decidida", dice: "S/ 120 y te regalo el envío" },
+  { estado: "Pedido anotado", sofi: "Anota el pedido y pide el pago", cara: "atenta", dice: "Te paso el link" },
   {
     estado: "Pago por confirmar",
     tu: "Confirmas la captura (el link se confirma solo)",
     argos: "Te toca: 1 pago por confirmar",
+    dice: "¡Te toca confirmar!",
   },
-  { estado: "Pagado", sofi: "Cobró, y el stock baja solo", cara: "feliz" },
-  { estado: "Sale hoy", tu: "Empacas", argos: "Sale hoy, en Despachos" },
-  { estado: "Entregado", tu: "Entregas", argos: "Queda en la ficha de la clienta" },
+  { estado: "Pagado", sofi: "Cobró, y el stock baja solo", cara: "feliz", dice: "¡Pagado!" },
+  { estado: "Sale hoy", tu: "Empacas", argos: "Sale hoy, en Despachos", dice: "¡A empacar!" },
+  { estado: "Entregado", tu: "Entregas", argos: "Queda en la ficha de la clienta", dice: "¡Una venta más!" },
 ]
 const caras = { atenta: sofiAtenta, decidida: sofiDecidida, feliz: sofiFeliz }
 ---
@@ -45,7 +48,7 @@ const caras = { atenta: sofiAtenta, decidida: sofiDecidida, feliz: sofiFeliz }
         <div class="proceso__fila proceso__fila--estados" role="row">
           <span class="proceso__carril" role="columnheader">Estado</span>
           {estados.map((e, i) => (
-            <span class="proceso__estado" role="columnheader" data-col={i} data-cara={e.cara ?? ""} data-nombre={e.estado}>
+            <span class="proceso__estado" role="columnheader" data-col={i} data-cara={e.cara ?? ""} data-nombre={e.estado} data-dice={e.dice}>
               <i aria-hidden="true">{i + 1}</i>{e.estado}
             </span>
           ))}
@@ -58,9 +61,14 @@ const caras = { atenta: sofiAtenta, decidida: sofiDecidida, feliz: sofiFeliz }
             </span>
           ))}
           <span class="proceso__sofi" data-proceso-sofi aria-hidden="true">
-            {Object.entries(caras).map(([k, img]) => (
-              <Image src={img} alt="" widths={[80, 160]} sizes="80px" data-cara={k} />
-            ))}
+            <span class="proceso__dice" data-proceso-dice></span>
+            <span class="proceso__salto" data-proceso-salto>
+              <span class="proceso__flota" data-proceso-flota>
+                {Object.entries(caras).map(([k, img]) => (
+                  <Image src={img} alt="" widths={[96, 192]} sizes="96px" data-cara={k} />
+                ))}
+              </span>
+            </span>
           </span>
         </div>
         <div class="proceso__fila proceso__fila--tu" role="row">

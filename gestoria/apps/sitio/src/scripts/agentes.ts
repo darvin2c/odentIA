@@ -391,6 +391,30 @@ function viajeCel() {
     .to(desdeCel, { opacity: 0, duration: 0.12, ease: "none" }, 0.88)
 }
 
+/** Unas chispas naranjas que saltan alrededor de Sofi cuando festeja. */
+function chispas(donde: HTMLElement) {
+  for (let i = 0; i < 10; i++) {
+    const c = document.createElement("span")
+    c.className = "chispa"
+    donde.append(c)
+    const ang = (i / 10) * Math.PI * 2
+    gsap.fromTo(
+      c,
+      { x: 0, y: 0, scale: 1, opacity: 1 },
+      {
+        x: Math.cos(ang) * (50 + Math.random() * 30),
+        y: Math.sin(ang) * (50 + Math.random() * 30) - 20,
+        scale: 0,
+        opacity: 0,
+        duration: 0.9,
+        delay: 0.45,
+        ease: "power3.out",
+        onComplete: () => c.remove(),
+      },
+    )
+  }
+}
+
 /**
  * Quién hace qué: en computadora la escena se fija y el pedido avanza de estado en estado con el
  * scroll. Cada estado se enciende al llegar, el rótulo del pedido cambia, Sofi salta al último estado
@@ -407,6 +431,18 @@ function proceso() {
   const rotulo = p.querySelector<HTMLElement>("[data-proceso-estado]")
   const avance = p.querySelector<HTMLElement>("[data-proceso-avance]")
   const caras = sofi ? [...sofi.querySelectorAll<HTMLElement>("[data-cara]")] : []
+  const salto = p.querySelector<HTMLElement>("[data-proceso-salto]")
+  const dice = p.querySelector<HTMLElement>("[data-proceso-dice]")
+  // Mientras espera, Sofi flota y se balancea: nunca queda quieta.
+  const flota = p.querySelector<HTMLElement>("[data-proceso-flota]")
+  if (flota) {
+    gsap.to(flota, { y: -8, duration: 1.4, ease: "sine.inOut", yoyo: true, repeat: -1 })
+    gsap.fromTo(
+      flota,
+      { rotate: -5 },
+      { rotate: 5, duration: 2.1, ease: "sine.inOut", yoyo: true, repeat: -1 },
+    )
+  }
   const total = estados.length
   let actual = -1
   const ir = (n: number) => {
@@ -422,21 +458,53 @@ function proceso() {
       rotulo.textContent = estado.dataset.nombre ?? ""
       gsap.fromTo(rotulo, { scale: 0.8 }, { scale: 1, duration: 0.4, ease: "back.out(3)" })
     }
-    // Sofi va al último estado suyo que ya pasó, con la cara de ese estado.
+    // Sofi va al último estado suyo que ya pasó, con la cara de ese estado; si el paso es de tu
+    // equipo, se queda y se inclina hacia él para avisarte.
     let k = n
     while (k > 0 && !estados[k]?.dataset.cara) k--
     const celda = celdasSofi[k]
     const cara = estados[k]?.dataset.cara
-    if (sofi && celda) {
+    const tuyo = k !== n
+    if (sofi && celda && salto) {
       const x = celda.offsetLeft + celda.offsetWidth / 2 - sofi.offsetWidth / 2 - sofi.offsetLeft
-      gsap.to(sofi, { x, duration: 0.6, ease: "power3.out" })
-      gsap.fromTo(
-        sofi,
-        { y: 0 },
-        { y: -18, duration: 0.25, yoyo: true, repeat: 1, ease: "sine.out" },
-      )
+      const cambia = Math.abs(Number(gsap.getProperty(sofi, "x")) - x) > 2
+      if (cambia) {
+        // Un salto de verdad: se agacha, se estira en el aire y rebota al caer.
+        gsap.to(sofi, { x, duration: 0.55, ease: "power2.inOut", delay: 0.12 })
+        gsap
+          .timeline()
+          .to(salto, { scaleX: 1.2, scaleY: 0.78, y: 6, duration: 0.12, ease: "power2.out" })
+          .to(salto, { y: -54, scaleX: 0.88, scaleY: 1.16, duration: 0.3, ease: "power2.out" })
+          .to(salto, { y: 0, scaleX: 1, scaleY: 1, duration: 0.25, ease: "power2.in" })
+          .to(salto, { scaleX: 1.18, scaleY: 0.84, duration: 0.08 })
+          .to(salto, { scaleX: 1, scaleY: 1, duration: 0.6, ease: "elastic.out(1.2, 0.35)" })
+      } else {
+        gsap.fromTo(
+          salto,
+          { y: 0 },
+          { y: -16, duration: 0.18, yoyo: true, repeat: 1, ease: "sine.out" },
+        )
+      }
+      gsap.to(salto, { rotate: tuyo ? 14 : 0, duration: 0.5, ease: "back.out(2)" })
+      if (cara === "feliz" && !tuyo) {
+        gsap.fromTo(
+          salto,
+          { rotate: 0 },
+          { rotate: 360, duration: 0.8, ease: "back.out(1.4)", delay: 0.4 },
+        )
+        chispas(sofi)
+      }
     }
     for (const img of caras) img.classList.toggle("es-cara", img.dataset.cara === cara)
+    if (dice && estado) {
+      dice.textContent = estado.dataset.dice ?? ""
+      dice.classList.toggle("es-tuyo", tuyo)
+      gsap.fromTo(
+        dice,
+        { scale: 0.4, opacity: 0, y: 10 },
+        { scale: 1, opacity: 1, y: 0, duration: 0.45, ease: "back.out(2.6)", delay: 0.35 },
+      )
+    }
   }
   ir(0)
   ScrollTrigger.create({

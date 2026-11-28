@@ -121,10 +121,55 @@
   position: absolute;
   left: calc(96px + 8px);
   top: 0;
-  width: 72px;
-  height: 72px;
+  width: 88px;
+  height: 88px;
   display: none;
   pointer-events: none;
+}
+.proceso__salto,
+.proceso__flota {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+}
+.proceso__flota {
+  transform-origin: 50% 60%;
+}
+/* El globito de lo que dice Sofi, a su lado. */
+.proceso__dice {
+  position: absolute;
+  left: calc(100% - 4px);
+  top: 4px;
+  z-index: 1;
+  width: max-content;
+  max-width: 190px;
+  padding: 7px 12px;
+  border-radius: 14px 14px 14px 4px;
+  background: var(--papel);
+  border: 1px solid var(--durazno-2);
+  box-shadow: 0 10px 24px -12px rgba(254, 79, 2, 0.6);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--texto);
+}
+.proceso__dice.es-tuyo {
+  background: var(--tinta);
+  border-color: var(--tinta);
+  color: #fff;
+}
+.proceso__dice:empty {
+  display: none;
+}
+.chispa {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 8px;
+  height: 8px;
+  margin: -4px;
+  border-radius: 50%;
+  background: var(--naranja-vivo);
+  box-shadow: 0 0 10px rgba(254, 79, 2, 0.8);
 }
 .proceso__sofi img {
   position: absolute;
