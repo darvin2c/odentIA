@@ -13,8 +13,15 @@
  */
 import { createECDH, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
-import { accountCopy, conversation, conversationMessage, storeMember } from "@gestoria/db"
+import {
+  accountCopy,
+  conversation,
+  conversationMessage,
+  storeMember,
+  storeSupportAccess,
+} from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
+import { eq } from "drizzle-orm"
 import { serve } from "@hono/node-server"
 import {
   type AccountState,
@@ -29,6 +36,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from
 import { GenericContainer, Wait } from "testcontainers"
 import { createApp } from "../apps/api/src/app.js"
 import { createS3Storage } from "../apps/api/src/archivos.js"
+import { fakePhotosModel } from "../apps/api/src/ia-fotos.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
 import {
@@ -154,6 +162,9 @@ const app = createApp({
   // ofrezca. Nada se envía: el servidor de prueba no corre la vuelta de los avisos.
   vapidPublicKey: createECDH("prime256v1").generateKeys().toString("base64url"),
   storage,
+  // La IA de fotos, con el modelo de desarrollo: sin red, propone un nombre de muestra y pregunta
+  // lo que la plantilla necesita. Nunca un proveedor real.
+  photosModel: fakePhotosModel(),
 })
 
 /** Un pedido de la administración, firmado como lo firmaría ella. */
@@ -226,6 +237,27 @@ const sofi = await answer(
   conv!.id,
 )
 if (sofi.status !== "apagada") throw new Error(`Sofi debía estar apagada: ${sofi.status}`)
+
+// Con `E2E_DEMO=1`, también la demo de Calzados Rosa (sus fotos reales en este RustFS) con Rosa de
+// Dueño: para mirar la pantalla con la demo y sacar capturas. Sin el pedido de soporte de la demo,
+// que dejaría su franja arriba. Los recorridos no la usan.
+if (process.env.E2E_DEMO === "1") {
+  const { DEMO_STORE_ID, seedDemoStore } = await import("../apps/api/src/semilla.js")
+  const { seedDemoMedia } = await import("../apps/api/src/semilla-medios.js")
+  await seedDemoStore(db.ownerDb)
+  await db.ownerDb
+    .insert(storeMember)
+    .values({ storeId: DEMO_STORE_ID, userId: rosa.id, role: "owner", addedBy: "semilla-rosa" })
+  await db.ownerDb.delete(storeSupportAccess).where(eq(storeSupportAccess.storeId, DEMO_STORE_ID))
+  Object.assign(process.env, {
+    GESTORIA_S3_ENDPOINT: `http://127.0.0.1:${rustfs.getMappedPort(9000)}`,
+    GESTORIA_S3_REGION: "us-east-1",
+    GESTORIA_S3_ACCESS_KEY: "gestoria",
+    GESTORIA_S3_SECRET_KEY: "gestoria-e2e",
+    GESTORIA_S3_BUCKET: "gestoria-medios-e2e",
+  })
+  console.log(`e2e: demo, ${await seedDemoMedia(db.ownerDb, DEMO_STORE_ID)}`)
+}
 
 serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 

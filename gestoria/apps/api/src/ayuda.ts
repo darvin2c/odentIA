@@ -492,8 +492,30 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "agregar-producto",
         q: "¿Cómo subo un producto con tallas y stock?",
         a: [
-          "En Catálogo, «Agregar producto»: el nombre, el precio de lista y hasta tres opciones, como talla y color. Al guardarlo se abre su ficha.",
+          "En Catálogo, «Agregar desde fotos» (en el celular, «Tomar fotos»): la IA mira tus fotos y propone el nombre, los colores y lo que se ve; tú pones el precio y «Guardar y abrir la ficha». Sin fotos, en el menú ⋯, «Agregar sin fotos»: el nombre, el precio de lista y hasta tres opciones, como talla y color.",
           "En la ficha, en «Variantes», cada color es un chip y las tallas se escriben como se dicen («35 a 42»). Debajo, la cuadrícula: una celda por color y talla con su «Stock». Subir el stock ahí es una entrada del kardex.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "agregar-desde-fotos",
+        q: "¿Cómo agrego un producto desde sus fotos?",
+        a: [
+          "En Catálogo, «Agregar desde fotos»: suelta o elige hasta 8 fotos del producto (de frente, de lado, el detalle, puesto) y toca «Mirar las fotos». En el celular, «Tomar fotos» abre la cámara.",
+          "La IA propone el nombre, la categoría, los colores con sus fotos y una descripción para vender. Lo punteado (✦) es lo que propone: con «Usar» lo tomas, con «Cambiar» lo escribes a tu manera y con «Descartar» lo quitas. Lo que no se ve en una foto, como cómo calza, lo pregunta en amarillo.",
+          "El precio lo pones tú: la IA nunca lo propone. «Ver cómo queda» muestra cómo se vería en tu vitrina y en WhatsApp antes de guardar. Con «Guardar y abrir la ficha» se crea; lo que no usaste te espera en la ficha.",
+        ],
+        needs: "configuracion",
+        screen: "catalogo",
+      },
+      {
+        id: "que-hace-la-ia",
+        q: "¿Qué hace y qué no hace la IA con mis fotos?",
+        a: [
+          "Mira tus fotos y propone lo que se ve: el nombre, la categoría, el rubro, los colores, los datos que se ven (como la lona de una zapatilla) o se leen en la etiqueta, las palabras con que la buscan y una descripción. Nunca guarda sola: todo queda punteado (✦) hasta que una persona lo usa. «Aplicar todos» usa lo propuesto de una vez.",
+          "Nunca propone el precio, el peso ni las medidas, ni inventa un material o una cualidad que no se ve: eso lo pregunta. «Mejorar» solo reescribe lo que tú escribiste, sin sumar datos. En la ficha, «Completar» le pide que vuelva a mirar las fotos.",
+          "Mira un número de fotos por día y sale del saldo de tu plan. Si llega a su tope o no está, lo dice y sigues cargando a mano: nada se frena. En «Cargar muchos», «Juntar con IA» propone qué fotos son del mismo producto y tú confirmas cada grupo.",
         ],
         needs: "configuracion",
         screen: "catalogo",

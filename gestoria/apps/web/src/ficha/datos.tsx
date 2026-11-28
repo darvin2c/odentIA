@@ -38,6 +38,7 @@ import {
 } from "../lib/ficha"
 import { when } from "../lib/pedidos"
 import { useFichaContext } from "./contexto"
+import { DataProposal, RubroProposal } from "./ia"
 import { FieldProblem, Section, Sub, useTyped } from "./piezas"
 
 /**
@@ -333,6 +334,7 @@ function Field({ field }: { field: TemplateField }) {
         ) : null}
       </div>
       {control}
+      {empty ? <DataProposal field={field} /> : null}
       <FieldProblem message={error} />
     </div>
   )
@@ -815,6 +817,7 @@ export function DataCard({ templates }: { templates: RubroTemplate[] }) {
             })
           }
         />
+        <RubroProposal labelOf={(id) => templates.find((t) => t.id === id)?.label ?? id} />
         {!draft.rubro ? (
           <p className="text-sm text-muted-foreground">
             Con el rubro, la ficha pide lo que sus clientas preguntan (cómo calza, la tela, el

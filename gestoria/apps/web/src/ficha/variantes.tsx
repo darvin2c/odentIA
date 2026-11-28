@@ -39,6 +39,7 @@ import { Photo, usePhotoUrl } from "../piezas"
 import { isLight, palette } from "./color"
 import { useFichaContext } from "./contexto"
 import { Hoja, type HojaAxisItem } from "./hoja"
+import { ColorProposals } from "./ia"
 import { FieldProblem, Section, Swatch } from "./piezas"
 
 /**
@@ -563,8 +564,8 @@ function SizesChip({ grid }: { grid: Grid }) {
         (value) => before.find((c) => sameText(c.value, value)) ?? { id: newId("c"), value },
       )
       const cells: Grid["cells"] = {}
+      // Lo que tenía sin tallas pasa a la primera talla.
       for (const row of g.rows)
-        // Lo que tenía sin tallas pasa a la primera talla.
         for (const [i, column] of columns.entries())
           cells[cellKey(row.id, column.id)] =
             g.cells[cellKey(row.id, column.id)] ??
@@ -732,6 +733,7 @@ export function VariantsCard() {
   if (!grid)
     return (
       <Section id="variantes" title="Variantes" summary={`${sheet.variants.length} variantes`}>
+        <ColorProposals />
         <PageNotice tone="aviso" label="Sin cuadrícula">
           La cuadrícula es de colores y tallas, y las opciones de este producto son otras. Sus
           variantes se ven aquí y su stock se cambia en el kardex.
@@ -805,6 +807,7 @@ export function VariantsCard() {
         .join(" · ")}
       contains={["stock"]}
     >
+      <ColorProposals />
       <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-3">
         <span className="text-sm text-muted-foreground">{rowLabel}</span>
         <div className="flex flex-wrap items-center gap-2">

@@ -109,6 +109,12 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   cierra la mirada, una vez, con su id como clave. Lo que no respondió y lo de `fake` no cuentan.
 - Quitar el fondo no lo hace este modelo (solo lee imágenes): el servidor recibe la propuesta ya
   hecha (`POST fotos/:id/sin-fondo`).
+- En la pantalla, las propuestas usan las piezas comunes (`AiSuggestion`, `AiSuggestionBar`,
+  `AiSuggestionChips`, `AiQuestion` de `@odentia/ui-patterns`): «Agregar desde fotos»
+  (`apps/web/src/agregar.tsx`; en el celular, «Tomar fotos» abre la cámara), los ✦ de la ficha
+  (`ficha/ia.tsx`: «Completar», «Mejorar», «Aplicar todos») y «Juntar con IA» en «Cargar muchos»
+  (`cargar-ia.tsx`). Usar en la ficha guarda antes el borrador. Una pregunta se responde en su
+  campo de siempre. El tope y la IA apagada se dicen y nada se frena.
 - Un cambio en lo que lee o propone se mide con `pnpm --filter @gestoria/api eval:fotos` (banco
   `apps/api/eval/fotos.json`, con los créditos de cada foto); `--estimar` dice cuánto costará.
   Las pruebas usan un modelo controlado, nunca la red.
