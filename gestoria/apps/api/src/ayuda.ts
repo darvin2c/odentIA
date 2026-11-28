@@ -124,23 +124,15 @@ export const HELP_SCREENS = {
     path: "/configuracion",
     opens: "configuracion",
     purpose:
-      "La entrada de Configuración: lo que le falta a la tienda para vender, con su botón para hacerlo, y cómo está cada parte.",
-    terms: ["lo que falta", "configuración", "ajustes", "empezar a vender", "pendiente"],
+      "La entrada de Configuración: lo que falta para vender, cada cosa con su botón, cómo está cada parte y el buscador de Configuración.",
+    terms: ["configuración", "lo que falta", "qué me falta", "ajustes", "buscar en configuración"],
   },
   datos: {
     label: "Datos de la tienda",
     path: "/configuracion/datos",
     opens: "configuracion",
     purpose: "El nombre de la tienda, su país y su hora.",
-    terms: [
-      "configuración",
-      "datos de la tienda",
-      "nombre",
-      "hora",
-      "zona horaria",
-      "país",
-      "moneda",
-    ],
+    terms: ["datos de la tienda", "nombre", "hora", "zona horaria", "país", "moneda"],
   },
   marca: {
     label: "Tu marca",
@@ -154,8 +146,8 @@ export const HELP_SCREENS = {
     path: "/configuracion/equipo",
     opens: "equipo.gestionar",
     purpose:
-      "Quiénes trabajan en la tienda y con qué rol, sus invitaciones y quién de soporte miró la tienda.",
-    terms: ["equipo", "invitar", "roles", "usuarios", "permisos", "soporte"],
+      "Quiénes trabajan en la tienda y con qué rol, sus invitaciones, los repartidores, y si soporte pide mirar la tienda o quién la miró.",
+    terms: ["equipo", "invitar", "roles", "usuarios", "permisos", "soporte", "repartidores"],
   },
   sofi: {
     label: "Sofi",
@@ -171,7 +163,15 @@ export const HELP_SCREENS = {
     opens: "configuracion",
     purpose:
       "Los medios de pago que ofrece Sofi (Yape, Plin, transferencias) y la conexión con Mercado Pago para los links de pago.",
-    terms: ["medios de pago", "Yape", "Plin", "transferencia", "cuenta bancaria", "Mercado Pago"],
+    terms: [
+      "cobros",
+      "medios de pago",
+      "Yape",
+      "Plin",
+      "transferencia",
+      "cuenta bancaria",
+      "Mercado Pago",
+    ],
   },
   entregas: {
     label: "Entregas",

@@ -566,15 +566,15 @@ export function gridBody(
       : null,
     cells: draft.rows.flatMap((row) =>
       draft.columns.map((column) => {
-        const cell = draft.cells[cellKey(row.id, column.id)] ?? {
-          stock: 0,
-          priceCents: null,
-          barcode: null,
-        }
+        const key = cellKey(row.id, column.id)
+        const cell = draft.cells[key] ?? emptyCell()
         return {
           row: hasRows ? row.value : null,
           column: hasColumns ? column.value : null,
           stock: cell.stock,
+          // El stock que vio la pantalla: el servidor guarda solo la diferencia sobre el de ahora,
+          // así una venta de mientras tanto no se pisa. Una celda nueva no tenía nada.
+          seenStock: base?.cells[key]?.stock ?? 0,
           priceCents: cell.priceCents,
           barcode: cell.barcode,
         }
