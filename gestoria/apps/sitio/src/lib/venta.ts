@@ -65,7 +65,7 @@ export type PreguntaChat = { q: string; a: string; humor: "atenta" | "decidida" 
 /** Respuestas de muestra de Calzados Rosa: la web dice que son un ejemplo. */
 export const CHAT_VIVO: readonly PreguntaChat[] = [
   {
-    q: "¿La tienen en 38?",
+    q: "¿Tienes la zapatilla blanca en talla 38?",
     a: MENSAJES[1]?.texto.replace(/^¡Hola! Soy Sofi, de Calzados Rosa\. /, "") ?? "",
     humor: "atenta",
   },

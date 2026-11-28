@@ -354,6 +354,10 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
   Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda» cuando el usuario lo
   decida. «Entrar» lleva al ingreso de la app.
+- «Producto» separa los agentes (Sofi y Argos, que trabajan solos) de las funciones (lo que la
+  tienda usa en la app), en la cabecera y en el pie (`SITE_MAP.agentes` y `SITE_MAP.funciones`).
+  Las páginas de los agentes usan las escenas del Inicio (`src/components/escenas/`) y las suyas
+  (`src/scripts/agentes.ts`, `src/styles/agentes.css`).
 - Las páginas del plan están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
   la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
 - El diseño es propio (web v5, versión clara del lienzo): `src/styles/base.css` (blanco, grises
