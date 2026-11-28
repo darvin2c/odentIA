@@ -112,6 +112,14 @@ import {
   setDeliveryRules,
   templateInput,
 } from "./entregas.js"
+import {
+  addCourier,
+  courierAddInput,
+  courierPatchInput,
+  removeCourier,
+  storeCouriers,
+  updateCourier,
+} from "./equipo-repartidores.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
@@ -221,6 +229,7 @@ import {
   myStores,
   mySupportState,
   newStoreInput,
+  noteInvitationShared,
   removeMember,
   revokeInvitation,
   roleInput,
@@ -563,6 +572,39 @@ export function createApp(deps: AppDeps) {
       c.req.param("invitationId"),
     )
     return c.body(null, 204)
+  })
+
+  // «Enviar por WhatsApp»: se abrió el WhatsApp con la invitación (enviada por quien la invita).
+  app.post("/api/tiendas/:id/invitaciones/:invitationId/enviada", async (c) =>
+    c.json(
+      await noteInvitationShared(
+        deps.appDb,
+        c.get("person"),
+        c.req.param("id"),
+        c.req.param("invitationId"),
+      ),
+    ),
+  )
+
+  // Los repartidores y su pago por entrega (tablero 9): del Dueño y el Administrador.
+  app.get("/api/tiendas/:id/repartidores", async (c) =>
+    c.json(await storeCouriers(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/repartidores", async (c) => {
+    const input = await bodyOf(c, courierAddInput)
+    const courier = await addCourier(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ courier }, 201)
+  })
+  app.patch("/api/tiendas/:id/repartidores/:courierId", async (c) => {
+    const input = await bodyOf(c, courierPatchInput)
+    const { id, courierId } = c.req.param()
+    return c.json({
+      courier: await updateCourier(deps.appDb, c.get("person"), id, courierId, input),
+    })
+  })
+  app.delete("/api/tiendas/:id/repartidores/:courierId", async (c) => {
+    const { id, courierId } = c.req.param()
+    return c.json(await removeCourier(deps.appDb, c.get("person"), id, courierId))
   })
 
   app.patch("/api/tiendas/:id/equipo/:userId", async (c) => {

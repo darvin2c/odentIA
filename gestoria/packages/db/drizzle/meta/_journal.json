@@ -302,6 +302,20 @@
       "when": 1795848520156,
       "tag": "0058_reglas_lo_que_sabe",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795849083145,
+      "tag": "0059_equipo_y_repartidores",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795849090305,
+      "tag": "0060_reglas_equipo_y_repartidores",
+      "breakpoints": true
     }
   ]
 }
