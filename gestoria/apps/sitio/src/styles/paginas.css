@@ -571,6 +571,7 @@
 .ct-chat {
   position: relative;
   justify-self: center;
+  box-sizing: border-box;
   width: min(100%, 340px);
   padding: 40px 30px 20px 0;
 }
@@ -865,5 +866,10 @@
     right: -10px;
     top: 0;
     width: 100px;
+  }
+}
+@media (max-width: 400px) {
+  .ct-chat__tel {
+    rotate: 0deg;
   }
 }

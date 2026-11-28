@@ -1553,16 +1553,18 @@ html:not(.mueve) .estado__b {
   }
   .mueve .tarjeta {
     position: absolute;
-    left: 50%;
-    translate: -50% 0;
-    width: min(290px, 86vw);
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    width: min(290px, calc(100vw - 32px));
     bottom: 8px;
   }
+  /* En la esquina del teléfono, sobre la parte vacía de su cabecera: ni el título ni el chat. */
   .mueve .venta__sofi {
-    top: -4px;
-    left: calc(50% + 70px * var(--kv));
-    width: calc(96px * var(--kv));
-    height: calc(96px * var(--kv));
+    top: calc(6px * var(--kv));
+    left: calc(50% + 86px * var(--kv));
+    width: calc(66px * var(--kv));
+    height: calc(66px * var(--kv));
   }
 }
 /* Sin movimiento: el chat completo y las tarjetas debajo, todo a la vista. */

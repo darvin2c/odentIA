@@ -8,8 +8,11 @@ import {
   configSectionOf,
   INTEGRATIONS_READY,
   namesIndex,
+  notYoursText,
   SEARCH_INDEX,
   searchConfig,
+  sectionById,
+  setupProgress,
   toDoItems,
   toDoTitle,
 } from "./configuracion"
@@ -97,13 +100,13 @@ describe("qué ve cada rol en Configuración", () => {
 /** Calzados Rosa: tiene casi todo; le falta la pasarela y probar a Sofi. */
 const ROSA: ConfigOverview = {
   steps: [
-    { step: "datos", state: "hecho", skippable: false },
-    { step: "catalogo", state: "hecho", skippable: false },
-    { step: "pagos", state: "hecho", skippable: false },
-    { step: "entregas", state: "hecho", skippable: false },
-    { step: "chats", state: "pronto", skippable: false },
-    { step: "sofi", state: "falta", skippable: true },
-    { step: "equipo", state: "hecho", skippable: true },
+    { step: "datos", state: "hecho", skippable: false, sells: true },
+    { step: "catalogo", state: "hecho", skippable: false, sells: true },
+    { step: "pagos", state: "hecho", skippable: false, sells: true },
+    { step: "entregas", state: "hecho", skippable: false, sells: true },
+    { step: "chats", state: "pronto", skippable: false, sells: true },
+    { step: "sofi", state: "falta", skippable: true, sells: true },
+    { step: "equipo", state: "hecho", skippable: true, sells: false },
   ],
   brand: { publicName: "Calzados Rosa", brandColor: "#be185d", logo: true, link: "calzadosrosa" },
   catalog: { products: 32, withStock: 30 },
@@ -148,7 +151,13 @@ const ROSA: ConfigOverview = {
     supportAsks: 1,
   },
   sofi: { enabled: true, tried: false },
-  plan: { name: "Emprende", status: "activa", creditLeftCents: 1035, currency: "USD" },
+  plan: {
+    name: "Emprende",
+    status: "activa",
+    creditLeftCents: 1035,
+    currency: "USD",
+    toPay: false,
+  },
 }
 
 const STORE = { name: "Calzados Rosa", country: "PE", timeZone: "America/Lima", currency: "PEN" }
@@ -172,47 +181,91 @@ const CARMEN: ConfigOverview = {
 }
 
 describe("lo que falta para vender", () => {
-  it("se marca con lo guardado y cada pendiente trae su botón", () => {
-    const items = toDoItems(ROSA, STORE)
-    expect(items.map((i) => [i.id, i.state])).toEqual([
+  it("se marca con los pasos del servidor y cada pendiente trae su botón", () => {
+    const { selling, more } = toDoItems(ROSA, STORE)
+    expect(selling.map((i) => [i.id, i.state])).toEqual([
       ["datos", "hecho"],
       ["catalogo", "hecho"],
-      ["marca", "hecho"],
       ["pagos", "hecho"],
-      ["link", "falta"],
       ["entregas", "hecho"],
       ["sofi", "falta"],
     ])
-    const link = items.find((i) => i.id === "link")
+    // Tu marca y el link de pago no frenan la venta: van aparte y no son una falta.
+    expect(more.map((i) => [i.id, i.state])).toEqual([
+      ["marca", "hecho"],
+      ["link", "opcional"],
+    ])
+    const link = more.find((i) => i.id === "link")
     expect(link?.action).toEqual({
       label: "Conectar pasarela",
       path: "/configuracion/medios-de-pago",
     })
     expect(link?.detail).toContain("Yape y Plin")
-    expect(toDoTitle(items)).toBe("Para vender te faltan 2 cosas")
+    // Los chats todavía dicen «Muy pronto»: Sofi no vende sola, y el título no lo promete.
+    expect(toDoTitle(ROSA.steps)).toBe("Para vender te falta 1 cosa")
+    const withChats = ROSA.steps.map((s) =>
+      s.step === "chats" ? { ...s, state: "hecho" as const } : s,
+    )
+    expect(toDoTitle(withChats)).toBe("Para que Sofi venda sola te falta 1 cosa")
   })
 
-  it("una tienda que empieza ve lo que le falta, y con todo listo la lista lo dice en una línea", () => {
+  it("Inicio y Configuración cuentan igual: sin lo de «Muy pronto» ni lo que no frena la venta", () => {
+    // Rosa: el equipo hecho no suma; los chats no cuentan. 4 de 5.
+    expect(setupProgress(ROSA.steps)).toEqual({ done: 4, total: 5, left: 1 })
+    // Carmen: país y Yape. Invitar al equipo falta, pero no frena la venta.
+    expect(setupProgress(CARMEN.steps)).toEqual({ done: 2, total: 5, left: 3 })
     const carmen = toDoItems(CARMEN, { ...STORE, name: "Tortas Carmen" })
-    expect(carmen.filter((i) => i.state === "falta").map((i) => i.id)).toEqual([
+    expect(carmen.selling.filter((i) => i.state === "falta").map((i) => i.id)).toEqual([
       "catalogo",
-      "marca",
-      "link",
       "entregas",
       "sofi",
     ])
+    expect(toDoTitle(CARMEN.steps)).toBe("Para vender te faltan 3 cosas")
+  })
+
+  it("un link de pago sin pasarela no es una forma de cobrar", () => {
+    const onlyLink: ConfigOverview = {
+      ...CARMEN,
+      // El servidor no manda el link sin pasarela (`chargingPaymentsIn`) ni da el paso por hecho.
+      payments: [],
+      steps: CARMEN.steps.map((s) => (s.step === "pagos" ? { ...s, state: "falta" } : s)),
+    }
+    const pagos = toDoItems(onlyLink, STORE).selling.find((i) => i.id === "pagos")
+    expect(pagos).toMatchObject({ state: "falta", action: { label: "Agregar un medio" } })
+    expect(pagos?.detail).not.toContain("Link de pago")
+    expect(configLines(onlyLink, STORE).pagos).toMatchObject({ status: "Falta", pending: true })
+  })
+
+  it("con todo listo lo dice; sin Sofi, «para vender»", () => {
     const done: ConfigOverview = {
       ...ROSA,
       paymentLink: { provider: "mercadopago" },
       steps: ROSA.steps.map((s) => (s.step === "sofi" ? { ...s, state: "saltado" } : s)),
     }
-    const items = toDoItems(done, STORE)
-    expect(items.find((i) => i.id === "sofi")?.state).toBe("saltado")
-    expect(toDoTitle(items)).toBe("Tienes todo para vender")
+    const { selling } = toDoItems(done, STORE)
+    expect(selling.find((i) => i.id === "sofi")?.state).toBe("saltado")
+    expect(setupProgress(done.steps).left).toBe(0)
+    expect(toDoTitle(done.steps)).toBe("Tienes todo para vender")
   })
 
-  it("a soporte no le llega Sofi, y su paso no se muestra", () => {
-    expect(toDoItems({ ...ROSA, sofi: null }, STORE).map((i) => i.id)).not.toContain("sofi")
+  it("soporte ve el paso de Sofi, que cuenta igual (sin botón: no cambia nada)", () => {
+    const supportView: ConfigOverview = { ...ROSA, sofi: null }
+    expect(toDoItems(supportView, STORE).selling.map((i) => i.id)).toContain("sofi")
+  })
+})
+
+describe("lo que se dice a quien abre una parte ajena", () => {
+  it("dice la verdad para cada rol", () => {
+    expect(notYoursText(admin, sectionById("plan")).title).toBe(
+      "El plan y los pagos los ve el Dueño",
+    )
+    expect(notYoursText(support, sectionById("sofi")).title).toBe(
+      "Soporte de gestorIA no mira esta parte",
+    )
+    expect(notYoursText(sales, sectionById("marca")).title).toBe(
+      "Esto lo cambian el Dueño y el Administrador",
+    )
+    expect(notYoursText(owner, null).title).toBe("Esta parte no está en Configuración")
   })
 })
 
@@ -222,7 +275,8 @@ describe("cómo está cada parte", () => {
     expect(lines.pagos).toMatchObject({
       summary: "Yape y Plin con captura · Efectivo al recibir",
       status: "Sin pasarela",
-      pending: true,
+      // Sin pasarela se vende igual: lo dice, sin punto.
+      pending: false,
     })
     // El nombre que ya dice cómo se cobra no lo repite.
     const named = configLines(
@@ -246,10 +300,22 @@ describe("cómo está cada parte", () => {
       status: "Soporte pide mirar",
       pending: true,
     })
-    expect(lines.sofi).toMatchObject({ status: "Encendida", pending: true })
+    // Lo pendiente va junto a su punto; el estado de siempre, en la línea.
+    expect(lines.sofi).toMatchObject({ summary: "Encendida", status: "Sin probar", pending: true })
     expect(lines.marca).toMatchObject({ status: "Lista", pending: false })
     expect(lines.plan?.summary).toContain("Plan Emprende")
     expect(lines.plan?.status).toBe("Activa")
+    expect(lines.plan?.pending).toBe(false)
+  })
+
+  it("el plan con un cobro por pagar lleva su punto", () => {
+    const owing = configLines({ ...ROSA, plan: { ...ROSA.plan!, toPay: true } }, STORE)
+    expect(owing.plan).toMatchObject({ status: "Por pagar", pending: true })
+    const late = configLines(
+      { ...ROSA, plan: { ...ROSA.plan!, status: "gracia", toPay: true } },
+      STORE,
+    )
+    expect(late.plan).toMatchObject({ status: "Pago pendiente", pending: true })
   })
 
   it("sin plan conocido ni Sofi (soporte), esas líneas no se dibujan", () => {
@@ -277,6 +343,7 @@ describe("el buscador de Configuración", () => {
     expect(find("yape")[0]).toBe("Yape › Cobros")
     expect(find("shalom")).toEqual(["Shalom › Entregas", "Envío por agencia › Entregas"])
     expect(find("envío gratis")[0]).toBe("Envío gratis y descuento del envío › Entregas")
+    expect(find("plantilla")).toEqual(["Reparto propio y zonas › Entregas"])
     expect(find("horario")).toEqual(
       expect.arrayContaining([
         "Hora de la tienda › Datos de la tienda",
@@ -293,7 +360,8 @@ describe("el buscador de Configuración", () => {
 
   it("solo busca en lo que ve quien está, y nada sin escribir", () => {
     expect(find("sofi", support)).toEqual([])
-    expect(find("plan", admin)).toEqual([])
+    // «plan» también empieza «plantilla» (Entregas); lo del plan no sale.
+    expect(find("plan", admin).filter((r) => r.endsWith("Plan y pagos"))).toEqual([])
     expect(find("avisos", sales)).toEqual(["Avisos al celular › Avisos al celular"])
     expect(find("   ")).toEqual([])
     expect(find("whatsapp")).toEqual([])

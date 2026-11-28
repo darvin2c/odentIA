@@ -16,7 +16,6 @@ import {
   storeInvitation,
   storeLink,
   storeMember,
-  storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
 import { accountState } from "@odentia/contract"
@@ -25,7 +24,7 @@ import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { checkZonesIn, type ZoneSent, zoneInput, zonesProblem } from "./entregas.js"
 import { can } from "./permisos.js"
-import { setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
+import { chargingPaymentsIn, setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
 import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
 import { supportForTeam } from "./soporte.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -548,20 +547,8 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
       .select({ n: count() })
       .from(product)
       .where(eq(product.storeId, storeId))
-    const payments = await tx
-      .select({
-        name: storePaymentMethod.name,
-        typeCode: storePaymentMethod.typeCode,
-        collection: storePaymentMethod.collection,
-      })
-      .from(storePaymentMethod)
-      .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
-      .orderBy(asc(storePaymentMethod.createdAt))
-    // Solo si está conectada y con qué: la cuenta y sus llaves nunca salen de aquí.
-    const [paymentLink] = await tx
-      .select({ provider: storePaymentLink.provider })
-      .from(storePaymentLink)
-      .where(eq(storePaymentLink.storeId, storeId))
+    // Los medios con que se cobra (sin el link si no hay pasarela) y con qué pasarela.
+    const { payments, gateway: paymentLink } = await chargingPaymentsIn(tx, storeId)
     const deliveries = await tx
       .select({
         name: storeDeliveryMethod.name,
@@ -637,7 +624,8 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
 
 /**
  * La línea del plan con lo último que dijo la administración (`contract_state`), sin preguntarle:
- * su nombre, cómo está la cuenta y lo que queda del crédito del tramo. Sin nada guardado, null.
+ * su nombre, cómo está la cuenta, lo que queda del crédito del tramo y si hay un cobro por pagar
+ * (su estado, tal como lo dice la administración: aquí no se suma nada). Sin nada guardado, null.
  */
 async function planLineIn(tx: Db, storeId: string) {
   const [row] = await tx
@@ -646,7 +634,7 @@ async function planLineIn(tx: Db, storeId: string) {
     .where(eq(contractState.storeId, storeId))
   const parsed = accountState.safeParse(row?.state)
   if (!parsed.success || !parsed.data.found) return null
-  const { plan, access, budget } = parsed.data
+  const { plan, access, budget, charges } = parsed.data
   return {
     name: plan?.name ?? null,
     status: access?.status ?? null,
@@ -655,5 +643,6 @@ async function planLineIn(tx: Db, storeId: string) {
         ? Math.max(0, budget.creditCents - budget.creditUsedCents)
         : null,
     currency: budget?.currency ?? null,
+    toPay: charges.some((charge) => charge.status === "pendiente" || charge.status === "parcial"),
   }
 }
