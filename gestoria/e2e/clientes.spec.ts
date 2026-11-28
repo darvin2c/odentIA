@@ -9,9 +9,10 @@ import { ACCOUNT, API_PORT, STORE_ID, surface, WEB, type Who } from "./entorno"
  * - Dos pedidos de Mariela Ríos, por Instagram y por WhatsApp, abren dos fichas: el mismo nombre
  *   solo sugiere «¿Es la misma clienta?» y lo decide una persona («Sí, es la misma», con el
  *   teclado). La ficha junta sus canales y sus compras, con «Escribirle» por su WhatsApp aunque
- *   el teléfono se haya anotado sin el código del país, y su historia con «Separar».
+ *   el teléfono se haya anotado sin el código del país, y su historia con «Separar». La lista y la
+ *   ficha son dos páginas: la ficha vuelve a la lista con «Clientes».
  * - «Lo que sabemos» se edita en su cajón; «Repetir pedido» trae lo de su última compra y el
- *   pedido nuevo lleva a su ficha.
+ *   pedido nuevo lleva a su ficha. En el teléfono, «Repetir pedido» está en el menú ⋯.
  * - «Separar» la deja sola otra vez y no se vuelve a sugerir; «Anotar un pedido» sugiere las
  *   fichas que coinciden con lo escrito, sin elegir ninguna sola.
  * Cada pantalla en escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`.
@@ -158,15 +159,19 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await list.getByRole("link", { name: /Mariela Ríos/ }).click()
   const card = page.getByRole("article", { name: "Ficha de Mariela Ríos" })
   await expect(card).toBeVisible()
+  // Sus canales y su teléfono, en «Lo que sabemos» (y bajo su nombre si el servidor no arma su línea).
   await expect(
-    card.getByText(/Instagram · WhatsApp · 987 654 321|WhatsApp · Instagram · 987 654 321/),
+    card.getByText(/Instagram · WhatsApp · 987 654 321|WhatsApp · Instagram · 987 654 321/).first(),
   ).toBeVisible()
+  // Lo que Argos calcula con sus pedidos pagados, junto a lo que sabe de ella.
+  await expect(card.getByRole("region", { name: "Lo que Argos calcula" })).toBeVisible()
   // Anotado sin el código: en una tienda del Perú se lee como celular del Perú.
   await expect(card.getByRole("link", { name: "Escribirle" })).toHaveAttribute(
     "href",
     "https://wa.me/51987654321",
   )
-  await expect(card.getByText("2 compras", { exact: true })).toBeVisible()
+  const purchases = card.getByRole("region", { name: "Compras" })
+  await expect(purchases.getByText("2 compras", { exact: true })).toBeVisible()
   const owes = card.getByRole("region", { name: "Debe" })
   await expect(owes.getByText(/^S\/\s278$/)).toBeVisible()
   await expect(
@@ -207,7 +212,8 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await repeat.getByRole("button", { name: "Cancelar" }).click()
   await expect(repeat).toHaveCount(0)
   await page.setViewportSize(PHONE)
-  await card.getByRole("button", { name: "Repetir pedido" }).click()
+  await card.getByRole("button", { name: "Más opciones" }).click()
+  await page.getByRole("menuitem", { name: "Repetir pedido" }).click()
   await expect(repeat).toBeVisible()
   await noSideScroll(page)
   await shot(page, "clientes-repetir-telefono")
@@ -216,7 +222,7 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await expect(page.getByText(`Pedido ${next} anotado`)).toBeVisible()
   await expect(page).toHaveURL(/\/pedidos\?pedido=/)
   await page.getByRole("link", { name: "Ver su ficha" }).click()
-  await expect(card.getByText("3 compras", { exact: true })).toBeVisible()
+  await expect(purchases.getByText("3 compras", { exact: true })).toBeVisible()
 
   // «Separar»: vuelve a ser otra ficha, con su pedido, y no se vuelve a sugerir.
   await card.getByRole("button", { name: "Separar" }).click()
@@ -224,13 +230,15 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await expect(confirm).toBeVisible()
   await confirm.getByRole("button", { name: "Separar" }).click()
   await expect(page.getByText("Listo: volvió a ser otra ficha, con sus pedidos")).toBeVisible()
-  await expect(list.getByRole("link", { name: /Mariela Ríos/ })).toHaveCount(2)
-  await expect(page.getByText("Dos fichas podrían ser la misma clienta.")).toHaveCount(0)
   await expect(
     card.getByText(/Rosa Quispe separó «Mariela Ríos»: volvió a ser otra ficha\./),
   ).toBeVisible()
   await noSideScroll(page)
   await shot(page, "clientes-separada-escritorio")
+  // De vuelta en la lista: otra vez dos fichas, y no se vuelve a sugerir que son la misma.
+  await page.getByRole("link", { name: "Clientes", exact: true }).last().click()
+  await expect(list.getByRole("link", { name: /Mariela Ríos/ })).toHaveCount(2)
+  await expect(page.getByText("Dos fichas podrían ser la misma clienta.")).toHaveCount(0)
 
   // «Anotar un pedido» sugiere las fichas que coinciden con lo escrito; elegir una es de la persona.
   await page.goto(`${BASE}/pedidos`)

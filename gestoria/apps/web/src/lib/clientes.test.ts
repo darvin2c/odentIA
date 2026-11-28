@@ -2,10 +2,19 @@ import { describe, expect, it } from "vitest"
 import {
   type CustomerHistoryItem,
   channelsText,
+  customerSearch,
+  filtersOf,
+  groupNameOf,
+  hasFilters,
   historyText,
+  lastBoughtText,
+  listQuery,
   owedText,
+  priceText,
   purchasesText,
   reasonText,
+  sameFilters,
+  searchOfGroup,
   sinceText,
   whatsappLink,
 } from "./clientes"
@@ -87,5 +96,69 @@ describe("cómo se dice una clienta", () => {
     expect(historyText(item({ action: "distintas", actorName: null }))).toBe(
       "Alguien del equipo dijo que «Mari R.» es otra clienta.",
     )
+  })
+})
+
+describe("los filtros de Clientes, en la dirección", () => {
+  it("toma solo lo que vale: un grupo que no existe o un orden ajeno se descartan", () => {
+    expect(
+      customerSearch({
+        grupo: "riesgo",
+        medida: " 38 ",
+        promociones: "si",
+        sort: "-gasto",
+        q: "",
+        otro: "x",
+      }),
+    ).toEqual({ grupo: "riesgo", medida: "38", promociones: "si", sort: "-gasto" })
+    expect(customerSearch({ grupo: "oro", promociones: "talvez", sort: "nombre" })).toEqual({})
+  })
+
+  it("el orden va como «orden» al servidor, sin la flecha del menú", () => {
+    const filters = filtersOf({ grupo: "vip", sort: "-gasto", q: "ana" })
+    expect(filters).toEqual({ grupo: "vip", orden: "gasto" })
+    expect(listQuery(filters, "ana")).toBe("?grupo=vip&orden=gasto&q=ana")
+    expect(listQuery({})).toBe("")
+  })
+
+  it("el orden solo no es un grupo que se pueda guardar", () => {
+    expect(hasFilters({ orden: "gasto" })).toBe(false)
+    expect(hasFilters({ distrito: "Surco" })).toBe(true)
+  })
+
+  it("un grupo guardado reemplaza lo elegido y se reconoce como el de ahora", () => {
+    const saved = { grupo: "riesgo" as const, categoria: "Sandalias" }
+    expect(searchOfGroup(saved)).toEqual({
+      q: undefined,
+      grupo: "riesgo",
+      medida: undefined,
+      categoria: "Sandalias",
+      distrito: undefined,
+      promociones: undefined,
+      sort: undefined,
+    })
+    expect(sameFilters(saved, { categoria: "Sandalias", grupo: "riesgo" })).toBe(true)
+    expect(sameFilters(saved, { grupo: "riesgo" })).toBe(false)
+    expect(groupNameOf(saved)).toBe("En riesgo · Sandalias")
+    expect(groupNameOf({})).toBe("Mi grupo")
+  })
+})
+
+describe("lo que Argos calcula, en palabras", () => {
+  it("la última compra se cuenta en días de la tienda", () => {
+    expect(lastBoughtText(null)).toBe("Sin compras")
+    expect(lastBoughtText(0)).toBe("Hoy")
+    expect(lastBoughtText(1)).toBe("Ayer")
+    expect(lastBoughtText(12)).toBe("Hace 12 días")
+  })
+
+  it("el precio dice cómo compra, con su porqué", () => {
+    expect(priceText({ priceSensitivity: null, sensitivityWhy: null })).toEqual({
+      value: "Paga el precio normal",
+      why: "sin rebaja en sus compras",
+    })
+    expect(
+      priceText({ priceSensitivity: "rebaja", sensitivityWhy: "2 de 3 compras con rebaja" }),
+    ).toEqual({ value: "Pide rebaja", why: "2 de 3 compras con rebaja" })
   })
 })

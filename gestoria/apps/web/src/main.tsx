@@ -36,6 +36,7 @@ import {
 import { HomePage } from "./inicio"
 import { ApiError, SignedOut } from "./lib/api"
 import { startInstalledApp } from "./lib/avisos"
+import { customerSearch } from "./lib/clientes"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
 import { FILTERS, type OrderFilter } from "./lib/pedidos"
 import { BrandPage } from "./marca"
@@ -147,12 +148,13 @@ const moved = (from: string, to: string) =>
     },
   })
 
-// Clientes (entrega 4): la lista y, al lado, la ficha abierta. «?q=…» es lo que se busca.
+// Clientes (entrega 4): la lista y la ficha, cada una en su página. La dirección lleva lo que se
+// busca y los filtros de la lista («?q=…&grupo=riesgo&medida=38&sort=gasto»): vale también en la
+// ficha, para volver a la lista como estaba.
 const customersRoute = createRoute({
   getParentRoute: () => storeRoute,
   path: "/clientes",
-  validateSearch: (s: Record<string, unknown>): { q?: string } =>
-    typeof s.q === "string" && s.q ? { q: s.q } : {},
+  validateSearch: customerSearch,
   component: CustomersLayout,
 })
 const storeChildren = [
