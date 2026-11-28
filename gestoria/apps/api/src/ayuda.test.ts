@@ -127,6 +127,23 @@ describe("la pantalla donde está", () => {
     expect(helpScreenOf("/no-existe")).toBeNull()
   })
 
+  it("«Probar como clienta», abierto al lado de la ficha, tiene su pantalla y sus preguntas", () => {
+    // La web manda el panel abierto con la ruta; lo demás tras `#` no cuenta.
+    expect(storePath(`/tiendas/${STORE}/catalogo/prod-1#probar-como-clienta`, STORE)).toBe(
+      "/catalogo/prod-1#probar-como-clienta",
+    )
+    expect(storePath(`/tiendas/${STORE}/catalogo/prod-1#otra-cosa`, STORE)).toBe("/catalogo/prod-1")
+    expect(helpScreenOf("/catalogo/prod-1#probar-como-clienta")).toBe("probar")
+    expect(helpScreenOf("/catalogo#probar-como-clienta")).toBe("catalogo")
+    const view = helpScreenView("owner", "/catalogo/prod-1#probar-como-clienta")
+    expect(view.title).toBe("Probar como clienta")
+    expect(view.suggestions).toContain("¿Un pedido de prueba entra a Pedidos o mueve el stock?")
+    // Lo que dice de un pedido de prueba es lo que pasa: no entra a Pedidos ni gasta su número.
+    const reply = HELP_GUIDE.flatMap((g) => g.faqs).find((f) => f.id === "probar-no-es-venta")!
+    expect(reply.a.join(" ")).toContain("no entra a Pedidos")
+    expect(reply.a.join(" ")).toContain("no gasta el número")
+  })
+
   it("sugiere hasta tres preguntas de esa pantalla que su rol puede hacer", () => {
     const owner = helpScreenView("owner", "/pedidos")
     expect(owner.title).toBe("Pedidos")

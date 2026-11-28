@@ -64,8 +64,10 @@ export function PreviewDrawer({ onClose }: { onClose: () => void }) {
       ) : !page || !choice ? (
         <p className="py-10 text-center text-sm text-muted-foreground">Armando la vista previa…</p>
       ) : mode === "celular" ? (
-        <div className="grid h-[min(840px,calc(100dvh-12rem))] gap-6 py-2 md:grid-cols-2">
-          <figure className="flex min-h-0 flex-col items-center gap-2">
+        // En el teléfono van una debajo de otra (cada una con su alto): también se ve cómo lo
+        // manda Sofi por WhatsApp, como dice la Ayuda.
+        <div className="grid gap-6 py-2 md:h-[min(840px,calc(100dvh-12rem))] md:grid-cols-2">
+          <figure className="flex h-[min(720px,calc(100dvh-14rem))] min-h-0 flex-col items-center gap-2 md:h-auto">
             <figcaption className="text-sm font-medium text-muted-foreground">
               En la vitrina, por link
             </figcaption>
@@ -73,7 +75,7 @@ export function PreviewDrawer({ onClose }: { onClose: () => void }) {
               <ProductPhone page={page} choice={choice} onChoose={setChoice} />
             </PhoneFrame>
           </figure>
-          <figure className="hidden min-h-0 flex-col items-center gap-2 md:flex">
+          <figure className="flex h-[min(720px,calc(100dvh-14rem))] min-h-0 flex-col items-center gap-2 md:h-auto">
             <figcaption className="text-sm font-medium text-muted-foreground">
               En WhatsApp, cuando la piden
             </figcaption>

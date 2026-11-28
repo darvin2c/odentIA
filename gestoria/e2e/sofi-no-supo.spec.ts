@@ -134,3 +134,48 @@ test("Sofi no supo: «Te toca» en una línea, se responde una vez y queda en la
     await json("PATCH", `${STORE}/sofi/estado`, { enabled: settings.enabled })
   }
 })
+
+test("una respuesta a medias en la ficha no se pierde al salir sin avisar", async ({ page }) => {
+  await as("rosa")
+  await json("GET", "/api/yo")
+  const created = await json("POST", `${STORE}/productos`, {
+    name: "Sandalia de corcho",
+    category: "Sandalias",
+    listPriceCents: 7900,
+    options: [{ name: "Talla", values: ["36", "37"] }],
+  })
+  const productId = created.product.id as string
+  const { settings } = await json("GET", `${STORE}/sofi`)
+  await json("PATCH", `${STORE}/sofi/estado`, { enabled: true })
+  try {
+    await customerWrites("Carla", "¿Viene en caja?", productId)
+  } finally {
+    await json("PATCH", `${STORE}/sofi/estado`, { enabled: settings.enabled })
+  }
+  await page.setViewportSize(DESKTOP)
+  await page.goto(`${BASE}/catalogo/${productId}`)
+  const box = page.getByRole("textbox", { name: "Tu respuesta a «¿Viene en caja?»" })
+  await box.fill("Sí, viene en")
+  // Salir por el menú pregunta, como en «Te toca», y dice qué se pierde.
+  await page
+    .getByRole("navigation", { name: "Principal" })
+    .getByRole("link", { name: "Inicio" })
+    .click()
+  const ask = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
+  await expect(ask).toBeVisible()
+  await expect(
+    ask.getByText("Tu respuesta a «¿Viene en caja?» todavía no se guardó."),
+  ).toBeVisible()
+  await shot(page, "sofi-no-supo-a-medias-1440")
+  await ask.getByRole("button", { name: "Seguir aquí" }).click()
+  await expect(box).toHaveValue("Sí, viene en")
+  // Ya enviada, salir no pregunta.
+  await box.fill("Sí, viene en su caja.")
+  await page.getByRole("button", { name: "Guardar en la ficha" }).click()
+  await expect(page.getByText("Guardado en la ficha: Sofi ya lo sabe")).toBeVisible()
+  await page
+    .getByRole("navigation", { name: "Principal" })
+    .getByRole("link", { name: "Inicio" })
+    .click()
+  await expect(page.getByRole("heading", { name: "Inicio", level: 1 })).toBeVisible()
+})

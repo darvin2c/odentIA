@@ -176,6 +176,27 @@ export const HELP_SCREENS = {
       "Cómo vende Sofi, la vendedora de la tienda: lo que debe saber, sus seguimientos y la prueba escribiéndole como cliente.",
     terms: ["Sofi", "vendedora", "asistente", "bot", "probar", "seguimientos", "horario"],
   },
+  probar: {
+    label: "Probar como clienta",
+    // Se abre al lado de la ficha y no tiene ruta propia: es la ficha con ese panel abierto (la
+    // web lo dice con `#probar-como-clienta`, `helpScreenOf`).
+    path: "/catalogo/$productId",
+    panel: "probar-como-clienta",
+    opens: "configuracion",
+    purpose:
+      "Lo que vive la clienta con un producto: el chat de WhatsApp con Sofi y la vitrina por link, con el mismo carrito, la oferta con su plazo y el pago de prueba. No es una venta.",
+    terms: [
+      "probar como clienta",
+      "probar",
+      "prueba",
+      "vitrina",
+      "carrito",
+      "pagar ahora",
+      "pago de prueba",
+      "pedido de prueba",
+      "qué usó Sofi",
+    ],
+  },
   pagos: {
     label: "Cobros",
     path: "/configuracion/medios-de-pago",
@@ -220,6 +241,8 @@ export const HELP_SCREENS = {
   {
     label: string
     path: `/${string}`
+    /** Un panel que se abre dentro de esa pantalla, sin ruta propia (la web manda `#<panel>`). */
+    panel?: string
     opens: StorePermission
     purpose: string
     terms: readonly string[]
@@ -285,7 +308,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Quién es Sofi y qué hace sola?",
         a: [
           "Sofi es la vendedora de tu tienda. Responde con tu catálogo y tus precios, recomienda, negocia sin bajar del precio mínimo que pusiste y arma el pedido con lo que el cliente ya vio. Le dice cómo pagar y, si paga por link, el pedido queda pagado solo.",
-          "Lo que no está en tu catálogo ni en «Lo que sabe», no lo inventa: si es de un producto, te lo pregunta en «Te toca» y sigue vendiendo; si no, pasa la conversación a una persona y la pregunta aparece en «Lo que aprendió». Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», o desde la ficha de un producto con «Probar como clienta», escribiendo como si fueras una clienta: debajo de cada respuesta, «Por qué» dice qué usó. En una pantalla ancha la prueba está al lado, también mientras cambias algo; en el celular queda abajo, y el botón «Probar a Sofi» de arriba te lleva a ella. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Lo que no está en tu catálogo ni en «Lo que sabe», no lo inventa: si es de un producto, te lo pregunta en «Te toca» y sigue vendiendo; si no, pasa la conversación a una persona y la pregunta aparece en «Lo que aprendió». Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi» (eliges el producto), o desde la ficha de un producto con «Probar como clienta»: es lo mismo que vive la clienta, el chat y la vitrina, con el pago de prueba. En «Qué usó Sofi», «Por qué» dice por qué respondió así. En una pantalla ancha la prueba está al lado, también mientras cambias algo; en el celular queda abajo, y el botón «Probar a Sofi» de arriba te lleva a ella. Esos pedidos son de prueba: no son ventas, no mueven el stock ni entran a Pedidos.",
           "Probarla sirve al ajustarla: por eso la prueba quien cambia la configuración de la tienda.",
         ],
         needs: "configuracion",
@@ -723,12 +746,31 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "probar-como-clienta",
         q: "¿Cómo veo lo que vive la clienta con un producto?",
         a: [
-          "En la ficha, en la línea de Sofi, «Probar como clienta». Al lado (en el celular, abajo) se abre el celular de la clienta: «WhatsApp» es el chat con Sofi y «Vitrina» es la página del producto por link. Es la misma Sofi de un chat de verdad, con tu ficha de ahora: pregunta, pide la negra, «¿Me haces precio?» o «Lo voy a pensar».",
-          "El carrito es el mismo en el chat y en la vitrina, con lo que acordaste con Sofi y hasta cuándo vale. «Pagar ahora» simula el pago: dice «Pago de prueba: no se cobra». Después del pago, Sofi te escribe una vez y, si algo combina, te lo ofrece aparte.",
-          "Abajo, «Qué usó Sofi» dice de qué dato de la ficha salió cada respuesta y lo que todavía no sabe, con «Completar». La prueba no es una venta: no cobra ni entrega, no mueve el stock, no avisa y no cuenta en Reportes ni en lo que se cobra. Con «Empezar de nuevo» arrancas otra.",
+          "En la ficha, en la línea de Sofi, «Probar como clienta», o en Configuración, en Sofi, con «Probar a Sofi», eligiendo el producto. Se abre el celular de la clienta: «WhatsApp» es el chat con Sofi y «Vitrina» es la página del producto por link. Es la misma Sofi de un chat de verdad, con tu ficha de ahora: pregunta, pide la negra, «¿Me haces precio?» o «Lo voy a pensar».",
+          "El carrito es el mismo en el chat y en la vitrina, con lo que acordaste con Sofi y hasta cuándo vale, y cuesta lo mismo que el pedido: el precio por cantidad y las promociones los pone gestorIA, no la pantalla. «Pagar ahora» ofrece los medios de pago de tu tienda y simula el pago: dice «Pago de prueba: no se cobra». Después del pago, Sofi te escribe una vez y, si algo combina, te lo ofrece aparte.",
+          "Abajo, «Qué usó Sofi» dice de qué dato de la ficha salió cada respuesta, «Por qué» respondió así y lo que todavía no sabe, con «Completar». Con «Empezar de nuevo» arrancas otra.",
         ],
         needs: "configuracion",
-        screen: "catalogo",
+        screen: "probar",
+      },
+      {
+        id: "probar-no-es-venta",
+        q: "¿Un pedido de prueba entra a Pedidos o mueve el stock?",
+        a: [
+          "No. La prueba no es una venta: no se cobra, no mueve el stock, no se entrega y a nadie se le avisa. Su pedido no entra a Pedidos, Despachos, Inicio ni Clientes, y no cuenta en Caja, Reportes ni Argos.",
+          "Lleva su propia numeración de prueba: no gasta el número de un pedido de verdad. Lo ves solo en la prueba, en el carrito y en «Sigue tu pedido» de la vitrina.",
+        ],
+        needs: "configuracion",
+        screen: "probar",
+      },
+      {
+        id: "probar-quien",
+        q: "¿Quién puede probar como clienta?",
+        a: [
+          "Quien cambia la configuración de la tienda, porque probar sirve al ajustar la ficha y a Sofi. Lo que costó cada prueba lo ve quien ve Reportes.",
+        ],
+        needs: "configuracion",
+        screen: "probar",
       },
       {
         id: "vista-previa",
@@ -974,21 +1016,50 @@ export interface HelpReplyBody {
   basedOn: string
 }
 
-/** La ruta dentro de la tienda, sin lo que va tras `?` o `#`: `/tiendas/<id>/pedidos` → `/pedidos`. */
+/** Los paneles que la web puede decir que están abiertos (`#<panel>` en la ruta). */
+const PANELS = new Set<string>(
+  Object.values(HELP_SCREENS).flatMap((screen) => ("panel" in screen ? [screen.panel] : [])),
+)
+
+/**
+ * La ruta dentro de la tienda, sin lo que va tras `?` o `#`: `/tiendas/<id>/pedidos` → `/pedidos`.
+ * Un panel de la guía abierto en esa pantalla queda (`/catalogo/<id>#probar-como-clienta`).
+ */
 export function storePath(path: string, storeId: string): string {
   const base = `/tiendas/${storeId}`
   const bare = path.split(/[?#]/, 1)[0] ?? ""
+  const panel = path.split("#", 2)[1] ?? ""
   const inside = bare === base || bare.startsWith(`${base}/`) ? bare.slice(base.length) : bare
-  return (inside.startsWith("/") ? inside : `/${inside}`).slice(0, 200)
+  const shown = (inside.startsWith("/") ? inside : `/${inside}`).slice(0, 160)
+  return PANELS.has(panel) ? `${shown}#${panel}` : shown
 }
 
-/** La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. */
+/** Si la ruta está en la pantalla (`$productId` vale por cualquier parte): ella o algo dentro. */
+function within(path: string, screen: string): boolean {
+  if (screen === "/") return path === "/"
+  const want = screen.split("/")
+  const have = path.split("/")
+  if (have.length < want.length) return false
+  return want.every((part, i) => (part.startsWith("$") ? Boolean(have[i]) : part === have[i]))
+}
+
+/**
+ * La pantalla de la guía de una ruta dentro de la tienda: la más precisa que la contiene. Con un
+ * panel abierto (`#probar-como-clienta`), la del panel.
+ */
 export function helpScreenOf(path: string): HelpScreen | null {
+  const [bare = "", panel = null] = path.split("#", 2)
   let found: HelpScreen | null = null
   for (const key of SCREEN_KEYS) {
-    const screen: string = HELP_SCREENS[key].path
-    const inside = screen === "/" ? path === "/" : path === screen || path.startsWith(`${screen}/`)
-    if (inside && (!found || screen.length > HELP_SCREENS[found].path.length)) found = key
+    const screen = HELP_SCREENS[key]
+    const own = "panel" in screen ? screen.panel : null
+    if (own && own !== panel) continue
+    if (!within(bare, screen.path)) continue
+    const better =
+      !found ||
+      (own !== null && !("panel" in HELP_SCREENS[found])) ||
+      screen.path.length > HELP_SCREENS[found].path.length
+    if (better) found = key
   }
   return found
 }
@@ -1042,11 +1113,15 @@ function restrictionFor(seat: StoreSeat, needs: StorePermission): string | null 
   return `Con tu rol (${ROLE_NAMES[seat]}) no se puede: pídeselo a quien sí puede. ${many ? "Lo pueden hacer" : "Lo puede hacer"}: ${whoCan(needs)}.`
 }
 
-/** La pantalla en la tienda, si el rol la abre. */
+/**
+ * La pantalla en la tienda, si el rol la abre. La de un producto (`$productId`) no tiene un
+ * enlace fijo: lleva a donde se elige, la parte de la ruta antes del producto.
+ */
 function pathFor(seat: StoreSeat, storeId: string, screen: HelpScreen): string | null {
   const { path, opens } = HELP_SCREENS[screen]
   if (!can(seat, opens)) return null
-  return `/tiendas/${storeId}${path === "/" ? "" : path}`
+  const fixed = path.split("/$", 1)[0] ?? path
+  return `/tiendas/${storeId}${fixed === "/" ? "" : fixed}`
 }
 
 function isScreen(id: string): id is HelpScreen {

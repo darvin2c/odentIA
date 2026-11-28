@@ -36,6 +36,7 @@ import {
   type TemplateField,
   type TemplateFieldType,
 } from "../lib/ficha"
+import { DraftGuard } from "../lib/draft-guard"
 import { when } from "../lib/pedidos"
 import { useFichaContext } from "./contexto"
 import { DataProposal, RubroProposal } from "./ia"
@@ -551,6 +552,8 @@ function Questions() {
   const open = sheet.questions.filter((q) => !q.savedAt && !q.answer)
   const proposed = sheet.questions.filter((q) => !q.savedAt && q.answer && q.saveRequested)
   const saved = sheet.questions.filter((q) => q.savedAt)
+  // Una respuesta a medias no se pierde sin avisar: salir pregunta, como en «Te toca».
+  const halfWritten = open.filter((q) => (drafts[q.id] ?? "").trim())
 
   const answerBox = (q: SheetQuestion) => {
     const text = drafts[q.id] ?? q.answer ?? ""
@@ -588,6 +591,14 @@ function Questions() {
 
   return (
     <>
+      <DraftGuard
+        dirty={halfWritten.length > 0 && !act.isPending}
+        lost={
+          halfWritten.length === 1
+            ? `Tu respuesta a «${halfWritten[0]!.question}» todavía no se guardó.`
+            : "Tus respuestas a lo que Sofi no supo todavía no se guardaron."
+        }
+      />
       {open.length && (answers || edit) ? (
         <>
           <Sub id="no-supo">Lo que Sofi no supo</Sub>
