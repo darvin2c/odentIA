@@ -187,6 +187,40 @@ test("Tu marca: se suelta o se pega el logo, sus colores se eligen con un toque 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/configuracion/marca`)
   await expect(page.getByText("Suelta aquí tu logo")).toBeVisible()
+  // A 1366 (la laptop) el menú de la app queda en íconos y la vista previa, al lado.
+  await expect(page.getByRole("complementary", { name: "Así lo ve tu clienta" })).toBeVisible()
+  // Soltar un archivo: Playwright no arrastra desde el escritorio del sistema, así que el archivo
+  // entra como entra al elegirlo (`setInputFiles` en un campo aparte) y se suelta en la zona con
+  // ese mismo archivo en el `dataTransfer`, como lo entrega el navegador.
+  const teal = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#0c9488"/></svg>`
+  await page.evaluate(() => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.id = "e2e-soltar"
+    input.hidden = true
+    document.body.append(input)
+  })
+  await page
+    .locator("#e2e-soltar")
+    .setInputFiles({ name: "soltado.svg", mimeType: "image/svg+xml", buffer: Buffer.from(teal) })
+  const dropped = await page.evaluateHandle(() => {
+    const input = document.getElementById("e2e-soltar") as HTMLInputElement
+    const data = new DataTransfer()
+    for (const file of input.files ?? []) data.items.add(file)
+    input.remove()
+    return data
+  })
+  const zone = page.getByText("Suelta aquí tu logo")
+  await zone.dispatchEvent("dragover", { dataTransfer: dropped })
+  await zone.dispatchEvent("drop", { dataTransfer: dropped })
+  await expect(page.getByText(/soltado\.svg · 1024 × 1024/)).toBeVisible()
+  // Abrir «Ajustar» y cerrarlo sin tocar nada no pregunta.
+  await page.getByRole("button", { name: "Ajustar" }).click()
+  const untouched = surface(page, "Ajustar el logo")
+  await expect(untouched.getByRole("button", { name: "Usar así" })).toBeEnabled()
+  await untouched.getByRole("button", { name: "Cancelar" }).click()
+  await expect(page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })).toHaveCount(0)
+  await expect(untouched).toHaveCount(0)
   // Elegir un SVG: se pasa a imagen en el navegador y sus colores salen para tocarlos.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#be185d"/><circle cx="50" cy="50" r="20" fill="#fbcfe8"/></svg>`
   await page

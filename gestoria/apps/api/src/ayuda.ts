@@ -558,7 +558,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "tu-marca",
         q: "¿Cómo pongo mi logo y el color de mi marca?",
         a: [
-          "En Configuración, en Tu marca: suelta tu logo en el recuadro, elígelo con «Elegir imagen» o pégalo con Ctrl + V. Con «Ajustar» lo recortas. Salen los colores de tu logo: toca uno, o usa «Otro color». Cualquier color vale; si no se lee bien, te lo dice y los botones usan un tono más oscuro.",
+          "En Configuración, en Tu marca: suelta tu logo en el recuadro o pégalo con Ctrl + V; si aún no tienes logo, también lo eliges con «Elegir imagen», y si ya tienes uno, lo cambias con «Cambiar». Con «Ajustar» lo recortas. Salen los colores de tu logo: toca uno, o usa «Otro color». Cualquier color vale; si no se lee bien, te lo dice y los botones usan un tono más oscuro.",
           "También pones la portada, el nombre que ve la clienta y tu link, sin tildes ni espacios: al escribirlo te dice si está libre. Al lado (en el celular, «Ver cómo queda») ves cómo lo verá tu clienta. Nada se guarda hasta «Guardar»; si sales antes, te pregunta.",
         ],
         needs: "configuracion",

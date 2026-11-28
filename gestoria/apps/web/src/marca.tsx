@@ -20,6 +20,7 @@ import {
   useAppForm,
   useFieldContext,
   useFormSurface,
+  useIconSidebarWhileMounted,
   ViewTabs,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -71,7 +72,7 @@ import { StoreHeader, useStoreContext } from "./tiendas"
  * ve la clienta al lado.
  *
  * - El logo y la portada se sueltan, se eligen o se pegan (Ctrl + V): arrastrar nunca es la única
- *   forma. El logo se recorta con `ImageAdjust` (flechas y + y −, sin arrastrar) y se sube como
+ *   forma. El logo se recorta con `ImageAdjust` (recuadro y esquinas, o las flechas) y se sube como
  *   imagen con `renderAdjustedImage`: un SVG se pasa a imagen antes, nunca se guarda como SVG.
  * - Los colores salen del logo, leídos en el navegador; cualquier color vale (ADR 0162) y lo que
  *   el sistema ajusta para que se lea se dice, sin frenar.
@@ -83,6 +84,9 @@ const BRAND_KEY = (storeId: string) => ["marca", storeId]
 
 export function BrandPage() {
   const { store } = useStoreContext()
+  // En la laptop (1280–1366) el menú de la app en íconos mientras se está aquí: así la vista
+  // previa cabe al lado. Al salir vuelve como estaba; Ctrl + B lo abre como siempre.
+  useIconSidebarWhileMounted()
   const brand = useQuery({
     queryKey: BRAND_KEY(store.id),
     queryFn: () => api<{ brand: BrandView }>(`/api/tiendas/${store.id}/marca`),
@@ -753,21 +757,28 @@ function LogoField({
             <div className="flex flex-col gap-1">
               <p className="flex items-center justify-center gap-1.5 text-sm font-semibold">
                 <Upload aria-hidden className="size-4" />
-                {over ? "Suéltalo aquí" : "Suelta aquí tu logo"}
+                {!canEdit ? "Sin logo" : over ? "Suéltalo aquí" : "Suelta aquí tu logo"}
               </p>
-              <p className="text-xs text-muted-foreground">
-                PNG, JPG, WebP o SVG · desde {MIN_LOGO_SIDE} px
-              </p>
+              {canEdit ? (
+                <p className="text-xs text-muted-foreground">
+                  PNG, JPG, WebP o SVG · desde {MIN_LOGO_SIDE} px
+                </p>
+              ) : null}
             </div>
             {canEdit ? pickButton("Elegir imagen", true) : null}
           </div>
         )}
       </div>
-      <p id={`${id}-ayuda`} className="text-xs text-muted-foreground">
-        {shown
-          ? "También puedes pegar otro con Ctrl + V."
-          : `Sin logo, tu clienta ve tus iniciales en tu color. También puedes pegarlo con Ctrl + V.`}
-      </p>
+      {/* Quien solo mira (Soporte) no puede pegar ni soltar: no se le ofrece. */}
+      {canEdit || !shown ? (
+        <p id={`${id}-ayuda`} className="text-xs text-muted-foreground">
+          {!canEdit
+            ? "Sin logo, la clienta ve las iniciales de la tienda en su color."
+            : shown
+              ? "También puedes pegar otro con Ctrl + V."
+              : "Sin logo, tu clienta ve tus iniciales en tu color. También puedes pegarlo con Ctrl + V."}
+        </p>
+      ) : null}
       {small ? (
         <p className="flex items-start gap-2 rounded-lg bg-warning-soft p-3 text-sm text-warning">
           <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
@@ -802,10 +813,20 @@ function AdjustLogo({
   onDone: (logo: NewLogo) => void
 }) {
   const [value, setValue] = useState<ImageAdjustValue | null>(null)
+  // El recorte con que abre (el logo entero): `ImageAdjust` lo informa al cargar la imagen, sin
+  // que nadie lo toque. Solo hay cambios si lo de ahora es otro recorte u otra imagen.
+  const [start, setStart] = useState<ImageAdjustValue | null>(null)
   const [baking, setBaking] = useState(false)
   useEffect(() => {
-    if (open) setValue(null)
+    if (open) {
+      setValue(null)
+      setStart(null)
+    }
   }, [open])
+  const onChange = (next: ImageAdjustValue | null) => {
+    setValue(next)
+    setStart((first) => first ?? next)
+  }
   return (
     <FormDrawer
       open={open && source !== null}
@@ -814,7 +835,7 @@ function AdjustLogo({
       description="Deja solo tu logo, sin bordes de más. Con el teclado: las flechas mueven el recuadro."
       submitLabel="Usar así"
       submitDisabled={value === null}
-      isDirty={value !== null}
+      isDirty={value !== null && start !== null && !sameAdjust(value, start)}
       isSubmitting={baking}
       onSubmit={(event) => {
         event.preventDefault()
@@ -842,10 +863,21 @@ function AdjustLogo({
           shape="logo"
           name={name}
           defaultSource={source}
-          onChange={setValue}
+          onChange={onChange}
         />
       ) : null}
     </FormDrawer>
+  )
+}
+
+/** El mismo recorte de la misma imagen. */
+function sameAdjust(a: ImageAdjustValue, b: ImageAdjustValue): boolean {
+  return (
+    a.source === b.source &&
+    a.area.x === b.area.x &&
+    a.area.y === b.area.y &&
+    a.area.width === b.area.width &&
+    a.area.height === b.area.height
   )
 }
 
@@ -1113,12 +1145,17 @@ function CoverField({
               ? "Suéltala aquí"
               : url
                 ? "Tu vitrina o tus productos"
-                : "Suelta una foto horizontal"}
+                : canEdit
+                  ? "Suelta una foto horizontal"
+                  : "Sin portada"}
           </p>
-          <p id={`${id}-ayuda`} className="text-xs text-muted-foreground">
-            JPG, PNG o WebP.{" "}
-            {url ? "Suelta otra aquí para cambiarla." : "Tu vitrina o tus productos."}
-          </p>
+          {/* Quien solo mira (Soporte) no puede soltar ni elegir: no se le ofrece. */}
+          {canEdit ? (
+            <p id={`${id}-ayuda`} className="text-xs text-muted-foreground">
+              JPG, PNG o WebP.{" "}
+              {url ? "Suelta otra aquí para cambiarla." : "Tu vitrina o tus productos."}
+            </p>
+          ) : null}
           {canEdit ? (
             <div className="flex flex-wrap gap-1.5">
               <Button
