@@ -169,4 +169,11 @@ describe("RadioChips", () => {
     expect(chip.className).toContain("has-[[role=radio]:focus-visible]:ring-3")
     expect(chosen.className).toContain("focus-visible:ring-0")
   })
+
+  it("con el dedo cada pastilla mide 44 px; con el mouse, 40 como siempre", () => {
+    render(<Questionnaire onSubmit={() => {}} />)
+    const chip = option("¿Cuánto te duele?", "8").closest("label") as HTMLElement
+    expect(chip.className).toContain("min-h-10")
+    expect(chip.className).toContain("touch:min-h-11")
+  })
 })
